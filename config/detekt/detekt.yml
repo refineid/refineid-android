@@ -45,3 +45,8 @@ style:
   ThrowsCount:
     max: 10
     excludeGuardClauses: true
+
+naming:
+  FunctionNaming:
+    ignoreAnnotated:
+      - 'Composable'

@@ -486,7 +486,6 @@ internal fun MainScreen(
                         hasNfc = hasNfc,
                         pinCache = pinCache,
                         holderName = effectiveHolderName,
-                        cardDetails = effectiveDetails,
                         onConnectCard = { can, pin1 ->
                             onNfcConnect(can, pin1)
                         },

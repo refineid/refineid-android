@@ -200,11 +200,24 @@ internal class RappPairingModel(
                             val vault = app?.rappVault ?: AndroidRappVault(context)
                             record.persistDeviceOnly(vault)
 
+                            val primedStore = app?.primedCanStore
+                            val primedHolder = primedStore?.readHolderName()
+                            val certDer = primedStore?.readAuthCertificateDer()
+                            val certB64 =
+                                certDer?.let {
+                                    android.util.Base64.encodeToString(
+                                        it,
+                                        android.util.Base64.NO_WRAP,
+                                    )
+                                }
+
                             catalog.savePair(
                                 pairId = record.metadata().pairId,
                                 displayName = peer.displayName,
                                 platform = peer.platform,
                                 createdAtMs = peer.createdAtMs,
+                                holderName = primedHolder,
+                                certificateDerBase64 = certB64,
                             )
                             pairedDevices = catalog.listPairs()
                             phase = PairingPhase.Paired(peer)
@@ -395,11 +408,24 @@ internal class RappPairingModel(
                             val vault = app?.rappVault ?: AndroidRappVault(context)
                             record.persistDeviceOnly(vault)
 
+                            val primedStore = app?.primedCanStore
+                            val primedHolder = primedStore?.readHolderName()
+                            val certDer = primedStore?.readAuthCertificateDer()
+                            val certB64 =
+                                certDer?.let {
+                                    android.util.Base64.encodeToString(
+                                        it,
+                                        android.util.Base64.NO_WRAP,
+                                    )
+                                }
+
                             catalog.savePair(
                                 pairId = record.metadata().pairId,
                                 displayName = peer.displayName,
                                 platform = peer.platform,
                                 createdAtMs = peer.createdAtMs,
+                                holderName = primedHolder,
+                                certificateDerBase64 = certB64,
                             )
                             pairedDevices = catalog.listPairs()
                             phase = PairingPhase.Paired(peer)
@@ -472,10 +498,13 @@ internal class RappPairingModel(
         vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
         catalog.removePair(pairIdHex)
         pairedDevices = catalog.listPairs()
+        if (activeConnectedPeer?.pairIdHex == pairIdHex) {
+            app?.rappProxyDispatcher?.disconnectClient()
+            activeConnectedPeer = null
+        }
         if (pairedDevices.isEmpty()) {
             app?.rappProxyDispatcher?.stopListening()
         }
-        activeConnectedPeer = null
     }
 
     fun reset() {

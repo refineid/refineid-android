@@ -65,19 +65,21 @@ internal class RappPairCatalog(
         platform: String,
         createdAtMs: Long,
         holderName: String? = null,
+        certificateDerBase64: String? = null,
     ) {
         val hex = pairId.joinToString("") { "%02x".format(it) }
-        val current =
-            listOf(
-                PairedPeer(
-                    pairIdHex = hex,
-                    displayName = displayName,
-                    platform = platform,
-                    createdAtMs = createdAtMs,
-                    holderName = holderName,
-                ),
-            )
-        persistPairs(current)
+        val updated = listPairs().filter { it.pairIdHex != hex }.toMutableList()
+        updated.add(
+            PairedPeer(
+                pairIdHex = hex,
+                displayName = displayName,
+                platform = platform,
+                createdAtMs = createdAtMs,
+                holderName = holderName,
+                certificateDerBase64 = certificateDerBase64,
+            ),
+        )
+        persistPairs(updated)
     }
 
     fun updateHolderName(

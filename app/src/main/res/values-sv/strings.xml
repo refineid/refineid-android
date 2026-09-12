@@ -115,4 +115,6 @@
     <string name="confirm_activation_dialog_msg_single">Du aktiverar den saknade koden (%1$s). Den träder i kraft omedelbart. Se till att du har skrivit upp den.</string>
     <string name="pin1_section_title">Grund-PIN (PIN 1)</string>
     <string name="pin2_section_title">Underskrifts-PIN (PIN 2)</string>
+    <string name="paired_devices">Kopplade datorer</string>
+    <string name="connected_status">Ansluten</string>
 </resources>

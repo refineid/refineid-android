@@ -66,6 +66,11 @@ class ReFineIdApplication : Application() {
             primedStore.readPin1()?.let { storedPin ->
                 authenticationPinCache.recordVerified(storedPin)
             }
+            primedStore.read()?.let { storedCan ->
+                fi.refineid.android.core.CanSessionStore
+                    .remember(String(storedCan, Charsets.US_ASCII))
+                storedCan.fill(0)
+            }
         } catch (_: Exception) {
         }
         nfcReaderController =
