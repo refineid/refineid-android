@@ -5,7 +5,7 @@ import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.uiAutomator
-import fi.refineid.android.ReFineIdApplication
+import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.core.NativePin2PreflightResult
 import fi.refineid.android.core.NativePinReferenceScheme
 import org.junit.Assert.assertTrue
@@ -59,7 +59,7 @@ internal class LivePin2PreflightUiAutomatorTest {
         val completion = CountDownLatch(SINGLE_COMPLETION)
         val result = AtomicReference<NativePin2PreflightResult>()
         val application =
-            instrumentation.targetContext.applicationContext as ReFineIdApplication
+            instrumentation.targetContext.applicationContext as RefineIdApplication
         application.readerController.qualifiedCardService.requestPin2Preflight { preflightResult ->
             result.set(preflightResult)
             completion.countDown()

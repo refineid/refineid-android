@@ -6,7 +6,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import fi.refineid.android.ReFineIdApplication
+import fi.refineid.android.RefineIdApplication
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -17,7 +17,7 @@ import org.junit.runner.RunWith
 class ExternalKeyProviderManifestInstrumentedTest {
     @Test
     fun providerIsExactlyExportedBehindTheKeyChainSignaturePermission() {
-        val context = ApplicationProvider.getApplicationContext<ReFineIdApplication>()
+        val context = ApplicationProvider.getApplicationContext<RefineIdApplication>()
         val packageManager = context.packageManager
         val component = ComponentName(context, ExternalKeyProviderService::class.java)
         val serviceInfo =
@@ -45,7 +45,7 @@ class ExternalKeyProviderManifestInstrumentedTest {
 
     @Test
     fun pinPromptIsPrivateExcludedFromRecentsAndDeclaresItsPlatformLaunchPermission() {
-        val context = ApplicationProvider.getApplicationContext<ReFineIdApplication>()
+        val context = ApplicationProvider.getApplicationContext<RefineIdApplication>()
         val activityInfo =
             context.packageManager.getActivityInfo(
                 ComponentName(context, ExternalKeyPinActivity::class.java),

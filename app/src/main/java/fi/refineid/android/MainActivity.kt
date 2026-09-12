@@ -54,12 +54,12 @@ class MainActivity : ComponentActivity() {
         window.decorView.importantForContentCapture =
             View.IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS
 
-        readerController = (application as ReFineIdApplication).readerController
+        readerController = (application as RefineIdApplication).readerController
         readerController.addStateListener(readerStateListener)
-        nfcReaderController = (application as ReFineIdApplication).nfcReaderController
+        nfcReaderController = (application as RefineIdApplication).nfcReaderController
         nfcReaderController.addStateListener(nfcStateListener)
 
-        val rappInbox = (application as ReFineIdApplication).rappAuthorizationInbox
+        val rappInbox = (application as RefineIdApplication).rappAuthorizationInbox
         val model =
             fi.refineid.android.rapp.RappPairingModel(
                 context = this,
@@ -81,7 +81,7 @@ class MainActivity : ComponentActivity() {
                     cardManagementService = readerController.cardManagementService,
                     nfcCardManagementService = nfcReaderController.cardManagementService,
                     timestampAuthorityRepository =
-                        (application as ReFineIdApplication).timestampAuthorityStore,
+                        (application as RefineIdApplication).timestampAuthorityStore,
                     hasNfc = nfcReaderController.hasNfc,
                     nfcSnapshot = nfcSnapshot,
                     onOpenNfcSettings = ::openNfcSettings,
@@ -90,11 +90,11 @@ class MainActivity : ComponentActivity() {
                     nfcCardService = nfcReaderController.authenticationCardService,
                     onSignBeginTap = nfcReaderController.tapToSign::begin,
                     onSignEndTap = nfcReaderController.tapToSign::end,
-                    pinCache = (application as ReFineIdApplication).authenticationPinCache,
+                    pinCache = (application as RefineIdApplication).authenticationPinCache,
                     onPin1Changed = nfcReaderController::forgetPin1,
                     rappPairingModel = model,
                     rappInbox = rappInbox,
-                    remoteCardModel = (application as ReFineIdApplication).remoteCardModel,
+                    remoteCardModel = (application as RefineIdApplication).remoteCardModel,
                     onReadPhoto = { onResult ->
                         if (readerSnapshot.cardPresence == CardPresence.PRESENT) {
                             readerController.readPhoto(onResult)
@@ -111,7 +111,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         nfcReaderController.attach(this)
         readerController.refresh()
-        (application as ReFineIdApplication).remoteCardModel.refresh()
+        (application as RefineIdApplication).remoteCardModel.refresh()
     }
 
     override fun onStop() {
@@ -140,7 +140,7 @@ class MainActivity : ComponentActivity() {
     private fun handleAuthPinIntent(intent: Intent?) {
         val pin = intent?.getStringExtra("REFINEID_AUTH_PIN")
         if (!pin.isNullOrBlank()) {
-            val app = application as? ReFineIdApplication ?: return
+            val app = application as? RefineIdApplication ?: return
             app.rappAuthorizationInbox.currentRequest
                 ?.onApproved
                 ?.invoke(pin)

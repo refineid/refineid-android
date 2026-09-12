@@ -11,12 +11,14 @@ import android.nfc.tech.IsoDep
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.CardPhotoStore
 import fi.refineid.android.core.CertificateHolderName
 import fi.refineid.android.core.NativeCardAccessResult
+import fi.refineid.android.core.NativeCardCa
 import fi.refineid.android.core.NativeCardExchangeLevel
 import fi.refineid.android.core.NativeCardSessionMaterial
 import fi.refineid.android.core.NativeCertificateReadFailure
@@ -94,6 +96,15 @@ internal class NfcReaderController(
     private var activeSession: ContactlessSession? = null
     private var activeProviderGeneration: Long? = null
     private val providerGenerationRandom = SecureRandom()
+
+    @Volatile
+    private var isOpeningSession = false
+
+    @Volatile
+    private var currentAuthCertDer: ByteArray? = null
+
+    val currentAuthenticationCertificateDer: ByteArray?
+        get() = currentAuthCertDer?.copyOf()
 
     private val feedback = NfcFeedback(applicationContext)
 
@@ -248,22 +259,26 @@ internal class NfcReaderController(
         if (isCardReady) {
             return true
         }
-        val resting = latestIsoDep
-        if (resting != null) {
-            val storedCan = CanSessionStore.canBytes() ?: primedCanStore.read()
-            if (storedCan != null) {
-                val generation = probeGeneration
-                try {
-                    probeExecutor.execute {
-                        openSessionBytes(
-                            canBytes = storedCan,
-                            generation = generation,
-                            mintOnSuccess = false,
-                            pin1 = null,
-                            isoDepTarget = resting,
-                        )
+        if (latestSnapshot.status != NfcReaderStatus.CONNECTING && !isOpeningSession) {
+            val resting = latestIsoDep
+            if (resting != null) {
+                val storedCan = CanSessionStore.canBytes() ?: primedCanStore.read()
+                if (storedCan != null) {
+                    val generation = probeGeneration
+                    isOpeningSession = true
+                    try {
+                        probeExecutor.execute {
+                            openSessionBytes(
+                                canBytes = storedCan,
+                                generation = generation,
+                                mintOnSuccess = false,
+                                pin1 = null,
+                                isoDepTarget = resting,
+                            )
+                        }
+                    } catch (_: RejectedExecutionException) {
+                        isOpeningSession = false
                     }
-                } catch (_: RejectedExecutionException) {
                 }
             }
         }
@@ -318,12 +333,14 @@ internal class NfcReaderController(
         }
         publish(NfcReaderSnapshot(status = NfcReaderStatus.CONNECTING))
         AppTrace.nfcConnectStarted()
+        isOpeningSession = true
         try {
             probeExecutor.execute {
                 // primedCanStore.read() decrypts Android Keystore ciphertext;
                 // it must run off the main thread — resolved here on the executor.
                 val canBytes = inMemoryCanBytes ?: primedCanStore.read()
                 if (canBytes == null) {
+                    isOpeningSession = false
                     pin1?.close()
                     publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true)
                     return@execute
@@ -332,6 +349,7 @@ internal class NfcReaderController(
                 openSessionBytes(canBytes, generation, mintOnSuccess = mint, pin1 = pin1)
             }
         } catch (_: RejectedExecutionException) {
+            isOpeningSession = false
             inMemoryCanBytes?.fill(0)
             pin1?.close()
         }
@@ -414,6 +432,7 @@ internal class NfcReaderController(
         val storedCan = CanSessionStore.canBytes() ?: primedCanStore.read()
         if (storedCan != null) {
             feedback.onCardDiscovered()
+            isOpeningSession = true
             try {
                 probeExecutor.execute {
                     openSessionBytes(
@@ -425,6 +444,7 @@ internal class NfcReaderController(
                     )
                 }
             } catch (_: RejectedExecutionException) {
+                isOpeningSession = false
                 AppTrace.nfcProbeResultDiscarded()
             }
             return
@@ -549,6 +569,16 @@ internal class NfcReaderController(
             rememberedDetails = cardDetails
         }
         val certDer = opened.certificate.copyDer()
+        currentAuthCertDer = certDer.copyOf()
+        val app = applicationContext as? RefineIdApplication
+        val rootCa = NativeCardCa.readRootCaCertificate()
+        if (rootCa != null) {
+            app?.caCertificateStore?.saveCertificate(rootCa)
+        }
+        val intermediateCa = NativeCardCa.readIntermediateCaCertificate()
+        if (intermediateCa != null) {
+            app?.caCertificateStore?.saveCertificate(intermediateCa)
+        }
         if (mintOnSuccess) {
             primedCanStore.write(canBytes.copyOf())
             primedCanStore.writeHolderName(holderName)
@@ -588,6 +618,7 @@ internal class NfcReaderController(
     ) {
         CanSessionStore.remember(String(canBytes, Charsets.US_ASCII))
         val (cardDetails, holderName) = extractCardDetails(opened)
+        currentAuthCertDer = opened.certificate.copyDer()
         pin1?.close()
         primedCanStore.clear()
         primedCardStored = false
@@ -616,6 +647,7 @@ internal class NfcReaderController(
         material: NativeCardSessionMaterial,
         isoDep: IsoDep,
     ) {
+        currentAuthCertDer = null
         pin1?.close()
         if (status == NfcReaderStatus.WRONG_CAN) {
             val rejected = String(canBytes, Charsets.US_ASCII)
@@ -650,43 +682,52 @@ internal class NfcReaderController(
         pin1: Pin1Submission?,
         isoDepTarget: IsoDep? = latestIsoDep,
     ) {
-        closeActiveSession()
-        val isoDep = isoDepTarget ?: latestIsoDep
-        if (isoDep == null || generation != probeGeneration) {
-            canBytes.fill(0)
-            pin1?.close()
-            publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true)
-            return
-        }
-        if (!ensureIsoDepConnected(isoDep)) {
-            canBytes.fill(0)
-            pin1?.close()
-            AppTrace.nfcSessionOpenFailed()
-            publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD)
-            return
-        }
-        val exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep))
-        val material = NativeCardSessionMaterial()
-        val opened = NativeContactlessSession.connect(canBytes.copyOf(), exchange)
-        when (opened) {
-            is NativeContactlessOpenResult.Success -> {
-                material.cacheAuthenticationCertificate(opened.certificate)
-                material.cachePin1Preflight(opened.preflight)
-                if (generation == probeGeneration) {
-                    handleOpenSuccess(generation, opened, canBytes, pin1, mintOnSuccess, isoDep, material)
+        try {
+            if (activeSession != null && generation == probeGeneration) {
+                canBytes.fill(0)
+                pin1?.close()
+                return
+            }
+            closeActiveSession()
+            val isoDep = isoDepTarget ?: latestIsoDep
+            if (isoDep == null || generation != probeGeneration) {
+                canBytes.fill(0)
+                pin1?.close()
+                publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true)
+                return
+            }
+            if (!ensureIsoDepConnected(isoDep)) {
+                canBytes.fill(0)
+                pin1?.close()
+                AppTrace.nfcSessionOpenFailed()
+                publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD)
+                return
+            }
+            val exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep))
+            val material = NativeCardSessionMaterial()
+            val opened = NativeContactlessSession.connect(canBytes.copyOf(), exchange)
+            when (opened) {
+                is NativeContactlessOpenResult.Success -> {
+                    material.cacheAuthenticationCertificate(opened.certificate)
+                    material.cachePin1Preflight(opened.preflight)
+                    if (generation == probeGeneration) {
+                        handleOpenSuccess(generation, opened, canBytes, pin1, mintOnSuccess, isoDep, material)
+                    }
+                }
+
+                is NativeContactlessOpenResult.ActivationRequired -> {
+                    material.cacheAuthenticationCertificate(opened.certificate)
+                    if (generation == probeGeneration) {
+                        handleOpenActivationRequired(generation, opened, canBytes, pin1, isoDep, material)
+                    }
+                }
+
+                is NativeContactlessOpenResult.Failure -> {
+                    handleOpenFailure(generation, opened.kind.toConnectStatus(), canBytes, pin1, material, isoDep)
                 }
             }
-
-            is NativeContactlessOpenResult.ActivationRequired -> {
-                material.cacheAuthenticationCertificate(opened.certificate)
-                if (generation == probeGeneration) {
-                    handleOpenActivationRequired(generation, opened, canBytes, pin1, isoDep, material)
-                }
-            }
-
-            is NativeContactlessOpenResult.Failure -> {
-                handleOpenFailure(generation, opened.kind.toConnectStatus(), canBytes, pin1, material, isoDep)
-            }
+        } finally {
+            isOpeningSession = false
         }
     }
 
@@ -740,7 +781,16 @@ internal class NfcReaderController(
                 if (photo != null && holderName != null) {
                     CardPhotoStore.savePhoto(photo, holderName, docNum)
                 }
+                val tamperProofVerified = NativeVerification.readCardVerificationPassed()
+                val updatedDetails =
+                    latestSnapshot.cardDetails?.copy(
+                        photoBytes = photo,
+                        isTamperProofVerified = tamperProofVerified,
+                    )
                 mainHandler.post {
+                    if (updatedDetails != null) {
+                        publish(latestSnapshot.copy(cardDetails = updatedDetails))
+                    }
                     onResult(photo)
                 }
             }
@@ -766,7 +816,16 @@ internal class NfcReaderController(
                 if (photo != null && holderName != null) {
                     CardPhotoStore.savePhoto(photo, holderName, docNum)
                 }
+                val tamperProofVerified = NativeVerification.readCardVerificationPassed()
+                val updatedDetails =
+                    latestSnapshot.cardDetails?.copy(
+                        photoBytes = photo,
+                        isTamperProofVerified = tamperProofVerified,
+                    )
                 mainHandler.post {
+                    if (updatedDetails != null) {
+                        publish(latestSnapshot.copy(cardDetails = updatedDetails))
+                    }
                     onResult(photo)
                 }
             }
@@ -779,6 +838,7 @@ internal class NfcReaderController(
 
     private fun closeActiveSession() {
         activeProviderGeneration = null
+        currentAuthCertDer = null
         activeSession?.close()
         activeSession = null
     }

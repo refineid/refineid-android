@@ -1,8 +1,9 @@
 //! Typed public-certificate reads and public-key classification.
 
 use refineid_apdu::{CardTransport, TransportOutcome};
+use refineid_ber::{BerTlv, Sequence};
 use refineid_pkcs15::{CertSlot, Pkcs15Error, Pkcs15Ops};
-use refineid_x509::{EcCurve, PublicKey};
+use refineid_x509::{EcCurve, PublicKey, UnvalidatedCertificate};
 
 const RSA_2048_BITS: usize = 2_048;
 const RSA_3072_BITS: usize = 3_072;
@@ -16,10 +17,168 @@ pub(crate) enum CardKeyProfile {
     EcdsaP384,
 }
 
-/// Validated public certificate bytes and their reconstructed key profile.
+/// Canonical DER encoding of an X.509 certificate.
+///
+/// Refinement invariant: The inner bytes form a non-empty, structurally sound
+/// DER-encoded ASN.1 SEQUENCE whose length exactly matches the buffer length.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CertificateDer(Vec<u8>);
+
+impl CertificateDer {
+    /// Construct and validate `CertificateDer` from raw bytes.
+    pub(crate) fn try_from_bytes(bytes: Vec<u8>) -> Result<Self, CertificateReadFailure> {
+        let tlv = BerTlv::<Sequence>::parse(&bytes)
+            .map_err(|_| CertificateReadFailure::InvalidCertificate)?;
+        if tlv.size() != bytes.len() {
+            return Err(CertificateReadFailure::InvalidCertificate);
+        }
+        Ok(Self(bytes))
+    }
+
+    /// Construct `CertificateDer` from bytes that have already been validated.
+    #[must_use]
+    pub(crate) const fn from_validated(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
+    /// Borrow the DER-encoded byte slice.
+    #[must_use]
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    /// Byte length of the DER encoding.
+    #[must_use]
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Consume into the inner raw byte buffer.
+    #[must_use]
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+impl AsRef<[u8]> for CertificateDer {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+/// Validated public certificate and its reconstructed key profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CardCertificate {
-    pub(crate) profile: CardKeyProfile,
-    pub(crate) der: Vec<u8>,
+    profile: CardKeyProfile,
+    der: CertificateDer,
+}
+
+impl CardCertificate {
+    /// Construct a `CardCertificate` from a key profile and validated DER.
+    #[must_use]
+    pub(crate) const fn new(profile: CardKeyProfile, der: CertificateDer) -> Self {
+        Self { profile, der }
+    }
+
+    /// The key profile of the certificate.
+    #[must_use]
+    pub(crate) const fn profile(&self) -> CardKeyProfile {
+        self.profile
+    }
+
+    /// Reference to the canonical certificate DER.
+    #[must_use]
+    pub(crate) fn der(&self) -> &CertificateDer {
+        &self.der
+    }
+
+    /// Consume the certificate into its canonical DER representation.
+    #[must_use]
+    pub(crate) fn into_der(self) -> CertificateDer {
+        self.der
+    }
+}
+
+/// An X.509 CA certificate whose DER structure and public key have been validated.
+///
+/// Refinement invariant: The inner bytes form a structurally valid X.509 certificate
+/// carrying a valid RSA or ECDSA public key. Construction rejects malformed DER,
+/// invalid TLV encodings, and unsupported key algorithms.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ValidatedCaCertificate {
+    public_key: PublicKey,
+    der: CertificateDer,
+}
+
+impl ValidatedCaCertificate {
+    /// Construct and validate a CA certificate from an unvalidated certificate.
+    pub(crate) fn from_unvalidated(
+        certificate: UnvalidatedCertificate,
+    ) -> Result<Self, CertificateReadFailure> {
+        let der = CertificateDer::try_from_bytes(certificate.as_bytes().to_vec())?;
+        let public_key = PublicKey::from_certificate(certificate)
+            .map_err(|_| CertificateReadFailure::InvalidCertificate)?;
+        Ok(Self { public_key, der })
+    }
+
+    /// Construct and validate a CA certificate from a `CertificateDer`.
+    pub(crate) fn from_der(der: CertificateDer) -> Result<Self, CertificateReadFailure> {
+        Self::from_unvalidated(UnvalidatedCertificate::new(der.into_bytes()))
+    }
+
+    /// Borrow the validated DER encoding.
+    #[must_use]
+    pub(crate) fn der(&self) -> &CertificateDer {
+        &self.der
+    }
+}
+
+/// Validated card Root CA certificate extracted from EF.4334.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RootCaCertificate(ValidatedCaCertificate);
+
+impl RootCaCertificate {
+    /// Validate and construct a Root CA certificate from `CertificateDer`.
+    pub(crate) fn from_der(der: CertificateDer) -> Result<Self, CertificateReadFailure> {
+        ValidatedCaCertificate::from_der(der).map(Self)
+    }
+
+    /// Validate and construct a Root CA certificate from an unvalidated certificate.
+    pub(crate) fn from_unvalidated(
+        certificate: UnvalidatedCertificate,
+    ) -> Result<Self, CertificateReadFailure> {
+        ValidatedCaCertificate::from_unvalidated(certificate).map(Self)
+    }
+
+    /// Borrow the validated DER encoding.
+    #[must_use]
+    pub(crate) fn der(&self) -> &CertificateDer {
+        self.0.der()
+    }
+}
+
+/// Validated card Intermediate / Issuing CA certificate extracted from EF.4336.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IntermediateCaCertificate(ValidatedCaCertificate);
+
+impl IntermediateCaCertificate {
+    /// Validate and construct an Intermediate CA certificate from `CertificateDer`.
+    pub(crate) fn from_der(der: CertificateDer) -> Result<Self, CertificateReadFailure> {
+        ValidatedCaCertificate::from_der(der).map(Self)
+    }
+
+    /// Validate and construct an Intermediate CA certificate from an unvalidated certificate.
+    pub(crate) fn from_unvalidated(
+        certificate: UnvalidatedCertificate,
+    ) -> Result<Self, CertificateReadFailure> {
+        ValidatedCaCertificate::from_unvalidated(certificate).map(Self)
+    }
+
+    /// Borrow the validated DER encoding.
+    #[must_use]
+    pub(crate) fn der(&self) -> &CertificateDer {
+        self.0.der()
+    }
 }
 
 /// Safe failure classes crossing the native boundary.
@@ -56,11 +215,12 @@ fn read_card_certificate<T: CardTransport>(
     slot: CertSlot,
 ) -> Result<CardCertificate, CertificateReadFailure> {
     let certificate = transport.read_certificate(slot).map_err(map_pkcs15_error)?;
-    let der = certificate.as_bytes().to_vec();
+    let der_bytes = certificate.as_bytes().to_vec();
     let public_key = PublicKey::from_certificate(certificate)
         .map_err(|_| CertificateReadFailure::InvalidCertificate)?;
     let profile = classify_public_key(&public_key)?;
-    Ok(CardCertificate { profile, der })
+    let der = CertificateDer::from_validated(der_bytes);
+    Ok(CardCertificate::new(profile, der))
 }
 
 fn classify_public_key(public_key: &PublicKey) -> Result<CardKeyProfile, CertificateReadFailure> {
@@ -103,8 +263,50 @@ mod tests {
     use refineid_apdu::{ResponseApdu, StatusWord, TransportOutcome};
     use refineid_pkcs15::Pkcs15Error;
 
-    use super::{CertificateReadFailure, map_pkcs15_error};
+    use super::{
+        CardCertificate, CardKeyProfile, CertificateDer, CertificateReadFailure, map_pkcs15_error,
+    };
     use crate::card_transport::AndroidTransportError;
+
+    #[test]
+    fn validates_certificate_der_framing() {
+        let valid_der = vec![0x30, 0x00];
+        let der = CertificateDer::try_from_bytes(valid_der.clone())
+            .expect("empty sequence is valid DER TLV");
+        assert_eq!(der.as_bytes(), &valid_der);
+        assert_eq!(der.len(), 2);
+        assert_eq!(der.into_bytes(), valid_der);
+
+        assert_eq!(
+            CertificateDer::try_from_bytes(Vec::new()),
+            Err(CertificateReadFailure::InvalidCertificate)
+        );
+
+        assert_eq!(
+            CertificateDer::try_from_bytes(vec![0x04, 0x00]),
+            Err(CertificateReadFailure::InvalidCertificate)
+        );
+
+        assert_eq!(
+            CertificateDer::try_from_bytes(vec![0x30, 0x05, 0x01]),
+            Err(CertificateReadFailure::InvalidCertificate)
+        );
+
+        assert_eq!(
+            CertificateDer::try_from_bytes(vec![0x30, 0x01, 0x00, 0xFF]),
+            Err(CertificateReadFailure::InvalidCertificate)
+        );
+    }
+
+    #[test]
+    fn card_certificate_into_der_preserves_der_type() {
+        let der = CertificateDer::from_validated(vec![0x30, 0x00]);
+        let cert = CardCertificate::new(CardKeyProfile::Rsa2048, der.clone());
+        assert_eq!(cert.profile(), CardKeyProfile::Rsa2048);
+        assert_eq!(cert.der(), &der);
+        let extracted_der: CertificateDer = cert.into_der();
+        assert_eq!(extracted_der, der);
+    }
 
     #[test]
     fn maps_card_and_transport_failures_without_details() {

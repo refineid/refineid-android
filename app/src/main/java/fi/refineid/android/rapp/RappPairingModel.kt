@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import fi.refineid.android.BuildConfig
+import fi.refineid.android.RefineIdApplication
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -53,7 +54,7 @@ internal class RappPairingModel(
     private var proxyHandshakeStep = 0
     private var requesterHandshakeStep = 0
     private var receivedPeerHello: uniffi.refineid_rapp.RappPeerHello? = null
-    private val app = context.applicationContext as? fi.refineid.android.ReFineIdApplication
+    private val app = context.applicationContext as? RefineIdApplication
 
     var phase by mutableStateOf<PairingPhase>(PairingPhase.Idle)
         private set
@@ -196,13 +197,19 @@ internal class RappPairingModel(
                                     platform = hello?.platform?.takeIf { it.isNotBlank() } ?: "Unknown",
                                     createdAtMs = System.currentTimeMillis(),
                                 )
-                            val app = context.applicationContext as? fi.refineid.android.ReFineIdApplication
+                            val app = context.applicationContext as? RefineIdApplication
                             val vault = app?.rappVault ?: AndroidRappVault(context)
                             record.persistDeviceOnly(vault)
 
                             val primedStore = app?.primedCanStore
                             val primedHolder = primedStore?.readHolderName()
-                            val certDer = primedStore?.readAuthCertificateDer()
+                            val certDer =
+                                primedStore?.readAuthCertificateDer()
+                                    ?: app?.nfcReaderController?.currentAuthenticationCertificateDer
+                                    ?: app?.rappProxyDispatcher?.cachedAuthCertDer
+                            if (certDer != null) {
+                                app?.rappProxyDispatcher?.storeReadAuthCertificate(certDer)
+                            }
                             val certB64 =
                                 certDer?.let {
                                     android.util.Base64.encodeToString(
@@ -404,13 +411,19 @@ internal class RappPairingModel(
                                     createdAtMs = System.currentTimeMillis(),
                                 )
 
-                            val app = context.applicationContext as? fi.refineid.android.ReFineIdApplication
+                            val app = context.applicationContext as? RefineIdApplication
                             val vault = app?.rappVault ?: AndroidRappVault(context)
                             record.persistDeviceOnly(vault)
 
                             val primedStore = app?.primedCanStore
                             val primedHolder = primedStore?.readHolderName()
-                            val certDer = primedStore?.readAuthCertificateDer()
+                            val certDer =
+                                primedStore?.readAuthCertificateDer()
+                                    ?: app?.nfcReaderController?.currentAuthenticationCertificateDer
+                                    ?: app?.rappProxyDispatcher?.cachedAuthCertDer
+                            if (certDer != null) {
+                                app?.rappProxyDispatcher?.storeReadAuthCertificate(certDer)
+                            }
                             val certB64 =
                                 certDer?.let {
                                     android.util.Base64.encodeToString(
@@ -492,7 +505,7 @@ internal class RappPairingModel(
     }
 
     fun removePair(pairIdHex: String) {
-        val app = context.applicationContext as? fi.refineid.android.ReFineIdApplication
+        val app = context.applicationContext as? RefineIdApplication
         val vault = app?.rappVault ?: AndroidRappVault(context)
         val pairIdBytes = pairIdHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
@@ -526,7 +539,7 @@ internal class RappPairingModel(
 
     fun terminate() {
         reset()
-        val app = context.applicationContext as? fi.refineid.android.ReFineIdApplication
+        val app = context.applicationContext as? RefineIdApplication
         app?.rappProxyDispatcher?.disconnectClient()
         app?.rappProxyDispatcher?.stopListening()
         val vault = app?.rappVault ?: AndroidRappVault(context)

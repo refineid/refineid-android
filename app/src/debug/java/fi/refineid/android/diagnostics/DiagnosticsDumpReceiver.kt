@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import fi.refineid.android.BuildConfig
-import fi.refineid.android.ReFineIdApplication
+import fi.refineid.android.RefineIdApplication
 import java.io.File
 
 /**
@@ -29,7 +29,7 @@ class DiagnosticsDumpReceiver : BroadcastReceiver() {
             }
 
             ACTION_DUMP_DIAGNOSTICS, null -> {
-                val app = context.applicationContext as? ReFineIdApplication
+                val app = context.applicationContext as? RefineIdApplication
                 val nfcSnapshot = app?.nfcReaderController?.snapshot
                 val usbSnapshot = app?.readerController?.snapshot
                 val holder = nfcSnapshot?.holderName ?: usbSnapshot?.holderName

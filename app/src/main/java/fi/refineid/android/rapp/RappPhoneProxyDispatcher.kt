@@ -57,6 +57,7 @@ internal class RappPhoneProxyDispatcher(
     private val qualifiedCardService: () -> QualifiedCardService?,
     private val isCardReady: () -> Boolean = { false },
     private val awaitCardReady: suspend () -> Boolean = { false },
+    private val activeAuthCertDer: () -> ByteArray? = { null },
 ) : AutoCloseable {
     private var activeListener: StreamRelayListener? = null
     private var sessionBridge: RappSessionBridge? = null
@@ -520,8 +521,12 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
+    val cachedAuthCertDer: ByteArray?
+        get() = lastReadAuthCertDer?.copyOf()
+
     private fun resolveCachedAuthCertificate(): ByteArray? {
-        lastReadAuthCertDer?.let { return it }
+        lastReadAuthCertDer?.let { return it.copyOf() }
+        activeAuthCertDer()?.let { return it.copyOf() }
         primedCanStore?.readAuthCertificateDer()?.let { return it }
         val encoded = catalog.listPairs().firstOrNull()?.certificateDerBase64 ?: return null
         return try {
@@ -531,8 +536,8 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
-    private fun storeReadAuthCertificate(certDer: ByteArray) {
-        lastReadAuthCertDer = certDer
+    internal fun storeReadAuthCertificate(certDer: ByteArray) {
+        lastReadAuthCertDer = certDer.copyOf()
         primedCanStore?.writeAuthCertificateDer(certDer)
         val pairId = catalog.listPairs().firstOrNull()?.pairIdHex ?: return
         catalog.updateCertificateDer(pairId, certDer)
@@ -601,9 +606,9 @@ internal class RappPhoneProxyDispatcher(
         isAuth: Boolean,
         bridge: RappOperationBridge,
     ): Boolean {
-        if (!isAuth || isCardReady()) return false
+        if (!isAuth) return false
         val cached = resolveCachedAuthCertificate() ?: return false
-        lastReadAuthCertDer = cached
+        storeReadAuthCertificate(cached)
         AppTrace.rappOperationCompleted(opKindName, opIdHex, 0L)
         respondBridgeCertificate(opId, cached, bridge)
         return true
@@ -647,6 +652,9 @@ internal class RappPhoneProxyDispatcher(
 
                     CardReadyOutcome.READY -> {
                     }
+                }
+                if (tryCompleteFromCachedAuthCert(opId, opIdHex, desc.kind.name, isAuth, bridge)) {
+                    return@launch
                 }
                 val certDer =
                     if (isAuth) {

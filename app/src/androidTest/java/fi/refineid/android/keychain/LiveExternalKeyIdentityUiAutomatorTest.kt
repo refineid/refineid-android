@@ -5,7 +5,7 @@ import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.uiAutomator
-import fi.refineid.android.ReFineIdApplication
+import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.ui.UiAutomationIds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -56,7 +56,7 @@ internal class LiveExternalKeyIdentityUiAutomatorTest {
         }
 
         val application =
-            instrumentation.targetContext.applicationContext as ReFineIdApplication
+            instrumentation.targetContext.applicationContext as RefineIdApplication
         val identity = application.externalKeyProviderRuntime.backend.copyActiveIdentity()
         assertNotNull("live card did not publish an external-key identity", identity)
         identity ?: return

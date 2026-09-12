@@ -22,7 +22,8 @@ use authentication_signer::{
 };
 use card_access::{CardAccessProbeFailure, CardAccessSummary, probe_card_access};
 use card_certificate::{
-    CardCertificate, CardKeyProfile, CertificateReadFailure, read_authentication_certificate,
+    CardCertificate, CardKeyProfile, CertificateDer, CertificateReadFailure,
+    IntermediateCaCertificate, RootCaCertificate, read_authentication_certificate,
     read_qualified_certificate,
 };
 use card_transport::{AndroidCardTransport, CardExchangeLevel};
@@ -258,6 +259,24 @@ const _: NativeMethod = jni::native_method! {
 const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeCore",
     static extern fn read_card_document_number_native() -> [jbyte],
+};
+
+const _: NativeMethod = jni::native_method! {
+    java_type = "fi.refineid.android.core.NativeCardCa",
+    static extern fn read_card_root_ca_certificate_native() -> [jbyte],
+};
+
+const _: NativeMethod = jni::native_method! {
+    java_type = "fi.refineid.android.core.NativeCardCa",
+    static extern fn read_card_intermediate_ca_certificate_native() -> [jbyte],
+};
+
+const _: NativeMethod = jni::native_method! {
+    java_type = "fi.refineid.android.core.NativeCardCa",
+    static extern fn set_cached_ca_certificates_native(
+        root_ca: [jbyte],
+        intermediate_ca: [jbyte],
+    ) -> jint,
 };
 
 const _: NativeMethod = jni::native_method! {
@@ -762,7 +781,7 @@ fn read_face_photo_on_session_native<'local>(
         env.new_byte_array(0)
     } else {
         match photo {
-            Some(bytes) => env.byte_array_from_slice(&bytes),
+            Some(image) => env.byte_array_from_slice(image.image_bytes()),
             None => env.new_byte_array(0),
         }
     }
@@ -785,7 +804,7 @@ fn read_face_photo_with_can_native<'local>(
         env.new_byte_array(0)
     } else {
         match photo {
-            Some(bytes) => env.byte_array_from_slice(&bytes),
+            Some(image) => env.byte_array_from_slice(image.image_bytes()),
             None => env.new_byte_array(0),
         }
     }
@@ -797,7 +816,7 @@ fn read_card_face_photo_native<'local>(
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
     let photo = contactless::get_last_read_face_photo();
     match photo {
-        Some(bytes) => env.byte_array_from_slice(&bytes),
+        Some(image) => env.byte_array_from_slice(image.image_bytes()),
         None => env.new_byte_array(0),
     }
 }
@@ -811,6 +830,51 @@ fn read_card_document_number_native<'local>(
         Some(text) => env.byte_array_from_slice(text.as_bytes()),
         None => env.new_byte_array(0),
     }
+}
+
+fn read_card_root_ca_certificate_native<'local>(
+    env: &mut Env<'local>,
+    _class: JClass<'local>,
+) -> Result<JByteArray<'local>, jni::errors::Error> {
+    let cert = contactless::get_last_read_root_ca();
+    match cert {
+        Some(cert) => env.byte_array_from_slice(cert.der().as_bytes()),
+        None => env.new_byte_array(0),
+    }
+}
+
+fn read_card_intermediate_ca_certificate_native<'local>(
+    env: &mut Env<'local>,
+    _class: JClass<'local>,
+) -> Result<JByteArray<'local>, jni::errors::Error> {
+    let cert = contactless::get_last_read_intermediate_ca();
+    match cert {
+        Some(cert) => env.byte_array_from_slice(cert.der().as_bytes()),
+        None => env.new_byte_array(0),
+    }
+}
+
+fn set_cached_ca_certificates_native<'local>(
+    env: &mut Env<'local>,
+    _class: JClass<'local>,
+    root_ca: JByteArray<'local>,
+    intermediate_ca: JByteArray<'local>,
+) -> Result<jint, jni::errors::Error> {
+    let root = env.convert_byte_array(&root_ca)?;
+    if !root.is_empty()
+        && let Ok(der) = CertificateDer::try_from_bytes(root)
+        && let Ok(cert) = RootCaCertificate::from_der(der)
+    {
+        contactless::set_last_read_root_ca(Some(cert));
+    }
+    let intermediate = env.convert_byte_array(&intermediate_ca)?;
+    if !intermediate.is_empty()
+        && let Ok(der) = CertificateDer::try_from_bytes(intermediate)
+        && let Ok(cert) = IntermediateCaCertificate::from_der(der)
+    {
+        contactless::set_last_read_intermediate_ca(Some(cert));
+    }
+    Ok(CARD_OPERATION_SUCCEEDED)
 }
 
 fn read_card_verification_native<'local>(
@@ -828,8 +892,12 @@ fn add_csca_anchor_native<'local>(
     anchor_der: JByteArray<'local>,
 ) -> Result<jint, jni::errors::Error> {
     let bytes = env.convert_byte_array(&anchor_der)?;
-    contactless::add_csca_anchor(bytes);
-    Ok(1)
+    if let Ok(der) = CertificateDer::try_from_bytes(bytes) {
+        contactless::add_csca_anchor(der);
+        Ok(1)
+    } else {
+        Ok(0)
+    }
 }
 
 fn clear_csca_anchors_native<'local>(
@@ -2001,17 +2069,19 @@ fn map_pkcs15_selection_result(
 
 fn encode_certificate_reply(result: Result<CardCertificate, CertificateReadFailure>) -> Vec<u8> {
     match result {
-        Ok(mut certificate) => {
-            let mut reply =
-                Vec::with_capacity(CERTIFICATE_REPLY_HEADER_LENGTH + certificate.der.len());
+        Ok(certificate) => {
+            let profile = certificate.profile();
+            let der = certificate.into_der();
+            let der_bytes = der.as_bytes();
+            let mut reply = Vec::with_capacity(CERTIFICATE_REPLY_HEADER_LENGTH + der.len());
             reply.push(CERTIFICATE_SUCCEEDED);
-            reply.push(match certificate.profile {
+            reply.push(match profile {
                 CardKeyProfile::Rsa2048 => KEY_PROFILE_RSA_2048,
                 CardKeyProfile::Rsa3072 => KEY_PROFILE_RSA_3072,
                 CardKeyProfile::EcdsaP256 => KEY_PROFILE_ECDSA_P256,
                 CardKeyProfile::EcdsaP384 => KEY_PROFILE_ECDSA_P384,
             });
-            reply.append(&mut certificate.der);
+            reply.extend_from_slice(der_bytes);
             reply
         }
         Err(failure) => vec![match failure {
@@ -2279,7 +2349,9 @@ mod tests {
         AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
     };
     use crate::card_access::{CardAccessProbeFailure, CardAccessSummary};
-    use crate::card_certificate::{CardCertificate, CardKeyProfile, CertificateReadFailure};
+    use crate::card_certificate::{
+        CardCertificate, CardKeyProfile, CertificateDer, CertificateReadFailure,
+    };
     use crate::card_transport::{AndroidTransportError, CardExchangeLevel};
     use crate::pin1_status::{Pin1Preflight, Pin1PreflightFailure, Pin1State};
     use crate::pin2_status::{Pin2Preflight, Pin2PreflightFailure, Pin2State};
@@ -2580,10 +2652,10 @@ mod tests {
     #[test]
     fn encodes_certificate_success_and_typed_failures() {
         const SYNTHETIC_DER: &[u8] = &[SYNTHETIC_DER_SEQUENCE_TAG, SYNTHETIC_DER_EMPTY_LENGTH];
-        let success = encode_certificate_reply(Ok(CardCertificate {
-            profile: CardKeyProfile::Rsa2048,
-            der: SYNTHETIC_DER.to_vec(),
-        }));
+        let success = encode_certificate_reply(Ok(CardCertificate::new(
+            CardKeyProfile::Rsa2048,
+            CertificateDer::from_validated(SYNTHETIC_DER.to_vec()),
+        )));
         assert_eq!(
             success,
             [
@@ -2655,10 +2727,10 @@ mod tests {
     fn encodes_contactless_open_as_nested_established_replies() {
         const SYNTHETIC_DER: &[u8] = &[SYNTHETIC_DER_SEQUENCE_TAG, SYNTHETIC_DER_EMPTY_LENGTH];
         let success = encode_contactless_open_reply(ContactlessOpenOutcome::Ready(
-            CardCertificate {
-                profile: CardKeyProfile::Rsa2048,
-                der: SYNTHETIC_DER.to_vec(),
-            },
+            CardCertificate::new(
+                CardKeyProfile::Rsa2048,
+                CertificateDer::from_validated(SYNTHETIC_DER.to_vec()),
+            ),
             Pin1Preflight {
                 scheme: PinReferenceScheme::Citizen,
                 state: Pin1State::Remaining(SYNTHETIC_PIN_RETRY_COUNT),
@@ -2684,10 +2756,10 @@ mod tests {
             .concat()
         );
         let activation_required = encode_contactless_open_reply(
-            ContactlessOpenOutcome::ActivationRequired(CardCertificate {
-                profile: CardKeyProfile::EcdsaP256,
-                der: SYNTHETIC_DER.to_vec(),
-            }),
+            ContactlessOpenOutcome::ActivationRequired(CardCertificate::new(
+                CardKeyProfile::EcdsaP256,
+                CertificateDer::from_validated(SYNTHETIC_DER.to_vec()),
+            )),
         );
         assert_eq!(
             activation_required,

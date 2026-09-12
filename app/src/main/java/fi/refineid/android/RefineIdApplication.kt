@@ -3,9 +3,8 @@
 package fi.refineid.android
 
 import android.app.Application
-import fi.refineid.android.browser.BundledIssuerCertificates
-import fi.refineid.android.core.AuthenticationIssuerCertificateStore
 import fi.refineid.android.core.AuthenticationPinCache
+import fi.refineid.android.core.NativeCardCa
 import fi.refineid.android.keychain.AndroidExternalKeyCallerLabelResolver
 import fi.refineid.android.keychain.ExternalKeyPinPromptBroker
 import fi.refineid.android.keychain.ExternalKeyProviderRuntime
@@ -13,6 +12,7 @@ import fi.refineid.android.keychain.TransportSelectingCardSession
 import fi.refineid.android.nfc.NfcReaderController
 import fi.refineid.android.prime.PrimedCanStore
 import fi.refineid.android.settings.TimestampAuthorityStore
+import fi.refineid.android.trust.CaCertificateStore
 import fi.refineid.android.usb.UsbReaderController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,12 +20,14 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.selects.select
 
-class ReFineIdApplication : Application() {
+class RefineIdApplication : Application() {
     internal lateinit var readerController: UsbReaderController
         private set
     internal lateinit var primedCanStore: PrimedCanStore
         private set
     internal lateinit var nfcReaderController: NfcReaderController
+        private set
+    internal lateinit var caCertificateStore: CaCertificateStore
         private set
     internal val authenticationPinCache = AuthenticationPinCache()
     internal lateinit var pinPromptBroker: ExternalKeyPinPromptBroker
@@ -60,6 +62,14 @@ class ReFineIdApplication : Application() {
         fi.refineid.android.core.NativeVerification
             .installCscaAnchors(loadCscaAnchorAssets())
         readerController = UsbReaderController(this)
+        val caStore = CaCertificateStore(this)
+        caStore.load()
+        caCertificateStore = caStore
+        val rootCa = caStore.rootCaDer
+        val intermediateCa = caStore.intermediateCaDer
+        if (rootCa != null || intermediateCa != null) {
+            NativeCardCa.setCachedCaCertificates(rootCa, intermediateCa)
+        }
         val primedStore = PrimedCanStore(this)
         primedCanStore = primedStore
         try {
@@ -109,10 +119,7 @@ class ReFineIdApplication : Application() {
                         ),
                     ),
                 pinAuthorizer = pinPromptBroker,
-                issuerCertificateSource =
-                    AuthenticationIssuerCertificateStore(
-                        BundledIssuerCertificates.load(this),
-                    ),
+                issuerCertificateSource = caStore,
             )
         readerController.start()
         rappProxyDispatcher = createRappProxyDispatcher(primedStore)
@@ -163,6 +170,7 @@ class ReFineIdApplication : Application() {
             inbox = rappAuthorizationInbox,
             pinCache = authenticationPinCache,
             primedCanStore = primedStore,
+            activeAuthCertDer = { nfcReaderController.currentAuthenticationCertificateDer },
             authCardService = {
                 if (readerController.isCardReady) {
                     readerController

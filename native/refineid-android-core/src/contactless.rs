@@ -12,16 +12,17 @@
 use std::sync::Mutex;
 
 use refineid_apdu::{CardTransport, TransportOutcome};
-use refineid_emrtd::{CscaAnchor, CscaAnchors, EmrtdOps};
+use refineid_emrtd::{CardFaceImage, CscaAnchor, CscaAnchors, EmrtdOps};
 use refineid_pace::{Can, PaceError, PaceSession, SmTransport, UnvalidatedCan, run_pace_with_can};
-use refineid_pkcs15::{Pkcs15Error, Pkcs15Ops};
+use refineid_pkcs15::{CertSlot, Pkcs15Error, Pkcs15Ops};
 
 use crate::authentication_signer::{
     AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
     AuthenticationSigningInput, authenticate_and_sign,
 };
 use crate::card_certificate::{
-    CardCertificate, CardKeyProfile, CertificateReadFailure, map_pkcs15_error,
+    CardCertificate, CardKeyProfile, CertificateDer, CertificateReadFailure,
+    IntermediateCaCertificate, RootCaCertificate, map_pkcs15_error,
     read_authentication_certificate, read_qualified_certificate,
 };
 use crate::card_management::{
@@ -87,8 +88,8 @@ pub(crate) fn contactless_close() {
     }
 }
 
-/// The latest face photo bytes extracted from EF.DG2 under secure messaging.
-static LAST_READ_FACE_PHOTO: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+/// The latest face photo extracted from EF.DG2 under secure messaging.
+static LAST_READ_FACE_PHOTO: Mutex<Option<CardFaceImage>> = Mutex::new(None);
 
 /// The latest MRZ document number extracted from EF.DG1 under secure
 /// messaging; the printed card number that makes exported photo file
@@ -109,10 +110,8 @@ pub(crate) const VERIFICATION_FAILED: i32 = 2;
 static LAST_READ_VERIFICATION: Mutex<i32> = Mutex::new(VERIFICATION_NOT_PERFORMED);
 
 /// Trusted CSCA anchor certificates (DER), installed by the platform
-/// at startup and consumed by every subsequent card read. Raw bytes
-/// are stored and parsed per read, so an unparsable anchor surfaces at
-/// verification time instead of poisoning installation.
-static CSCA_ANCHOR_DERS: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
+/// at startup and consumed by every subsequent card read.
+static CSCA_ANCHOR_DERS: Mutex<Vec<CertificateDer>> = Mutex::new(Vec::new());
 
 pub(crate) fn get_last_read_verification() -> i32 {
     LAST_READ_VERIFICATION
@@ -126,7 +125,7 @@ pub(crate) fn set_last_read_verification(verdict: i32) {
     }
 }
 
-pub(crate) fn add_csca_anchor(anchor_der: Vec<u8>) {
+pub(crate) fn add_csca_anchor(anchor_der: CertificateDer) {
     if let Ok(mut guard) = CSCA_ANCHOR_DERS.lock() {
         guard.push(anchor_der);
     }
@@ -144,7 +143,7 @@ fn installed_csca_anchors() -> Option<CscaAnchors> {
     let ders = CSCA_ANCHOR_DERS.lock().ok()?;
     let anchors: Vec<CscaAnchor> = ders
         .iter()
-        .filter_map(|der| CscaAnchor::from_der(der).ok())
+        .filter_map(|der| CscaAnchor::from_der(der.as_bytes()).ok())
         .collect();
     if anchors.is_empty() {
         None
@@ -153,14 +152,14 @@ fn installed_csca_anchors() -> Option<CscaAnchors> {
     }
 }
 
-pub(crate) fn get_last_read_face_photo() -> Option<Vec<u8>> {
+pub(crate) fn get_last_read_face_photo() -> Option<CardFaceImage> {
     LAST_READ_FACE_PHOTO
         .lock()
         .ok()
         .and_then(|guard| guard.clone())
 }
 
-pub(crate) fn set_last_read_face_photo(photo: Option<Vec<u8>>) {
+pub(crate) fn set_last_read_face_photo(photo: Option<CardFaceImage>) {
     if let Ok(mut guard) = LAST_READ_FACE_PHOTO.lock() {
         *guard = photo;
     }
@@ -177,6 +176,66 @@ pub(crate) fn set_last_read_document_number(document_number: Option<String>) {
     if let Ok(mut guard) = LAST_READ_DOCUMENT_NUMBER.lock() {
         *guard = document_number;
     }
+}
+
+/// The latest on-card root CA certificate extracted from EF.4334.
+static LAST_READ_ROOT_CA: Mutex<Option<RootCaCertificate>> = Mutex::new(None);
+
+/// The latest on-card intermediate CA certificate extracted from EF.4336.
+static LAST_READ_INTERMEDIATE_CA: Mutex<Option<IntermediateCaCertificate>> = Mutex::new(None);
+
+pub(crate) fn get_last_read_root_ca() -> Option<RootCaCertificate> {
+    LAST_READ_ROOT_CA
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+pub(crate) fn set_last_read_root_ca(cert: Option<RootCaCertificate>) {
+    if let Ok(mut guard) = LAST_READ_ROOT_CA.lock() {
+        *guard = cert;
+    }
+}
+
+pub(crate) fn get_last_read_intermediate_ca() -> Option<IntermediateCaCertificate> {
+    LAST_READ_INTERMEDIATE_CA
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+pub(crate) fn set_last_read_intermediate_ca(cert: Option<IntermediateCaCertificate>) {
+    if let Ok(mut guard) = LAST_READ_INTERMEDIATE_CA.lock() {
+        *guard = cert;
+    }
+}
+
+fn read_on_card_ca_certificates_if_needed<T: CardTransport + Pkcs15Ops>(secure: &mut T) {
+    if get_last_read_root_ca().is_none()
+        && let Ok(cert) = secure.read_certificate(CertSlot::RootCa)
+        && let Ok(root_ca) = RootCaCertificate::from_unvalidated(cert)
+    {
+        set_last_read_root_ca(Some(root_ca));
+    }
+    if get_last_read_intermediate_ca().is_none()
+        && let Ok(cert) = secure.read_certificate(CertSlot::IssuingCaEcc)
+        && let Ok(inter_ca) = IntermediateCaCertificate::from_unvalidated(cert)
+    {
+        set_last_read_intermediate_ca(Some(inter_ca));
+    }
+    let _ = secure.select_pkcs15_application();
+}
+
+fn read_document_number_from_secure_channel<T: CardTransport + Pkcs15Ops + EmrtdOps>(
+    secure: &mut T,
+) {
+    set_last_read_document_number(None);
+    if secure.select_emrtd_application().is_ok()
+        && let Ok(Some(mrz)) = secure.read_mrz_td1()
+    {
+        set_last_read_document_number(Some(mrz.document_number));
+    }
+    let _ = secure.select_pkcs15_application();
 }
 
 pub(crate) enum ContactlessOpenOutcome {
@@ -209,10 +268,9 @@ pub(crate) fn contactless_open<Exchange: SingleBlockExchange>(
                 Ok(()) => match read_authentication_certificate(&mut secure) {
                     Err(failure) => ContactlessOpenOutcome::Failure(failure),
                     Ok(certificate) => {
-                        let _ = secure.select_pkcs15_application();
-                        read_emrtd_data_from_secure_channel(&mut secure);
-                        let _ = secure.select_pkcs15_application();
-                        if is_activation_required(&mut secure, certificate.profile) {
+                        read_on_card_ca_certificates_if_needed(&mut secure);
+                        read_document_number_from_secure_channel(&mut secure);
+                        if is_activation_required(&mut secure, certificate.profile()) {
                             ContactlessOpenOutcome::ActivationRequired(certificate)
                         } else {
                             match probe_pin1_preflight(&mut secure) {
@@ -288,10 +346,9 @@ pub(crate) fn contactless_connect<Exchange: SingleBlockExchange>(
                 Ok(()) => match read_authentication_certificate(&mut secure) {
                     Err(failure) => ContactlessOpenOutcome::Failure(failure),
                     Ok(certificate) => {
-                        let _ = secure.select_pkcs15_application();
-                        read_emrtd_data_from_secure_channel(&mut secure);
-                        let _ = secure.select_pkcs15_application();
-                        if is_activation_required(&mut secure, certificate.profile) {
+                        read_on_card_ca_certificates_if_needed(&mut secure);
+                        read_document_number_from_secure_channel(&mut secure);
+                        if is_activation_required(&mut secure, certificate.profile()) {
                             ContactlessOpenOutcome::ActivationRequired(certificate)
                         } else {
                             match probe_pin1_preflight(&mut secure) {
@@ -422,7 +479,7 @@ pub(crate) fn contactless_probe_pin2<Exchange: SingleBlockExchange>(
 /// returning so following operations are unaffected.
 pub(crate) fn contactless_read_face_photo_on_session<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
-) -> (Option<Vec<u8>>, Exchange) {
+) -> (Option<CardFaceImage>, Exchange) {
     let Some(session) = take_held_session() else {
         return (None, transport.into_exchange());
     };
@@ -438,7 +495,7 @@ pub(crate) fn contactless_read_face_photo_on_session<Exchange: SingleBlockExchan
 pub(crate) fn contactless_read_face_photo<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
     can_bytes: Vec<u8>,
-) -> (Option<Vec<u8>>, Exchange) {
+) -> (Option<CardFaceImage>, Exchange) {
     let mut secure = match open_secure_channel(transport, can_bytes) {
         Ok(secure) => secure,
         Err((exchange, _)) => return (None, exchange),
@@ -842,7 +899,7 @@ fn read_emrtd_data_from_secure_channel<T: CardTransport + Pkcs15Ops + EmrtdOps>(
             Some(false) => set_last_read_verification(VERIFICATION_FAILED),
             None => set_last_read_verification(VERIFICATION_NOT_PERFORMED),
         }
-        set_last_read_face_photo(profile.face_image.map(|image| image.into_bytes()));
+        set_last_read_face_photo(profile.face_image);
     }
 
     let _ = secure.select_pkcs15_application();
