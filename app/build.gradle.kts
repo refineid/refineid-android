@@ -545,7 +545,10 @@ val verifyReleaseNoLogging =
                     "card:credential",
                     "authentication:",
                     "qualified-pdf:",
+                    "rapp:",
+                    "DiagnosticsDumpReceiver",
                     "Lfi/refineid/android/diagnostics/AppTrace;",
+                    "Lfi/refineid/android/diagnostics/DiagnosticsDumpReceiver;",
                 )
             val forbiddenMethods: Map<String, Set<String>?> =
                 mapOf(

@@ -145,6 +145,23 @@ internal class PrimedCanStore(
         }
     }
 
+    @Synchronized
+    fun readAuthCertificateDer(): ByteArray? {
+        val b64 = preferences.getString(ENTRY_AUTH_CERT, null) ?: return null
+        return decodeBase64(b64)
+    }
+
+    @Synchronized
+    fun writeAuthCertificateDer(der: ByteArray?) {
+        preferences.edit {
+            if (der != null) {
+                putString(ENTRY_AUTH_CERT, Base64.getEncoder().encodeToString(der))
+            } else {
+                remove(ENTRY_AUTH_CERT)
+            }
+        }
+    }
+
     /** Whether PIN 1 digits are stored, without decrypting them. */
     @Synchronized
     fun hasPin1(): Boolean =
@@ -307,6 +324,7 @@ internal class PrimedCanStore(
         const val ENTRY_NAME = "can"
         const val ENTRY_PIN1 = "pin1"
         const val ENTRY_HOLDER_NAME = "holder_name"
+        const val ENTRY_AUTH_CERT = "auth_cert_der"
         const val IV_SUFFIX = ".iv"
         const val CIPHERTEXT_SUFFIX = ".ciphertext"
         const val AES_KEY_SIZE_BITS = 256

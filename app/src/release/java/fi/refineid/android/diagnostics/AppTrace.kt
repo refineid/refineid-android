@@ -274,6 +274,49 @@ internal object AppTrace {
 
     fun usbPermissionRequested() = Unit
 
+    fun rappListenerStarted(port: Int) = Unit
+
+    fun rappListenerServiceRegistered(serviceName: String) = Unit
+
+    fun rappListenerFailed(error: String) = Unit
+
+    fun rappConnectionAccepted(remoteAddress: String) = Unit
+
+    fun rappConnectionRejected(
+        remoteAddress: String,
+        reason: String,
+    ) = Unit
+
+    fun rappConnectionDropped(reason: String) = Unit
+
+    fun rappOperationReceived(
+        opType: String,
+        opIdHex: String,
+    ) = Unit
+
+    fun rappOperationApproved(opIdHex: String) = Unit
+
+    fun rappOperationDenied(
+        opIdHex: String,
+        reason: String,
+    ) = Unit
+
+    fun rappOperationCompleted(
+        opType: String,
+        opIdHex: String,
+        durationUs: Long,
+    ) = Unit
+
+    fun rappOperationFailed(
+        opType: String,
+        opIdHex: String,
+        failureKind: String,
+    ) = Unit
+
+    fun rappPairingCodeDisplayed() = Unit
+
+    fun rappPairingCompleted(peerName: String) = Unit
+
     fun usbPermissionRequestFailed() = Unit
 
     fun usbSessionOpenStarted() = Unit

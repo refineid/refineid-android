@@ -15,6 +15,7 @@ internal data class DiagnosticsSnapshot(
     val nfcStatus: String,
     val usbStatus: String,
     val cardStatus: String,
+    val rappStatus: String? = null,
     val traceLogs: List<String>,
 ) {
     fun toReportText(): String =
@@ -36,6 +37,11 @@ internal data class DiagnosticsSnapshot(
             appendLine("== Card & Identity ==")
             appendLine(cardStatus)
             appendLine()
+            if (!rappStatus.isNullOrBlank()) {
+                appendLine("== Remote Access (RAPP) ==")
+                appendLine(rappStatus)
+                appendLine()
+            }
             appendLine("== Trace Log (${traceLogs.size} lines) ==")
             if (traceLogs.isEmpty()) {
                 appendLine("(no trace events recorded)")
@@ -52,6 +58,7 @@ internal object DiagnosticsCollector {
         usbReaderStatus: ReaderConnectionStatus? = null,
         holderName: String? = null,
         cardDetails: PersonCardDetails? = null,
+        rappStatus: String? = null,
     ): DiagnosticsSnapshot {
         val appInfo =
             "Version: ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_NUMBER})\n" +
@@ -111,6 +118,7 @@ internal object DiagnosticsCollector {
             nfcStatus = nfcStatus,
             usbStatus = usbStatus,
             cardStatus = cardStatus,
+            rappStatus = rappStatus,
             traceLogs = AppTrace.getTraceLog(),
         )
     }

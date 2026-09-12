@@ -226,6 +226,9 @@ internal class NfcReaderController(
         stateListeners -= listener
     }
 
+    val snapshot: NfcReaderSnapshot
+        get() = latestSnapshot
+
     val isCardReady: Boolean
         get() = latestSnapshot.status == NfcReaderStatus.CARD_READY
 
@@ -569,11 +572,17 @@ internal class NfcReaderController(
         if (status == NfcReaderStatus.CARD_READY && generation == probeGeneration) {
             CanSessionStore.remember(String(canBytes, Charsets.US_ASCII))
             val (cardDetails, holderName) = extractCardDetails(opened)
+            val certDer = (opened as? NativeContactlessOpenResult.Success)?.certificate?.copyDer()
             if (mintOnSuccess) {
                 primedCanStore.write(canBytes.copyOf())
                 primedCanStore.writeHolderName(holderName)
+                if (certDer != null) {
+                    primedCanStore.writeAuthCertificateDer(certDer)
+                }
                 primedCardStored = true
                 AppTrace.nfcPrimedMinted()
+            } else if (primedCardStored && certDer != null) {
+                primedCanStore.writeAuthCertificateDer(certDer)
             }
             // Hold PIN1 for the session so browser signing needs no
             // prompt; the negative cache guards a genuinely wrong value.

@@ -270,6 +270,9 @@ internal class UsbReaderController(
         stateListeners -= listener
     }
 
+    val snapshot: UsbReaderSnapshot
+        get() = latestSnapshot
+
     val isCardReady: Boolean
         get() =
             isStarted &&
