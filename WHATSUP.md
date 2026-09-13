@@ -1,7 +1,7 @@
 # WHATSUP
 
-branch: agent/audit-nvd-args
-purpose: Fix audit-dependencies.sh crashing on empty nvd_args under set -u (bash 3.2) when NVD_API_KEY is unset.
-started: 2026-09-14T00:35Z by keen-orbit (Muse)
-heartbeat: 2026-09-14T00:50Z
+branch: agent/promote-fix
+purpose: Fix promote in google-play-developer-release-manager.main.kts truncating the releases array at the first nested bracket.
+started: 2026-09-14T01:20Z by keen-orbit (Muse)
+heartbeat: 2026-09-14T01:35Z
 status: done-pending-merge
