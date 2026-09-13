@@ -659,6 +659,9 @@ val verifyReleaseAbis =
         description = "Require identical native libraries for every supported ABI."
         dependsOn("assembleRelease")
         inputs.file(releaseApk)
+        // Local copy: task actions cannot capture script object
+        // references under the configuration cache.
+        val requiredAbis = androidAbis
 
         doLast {
             val nativeLibraryPrefix = "lib/"
@@ -683,15 +686,15 @@ val verifyReleaseAbis =
                     }
                 }
             }
-            androidAbis.forEach { abi ->
+            requiredAbis.forEach { abi ->
                 check(!librariesByAbi[abi].isNullOrEmpty()) {
                     "release APK is missing native libraries for $abi"
                 }
             }
-            val referenceLibraries = librariesByAbi.getValue(androidAbis.first())
+            val referenceLibraries = librariesByAbi.getValue(requiredAbis.first())
             librariesByAbi.forEach { (abi, libraries) ->
                 check(libraries == referenceLibraries) {
-                    "release APK native libraries differ between ${androidAbis.first()} and $abi"
+                    "release APK native libraries differ between ${requiredAbis.first()} and $abi"
                 }
             }
         }
