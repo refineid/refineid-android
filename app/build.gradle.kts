@@ -662,6 +662,9 @@ val verifyReleaseAbis =
         val requiredAbis = androidAbis
 
         doLast {
+            check(requiredAbis.isNotEmpty()) {
+                "supported ABI list must not be empty"
+            }
             val nativeLibraryPrefix = "lib/"
             val sharedObjectSuffix = ".so"
             val apkEntrySegments = 3
@@ -677,6 +680,9 @@ val verifyReleaseAbis =
                         val segments = entry.name.split("/")
                         check(segments.size == apkEntrySegments) {
                             "release APK has a malformed native library entry: " + entry.name
+                        }
+                        check(entry.size > 0) {
+                            "release APK has an empty native library: " + entry.name
                         }
                         librariesByAbi.getOrPut(segments[abiSegmentIndex]) { mutableSetOf() }.add(
                             segments[librarySegmentIndex],
