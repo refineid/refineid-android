@@ -70,7 +70,7 @@ jobs:
 
       - name: Install the Rust Android target
         working-directory: refineid-android
-        run: rustup target add aarch64-linux-android
+        run: rustup target add aarch64-linux-android x86_64-linux-android
 
       - name: Install cargo-ndk
         uses: taiki-e/install-action@v2

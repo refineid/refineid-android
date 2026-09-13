@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 sdk_root="${ANDROID_SDK_ROOT:-${HOME}/Library/Android/sdk}"
-rust_android_targets=(aarch64-linux-android)
+rust_android_targets=(aarch64-linux-android x86_64-linux-android)
 brew_formulas=(openjdk rustup shellcheck)
 brew_casks=(android-commandlinetools android-platform-tools)
 

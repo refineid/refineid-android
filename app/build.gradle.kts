@@ -16,6 +16,8 @@ val rappCrateDirectory =
 val rappGeneratedKotlin = rappCrateDirectory.dir("generated")
 val minimumAndroidApi = 33
 val currentAndroidApi = 37
+val androidAbis = listOf("arm64-v8a", "x86_64")
+val abiTargetArgs = androidAbis.flatMap { abi -> listOf("-t", abi) }
 val javaToolchainVersion = 25
 val calendarYearBase = 2000
 val maximumUtcHour = 23
@@ -148,7 +150,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += setOf("arm64-v8a")
+            abiFilters += androidAbis
         }
     }
 
@@ -311,8 +313,7 @@ fun registerRappBuild(
         mutableListOf(
             "cargo",
             "ndk",
-            "-t",
-            "arm64-v8a",
+            *abiTargetArgs.toTypedArray(),
             "-P",
             minimumAndroidApi,
             "-o",
@@ -345,8 +346,7 @@ val buildRustDebug =
         commandLine(
             "cargo",
             "ndk",
-            "-t",
-            "arm64-v8a",
+            *abiTargetArgs.toTypedArray(),
             "-P",
             minimumAndroidApi,
             "-o",
@@ -372,8 +372,7 @@ val buildRustRelease =
         commandLine(
             "cargo",
             "ndk",
-            "-t",
-            "arm64-v8a",
+            *abiTargetArgs.toTypedArray(),
             "-P",
             minimumAndroidApi,
             "-o",
@@ -652,8 +651,64 @@ val verifyReleaseNetworkIsolation =
         }
     }
 
+val verifyReleaseAbis =
+    tasks.register("verifyReleaseAbis") {
+        group = "verification"
+        description = "Require identical native libraries for every supported ABI."
+        dependsOn("assembleRelease")
+        inputs.file(releaseApk)
+        // Local copy: task actions cannot capture script object
+        // references under the configuration cache.
+        val requiredAbis = androidAbis
+
+        doLast {
+            check(requiredAbis.isNotEmpty()) {
+                "supported ABI list must not be empty"
+            }
+            val nativeLibraryPrefix = "lib/"
+            val sharedObjectSuffix = ".so"
+            val apkEntrySegments = 3
+            val abiSegmentIndex = 1
+            val librarySegmentIndex = 2
+            val librariesByAbi = mutableMapOf<String, MutableSet<String>>()
+            ZipFile(inputs.files.singleFile).use { apk ->
+                apk.entries().asSequence().forEach { entry ->
+                    val isNativeLibrary =
+                        entry.name.startsWith(nativeLibraryPrefix) &&
+                            entry.name.endsWith(sharedObjectSuffix)
+                    if (isNativeLibrary) {
+                        val segments = entry.name.split("/")
+                        check(segments.size == apkEntrySegments) {
+                            "release APK has a malformed native library entry: " + entry.name
+                        }
+                        check(entry.size > 0) {
+                            "release APK has an empty native library: " + entry.name
+                        }
+                        librariesByAbi.getOrPut(segments[abiSegmentIndex]) { mutableSetOf() }.add(
+                            segments[librarySegmentIndex],
+                        )
+                    }
+                }
+            }
+            requiredAbis.forEach { abi ->
+                check(!librariesByAbi[abi].isNullOrEmpty()) {
+                    "release APK is missing native libraries for $abi"
+                }
+            }
+            check(librariesByAbi.keys == requiredAbis.toSet()) {
+                "release APK has unexpected ABIs: expected $requiredAbis, found ${librariesByAbi.keys}"
+            }
+            val referenceLibraries = librariesByAbi.getValue(requiredAbis.first())
+            librariesByAbi.forEach { (abi, libraries) ->
+                check(libraries == referenceLibraries) {
+                    "release APK native libraries differ between ${requiredAbis.first()} and $abi"
+                }
+            }
+        }
+    }
+
 tasks.named("check").configure {
-    dependsOn(verifyReleaseNoLogging, verifyReleaseNetworkIsolation)
+    dependsOn(verifyReleaseNoLogging, verifyReleaseNetworkIsolation, verifyReleaseAbis)
 }
 
 play {
