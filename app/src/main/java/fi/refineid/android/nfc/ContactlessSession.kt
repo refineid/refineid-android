@@ -136,13 +136,19 @@ internal class ContactlessSession(
                 // The PACE channel opened at connect is still live on the held
                 // field: VERIFY and sign on it with no second handshake, and
                 // leave the field up for any further operation.
-                NativeContactlessSession.authenticateAndSignOnSession(
-                    algorithm = algorithm,
-                    inputMode = inputMode,
-                    pin1 = pin1,
-                    input = input,
-                    exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
-                )
+                val result =
+                    NativeContactlessSession.authenticateAndSignOnSession(
+                        algorithm = algorithm,
+                        inputMode = inputMode,
+                        pin1 = pin1,
+                        input = input,
+                        exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
+                    )
+                if (result is NativeAuthenticationSignResult.Failure) {
+                    heldSession = false
+                    closeIsoDep()
+                }
+                result
             } else {
                 // The field dropped and was re-polled: re-run PACE on the
                 // resting tag for this one operation, then drop it again.

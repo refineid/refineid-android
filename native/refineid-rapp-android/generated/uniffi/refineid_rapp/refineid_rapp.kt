@@ -896,6 +896,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_receive_frame(
     ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_report_progress(
+    ): Int
     external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_request_invalid_or_unsupported(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_retry_refused(
@@ -1089,6 +1091,8 @@ internal object UniffiLib {
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_prerequisites_complete(`ptr`: Long,`operationId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_receive_frame(`ptr`: Long,`bytes`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_report_progress(`ptr`: Long,`operationId`: RustBuffer.ByValue,`event`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_request_invalid_or_unsupported(`ptr`: Long,`operationId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1402,6 +1406,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_receive_frame() != 38009) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_report_progress() != 2325) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_request_invalid_or_unsupported() != 52144) {
@@ -2060,6 +2067,14 @@ public interface RappOperationBridgeInterface {
     fun `receiveFrame`(`bytes`: kotlin.ByteArray, `nowMs`: kotlin.ULong): RappBridgeAction
     
     /**
+     * Report authenticated advisory progress on an active operation.
+     *
+     * # Errors
+     * [`RappBindingError`] on invalid input or the wrong protocol phase.
+     */
+    fun `reportProgress`(`operationId`: kotlin.ByteArray, `event`: RappProgressEvent): RappBridgeAction
+    
+    /**
      * Reject a request whose authenticated descriptor is unsupported or
      * contradicts the live card's certificate/profile.
      *
@@ -2624,6 +2639,28 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
         
         FfiConverterByteArray.lower(`bytes`),
         FfiConverterULong.lower(`nowMs`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Report authenticated advisory progress on an active operation.
+     *
+     * # Errors
+     * [`RappBindingError`] on invalid input or the wrong protocol phase.
+     */
+    @Throws(RappBindingException::class)override fun `reportProgress`(`operationId`: kotlin.ByteArray, `event`: RappProgressEvent): RappBridgeAction {
+            return FfiConverterTypeRappBridgeAction.lift(
+    callWithHandle {
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rappoperationbridge_report_progress(
+        it,
+        
+        FfiConverterByteArray.lower(`operationId`),
+        FfiConverterTypeRappProgressEvent.lower(`event`),_status)
 }
     }
     )
@@ -5603,6 +5640,11 @@ data class RappBridgeAction (
     var `terminalReason`: RappTerminalReason?
     , 
     /**
+     * Advisory progress event.
+     */
+    var `progressEvent`: RappProgressEvent?
+    , 
+    /**
      * The session must close after this frame is delivered.
      */
     var `closeSessionAfterSend`: kotlin.Boolean
@@ -5633,6 +5675,7 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalByteArray.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalTypeRappTerminalReason.read(buf),
+            FfiConverterOptionalTypeRappProgressEvent.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalULong.read(buf),
         )
@@ -5645,6 +5688,7 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalByteArray.allocationSize(value.`frame`) +
             FfiConverterOptionalString.allocationSize(value.`terminalState`) +
             FfiConverterOptionalTypeRappTerminalReason.allocationSize(value.`terminalReason`) +
+            FfiConverterOptionalTypeRappProgressEvent.allocationSize(value.`progressEvent`) +
             FfiConverterBoolean.allocationSize(value.`closeSessionAfterSend`) +
             FfiConverterOptionalULong.allocationSize(value.`nextPollAtMs`)
     )
@@ -5656,6 +5700,7 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalByteArray.write(value.`frame`, buf)
             FfiConverterOptionalString.write(value.`terminalState`, buf)
             FfiConverterOptionalTypeRappTerminalReason.write(value.`terminalReason`, buf)
+            FfiConverterOptionalTypeRappProgressEvent.write(value.`progressEvent`, buf)
             FfiConverterBoolean.write(value.`closeSessionAfterSend`, buf)
             FfiConverterOptionalULong.write(value.`nextPollAtMs`, buf)
     }
@@ -6350,6 +6395,15 @@ sealed class RappBindingException: kotlin.Exception() {
             get() = ""
     }
     
+    /**
+     * Referenced operation was not found in the active session.
+     */
+    class UnknownOperation(
+        ) : RappBindingException() {
+        override val message
+            get() = ""
+    }
+    
 
     
 
@@ -6375,6 +6429,7 @@ public object FfiConverterTypeRappBindingError : FfiConverterRustBuffer<RappBind
             4 -> RappBindingException.ProtocolFailure()
             5 -> RappBindingException.LocalStateFailure()
             6 -> RappBindingException.PairNotFound()
+            7 -> RappBindingException.UnknownOperation()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -6405,6 +6460,10 @@ public object FfiConverterTypeRappBindingError : FfiConverterRustBuffer<RappBind
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
             )
+            is RappBindingException.UnknownOperation -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
         }
     }
 
@@ -6432,6 +6491,10 @@ public object FfiConverterTypeRappBindingError : FfiConverterRustBuffer<RappBind
             }
             is RappBindingException.PairNotFound -> {
                 buf.putInt(6)
+                Unit
+            }
+            is RappBindingException.UnknownOperation -> {
+                buf.putInt(7)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -6491,6 +6554,10 @@ enum class RappBridgeActionKind {
      * Peer acknowledged the completed result.
      */
     RESULT_ACKNOWLEDGED,
+    /**
+     * Advisory progress update reported by peer.
+     */
+    PROGRESS,
     /**
      * Peer already serves a live session for this pairing.
      */
@@ -6689,6 +6756,53 @@ public object FfiConverterTypeRappOperationKind: FfiConverterRustBuffer<RappOper
     override fun allocationSize(value: RappOperationKind) = 4UL
 
     override fun write(value: RappOperationKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * Advisory progress events exposed to platform callers.
+ */
+
+enum class RappProgressEvent {
+    
+    /**
+     * Proxy is waiting for card presentation.
+     */
+    WAITING_FOR_CARD,
+    /**
+     * Card presentation wait has ended.
+     */
+    CARD_WAIT_ENDED,
+    /**
+     * Forward-compatible unknown progress event.
+     */
+    UNKNOWN;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRappProgressEvent: FfiConverterRustBuffer<RappProgressEvent> {
+    override fun read(buf: ByteBuffer) = try {
+        RappProgressEvent.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RappProgressEvent) = 4UL
+
+    override fun write(value: RappProgressEvent, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -7198,6 +7312,38 @@ public object FfiConverterOptionalTypeRappCardKeyProfile: FfiConverterRustBuffer
         } else {
             buf.put(1)
             FfiConverterTypeRappCardKeyProfile.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeRappProgressEvent: FfiConverterRustBuffer<RappProgressEvent?> {
+    override fun read(buf: ByteBuffer): RappProgressEvent? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeRappProgressEvent.read(buf)
+    }
+
+    override fun allocationSize(value: RappProgressEvent?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeRappProgressEvent.allocationSize(value)
+        }
+    }
+
+    override fun write(value: RappProgressEvent?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeRappProgressEvent.write(value, buf)
         }
     }
 }

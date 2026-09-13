@@ -33,9 +33,7 @@ if [[ ! -x "$MAC_APP" ]]; then
 fi
 
 cleanup() {
-  if [[ -n "${MAC_PID:-}" ]] && kill -0 "$MAC_PID" 2>/dev/null; then
-    kill "$MAC_PID" 2>/dev/null || true
-  fi
+  killall RefineID 2>/dev/null || true
   rm -f "$MAC_LOG"
 }
 trap cleanup EXIT
@@ -46,6 +44,7 @@ echo "============================================================"
 
 # Step 1: Clean slate
 echo "==> Step 1: Clearing stale pairing state on Mac and Android..."
+killall RefineID 2>/dev/null || true
 "$MAC_APP" --reset-card-state >/dev/null 2>&1 || true
 
 adb -s "$SERIAL" shell run-as fi.refineid.android rm -f \
@@ -59,8 +58,7 @@ sleep 1
 
 # Step 2: Start Mac in offer mode
 echo "==> Step 2: Generating pairing offer on Mac..."
-"$MAC_APP" --offer-remote-reader > "$MAC_LOG" 2>&1 &
-MAC_PID=$!
+open -n -a "$MAC_APP" --stdout "$MAC_LOG" --stderr "$MAC_LOG" --args --offer-remote-reader
 
 CODE=""
 for i in $(seq 1 30); do

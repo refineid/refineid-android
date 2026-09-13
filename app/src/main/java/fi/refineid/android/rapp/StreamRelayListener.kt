@@ -7,6 +7,7 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import fi.refineid.android.BuildConfig
+import fi.refineid.android.diagnostics.AppTrace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -72,6 +73,7 @@ internal class StreamRelayListener(
         try {
             val server = ServerSocket(0)
             serverSocket = server
+            AppTrace.rappListenerStarted(server.localPort)
             if (BuildConfig.DEBUG) {
                 android.util.Log.i("STREAM_LISTENER", "ServerSocket listening on port ${server.localPort}")
             }
@@ -86,6 +88,7 @@ internal class StreamRelayListener(
             val regListener =
                 object : NsdManager.RegistrationListener {
                     override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                        AppTrace.rappListenerServiceRegistered(serviceInfo.serviceName)
                         if (BuildConfig.DEBUG) {
                             android.util.Log.i("STREAM_LISTENER", "onServiceRegistered: ${serviceInfo.serviceName}")
                         }
@@ -95,6 +98,7 @@ internal class StreamRelayListener(
                         serviceInfo: NsdServiceInfo,
                         errorCode: Int,
                     ) {
+                        AppTrace.rappListenerFailed("registration_failed_code_$errorCode")
                         android.util.Log.e(
                             "STREAM_LISTENER",
                             "onRegistrationFailed: ${serviceInfo.serviceName}, errorCode: $errorCode",
@@ -125,24 +129,46 @@ internal class StreamRelayListener(
                     while (isActive && !isClosed.get()) {
                         try {
                             val socket = server.accept()
-                            if (BuildConfig.DEBUG) {
-                                android.util.Log.i(
-                                    "STREAM_LISTENER",
-                                    "Accepted connection from ${socket.remoteSocketAddress}",
-                                )
-                            }
-                            readJob?.cancel()
-                            clientSocket?.close()
-                            clientSocket = socket
-                            outputStream = DataOutputStream(socket.getOutputStream())
-                            onEvent(StreamRelayEvent.Connected)
-
-                            readJob =
-                                scope.launch(Dispatchers.IO) {
-                                    readLoop(socket)
+                            val shouldReject =
+                                synchronized(this@StreamRelayListener) {
+                                    val current = clientSocket
+                                    if (current != null && !current.isClosed && current.isConnected) {
+                                        true
+                                    } else {
+                                        readJob?.cancel()
+                                        clientSocket = socket
+                                        outputStream = DataOutputStream(socket.getOutputStream())
+                                        false
+                                    }
                                 }
+
+                            if (shouldReject) {
+                                AppTrace.rappConnectionRejected(
+                                    socket.remoteSocketAddress?.toString() ?: "unknown",
+                                    "already_connected",
+                                )
+                                try {
+                                    socket.close()
+                                } catch (_: Exception) {
+                                }
+                            } else {
+                                AppTrace.rappConnectionAccepted(socket.remoteSocketAddress.toString())
+                                if (BuildConfig.DEBUG) {
+                                    android.util.Log.i(
+                                        "STREAM_LISTENER",
+                                        "Accepted connection from ${socket.remoteSocketAddress}",
+                                    )
+                                }
+                                onEvent(StreamRelayEvent.Connected)
+
+                                readJob =
+                                    scope.launch(Dispatchers.IO) {
+                                        readLoop(socket)
+                                    }
+                            }
                         } catch (e: IOException) {
                             if (!isClosed.get()) {
+                                AppTrace.rappListenerFailed("accept_loop_exited_${e.message}")
                                 android.util.Log.w("STREAM_LISTENER", "ServerSocket accept loop exited: ${e.message}")
                                 onEvent(StreamRelayEvent.Error(e))
                             }
@@ -151,6 +177,7 @@ internal class StreamRelayListener(
                     }
                 }
         } catch (e: IOException) {
+            AppTrace.rappListenerFailed("start_failed_${e.message}")
             android.util.Log.e("STREAM_LISTENER", "start failed", e)
             onEvent(StreamRelayEvent.Error(e))
         }
@@ -175,8 +202,29 @@ internal class StreamRelayListener(
             if (BuildConfig.DEBUG) {
                 android.util.Log.w("STREAM_LISTENER", "Socket read loop ended: ${e.message}")
             }
-            if (!isClosed.get() && clientSocket === socket) {
+            val notifyDisconnect =
+                synchronized(this) {
+                    if (!isClosed.get() && clientSocket === socket) {
+                        clientSocket = null
+                        outputStream = null
+                        true
+                    } else {
+                        false
+                    }
+                }
+            if (notifyDisconnect) {
                 onEvent(StreamRelayEvent.Disconnected)
+            }
+        } finally {
+            try {
+                socket.close()
+            } catch (_: Exception) {
+            }
+            synchronized(this) {
+                if (clientSocket === socket) {
+                    clientSocket = null
+                    outputStream = null
+                }
             }
         }
     }
@@ -191,6 +239,19 @@ internal class StreamRelayListener(
             out.writeShort(frame.size)
             out.write(frame)
             out.flush()
+        }
+    }
+
+    fun disconnectClient() {
+        synchronized(this) {
+            readJob?.cancel()
+            readJob = null
+            try {
+                clientSocket?.close()
+            } catch (_: Exception) {
+            }
+            clientSocket = null
+            outputStream = null
         }
     }
 

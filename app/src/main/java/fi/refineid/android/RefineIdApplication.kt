@@ -3,9 +3,8 @@
 package fi.refineid.android
 
 import android.app.Application
-import fi.refineid.android.browser.BundledIssuerCertificates
-import fi.refineid.android.core.AuthenticationIssuerCertificateStore
 import fi.refineid.android.core.AuthenticationPinCache
+import fi.refineid.android.core.NativeCardCa
 import fi.refineid.android.keychain.AndroidExternalKeyCallerLabelResolver
 import fi.refineid.android.keychain.ExternalKeyPinPromptBroker
 import fi.refineid.android.keychain.ExternalKeyProviderRuntime
@@ -13,6 +12,7 @@ import fi.refineid.android.keychain.TransportSelectingCardSession
 import fi.refineid.android.nfc.NfcReaderController
 import fi.refineid.android.prime.PrimedCanStore
 import fi.refineid.android.settings.TimestampAuthorityStore
+import fi.refineid.android.trust.CaCertificateStore
 import fi.refineid.android.usb.UsbReaderController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,12 +20,14 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.selects.select
 
-class ReFineIdApplication : Application() {
+class RefineIdApplication : Application() {
     internal lateinit var readerController: UsbReaderController
         private set
     internal lateinit var primedCanStore: PrimedCanStore
         private set
     internal lateinit var nfcReaderController: NfcReaderController
+        private set
+    internal lateinit var caCertificateStore: CaCertificateStore
         private set
     internal val authenticationPinCache = AuthenticationPinCache()
     internal lateinit var pinPromptBroker: ExternalKeyPinPromptBroker
@@ -60,11 +62,24 @@ class ReFineIdApplication : Application() {
         fi.refineid.android.core.NativeVerification
             .installCscaAnchors(loadCscaAnchorAssets())
         readerController = UsbReaderController(this)
+        val caStore = CaCertificateStore(this)
+        caStore.load()
+        caCertificateStore = caStore
+        val rootCa = caStore.rootCaDer
+        val intermediateCa = caStore.intermediateCaDer
+        if (rootCa != null || intermediateCa != null) {
+            NativeCardCa.setCachedCaCertificates(rootCa, intermediateCa)
+        }
         val primedStore = PrimedCanStore(this)
         primedCanStore = primedStore
         try {
             primedStore.readPin1()?.let { storedPin ->
                 authenticationPinCache.recordVerified(storedPin)
+            }
+            primedStore.read()?.let { storedCan ->
+                fi.refineid.android.core.CanSessionStore
+                    .remember(String(storedCan, Charsets.US_ASCII))
+                storedCan.fill(0)
             }
         } catch (_: Exception) {
         }
@@ -78,6 +93,47 @@ class ReFineIdApplication : Application() {
         rappAuthorizationInbox =
             fi.refineid.android.rapp
                 .RappAuthorizationInbox(this)
+        registerActivityLifecycleCallbacks(
+            object : ActivityLifecycleCallbacks {
+                private var resumedActivities = 0
+
+                override fun onActivityResumed(activity: android.app.Activity) {
+                    resumedActivities++
+                    rappAuthorizationInbox.updateForeground(resumedActivities > 0)
+                }
+
+                override fun onActivityPaused(activity: android.app.Activity) {
+                    resumedActivities = (resumedActivities - 1).coerceAtLeast(0)
+                    rappAuthorizationInbox.updateForeground(resumedActivities > 0)
+                }
+
+                override fun onActivityCreated(
+                    activity: android.app.Activity,
+                    savedInstanceState: android.os.Bundle?,
+                ) {
+                    // Unused lifecycle event.
+                }
+
+                override fun onActivityStarted(activity: android.app.Activity) {
+                    // Unused lifecycle event.
+                }
+
+                override fun onActivityStopped(activity: android.app.Activity) {
+                    // Unused lifecycle event.
+                }
+
+                override fun onActivitySaveInstanceState(
+                    activity: android.app.Activity,
+                    outState: android.os.Bundle,
+                ) {
+                    // Unused lifecycle event.
+                }
+
+                override fun onActivityDestroyed(activity: android.app.Activity) {
+                    // Unused lifecycle event.
+                }
+            },
+        )
         rappPairCatalog =
             fi.refineid.android.rapp
                 .RappPairCatalog(this)
@@ -104,10 +160,7 @@ class ReFineIdApplication : Application() {
                         ),
                     ),
                 pinAuthorizer = pinPromptBroker,
-                issuerCertificateSource =
-                    AuthenticationIssuerCertificateStore(
-                        BundledIssuerCertificates.load(this),
-                    ),
+                issuerCertificateSource = caStore,
             )
         readerController.start()
         rappProxyDispatcher = createRappProxyDispatcher(primedStore)
@@ -158,6 +211,7 @@ class ReFineIdApplication : Application() {
             inbox = rappAuthorizationInbox,
             pinCache = authenticationPinCache,
             primedCanStore = primedStore,
+            activeAuthCertDer = { nfcReaderController.currentAuthenticationCertificateDer },
             authCardService = {
                 if (readerController.isCardReady) {
                     readerController

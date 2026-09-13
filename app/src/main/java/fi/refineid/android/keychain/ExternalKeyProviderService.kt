@@ -4,7 +4,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import com.android.keychain.external.IExternalKeyProviderService
-import fi.refineid.android.ReFineIdApplication
+import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.diagnostics.AppTrace
 
 /** Exact-component privileged service consumed only by the system KeyChain app. */
@@ -14,7 +14,7 @@ class ExternalKeyProviderService : Service() {
     override fun onCreate() {
         super.onCreate()
         AppTrace.externalKeyProviderServiceCreated()
-        val refineIdApplication = application as ReFineIdApplication
+        val refineIdApplication = application as RefineIdApplication
         providerBinder =
             ExternalKeyProviderBinder(
                 backend = refineIdApplication.externalKeyProviderRuntime.backend,

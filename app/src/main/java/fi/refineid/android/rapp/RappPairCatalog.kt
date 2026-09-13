@@ -1,10 +1,11 @@
 package fi.refineid.android.rapp
 
 import android.content.Context
-import android.util.Base64
+import android.content.SharedPreferences
 import androidx.core.content.edit
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Base64
 
 internal data class PairedPeer(
     val pairIdHex: String,
@@ -17,9 +18,11 @@ internal data class PairedPeer(
 
 /** Persists authenticated RAPP paired devices locally on Android. */
 internal class RappPairCatalog(
-    context: Context,
+    private val prefs: SharedPreferences,
 ) {
-    private val prefs = context.getSharedPreferences("fi.refineid.rapp.pairs", Context.MODE_PRIVATE)
+    constructor(context: Context) : this(
+        context.getSharedPreferences("fi.refineid.rapp.pairs", Context.MODE_PRIVATE),
+    )
 
     companion object {
         private const val KEY_PAIRS = "paired_devices"
@@ -39,18 +42,8 @@ internal class RappPairCatalog(
                         displayName = obj.getString("displayName"),
                         platform = obj.getString("platform"),
                         createdAtMs = obj.getLong("createdAtMs"),
-                        holderName =
-                            if (obj.has("holderName") && !obj.isNull("holderName")) {
-                                obj.getString("holderName")
-                            } else {
-                                null
-                            },
-                        certificateDerBase64 =
-                            if (obj.has("certificateDerBase64") && !obj.isNull("certificateDerBase64")) {
-                                obj.getString("certificateDerBase64")
-                            } else {
-                                null
-                            },
+                        holderName = obj.optString("holderName").takeIf { it.isNotBlank() },
+                        certificateDerBase64 = obj.optString("certificateDerBase64").takeIf { it.isNotBlank() },
                     ),
                 )
             }
@@ -65,19 +58,21 @@ internal class RappPairCatalog(
         platform: String,
         createdAtMs: Long,
         holderName: String? = null,
+        certificateDerBase64: String? = null,
     ) {
         val hex = pairId.joinToString("") { "%02x".format(it) }
-        val current =
-            listOf(
-                PairedPeer(
-                    pairIdHex = hex,
-                    displayName = displayName,
-                    platform = platform,
-                    createdAtMs = createdAtMs,
-                    holderName = holderName,
-                ),
-            )
-        persistPairs(current)
+        val updated = listPairs().filter { it.pairIdHex != hex }.toMutableList()
+        updated.add(
+            PairedPeer(
+                pairIdHex = hex,
+                displayName = displayName,
+                platform = platform,
+                createdAtMs = createdAtMs,
+                holderName = holderName,
+                certificateDerBase64 = certificateDerBase64,
+            ),
+        )
+        persistPairs(updated)
     }
 
     fun updateHolderName(
@@ -99,7 +94,7 @@ internal class RappPairCatalog(
         pairIdHex: String,
         certDer: ByteArray,
     ) {
-        val b64 = Base64.encodeToString(certDer, Base64.NO_WRAP)
+        val b64 = Base64.getEncoder().encodeToString(certDer)
         val current =
             listPairs().map { peer ->
                 if (peer.pairIdHex == pairIdHex) {

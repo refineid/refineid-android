@@ -517,6 +517,101 @@ internal object AppTrace {
         debug("usb:contactless-connect-completed opened=" + opened)
     }
 
+    fun rappListenerStarted(port: Int) {
+        debug("rapp:listener-started port=" + port)
+    }
+
+    fun rappListenerServiceRegistered(serviceName: String) {
+        debug("rapp:service-registered name=" + serviceName)
+    }
+
+    fun rappListenerFailed(error: String) {
+        debug("rapp:listener-failed error=" + error)
+    }
+
+    fun rappConnectionAccepted(remoteAddress: String) {
+        debug("rapp:connection-accepted remote=" + remoteAddress)
+    }
+
+    fun rappConnectionRejected(
+        remoteAddress: String,
+        reason: String,
+    ) {
+        debug("rapp:connection-rejected remote=" + remoteAddress + " reason=" + reason)
+    }
+
+    fun rappConnectionDropped(reason: String) {
+        debug("rapp:connection-dropped reason=" + reason)
+    }
+
+    fun rappOperationReceived(
+        opType: String,
+        opIdHex: String,
+    ) {
+        debug("rapp:operation-received type=" + opType + " id=" + opIdHex)
+    }
+
+    fun rappOperationApproved(opIdHex: String) {
+        debug("rapp:operation-approved id=" + opIdHex)
+    }
+
+    fun rappOperationDenied(
+        opIdHex: String,
+        reason: String,
+    ) {
+        debug("rapp:operation-denied id=" + opIdHex + " reason=" + reason)
+    }
+
+    fun rappOperationCompleted(
+        opType: String,
+        opIdHex: String,
+        durationUs: Long,
+    ) {
+        debug("rapp:operation-completed type=" + opType + " id=" + opIdHex + " duration-us=" + durationUs)
+    }
+
+    fun rappOperationFailed(
+        opType: String,
+        opIdHex: String,
+        failureKind: String,
+    ) {
+        debug("rapp:operation-failed type=" + opType + " id=" + opIdHex + " failure=" + failureKind)
+    }
+
+    fun rappCardPromptShown(
+        opIdHex: String,
+        action: String,
+    ) {
+        debug("rapp:card-prompt-shown id=" + opIdHex + " action=" + action)
+    }
+
+    fun rappCardPromptDismissed(opIdHex: String) {
+        debug("rapp:card-prompt-dismissed id=" + opIdHex)
+    }
+
+    fun rappPairingCodeDisplayed() {
+        debug("rapp:pairing-code-displayed")
+    }
+
+    fun rappPairingCompleted(peerName: String) {
+        debug("rapp:pairing-completed peer=" + peerName)
+    }
+
+    fun rappOperationApproveFailed(error: String) {
+        debug("rapp:approve-failed error=" + error)
+    }
+
+    fun rappOperationDenyFailed(error: String) {
+        debug("rapp:deny-failed error=" + error)
+    }
+
+    fun rappProgressReportFailed(
+        stage: String,
+        error: String,
+    ) {
+        debug("rapp:progress-failed stage=" + stage + " error=" + error)
+    }
+
     fun browserOpened() {
         debug("browser:opened")
     }
@@ -772,6 +867,22 @@ internal object AppTrace {
 
     fun nfcPrimedForgotten() {
         debug("nfc:primed-forgotten")
+    }
+
+    fun nfcAwaitCardReady(
+        isCardReady: Boolean,
+        status: String,
+        hasResting: Boolean,
+    ) {
+        debug("nfc:await-card-ready ready=" + isCardReady + " status=" + status + " resting=" + hasResting)
+    }
+
+    fun nfcOpenSessionStarted(
+        hasTarget: Boolean,
+        generation: Int,
+        mintOnSuccess: Boolean,
+    ) {
+        debug("nfc:open-session-started target=" + hasTarget + " gen=" + generation + " mint=" + mintOnSuccess)
     }
 
     fun ccidEndpointsMissing() {

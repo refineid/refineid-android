@@ -5,7 +5,7 @@ import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.uiAutomator
-import fi.refineid.android.ReFineIdApplication
+import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.core.NativeCertificateReadResult
 import fi.refineid.android.core.NativeQualifiedCertificate
 import fi.refineid.android.core.SHA384_DIGEST_LENGTH_BYTES
@@ -67,7 +67,7 @@ internal class LiveSigningValidationUiAutomatorTest {
         val result =
             AtomicReference<NativeCertificateReadResult<NativeQualifiedCertificate>>()
         val application =
-            instrumentation.targetContext.applicationContext as ReFineIdApplication
+            instrumentation.targetContext.applicationContext as RefineIdApplication
         application.readerController.qualifiedCardService.requestQualifiedCertificate { certificateResult ->
             result.set(certificateResult)
             completion.countDown()

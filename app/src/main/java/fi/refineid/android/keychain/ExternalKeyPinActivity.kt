@@ -36,7 +36,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import fi.refineid.android.R
-import fi.refineid.android.ReFineIdApplication
+import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.ui.Pin1InputTransformation
 import fi.refineid.android.ui.ReFineIdTheme
@@ -61,7 +61,7 @@ class ExternalKeyPinActivity : ComponentActivity() {
         window.decorView.importantForContentCapture =
             View.IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS
 
-        broker = (application as ReFineIdApplication).pinPromptBroker
+        broker = (application as RefineIdApplication).pinPromptBroker
         promptId = intent.getLongExtra(EXTRA_PROMPT_ID, NO_PROMPT_ID)
         val prompt =
             broker.attachActivity(promptId) {

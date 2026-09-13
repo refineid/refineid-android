@@ -268,6 +268,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
 
     testImplementation(libs.junit)
+    testImplementation(libs.json)
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
@@ -545,7 +546,10 @@ val verifyReleaseNoLogging =
                     "card:credential",
                     "authentication:",
                     "qualified-pdf:",
+                    "rapp:",
+                    "DiagnosticsDumpReceiver",
                     "Lfi/refineid/android/diagnostics/AppTrace;",
+                    "Lfi/refineid/android/diagnostics/DiagnosticsDumpReceiver;",
                 )
             val forbiddenMethods: Map<String, Set<String>?> =
                 mapOf(

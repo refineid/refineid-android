@@ -81,9 +81,13 @@ in seconds whether to resume work or clean up. In particular:
 1. Run the quality gates (`./gradlew check`) in the worktree.
 2. Commit on the task branch (subject and body only) and push.
 3. Open one pull request for the branch.
-4. Squash-merge once CI is green, so the `main` history stays
+4. Conduct iterative code review via Muse (`discuss-with-muse start --pr <NUM>`).
+   Muse runs with `--model muse-spark-1.3-contributor --reasoning-effort max`.
+   Codex reviews (`codex --model gpt-6-astra -c model_reasoning_effort=high`)
+   are reserved strictly for explicit maintainer requests.
+5. Squash-merge once CI and reviews are green, so the `main` history stays
    linear. The pull request preserves the branch history.
-5. Remove the worktree (`git worktree remove`), delete the branch, and
+6. Remove the worktree (`git worktree remove`), delete the branch, and
    fast-forward local main.
 
 ## Out of scope

@@ -174,10 +174,10 @@ where
     let certificate = transport
         .read_qualified_certificate_for_signing()
         .map_err(map_certificate_failure)?;
-    if certificate.der.as_slice() != expected_certificate {
+    if certificate.der().as_bytes() != expected_certificate {
         return Err(QualifiedSignFailure::CertificateMismatch);
     }
-    if !algorithm.accepts_profile(certificate.profile) {
+    if !algorithm.accepts_profile(certificate.profile()) {
         return Err(QualifiedSignFailure::KeyProfileMismatch);
     }
 
@@ -272,7 +272,9 @@ mod tests {
         MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH, QualifiedCertificateSource, QualifiedSignFailure,
         QualifiedSigningAlgorithm, QualifiedSigningInput, qualified_sign,
     };
-    use crate::card_certificate::{CardCertificate, CardKeyProfile, CertificateReadFailure};
+    use crate::card_certificate::{
+        CardCertificate, CardKeyProfile, CertificateDer, CertificateReadFailure,
+    };
 
     const SAFE_RETRIES: u8 = 3;
     const LOW_RETRIES: u8 = 2;
@@ -311,10 +313,10 @@ mod tests {
                 public_calls: 0,
                 credential_calls: 0,
                 certificate_reads: 0,
-                certificate: Some(Ok(CardCertificate {
+                certificate: Some(Ok(CardCertificate::new(
                     profile,
-                    der: SYNTHETIC_CERTIFICATE.to_vec(),
-                })),
+                    CertificateDer::from_validated(SYNTHETIC_CERTIFICATE.to_vec()),
+                ))),
             }
         }
     }

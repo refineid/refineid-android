@@ -4,6 +4,7 @@ agp = "9.4.0"
 compose-bom = "2026.06.00"
 detekt = "2.0.0-alpha.6"
 jna = "5.19.1"
+json = "20240303"
 junit = "4.13.2"
 kotlin = "2.4.20"
 ktlint = "1.8.0"
@@ -30,6 +31,7 @@ junit = { module = "junit:junit", version.ref = "junit" }
 # The generated RAPP binding calls its Rust side through JNA. The aar
 # classifier is the Android build of the same library.
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+json = { module = "org.json:json", version.ref = "json" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

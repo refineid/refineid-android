@@ -183,9 +183,7 @@ internal fun MainScreen(
             (usbCardAwaitsCan || (isSubmittingUsbCan && snapshot.status == ReaderConnectionStatus.CHECKING))
 
     val fallbackRemoteName = remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }
-    val fallbackRemoteDetails = remember { kotlinx.coroutines.flow.MutableStateFlow<PersonCardDetails?>(null) }
     val remoteHolderName by (remoteCardModel?.holderName ?: fallbackRemoteName).collectAsState()
-    val remoteDetails by (remoteCardModel?.cardDetails ?: fallbackRemoteDetails).collectAsState()
 
     LaunchedEffect(Unit) {
         remoteCardModel?.refresh()
@@ -267,13 +265,13 @@ internal fun MainScreen(
         if (usbCardReady) {
             snapshot.holderName
         } else {
-            nfcSnapshot.holderName ?: snapshot.holderName ?: remoteHolderName
+            nfcSnapshot.holderName ?: snapshot.holderName
         }
     val effectiveDetails =
         if (usbCardReady) {
             snapshot.cardDetails
         } else {
-            nfcSnapshot.cardDetails ?: snapshot.cardDetails ?: remoteDetails
+            nfcSnapshot.cardDetails ?: snapshot.cardDetails
         }
     val performFullIdentityReset: () -> Unit = {
         onForgetPrimedCard()
@@ -341,20 +339,6 @@ internal fun MainScreen(
                         isActivationRequired = nfcSnapshot.status == NfcReaderStatus.ACTIVATION_REQUIRED,
                         isSelected = !usbCardReady,
                         details = nfcSnapshot.cardDetails,
-                        onForget = forgetIdentity,
-                    ),
-                )
-            }
-
-            if (remoteHolderName != null) {
-                add(
-                    CardIdentityItem(
-                        id = "remote/active",
-                        title = remoteHolderName ?: stringResource(R.string.connect_id_card),
-                        transportLabel = stringResource(R.string.connected_to_computer),
-                        isActivationRequired = false,
-                        isSelected = !usbCardReady && nfcSnapshot.holderName == null,
-                        details = remoteDetails,
                         onForget = forgetIdentity,
                     ),
                 )
@@ -486,7 +470,6 @@ internal fun MainScreen(
                         hasNfc = hasNfc,
                         pinCache = pinCache,
                         holderName = effectiveHolderName,
-                        cardDetails = effectiveDetails,
                         onConnectCard = { can, pin1 ->
                             onNfcConnect(can, pin1)
                         },

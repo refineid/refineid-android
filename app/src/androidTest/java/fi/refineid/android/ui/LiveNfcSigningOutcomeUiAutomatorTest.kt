@@ -5,7 +5,7 @@ import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.uiAutomator
-import fi.refineid.android.ReFineIdApplication
+import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.browser.BundledIssuerCertificates
 import fi.refineid.android.core.Pin2Submission
 import fi.refineid.android.document.DocumentValidationResult
@@ -65,7 +65,7 @@ internal class LiveNfcSigningOutcomeUiAutomatorTest {
         assumeTrue("supply PIN2 to sign", !pin2.isNullOrEmpty())
 
         val context = instrumentation.targetContext
-        val application = context.applicationContext as ReFineIdApplication
+        val application = context.applicationContext as RefineIdApplication
         context.startActivity(
             Intent
                 .makeMainActivity(ComponentName(context, TARGET_ACTIVITY_CLASS))

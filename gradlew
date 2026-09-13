@@ -116,6 +116,35 @@ esac
 
 
 
+# Auto-detect Java environment and toolchains if not set or invalid
+if [ -z "${JAVA_HOME:-}" ] || [ ! -x "${JAVA_HOME:-}/bin/java" ] ; then
+    if [ -f "$APP_HOME/Scripts/gradle-environment.sh" ] ; then
+        . "$APP_HOME/Scripts/gradle-environment.sh" >/dev/null 2>&1 || true
+    fi
+    if [ -z "${JAVA_HOME:-}" ] || [ ! -x "${JAVA_HOME:-}/bin/java" ] ; then
+        if "$darwin" ; then
+            for candidate in \
+                "/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
+                "/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home" \
+                "/usr/local/opt/openjdk/libexec/openjdk.jdk/Contents/Home"
+            do
+                if [ -x "$candidate/bin/java" ] ; then
+                    JAVA_HOME="$candidate"
+                    export JAVA_HOME
+                    break
+                fi
+            done
+        fi
+    fi
+fi
+
+if [ -d "$HOME/.cargo/bin" ] ; then
+    case ":$PATH:" in
+        *":$HOME/.cargo/bin:"*) ;;
+        *) PATH="$PATH:$HOME/.cargo/bin" ; export PATH ;;
+    esac
+fi
+
 # Determine the Java command to use to start the JVM.
 if [ -n "$JAVA_HOME" ] ; then
     if [ -x "$JAVA_HOME/jre/sh/java" ] ; then

@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import fi.refineid.android.BuildConfig
+import fi.refineid.android.RefineIdApplication
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -53,7 +54,7 @@ internal class RappPairingModel(
     private var proxyHandshakeStep = 0
     private var requesterHandshakeStep = 0
     private var receivedPeerHello: uniffi.refineid_rapp.RappPeerHello? = null
-    private val app = context.applicationContext as? fi.refineid.android.ReFineIdApplication
+    private val app = context.applicationContext as? RefineIdApplication
 
     var phase by mutableStateOf<PairingPhase>(PairingPhase.Idle)
         private set
@@ -196,15 +197,26 @@ internal class RappPairingModel(
                                     platform = hello?.platform?.takeIf { it.isNotBlank() } ?: "Unknown",
                                     createdAtMs = System.currentTimeMillis(),
                                 )
-                            val app = context.applicationContext as? fi.refineid.android.ReFineIdApplication
+                            val app = context.applicationContext as? RefineIdApplication
                             val vault = app?.rappVault ?: AndroidRappVault(context)
                             record.persistDeviceOnly(vault)
+
+                            val primedStore = app?.primedCanStore
+                            val certDer =
+                                primedStore?.readAuthCertificateDer()
+                                    ?: app?.nfcReaderController?.currentAuthenticationCertificateDer
+                                    ?: app?.rappProxyDispatcher?.cachedAuthCertDer
+                            if (certDer != null) {
+                                app?.rappProxyDispatcher?.storeReadAuthCertificate(certDer)
+                            }
 
                             catalog.savePair(
                                 pairId = record.metadata().pairId,
                                 displayName = peer.displayName,
                                 platform = peer.platform,
                                 createdAtMs = peer.createdAtMs,
+                                holderName = null,
+                                certificateDerBase64 = null,
                             )
                             pairedDevices = catalog.listPairs()
                             phase = PairingPhase.Paired(peer)
@@ -391,15 +403,26 @@ internal class RappPairingModel(
                                     createdAtMs = System.currentTimeMillis(),
                                 )
 
-                            val app = context.applicationContext as? fi.refineid.android.ReFineIdApplication
+                            val app = context.applicationContext as? RefineIdApplication
                             val vault = app?.rappVault ?: AndroidRappVault(context)
                             record.persistDeviceOnly(vault)
+
+                            val primedStore = app?.primedCanStore
+                            val certDer =
+                                primedStore?.readAuthCertificateDer()
+                                    ?: app?.nfcReaderController?.currentAuthenticationCertificateDer
+                                    ?: app?.rappProxyDispatcher?.cachedAuthCertDer
+                            if (certDer != null) {
+                                app?.rappProxyDispatcher?.storeReadAuthCertificate(certDer)
+                            }
 
                             catalog.savePair(
                                 pairId = record.metadata().pairId,
                                 displayName = peer.displayName,
                                 platform = peer.platform,
                                 createdAtMs = peer.createdAtMs,
+                                holderName = null,
+                                certificateDerBase64 = null,
                             )
                             pairedDevices = catalog.listPairs()
                             phase = PairingPhase.Paired(peer)
@@ -466,16 +489,21 @@ internal class RappPairingModel(
     }
 
     fun removePair(pairIdHex: String) {
-        val app = context.applicationContext as? fi.refineid.android.ReFineIdApplication
+        val app = context.applicationContext as? RefineIdApplication
         val vault = app?.rappVault ?: AndroidRappVault(context)
-        val pairIdBytes = pairIdHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
+        val pairIdBytes = decodeHexOrNull(pairIdHex)
+        if (pairIdBytes != null) {
+            vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
+        }
         catalog.removePair(pairIdHex)
         pairedDevices = catalog.listPairs()
+        if (activeConnectedPeer?.pairIdHex == pairIdHex) {
+            app?.rappProxyDispatcher?.disconnectClient()
+            activeConnectedPeer = null
+        }
         if (pairedDevices.isEmpty()) {
             app?.rappProxyDispatcher?.stopListening()
         }
-        activeConnectedPeer = null
     }
 
     fun reset() {
@@ -497,24 +525,34 @@ internal class RappPairingModel(
 
     fun terminate() {
         reset()
-        val app = context.applicationContext as? fi.refineid.android.ReFineIdApplication
+        val app = context.applicationContext as? RefineIdApplication
         app?.rappProxyDispatcher?.disconnectClient()
         app?.rappProxyDispatcher?.stopListening()
         val vault = app?.rappVault ?: AndroidRappVault(context)
         for (pair in catalog.listPairs()) {
             try {
-                val pairIdBytes =
-                    pair.pairIdHex
-                        .chunked(2)
-                        .map { it.toInt(16).toByte() }
-                        .toByteArray()
-                vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
+                val pairIdBytes = decodeHexOrNull(pair.pairIdHex)
+                if (pairIdBytes != null) {
+                    vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
+                }
             } catch (_: Exception) {
             }
         }
         catalog.clearAll()
         pairedDevices = emptyList()
         activeConnectedPeer = null
+    }
+
+    companion object {
+        internal fun decodeHexOrNull(hex: String): ByteArray? {
+            if (hex.isEmpty() || hex.length % 2 != 0) return null
+            val result = ByteArray(hex.length / 2)
+            for (i in result.indices) {
+                val byte = hex.substring(i * 2, i * 2 + 2).toIntOrNull(16) ?: return null
+                result[i] = byte.toByte()
+            }
+            return result
+        }
     }
 
     private fun localDeviceDisplayName(): String {

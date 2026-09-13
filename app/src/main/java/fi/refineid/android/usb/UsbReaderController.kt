@@ -224,7 +224,6 @@ internal class UsbReaderController(
 
                     UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                         AppTrace.usbDeviceDetached()
-                        CanSessionStore.drop()
                         refresh()
                     }
                 }
@@ -269,6 +268,9 @@ internal class UsbReaderController(
         checkMainThread()
         stateListeners -= listener
     }
+
+    val snapshot: UsbReaderSnapshot
+        get() = latestSnapshot
 
     val isCardReady: Boolean
         get() =
@@ -327,7 +329,6 @@ internal class UsbReaderController(
         probeGeneration += 1
         ioExecutor.execute(::closeActiveSession)
         ioExecutor.shutdown()
-        CanSessionStore.drop()
         AppTrace.usbControllerStopped()
     }
 
@@ -337,7 +338,6 @@ internal class UsbReaderController(
             return
         }
         preferredDeviceId = deviceId
-        CanSessionStore.drop()
         refresh()
     }
 
@@ -364,7 +364,6 @@ internal class UsbReaderController(
             when {
                 device == null || match == null -> {
                     closeActiveSessionAsync()
-                    CanSessionStore.drop()
                     UsbReaderSnapshot()
                 }
 

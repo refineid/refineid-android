@@ -95,7 +95,7 @@ fn encode_pin_status(status: PinStatus) -> (u8, u8) {
 
 fn detect_activation_scheme<T: CardTransport>(transport: &mut T) -> Option<ActivationScheme> {
     if let Ok(cert) = read_authentication_certificate(transport) {
-        match cert.profile {
+        match cert.profile() {
             CardKeyProfile::Rsa2048 | CardKeyProfile::Rsa3072 => {
                 Some(ActivationScheme::ActivationCodeIsPuk)
             }

@@ -274,6 +274,65 @@ internal object AppTrace {
 
     fun usbPermissionRequested() = Unit
 
+    fun rappListenerStarted(port: Int) = Unit
+
+    fun rappListenerServiceRegistered(serviceName: String) = Unit
+
+    fun rappListenerFailed(error: String) = Unit
+
+    fun rappConnectionAccepted(remoteAddress: String) = Unit
+
+    fun rappConnectionRejected(
+        remoteAddress: String,
+        reason: String,
+    ) = Unit
+
+    fun rappConnectionDropped(reason: String) = Unit
+
+    fun rappOperationReceived(
+        opType: String,
+        opIdHex: String,
+    ) = Unit
+
+    fun rappOperationApproved(opIdHex: String) = Unit
+
+    fun rappOperationDenied(
+        opIdHex: String,
+        reason: String,
+    ) = Unit
+
+    fun rappOperationCompleted(
+        opType: String,
+        opIdHex: String,
+        durationUs: Long,
+    ) = Unit
+
+    fun rappOperationFailed(
+        opType: String,
+        opIdHex: String,
+        failureKind: String,
+    ) = Unit
+
+    fun rappCardPromptShown(
+        opIdHex: String,
+        action: String,
+    ) = Unit
+
+    fun rappCardPromptDismissed(opIdHex: String) = Unit
+
+    fun rappPairingCodeDisplayed() = Unit
+
+    fun rappPairingCompleted(peerName: String) = Unit
+
+    fun rappOperationApproveFailed(error: String) = Unit
+
+    fun rappOperationDenyFailed(error: String) = Unit
+
+    fun rappProgressReportFailed(
+        stage: String,
+        error: String,
+    ) = Unit
+
     fun usbPermissionRequestFailed() = Unit
 
     fun usbSessionOpenStarted() = Unit
@@ -341,6 +400,18 @@ internal object AppTrace {
     fun nfcPrimedMinted() = Unit
 
     fun nfcPrimedForgotten() = Unit
+
+    fun nfcAwaitCardReady(
+        isCardReady: Boolean,
+        status: String,
+        hasResting: Boolean,
+    ) = Unit
+
+    fun nfcOpenSessionStarted(
+        hasTarget: Boolean,
+        generation: Int,
+        mintOnSuccess: Boolean,
+    ) = Unit
 
     fun ccidEndpointsMissing() = Unit
 

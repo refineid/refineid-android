@@ -47,15 +47,12 @@
     <string name="copy_photo">Kopiera bild</string>
     <string name="share_photo">Dela bild</string>
     <string name="photo_copied">Bilden kopierades till urklipp</string>
-    <string name="connected_to_computer">Ansluten till dator</string>
     <string name="disconnect">Koppla från</string>
     <string name="pairing_failed">Anslutning misslyckades</string>
     <string name="peer_connected">%1$s ansluten.</string>
     <string name="pairing_code">Kopplingskod</string>
     <string name="hold_card_to_phone">Håll ditt ID-kort mot baksidan av telefonen…</string>
-    <string name="remote_auth_title">Fjärridentifiering</string>
-    <string name="hold_card_to_approve">Håll ditt ID-kort mot telefonen för att godkänna.</string>
-    <string name="sign_document_title">Signera dokument</string>
+    <string name="hold_card_against_back">Håll ID-kortet mot baksidan.</string>
     <string name="connect_id_card">Anslut identitetskort</string>
     <string name="show_pairing_code">Visa kopplingskod</string>
     <string name="enter_pairing_code">Mata in kopplingskod</string>
@@ -115,4 +112,6 @@
     <string name="confirm_activation_dialog_msg_single">Du aktiverar den saknade koden (%1$s). Den träder i kraft omedelbart. Se till att du har skrivit upp den.</string>
     <string name="pin1_section_title">Grund-PIN (PIN 1)</string>
     <string name="pin2_section_title">Underskrifts-PIN (PIN 2)</string>
+    <string name="paired_devices">Kopplade datorer</string>
+    <string name="connected_status">Ansluten</string>
 </resources>
