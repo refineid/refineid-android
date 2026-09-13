@@ -268,9 +268,14 @@ mod tests {
     };
     use crate::card_transport::AndroidTransportError;
 
+    const SYNTHETIC_DER_SEQUENCE_TAG: u8 = 0x30;
+    const SYNTHETIC_DER_EMPTY_LENGTH: u8 = 0x00;
+    const SYNTHETIC_DER_OCTET_STRING_TAG: u8 = 0x04;
+    const SYNTHETIC_DER_TRAILING_GARBAGE: u8 = 0xFF;
+
     #[test]
     fn validates_certificate_der_framing() {
-        let valid_der = vec![0x30, 0x00];
+        let valid_der = vec![SYNTHETIC_DER_SEQUENCE_TAG, SYNTHETIC_DER_EMPTY_LENGTH];
         let der = CertificateDer::try_from_bytes(valid_der.clone())
             .expect("empty sequence is valid DER TLV");
         assert_eq!(der.as_bytes(), &valid_der);
@@ -283,24 +288,35 @@ mod tests {
         );
 
         assert_eq!(
-            CertificateDer::try_from_bytes(vec![0x04, 0x00]),
+            CertificateDer::try_from_bytes(vec![
+                SYNTHETIC_DER_OCTET_STRING_TAG,
+                SYNTHETIC_DER_EMPTY_LENGTH
+            ]),
             Err(CertificateReadFailure::InvalidCertificate)
         );
 
         assert_eq!(
-            CertificateDer::try_from_bytes(vec![0x30, 0x05, 0x01]),
+            CertificateDer::try_from_bytes(vec![SYNTHETIC_DER_SEQUENCE_TAG, 0x05, 0x01]),
             Err(CertificateReadFailure::InvalidCertificate)
         );
 
         assert_eq!(
-            CertificateDer::try_from_bytes(vec![0x30, 0x01, 0x00, 0xFF]),
+            CertificateDer::try_from_bytes(vec![
+                SYNTHETIC_DER_SEQUENCE_TAG,
+                0x01,
+                0x00,
+                SYNTHETIC_DER_TRAILING_GARBAGE
+            ]),
             Err(CertificateReadFailure::InvalidCertificate)
         );
     }
 
     #[test]
     fn card_certificate_into_der_preserves_der_type() {
-        let der = CertificateDer::from_validated(vec![0x30, 0x00]);
+        let der = CertificateDer::from_validated(vec![
+            SYNTHETIC_DER_SEQUENCE_TAG,
+            SYNTHETIC_DER_EMPTY_LENGTH,
+        ]);
         let cert = CardCertificate::new(CardKeyProfile::Rsa2048, der.clone());
         assert_eq!(cert.profile(), CardKeyProfile::Rsa2048);
         assert_eq!(cert.der(), &der);

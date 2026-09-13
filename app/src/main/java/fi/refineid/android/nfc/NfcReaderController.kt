@@ -39,6 +39,7 @@ import java.security.SecureRandom
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
 /**
@@ -97,8 +98,7 @@ internal class NfcReaderController(
     private var activeProviderGeneration: Long? = null
     private val providerGenerationRandom = SecureRandom()
 
-    @Volatile
-    private var isOpeningSession = false
+    private val isOpeningSession = AtomicBoolean(false)
 
     @Volatile
     private var currentAuthCertDer: ByteArray? = null
@@ -265,27 +265,28 @@ internal class NfcReaderController(
             status = latestSnapshot.status.name,
             hasResting = resting != null,
         )
-        if (!isOpeningSession && resting != null) {
+        if (!isOpeningSession.get() && resting != null) {
             val inMemoryCan = CanSessionStore.canBytes()
             val generation = probeGeneration
-            isOpeningSession = true
-            try {
-                probeExecutor.execute {
-                    val storedCan = inMemoryCan ?: primedCanStore.read()
-                    if (storedCan == null) {
-                        isOpeningSession = false
-                        return@execute
+            if (isOpeningSession.compareAndSet(false, true)) {
+                try {
+                    probeExecutor.execute {
+                        val storedCan = inMemoryCan ?: primedCanStore.read()
+                        if (storedCan == null) {
+                            isOpeningSession.set(false)
+                            return@execute
+                        }
+                        openSessionBytes(
+                            canBytes = storedCan,
+                            generation = generation,
+                            mintOnSuccess = false,
+                            pin1 = null,
+                            isoDepTarget = resting,
+                        )
                     }
-                    openSessionBytes(
-                        canBytes = storedCan,
-                        generation = generation,
-                        mintOnSuccess = false,
-                        pin1 = null,
-                        isoDepTarget = resting,
-                    )
+                } catch (_: RejectedExecutionException) {
+                    isOpeningSession.set(false)
                 }
-            } catch (_: RejectedExecutionException) {
-                isOpeningSession = false
             }
         }
         return withTimeoutOrNull(timeoutMs) {
@@ -353,14 +354,14 @@ internal class NfcReaderController(
         }
         publish(NfcReaderSnapshot(status = NfcReaderStatus.CONNECTING))
         AppTrace.nfcConnectStarted()
-        isOpeningSession = true
+        isOpeningSession.set(true)
         try {
             probeExecutor.execute {
                 // primedCanStore.read() decrypts Android Keystore ciphertext;
                 // it must run off the main thread — resolved here on the executor.
                 val canBytes = inMemoryCanBytes ?: primedCanStore.read()
                 if (canBytes == null) {
-                    isOpeningSession = false
+                    isOpeningSession.set(false)
                     pin1?.close()
                     publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true)
                     return@execute
@@ -369,7 +370,7 @@ internal class NfcReaderController(
                 openSessionBytes(canBytes, generation, mintOnSuccess = mint, pin1 = pin1)
             }
         } catch (_: RejectedExecutionException) {
-            isOpeningSession = false
+            isOpeningSession.set(false)
             inMemoryCanBytes?.fill(0)
             pin1?.close()
         }
@@ -452,7 +453,7 @@ internal class NfcReaderController(
         val storedCan = CanSessionStore.canBytes() ?: primedCanStore.read()
         if (storedCan != null) {
             feedback.onCardDiscovered()
-            isOpeningSession = true
+            isOpeningSession.set(true)
             try {
                 probeExecutor.execute {
                     openSessionBytes(
@@ -464,7 +465,7 @@ internal class NfcReaderController(
                     )
                 }
             } catch (_: RejectedExecutionException) {
-                isOpeningSession = false
+                isOpeningSession.set(false)
                 AppTrace.nfcProbeResultDiscarded()
             }
             return
@@ -755,7 +756,7 @@ internal class NfcReaderController(
                 }
             }
         } finally {
-            isOpeningSession = false
+            isOpeningSession.set(false)
         }
     }
 

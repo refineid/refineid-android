@@ -93,6 +93,47 @@ class RefineIdApplication : Application() {
         rappAuthorizationInbox =
             fi.refineid.android.rapp
                 .RappAuthorizationInbox(this)
+        registerActivityLifecycleCallbacks(
+            object : ActivityLifecycleCallbacks {
+                private var resumedActivities = 0
+
+                override fun onActivityResumed(activity: android.app.Activity) {
+                    resumedActivities++
+                    rappAuthorizationInbox.updateForeground(resumedActivities > 0)
+                }
+
+                override fun onActivityPaused(activity: android.app.Activity) {
+                    resumedActivities = (resumedActivities - 1).coerceAtLeast(0)
+                    rappAuthorizationInbox.updateForeground(resumedActivities > 0)
+                }
+
+                override fun onActivityCreated(
+                    activity: android.app.Activity,
+                    savedInstanceState: android.os.Bundle?,
+                ) {
+                    // Unused lifecycle event.
+                }
+
+                override fun onActivityStarted(activity: android.app.Activity) {
+                    // Unused lifecycle event.
+                }
+
+                override fun onActivityStopped(activity: android.app.Activity) {
+                    // Unused lifecycle event.
+                }
+
+                override fun onActivitySaveInstanceState(
+                    activity: android.app.Activity,
+                    outState: android.os.Bundle,
+                ) {
+                    // Unused lifecycle event.
+                }
+
+                override fun onActivityDestroyed(activity: android.app.Activity) {
+                    // Unused lifecycle event.
+                }
+            },
+        )
         rappPairCatalog =
             fi.refineid.android.rapp
                 .RappPairCatalog(this)

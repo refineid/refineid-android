@@ -491,8 +491,10 @@ internal class RappPairingModel(
     fun removePair(pairIdHex: String) {
         val app = context.applicationContext as? RefineIdApplication
         val vault = app?.rappVault ?: AndroidRappVault(context)
-        val pairIdBytes = pairIdHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
+        val pairIdBytes = decodeHexOrNull(pairIdHex)
+        if (pairIdBytes != null) {
+            vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
+        }
         catalog.removePair(pairIdHex)
         pairedDevices = catalog.listPairs()
         if (activeConnectedPeer?.pairIdHex == pairIdHex) {
@@ -529,18 +531,26 @@ internal class RappPairingModel(
         val vault = app?.rappVault ?: AndroidRappVault(context)
         for (pair in catalog.listPairs()) {
             try {
-                val pairIdBytes =
-                    pair.pairIdHex
-                        .chunked(2)
-                        .map { it.toInt(16).toByte() }
-                        .toByteArray()
-                vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
+                val pairIdBytes = decodeHexOrNull(pair.pairIdHex)
+                if (pairIdBytes != null) {
+                    vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
+                }
             } catch (_: Exception) {
             }
         }
         catalog.clearAll()
         pairedDevices = emptyList()
         activeConnectedPeer = null
+    }
+
+    private fun decodeHexOrNull(hex: String): ByteArray? {
+        if (hex.length % 2 != 0) return null
+        val result = ByteArray(hex.length / 2)
+        for (i in result.indices) {
+            val byte = hex.substring(i * 2, i * 2 + 2).toIntOrNull(16) ?: return null
+            result[i] = byte.toByte()
+        }
+        return result
     }
 
     private fun localDeviceDisplayName(): String {

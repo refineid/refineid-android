@@ -81,6 +81,8 @@ internal class RappPhoneProxyDispatcher(
         get() = activeListener?.port
 
     companion object {
+        private const val DEFAULT_REQUESTER_DISPLAY_NAME = "Computer"
+
         /** Maximum time to wait for an NFC card certificate read before reporting card-removed. */
         private const val CERT_READ_TIMEOUT_MS = 5_000L
         private const val NANOS_PER_MICROSECOND = 1_000L
@@ -115,6 +117,7 @@ internal class RappPhoneProxyDispatcher(
         pairRecord = null
         vault = null
         _connectedPeer.value = null
+        pendingPins.clear()
         inbox.dismissAll()
     }
 
@@ -126,6 +129,7 @@ internal class RappPhoneProxyDispatcher(
         operationBridge?.close()
         operationBridge = null
         _connectedPeer.value = null
+        pendingPins.clear()
         inbox.dismissAll()
         val currentPair = pairRecord
         val vlt = vault
@@ -237,7 +241,7 @@ internal class RappPhoneProxyDispatcher(
                             catalog.listPairs().firstOrNull { it.pairIdHex == hex }
                                 ?: PairedPeer(
                                     pairIdHex = hex,
-                                    displayName = "Computer",
+                                    displayName = DEFAULT_REQUESTER_DISPLAY_NAME,
                                     platform = "macOS",
                                     createdAtMs = System.currentTimeMillis(),
                                 )
@@ -264,6 +268,7 @@ internal class RappPhoneProxyDispatcher(
                 operationBridge?.close()
                 operationBridge = null
                 _connectedPeer.value = null
+                pendingPins.clear()
                 inbox.dismissAll()
             }
         }
@@ -280,8 +285,7 @@ internal class RappPhoneProxyDispatcher(
             action.frame?.let { frame ->
                 try {
                     activeListener?.send(frame)
-                } catch (e: Exception) {
-                    android.util.Log.e("PROXY_DISPATCH", "send frame failed", e)
+                } catch (_: Exception) {
                 }
             }
             return
@@ -295,8 +299,7 @@ internal class RappPhoneProxyDispatcher(
                 try {
                     val resp = bridge.prerequisitesComplete(opId)
                     handleBridgeAction(resp, bridge)
-                } catch (e: Exception) {
-                    android.util.Log.e("PROXY_DISPATCH", "prerequisitesComplete failed", e)
+                } catch (_: Exception) {
                 }
             }
 
@@ -317,8 +320,7 @@ internal class RappPhoneProxyDispatcher(
             RappBridgeActionKind.RESULT_ACKNOWLEDGMENT -> {
                 try {
                     bridge.acknowledgmentReleased(opId)
-                } catch (e: Exception) {
-                    android.util.Log.e("PROXY_DISPATCH", "acknowledgmentReleased failed", e)
+                } catch (_: Exception) {
                 }
             }
 

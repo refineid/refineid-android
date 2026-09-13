@@ -18,6 +18,9 @@ readonly BACKGROUND_ACTIVITY_PERMISSION='android:name="android.permission.START_
 readonly INTERNET_PERMISSION="android.permission.INTERNET"
 readonly CLEARTEXT_DISABLED='android:usesCleartextTraffic="false"'
 
+# shellcheck source=Scripts/gradle-environment.sh
+source Scripts/gradle-environment.sh
+
 ./gradlew check
 
 [[ -f "$RELEASE_APK" ]] || {

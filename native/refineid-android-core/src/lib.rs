@@ -866,6 +866,8 @@ fn set_cached_ca_certificates_native<'local>(
         && let Ok(cert) = RootCaCertificate::from_der(der)
     {
         contactless::set_last_read_root_ca(Some(cert));
+    } else {
+        contactless::set_last_read_root_ca(None);
     }
     let intermediate = env.convert_byte_array(&intermediate_ca)?;
     if !intermediate.is_empty()
@@ -873,6 +875,8 @@ fn set_cached_ca_certificates_native<'local>(
         && let Ok(cert) = IntermediateCaCertificate::from_der(der)
     {
         contactless::set_last_read_intermediate_ca(Some(cert));
+    } else {
+        contactless::set_last_read_intermediate_ca(None);
     }
     Ok(CARD_OPERATION_SUCCEEDED)
 }

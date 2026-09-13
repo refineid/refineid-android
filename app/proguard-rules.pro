@@ -1,5 +1,6 @@
 # A production build emits no application or dependency Logcat output.
 -assumenosideeffects class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int);
     public static int v(java.lang.String, java.lang.String);
     public static int v(java.lang.String, java.lang.String, java.lang.Throwable);
     public static int d(java.lang.String, java.lang.String);

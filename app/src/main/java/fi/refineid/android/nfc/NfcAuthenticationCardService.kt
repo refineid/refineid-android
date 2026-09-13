@@ -120,10 +120,18 @@ internal class NfcAuthenticationCardService(
                         pin1.close()
                         AuthenticationSignResult.Failure(AuthenticationSignFailure.BRIDGE_ERROR)
                     }
-                if (
+                val isCardLost =
                     result is AuthenticationSignResult.Failure &&
-                    result.kind == AuthenticationSignFailure.CARD_UNAVAILABLE
-                ) {
+                        when (result.kind) {
+                            AuthenticationSignFailure.WRONG_PIN,
+                            AuthenticationSignFailure.PIN_LOCKED,
+                            AuthenticationSignFailure.LOCAL_VERIFICATION_FAILED,
+                            AuthenticationSignFailure.KEY_PROFILE_MISMATCH,
+                            -> false
+
+                            else -> true
+                        }
+                if (isCardLost) {
                     onCardLost(generation)
                 }
                 completion.complete(result)

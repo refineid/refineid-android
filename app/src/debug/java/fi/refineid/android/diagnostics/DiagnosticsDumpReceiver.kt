@@ -28,7 +28,7 @@ class DiagnosticsDumpReceiver : BroadcastReceiver() {
                 resultData = "LOGS_CLEARED"
             }
 
-            ACTION_DUMP_DIAGNOSTICS, null -> {
+            ACTION_DUMP_DIAGNOSTICS -> {
                 val app = context.applicationContext as? RefineIdApplication
                 val nfcSnapshot = app?.nfcReaderController?.snapshot
                 val usbSnapshot = app?.readerController?.snapshot
@@ -42,7 +42,7 @@ class DiagnosticsDumpReceiver : BroadcastReceiver() {
                     } else {
                         pairs.joinToString("\n") { p ->
                             "  - ${p.displayName} [${p.platform}] id=${p.pairIdHex.take(
-                                8,
+                                PAIR_ID_DISPLAY_PREFIX_LENGTH,
                             )}... cert=${p.certificateDerBase64 != null}"
                         }
                     }
@@ -67,26 +67,19 @@ class DiagnosticsDumpReceiver : BroadcastReceiver() {
 
                 val report = snapshot.toReportText()
 
-                // 1. Write to internal cache
+                // Write exclusively to app internal storage (files/diagnostics.txt)
                 try {
-                    File(context.cacheDir, DIAGNOSTICS_FILENAME).writeText(report)
-                } catch (_: Exception) {
-                }
-
-                // 2. Also write to external files dir if available
-                try {
-                    context.getExternalFilesDir(null)?.let { externalDir ->
-                        File(externalDir, DIAGNOSTICS_FILENAME).writeText(report)
+                    File(context.filesDir, DIAGNOSTICS_FILENAME).writeText(report)
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) {
+                        Log.w(TAG, "failed to write diagnostics to filesDir", e)
                     }
-                } catch (_: Exception) {
                 }
 
-                // 3. Log to logcat under dedicated unflooded tag in chunks
+                // Log to logcat under dedicated unflooded tag in chunks
                 if (BuildConfig.DEBUG) {
                     for (chunk in report.lines().chunked(LOGCAT_CHUNK_LINES)) {
-                        if (BuildConfig.DEBUG) {
-                            Log.i(TAG, chunk.joinToString("\n"))
-                        }
+                        Log.i(TAG, chunk.joinToString("\n"))
                     }
 
                     val msg = "DUMP_OK: ${snapshot.traceLogs.size} trace lines written to files/$DIAGNOSTICS_FILENAME"
@@ -103,5 +96,6 @@ class DiagnosticsDumpReceiver : BroadcastReceiver() {
         private const val TAG = "RefineIdDiag"
         private const val DIAGNOSTICS_FILENAME = "diagnostics.txt"
         private const val LOGCAT_CHUNK_LINES = 50
+        private const val PAIR_ID_DISPLAY_PREFIX_LENGTH = 8
     }
 }

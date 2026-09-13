@@ -86,6 +86,10 @@ pub(crate) fn contactless_close() {
     if let Ok(mut slot) = HELD_SESSION.lock() {
         *slot = None;
     }
+    set_last_read_root_ca(None);
+    set_last_read_intermediate_ca(None);
+    set_last_read_face_photo(None);
+    set_last_read_document_number(None);
 }
 
 /// The latest face photo extracted from EF.DG2 under secure messaging.
@@ -402,7 +406,7 @@ pub(crate) fn contactless_authenticate_and_sign_on_session<Exchange: SingleBlock
     let Some(session) = take_held_session() else {
         pin_bytes.fill(0);
         return (
-            Err(AuthenticationSignFailure::Bridge),
+            Err(AuthenticationSignFailure::CardUnavailable),
             transport.into_exchange(),
         );
     };

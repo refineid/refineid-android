@@ -15,13 +15,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [[ -z "${JAVA_HOME:-}" ]] && [[ "$(uname)" == "Darwin" ]]; then
-  studio_jdk="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-  if [[ -d "${studio_jdk}" ]]; then
-    export JAVA_HOME="${studio_jdk}"
-    export PATH="${JAVA_HOME}/bin:${PATH}"
-  fi
-fi
+# shellcheck source=Scripts/gradle-environment.sh
+source Scripts/gradle-environment.sh
 
 device="${1:-}"
 if [[ -z "$device" ]]; then

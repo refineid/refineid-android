@@ -33,11 +33,27 @@ internal class RappAuthorizationInbox(
 ) {
     private val notificationManager = RappNotificationManager(context)
 
+    var isForeground: Boolean = false
+        private set
+
     var currentRequest by mutableStateOf<RappAuthRequest?>(null)
         private set
 
     var currentTapPrompt by mutableStateOf<RappCardTapPrompt?>(null)
         private set
+
+    fun updateForeground(foreground: Boolean) {
+        isForeground = foreground
+        if (foreground) {
+            notificationManager.dismissNotification()
+        } else {
+            currentRequest?.let {
+                notificationManager.postAuthorizationNotification(it.requestId)
+            } ?: currentTapPrompt?.let {
+                notificationManager.postAuthorizationNotification(it.requestId)
+            }
+        }
+    }
 
     fun ask(
         requestId: String,
@@ -63,7 +79,9 @@ internal class RappAuthorizationInbox(
                 },
             )
         currentRequest = req
-        notificationManager.postAuthorizationNotification(requestId)
+        if (!isForeground) {
+            notificationManager.postAuthorizationNotification(requestId)
+        }
     }
 
     fun showTapPrompt(
@@ -82,7 +100,9 @@ internal class RappAuthorizationInbox(
                     onCancel()
                 },
             )
-        notificationManager.postAuthorizationNotification(requestId)
+        if (!isForeground) {
+            notificationManager.postAuthorizationNotification(requestId)
+        }
     }
 
     fun dismissTapPrompt(requestId: String? = null) {
