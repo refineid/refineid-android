@@ -56,7 +56,6 @@
     <string name="peer_connected">%1$s connected.</string>
     <string name="pairing_code">Pairing code</string>
     <string name="hold_card_to_phone">Hold your ID card to the back of the phone…</string>
-    <string name="phone_needs_id_card">Your phone needs an ID card, please.</string>
     <string name="hold_card_against_back">Please hold your ID card against the back of the phone.</string>
     <string name="connect_id_card">Connect ID card</string>
     <string name="show_pairing_code">Show pairing code</string>

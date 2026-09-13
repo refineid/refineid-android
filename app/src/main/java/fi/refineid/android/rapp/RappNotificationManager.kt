@@ -63,7 +63,7 @@ internal class RappNotificationManager(
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
 
-        val title = context.getString(R.string.phone_needs_id_card)
+        val title = context.getString(R.string.app_name)
         val body = context.getString(R.string.hold_card_against_back)
         val notification =
             NotificationCompat

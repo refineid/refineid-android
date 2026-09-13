@@ -52,7 +52,6 @@
     <string name="peer_connected">%1$s ansluten.</string>
     <string name="pairing_code">Kopplingskod</string>
     <string name="hold_card_to_phone">Håll ditt ID-kort mot baksidan av telefonen…</string>
-    <string name="phone_needs_id_card">Mobilen behöver ID-kort.</string>
     <string name="hold_card_against_back">Håll ID-kortet mot baksidan.</string>
     <string name="connect_id_card">Anslut identitetskort</string>
     <string name="show_pairing_code">Visa kopplingskod</string>

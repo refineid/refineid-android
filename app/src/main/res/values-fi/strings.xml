@@ -52,7 +52,6 @@
     <string name="peer_connected">%1$s yhdistetty.</string>
     <string name="pairing_code">Pariliitoskoodi</string>
     <string name="hold_card_to_phone">Pidä henkilökorttia puhelimen takana…</string>
-    <string name="phone_needs_id_card">Puhelin kaipaa henkilökorttia.</string>
     <string name="hold_card_against_back">Pidä henkilökorttia taustaa vasten.</string>
     <string name="connect_id_card">Yhdistä henkilökortti</string>
     <string name="show_pairing_code">Näytä pariliitoskoodi</string>
