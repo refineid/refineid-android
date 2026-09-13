@@ -492,8 +492,9 @@ internal class RappPhoneProxyDispatcher(
     private suspend fun ensureCardReady(
         opIdHex: String,
         action: RappAuthAction,
+        forcePrompt: Boolean = false,
     ): CardReadyOutcome {
-        if (isCardReady()) return CardReadyOutcome.READY
+        if (!forcePrompt && isCardReady()) return CardReadyOutcome.READY
         val requesterName =
             catalog
                 .listPairs()
@@ -502,6 +503,7 @@ internal class RappPhoneProxyDispatcher(
                 ?.takeIf { it.isNotBlank() }
                 ?: "Computer"
         var cancelled = false
+        AppTrace.rappCardPromptShown(opIdHex, action.name)
         inbox.showTapPrompt(
             requestId = opIdHex,
             requester = requesterName,
@@ -512,6 +514,7 @@ internal class RappPhoneProxyDispatcher(
             try {
                 awaitCardReady()
             } finally {
+                AppTrace.rappCardPromptDismissed(opIdHex)
                 inbox.dismissTapPrompt(opIdHex)
             }
         return when {
@@ -520,6 +523,37 @@ internal class RappPhoneProxyDispatcher(
             else -> CardReadyOutcome.TIMEOUT
         }
     }
+
+    private suspend fun ensureCardOrAbort(
+        opId: ByteArray,
+        opIdHex: String,
+        action: RappAuthAction,
+        bridge: RappOperationBridge,
+        forcePrompt: Boolean = false,
+    ): Boolean =
+        when (ensureCardReady(opIdHex, action, forcePrompt = forcePrompt)) {
+            CardReadyOutcome.CANCELLED -> {
+                AppTrace.rappOperationDenied(opIdHex, "user_cancelled")
+                respondBridgeDeny(opId, bridge)
+                dropConnection()
+                false
+            }
+
+            CardReadyOutcome.TIMEOUT -> {
+                val actionTag =
+                    when (action) {
+                        RappAuthAction.BROWSER_AUTH -> "browser_auth"
+                        RappAuthAction.DOCUMENT_SIGN -> "document_sign"
+                    }
+                AppTrace.rappOperationFailed(actionTag, opIdHex, "card_not_ready_timeout")
+                respondCardRemoved(opId, bridge)
+                false
+            }
+
+            CardReadyOutcome.READY -> {
+                true
+            }
+        }
 
     val cachedAuthCertDer: ByteArray?
         get() = lastReadAuthCertDer?.copyOf()
@@ -637,31 +671,25 @@ internal class RappPhoneProxyDispatcher(
                 }
                 val authAction =
                     if (isAuth) RappAuthAction.BROWSER_AUTH else RappAuthAction.DOCUMENT_SIGN
-                when (ensureCardReady(opIdHex, authAction)) {
-                    CardReadyOutcome.CANCELLED -> {
-                        AppTrace.rappOperationFailed(desc.kind.name, opIdHex, "user_cancelled")
-                        respondCardRemoved(opId, bridge)
-                        return@launch
-                    }
-
-                    CardReadyOutcome.TIMEOUT -> {
-                        AppTrace.rappOperationFailed(desc.kind.name, opIdHex, "card_not_ready_timeout")
-                        respondCardRemoved(opId, bridge)
-                        return@launch
-                    }
-
-                    CardReadyOutcome.READY -> {
-                    }
-                }
+                if (!ensureCardOrAbort(opId, opIdHex, authAction, bridge)) return@launch
                 if (tryCompleteFromCachedAuthCert(opId, opIdHex, desc.kind.name, isAuth, bridge)) {
                     return@launch
                 }
-                val certDer =
+                var certDer =
                     if (isAuth) {
                         readAuthCertWithTimeout()
                     } else {
                         readSignatureCertWithTimeout()
                     }
+                if (certDer == null) {
+                    when (ensureCardReady(opIdHex, authAction, forcePrompt = true)) {
+                        CardReadyOutcome.CANCELLED, CardReadyOutcome.TIMEOUT -> {}
+
+                        CardReadyOutcome.READY -> {
+                            certDer = if (isAuth) readAuthCertWithTimeout() else readSignatureCertWithTimeout()
+                        }
+                    }
+                }
                 if (certDer != null) {
                     if (isAuth) {
                         storeReadAuthCertificate(certDer)
@@ -753,24 +781,14 @@ internal class RappPhoneProxyDispatcher(
                     respondBridgeInvalid(opId, bridge)
                     return@launch
                 }
-                when (ensureCardReady(opIdHex, RappAuthAction.BROWSER_AUTH)) {
-                    CardReadyOutcome.CANCELLED -> {
-                        AppTrace.rappOperationDenied(opIdHex, "user_cancelled")
-                        respondBridgeDeny(opId, bridge)
-                        dropConnection()
+                if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.BROWSER_AUTH, bridge)) return@launch
+                var service = authCardService()
+                if (service == null) {
+                    if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.BROWSER_AUTH, bridge, forcePrompt = true)) {
                         return@launch
                     }
-
-                    CardReadyOutcome.TIMEOUT -> {
-                        AppTrace.rappOperationFailed("browser_auth", opIdHex, "card_not_ready_timeout")
-                        respondCardRemoved(opId, bridge)
-                        return@launch
-                    }
-
-                    CardReadyOutcome.READY -> {
-                    }
+                    service = authCardService()
                 }
-                val service = authCardService()
                 if (service == null) {
                     AppTrace.rappOperationFailed("browser_auth", opIdHex, "service_unavailable")
                     respondCardRemoved(opId, bridge)
@@ -782,13 +800,18 @@ internal class RappPhoneProxyDispatcher(
                     respondBridgeDeny(opId, bridge)
                     return@launch
                 }
-                val result =
-                    service.signAuthenticationDigest(
+                val authResult =
+                    performBrowserAuthWithRetry(
+                        opId = opId,
+                        opIdHex = opIdHex,
                         algorithm = algorithm,
-                        pin1 = Pin1Submission.from(resolvedPin),
+                        resolvedPin = resolvedPin,
                         digest = desc.digest,
-                    )
-                when (result) {
+                        initialService = service,
+                        bridge = bridge,
+                    ) ?: return@launch
+                service = authResult.first
+                when (val result = authResult.second) {
                     is AuthenticationSignResult.Success -> {
                         handleBrowserAuthSuccess(
                             opId = opId,
@@ -812,6 +835,42 @@ internal class RappPhoneProxyDispatcher(
                     }
                 }
             }
+    }
+
+    private suspend fun performBrowserAuthWithRetry(
+        opId: ByteArray,
+        opIdHex: String,
+        algorithm: AuthenticationSigningAlgorithm,
+        resolvedPin: String,
+        digest: ByteArray,
+        initialService: AuthenticationCardService,
+        bridge: RappOperationBridge,
+    ): Pair<AuthenticationCardService, AuthenticationSignResult>? {
+        var service = initialService
+        var result =
+            service.signAuthenticationDigest(
+                algorithm = algorithm,
+                pin1 = Pin1Submission.from(resolvedPin),
+                digest = digest,
+            )
+        if (result is AuthenticationSignResult.Failure &&
+            result.kind == AuthenticationSignFailure.CARD_UNAVAILABLE
+        ) {
+            if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.BROWSER_AUTH, bridge, forcePrompt = true)) {
+                return null
+            }
+            val retryService = authCardService()
+            if (retryService != null) {
+                service = retryService
+                result =
+                    retryService.signAuthenticationDigest(
+                        algorithm = algorithm,
+                        pin1 = Pin1Submission.from(resolvedPin),
+                        digest = digest,
+                    )
+            }
+        }
+        return Pair(service, result)
     }
 
     private fun resolvePin1(pin1: String): String {
@@ -932,24 +991,14 @@ internal class RappPhoneProxyDispatcher(
                     respondBridgeInvalid(opId, bridge)
                     return@launch
                 }
-                when (ensureCardReady(opIdHex, RappAuthAction.DOCUMENT_SIGN)) {
-                    CardReadyOutcome.CANCELLED -> {
-                        AppTrace.rappOperationDenied(opIdHex, "user_cancelled")
-                        respondBridgeDeny(opId, bridge)
-                        dropConnection()
+                if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge)) return@launch
+                var service = qualifiedCardService()
+                if (service == null) {
+                    if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge, forcePrompt = true)) {
                         return@launch
                     }
-
-                    CardReadyOutcome.TIMEOUT -> {
-                        AppTrace.rappOperationFailed("document_sign", opIdHex, "card_not_ready_timeout")
-                        respondCardRemoved(opId, bridge)
-                        return@launch
-                    }
-
-                    CardReadyOutcome.READY -> {
-                    }
+                    service = qualifiedCardService()
                 }
-                val service = qualifiedCardService()
                 if (service == null) {
                     AppTrace.rappOperationFailed("document_sign", opIdHex, "service_unavailable")
                     respondCardRemoved(opId, bridge)
@@ -960,23 +1009,30 @@ internal class RappPhoneProxyDispatcher(
                     respondBridgeDeny(opId, bridge)
                     return@launch
                 }
-                val expectedCert = readSignatureCertificateWithTimeout()
+                var expectedCert = readSignatureCertificateWithTimeout()
+                if (expectedCert == null) {
+                    if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge, forcePrompt = true)) {
+                        return@launch
+                    }
+                    expectedCert = readSignatureCertificateWithTimeout()
+                }
                 if (expectedCert == null) {
                     AppTrace.rappOperationFailed("document_sign", opIdHex, "certificate_read_timeout")
                     respondCardRemoved(opId, bridge)
                     return@launch
                 }
                 try {
-                    val deferred = CompletableDeferred<QualifiedSignResult>()
-                    service.requestQualifiedDigestSignature(
-                        algorithm = algorithm,
-                        pin2 = Pin2Submission.from(pin2),
-                        digest = desc.digest,
-                        expectedCertificate = expectedCert,
-                    ) { signResult ->
-                        deferred.complete(signResult)
-                    }
-                    when (val signResult = deferred.await()) {
+                    val signResult =
+                        performQualifiedSignWithRetry(
+                            opId = opId,
+                            opIdHex = opIdHex,
+                            desc = desc,
+                            pin2 = pin2,
+                            algorithm = algorithm,
+                            expectedCert = expectedCert,
+                            bridge = bridge,
+                        ) ?: return@launch
+                    when (signResult) {
                         is QualifiedSignResult.Success -> {
                             handleDocumentSignSuccess(
                                 opId = opId,
@@ -1000,6 +1056,49 @@ internal class RappPhoneProxyDispatcher(
                     expectedCert.close()
                 }
             }
+    }
+
+    private suspend fun performQualifiedSignWithRetry(
+        opId: ByteArray,
+        opIdHex: String,
+        desc: RappOperationDescriptor,
+        pin2: String,
+        algorithm: QualifiedSigningAlgorithm,
+        expectedCert: NativeQualifiedCertificate,
+        bridge: RappOperationBridge,
+    ): QualifiedSignResult? {
+        val service = qualifiedCardService() ?: return null
+        val deferred = CompletableDeferred<QualifiedSignResult>()
+        service.requestQualifiedDigestSignature(
+            algorithm = algorithm,
+            pin2 = Pin2Submission.from(pin2),
+            digest = desc.digest,
+            expectedCertificate = expectedCert,
+        ) { signResult ->
+            deferred.complete(signResult)
+        }
+        var signResult = deferred.await()
+        if (signResult is QualifiedSignResult.Failure &&
+            signResult.kind == QualifiedSignFailure.CARD_UNAVAILABLE
+        ) {
+            if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge, forcePrompt = true)) {
+                return null
+            }
+            val retryService = qualifiedCardService()
+            if (retryService != null) {
+                val retryDeferred = CompletableDeferred<QualifiedSignResult>()
+                retryService.requestQualifiedDigestSignature(
+                    algorithm = algorithm,
+                    pin2 = Pin2Submission.from(pin2),
+                    digest = desc.digest,
+                    expectedCertificate = expectedCert,
+                ) { rResult ->
+                    retryDeferred.complete(rResult)
+                }
+                signResult = retryDeferred.await()
+            }
+        }
+        return signResult
     }
 
     private fun handleDocumentSignSuccess(

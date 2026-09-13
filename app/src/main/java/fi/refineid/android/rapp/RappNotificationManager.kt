@@ -42,11 +42,7 @@ internal class RappNotificationManager(
         notificationManager?.createNotificationChannel(channel)
     }
 
-    fun postAuthorizationNotification(
-        requestId: String,
-        requester: String,
-        actionName: String,
-    ) {
+    fun postAuthorizationNotification(requestId: String) {
         val intent =
             Intent(context, MainActivity::class.java).apply {
                 setClass(context, MainActivity::class.java)
@@ -67,16 +63,16 @@ internal class RappNotificationManager(
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
 
+        val title = context.getString(R.string.phone_needs_id_card)
+        val body = context.getString(R.string.hold_card_against_back)
         val notification =
             NotificationCompat
                 .Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
-                .setContentTitle(context.getString(R.string.app_name))
-                .setContentText("Sign-in requested by $requester. Tap to approve & present your card.")
+                .setContentTitle(title)
+                .setContentText(body)
                 .setStyle(
-                    NotificationCompat.BigTextStyle().bigText(
-                        "Sign-in requested by $requester ($actionName).\nTap to approve and present your ID card.",
-                    ),
+                    NotificationCompat.BigTextStyle().bigText(body),
                 ).setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setAutoCancel(true)

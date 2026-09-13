@@ -578,6 +578,17 @@ internal object AppTrace {
         debug("rapp:operation-failed type=" + opType + " id=" + opIdHex + " failure=" + failureKind)
     }
 
+    fun rappCardPromptShown(
+        opIdHex: String,
+        action: String,
+    ) {
+        debug("rapp:card-prompt-shown id=" + opIdHex + " action=" + action)
+    }
+
+    fun rappCardPromptDismissed(opIdHex: String) {
+        debug("rapp:card-prompt-dismissed id=" + opIdHex)
+    }
+
     fun rappPairingCodeDisplayed() {
         debug("rapp:pairing-code-displayed")
     }
@@ -841,6 +852,22 @@ internal object AppTrace {
 
     fun nfcPrimedForgotten() {
         debug("nfc:primed-forgotten")
+    }
+
+    fun nfcAwaitCardReady(
+        isCardReady: Boolean,
+        status: String,
+        hasResting: Boolean,
+    ) {
+        debug("nfc:await-card-ready ready=" + isCardReady + " status=" + status + " resting=" + hasResting)
+    }
+
+    fun nfcOpenSessionStarted(
+        hasTarget: Boolean,
+        generation: Int,
+        mintOnSuccess: Boolean,
+    ) {
+        debug("nfc:open-session-started target=" + hasTarget + " gen=" + generation + " mint=" + mintOnSuccess)
     }
 
     fun ccidEndpointsMissing() {

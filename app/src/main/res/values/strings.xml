@@ -51,15 +51,13 @@
     <string name="copy_photo">Copy photo</string>
     <string name="share_photo">Share photo</string>
     <string name="photo_copied">Photo copied to clipboard</string>
-    <string name="connected_to_computer">Connected to computer</string>
     <string name="disconnect">Disconnect</string>
     <string name="pairing_failed">Pairing failed</string>
     <string name="peer_connected">%1$s connected.</string>
     <string name="pairing_code">Pairing code</string>
     <string name="hold_card_to_phone">Hold your ID card to the back of the phone…</string>
-    <string name="remote_auth_title">Remote Authentication</string>
-    <string name="hold_card_to_approve">Hold your ID card against the phone to approve.</string>
-    <string name="sign_document_title">Sign Document</string>
+    <string name="phone_needs_id_card">Your phone needs an ID card, please.</string>
+    <string name="hold_card_against_back">Please hold your ID card against the back of the phone.</string>
     <string name="connect_id_card">Connect ID card</string>
     <string name="show_pairing_code">Show pairing code</string>
     <string name="enter_pairing_code">Enter pairing code</string>

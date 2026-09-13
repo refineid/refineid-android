@@ -146,6 +146,9 @@ internal class RemoteCardModel(
 
         if (record.metadata().role != RappEndpointRole.REQUESTER) {
             _hasPair.value = false
+            _holderName.value = null
+            _cardDetails.value = null
+            _certificateDer.value = null
             return
         }
 
@@ -159,6 +162,9 @@ internal class RemoteCardModel(
         if (!newest.holderName.isNullOrBlank()) {
             _holderName.value = newest.holderName
             _cardDetails.value = PersonCardDetails.fromHolderName(newest.holderName)
+        } else {
+            _holderName.value = null
+            _cardDetails.value = null
         }
     }
 

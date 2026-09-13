@@ -202,7 +202,6 @@ internal class RappPairingModel(
                             record.persistDeviceOnly(vault)
 
                             val primedStore = app?.primedCanStore
-                            val primedHolder = primedStore?.readHolderName()
                             val certDer =
                                 primedStore?.readAuthCertificateDer()
                                     ?: app?.nfcReaderController?.currentAuthenticationCertificateDer
@@ -210,21 +209,14 @@ internal class RappPairingModel(
                             if (certDer != null) {
                                 app?.rappProxyDispatcher?.storeReadAuthCertificate(certDer)
                             }
-                            val certB64 =
-                                certDer?.let {
-                                    android.util.Base64.encodeToString(
-                                        it,
-                                        android.util.Base64.NO_WRAP,
-                                    )
-                                }
 
                             catalog.savePair(
                                 pairId = record.metadata().pairId,
                                 displayName = peer.displayName,
                                 platform = peer.platform,
                                 createdAtMs = peer.createdAtMs,
-                                holderName = primedHolder,
-                                certificateDerBase64 = certB64,
+                                holderName = null,
+                                certificateDerBase64 = null,
                             )
                             pairedDevices = catalog.listPairs()
                             phase = PairingPhase.Paired(peer)
@@ -416,7 +408,6 @@ internal class RappPairingModel(
                             record.persistDeviceOnly(vault)
 
                             val primedStore = app?.primedCanStore
-                            val primedHolder = primedStore?.readHolderName()
                             val certDer =
                                 primedStore?.readAuthCertificateDer()
                                     ?: app?.nfcReaderController?.currentAuthenticationCertificateDer
@@ -424,21 +415,14 @@ internal class RappPairingModel(
                             if (certDer != null) {
                                 app?.rappProxyDispatcher?.storeReadAuthCertificate(certDer)
                             }
-                            val certB64 =
-                                certDer?.let {
-                                    android.util.Base64.encodeToString(
-                                        it,
-                                        android.util.Base64.NO_WRAP,
-                                    )
-                                }
 
                             catalog.savePair(
                                 pairId = record.metadata().pairId,
                                 displayName = peer.displayName,
                                 platform = peer.platform,
                                 createdAtMs = peer.createdAtMs,
-                                holderName = primedHolder,
-                                certificateDerBase64 = certB64,
+                                holderName = null,
+                                certificateDerBase64 = null,
                             )
                             pairedDevices = catalog.listPairs()
                             phase = PairingPhase.Paired(peer)

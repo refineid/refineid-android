@@ -313,6 +313,13 @@ internal object AppTrace {
         failureKind: String,
     ) = Unit
 
+    fun rappCardPromptShown(
+        opIdHex: String,
+        action: String,
+    ) = Unit
+
+    fun rappCardPromptDismissed(opIdHex: String) = Unit
+
     fun rappPairingCodeDisplayed() = Unit
 
     fun rappPairingCompleted(peerName: String) = Unit
@@ -384,6 +391,18 @@ internal object AppTrace {
     fun nfcPrimedMinted() = Unit
 
     fun nfcPrimedForgotten() = Unit
+
+    fun nfcAwaitCardReady(
+        isCardReady: Boolean,
+        status: String,
+        hasResting: Boolean,
+    ) = Unit
+
+    fun nfcOpenSessionStarted(
+        hasTarget: Boolean,
+        generation: Int,
+        mintOnSuccess: Boolean,
+    ) = Unit
 
     fun ccidEndpointsMissing() = Unit
 

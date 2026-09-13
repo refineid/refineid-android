@@ -47,15 +47,13 @@
     <string name="copy_photo">Kopioi kuva</string>
     <string name="share_photo">Jaa kuva</string>
     <string name="photo_copied">Kuva kopioitu leikepöydälle</string>
-    <string name="connected_to_computer">Yhdistetty tietokoneeseen</string>
     <string name="disconnect">Katkaise yhteys</string>
     <string name="pairing_failed">Yhdistäminen epäonnistui</string>
     <string name="peer_connected">%1$s yhdistetty.</string>
     <string name="pairing_code">Pariliitoskoodi</string>
     <string name="hold_card_to_phone">Pidä henkilökorttia puhelimen takana…</string>
-    <string name="remote_auth_title">Etätunnistautuminen</string>
-    <string name="hold_card_to_approve">Pidä henkilökorttia puhelimen takana vahvistaaksesi.</string>
-    <string name="sign_document_title">Allekirjoita asiakirja</string>
+    <string name="phone_needs_id_card">Puhelin kaipaa henkilökorttia.</string>
+    <string name="hold_card_against_back">Pidä henkilökorttia taustaa vasten.</string>
     <string name="connect_id_card">Yhdistä henkilökortti</string>
     <string name="show_pairing_code">Näytä pariliitoskoodi</string>
     <string name="enter_pairing_code">Syötä pariliitoskoodi</string>

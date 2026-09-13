@@ -54,6 +54,15 @@ class MainActivity : ComponentActivity() {
         window.decorView.importantForContentCapture =
             View.IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS
 
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                REQUEST_CODE_POST_NOTIFICATIONS,
+            )
+        }
+
         readerController = (application as RefineIdApplication).readerController
         readerController.addStateListener(readerStateListener)
         nfcReaderController = (application as RefineIdApplication).nfcReaderController
@@ -161,5 +170,9 @@ class MainActivity : ComponentActivity() {
         } catch (_: ActivityNotFoundException) {
             AppTrace.nfcSettingsUnavailable()
         }
+    }
+
+    private companion object {
+        private const val REQUEST_CODE_POST_NOTIFICATIONS = 101
     }
 }

@@ -63,12 +63,7 @@ internal class RappAuthorizationInbox(
                 },
             )
         currentRequest = req
-        val actionDescription =
-            when (action) {
-                RappAuthAction.BROWSER_AUTH -> "Remote Authentication"
-                RappAuthAction.DOCUMENT_SIGN -> "Document Signature"
-            }
-        notificationManager.postAuthorizationNotification(requestId, requester, actionDescription)
+        notificationManager.postAuthorizationNotification(requestId)
     }
 
     fun showTapPrompt(
@@ -87,11 +82,7 @@ internal class RappAuthorizationInbox(
                     onCancel()
                 },
             )
-        notificationManager.postAuthorizationNotification(
-            requestId = requestId,
-            requester = requester,
-            actionName = "Hold ID card against phone",
-        )
+        notificationManager.postAuthorizationNotification(requestId)
     }
 
     fun dismissTapPrompt(requestId: String? = null) {

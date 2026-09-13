@@ -39,18 +39,8 @@ internal class RappPairCatalog(
                         displayName = obj.getString("displayName"),
                         platform = obj.getString("platform"),
                         createdAtMs = obj.getLong("createdAtMs"),
-                        holderName =
-                            if (obj.has("holderName") && !obj.isNull("holderName")) {
-                                obj.getString("holderName")
-                            } else {
-                                null
-                            },
-                        certificateDerBase64 =
-                            if (obj.has("certificateDerBase64") && !obj.isNull("certificateDerBase64")) {
-                                obj.getString("certificateDerBase64")
-                            } else {
-                                null
-                            },
+                        holderName = null,
+                        certificateDerBase64 = null,
                     ),
                 )
             }

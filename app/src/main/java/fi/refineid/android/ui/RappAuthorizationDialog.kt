@@ -156,18 +156,14 @@ internal fun RappCardTapDialog(prompt: fi.refineid.android.rapp.RappCardTapPromp
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(
-                    text =
-                        when (prompt.action) {
-                            RappAuthAction.BROWSER_AUTH -> stringResource(R.string.remote_auth_title)
-                            RappAuthAction.DOCUMENT_SIGN -> stringResource(R.string.sign_document_title)
-                        },
+                    text = stringResource(R.string.phone_needs_id_card),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
 
                 Text(
-                    text = stringResource(R.string.hold_card_to_approve),
+                    text = stringResource(R.string.hold_card_against_back),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
