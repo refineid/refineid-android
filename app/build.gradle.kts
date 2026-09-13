@@ -16,6 +16,7 @@ val rappCrateDirectory =
 val rappGeneratedKotlin = rappCrateDirectory.dir("generated")
 val minimumAndroidApi = 33
 val currentAndroidApi = 37
+val androidAbis = listOf("arm64-v8a", "x86_64")
 val javaToolchainVersion = 25
 val calendarYearBase = 2000
 val maximumUtcHour = 23
@@ -652,8 +653,52 @@ val verifyReleaseNetworkIsolation =
         }
     }
 
+val verifyReleaseAbis =
+    tasks.register("verifyReleaseAbis") {
+        group = "verification"
+        description = "Require identical native libraries for every supported ABI."
+        dependsOn("assembleRelease")
+        inputs.file(releaseApk)
+
+        doLast {
+            val nativeLibraryPrefix = "lib/"
+            val sharedObjectSuffix = ".so"
+            val apkEntrySegments = 3
+            val abiSegmentIndex = 1
+            val librarySegmentIndex = 2
+            val librariesByAbi = mutableMapOf<String, MutableSet<String>>()
+            ZipFile(inputs.files.singleFile).use { apk ->
+                apk.entries().asSequence().forEach { entry ->
+                    val isNativeLibrary =
+                        entry.name.startsWith(nativeLibraryPrefix) &&
+                            entry.name.endsWith(sharedObjectSuffix)
+                    if (isNativeLibrary) {
+                        val segments = entry.name.split("/")
+                        check(segments.size == apkEntrySegments) {
+                            "release APK has a malformed native library entry: " + entry.name
+                        }
+                        librariesByAbi.getOrPut(segments[abiSegmentIndex]) { mutableSetOf() }.add(
+                            segments[librarySegmentIndex],
+                        )
+                    }
+                }
+            }
+            androidAbis.forEach { abi ->
+                check(!librariesByAbi[abi].isNullOrEmpty()) {
+                    "release APK is missing native libraries for $abi"
+                }
+            }
+            val referenceLibraries = librariesByAbi.getValue(androidAbis.first())
+            librariesByAbi.forEach { (abi, libraries) ->
+                check(libraries == referenceLibraries) {
+                    "release APK native libraries differ between ${androidAbis.first()} and $abi"
+                }
+            }
+        }
+    }
+
 tasks.named("check").configure {
-    dependsOn(verifyReleaseNoLogging, verifyReleaseNetworkIsolation)
+    dependsOn(verifyReleaseNoLogging, verifyReleaseNetworkIsolation, verifyReleaseAbis)
 }
 
 play {
