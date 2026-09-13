@@ -20,7 +20,7 @@
 //! reconstructed into the public core's non-clonable role type and consumed
 //! by exactly one credential command.
 
-use refineid_apdu::{CardTransport, TransportOutcome};
+use refineid_apdu::{CardTransport, StatusWord, TransportOutcome};
 use refineid_auth::{Pin1, PinOps, PinReferenceScheme, UnvalidatedSecret, VerifyOutcome};
 use refineid_digest::{Sha256, Sha384, Sha512};
 use refineid_sign::{KeyRef, SignError, SignOps, SignScheme};
@@ -57,6 +57,7 @@ pub(crate) enum AuthenticationSigningInput<'a> {
     Prehashed(&'a [u8]),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreparedAuthenticationSigningInput {
     RsaPkcs1Sha256(Sha256),
     RsaPssSha256(Sha256),
@@ -146,6 +147,18 @@ where
         });
     }
 
+    let scheme = sign_scheme(preflight.scheme);
+
+    if preflight.state == Pin1State::Verified {
+        match sign_prepared(transport, scheme, prepared_input) {
+            Ok(bytes) => return Ok(AuthenticationSignature { algorithm, bytes }),
+            Err(SignError::Status(_, StatusWord::SecurityNotSatisfied)) => {
+                // The card security context lapsed or requires re-authentication; fall through.
+            }
+            Err(error) => return Err(map_sign_error(error)),
+        }
+    }
+
     let outcome = transport
         .verify_pin1_with_scheme(preflight.scheme, pin)
         .map_err(|error| map_preflight_failure(map_auth_error(error)))?;
@@ -161,7 +174,6 @@ where
         }
     }
 
-    let scheme = sign_scheme(preflight.scheme);
     let bytes = sign_prepared(transport, scheme, prepared_input).map_err(map_sign_error)?;
     Ok(AuthenticationSignature { algorithm, bytes })
 }
@@ -323,9 +335,9 @@ mod tests {
 
     const SAFE_RETRIES: u8 = 3;
     const LOW_RETRIES: u8 = 2;
-    const PUBLIC_VERIFY_CALLS: usize = 2;
-    const FULL_RSA_PUBLIC_CALLS: usize = 5;
-    const PSO_HASH_PUBLIC_COMMAND_INDEX: usize = 3;
+    const PUBLIC_VERIFY_CALLS: usize = 1;
+    const FULL_RSA_PUBLIC_CALLS: usize = 4;
+    const PSO_HASH_PUBLIC_COMMAND_INDEX: usize = 2;
     const VERIFY_INSTRUCTION: u8 = 0x20;
     const INSTRUCTION_OFFSET: usize = 1;
     const SYNTHETIC_PIN: &[u8] = b"1357";
@@ -406,7 +418,6 @@ mod tests {
         let safe = response(status(SAFE_RETRIES), Vec::new());
         ScriptedTransport::new(
             vec![
-                safe.clone(),
                 safe,
                 response(StatusWord::Success, Vec::new()),
                 response(StatusWord::Success, Vec::new()),
@@ -456,7 +467,7 @@ mod tests {
     #[test]
     fn the_retry_floor_refuses_before_the_credential_path() {
         let low = response(status(LOW_RETRIES), Vec::new());
-        let mut transport = ScriptedTransport::new(vec![low.clone(), low], StatusWord::Success);
+        let mut transport = ScriptedTransport::new(vec![low], StatusWord::Success);
 
         let result = authenticate_and_sign(
             &mut transport,
@@ -476,7 +487,7 @@ mod tests {
     #[test]
     fn a_wrong_pin_stops_before_mse_and_is_never_replayed() {
         let safe = response(status(SAFE_RETRIES), Vec::new());
-        let mut transport = ScriptedTransport::new(vec![safe.clone(), safe], status(LOW_RETRIES));
+        let mut transport = ScriptedTransport::new(vec![safe], status(LOW_RETRIES));
 
         let result = authenticate_and_sign(
             &mut transport,
@@ -564,7 +575,6 @@ mod tests {
             let safe = response(status(SAFE_RETRIES), Vec::new());
             let mut transport = ScriptedTransport::new(
                 vec![
-                    safe.clone(),
                     safe,
                     response(StatusWord::Success, Vec::new()),
                     response(StatusWord::Success, Vec::new()),
@@ -584,5 +594,64 @@ mod tests {
             assert_eq!(result.bytes.len(), signature_length);
             assert_eq!(transport.credential_calls, 1);
         }
+    }
+
+    #[test]
+    fn verified_session_skips_credential_verification_and_signs_directly() {
+        let mut transport = ScriptedTransport::new(
+            vec![
+                response(StatusWord::Success, Vec::new()),
+                response(StatusWord::Success, Vec::new()),
+                response(StatusWord::Success, Vec::new()),
+                response(
+                    StatusWord::Success,
+                    vec![SIGNATURE_FILL; RSA_3072_SIG_BYTES],
+                ),
+            ],
+            StatusWord::Success,
+        );
+
+        let result = authenticate_and_sign(
+            &mut transport,
+            AuthenticationSigningAlgorithm::RsaPkcs1Sha256,
+            SYNTHETIC_PIN.to_vec(),
+            AuthenticationSigningInput::Message(SYNTHETIC_MESSAGE),
+        )
+        .expect("scripted authentication signature succeeds");
+
+        assert_eq!(result.bytes.len(), RSA_3072_SIG_BYTES);
+        assert_eq!(transport.credential_calls, 0);
+        assert_eq!(transport.public_calls, FULL_RSA_PUBLIC_CALLS);
+        assert!(transport.public_responses.is_empty());
+    }
+
+    #[test]
+    fn verified_session_falls_back_to_credential_verification_on_security_status_not_satisfied() {
+        let mut transport = ScriptedTransport::new(
+            vec![
+                response(StatusWord::Success, Vec::new()),
+                response(StatusWord::SecurityNotSatisfied, Vec::new()),
+                response(StatusWord::Success, Vec::new()),
+                response(StatusWord::Success, Vec::new()),
+                response(
+                    StatusWord::Success,
+                    vec![SIGNATURE_FILL; RSA_3072_SIG_BYTES],
+                ),
+            ],
+            StatusWord::Success,
+        );
+
+        let result = authenticate_and_sign(
+            &mut transport,
+            AuthenticationSigningAlgorithm::RsaPkcs1Sha256,
+            SYNTHETIC_PIN.to_vec(),
+            AuthenticationSigningInput::Message(SYNTHETIC_MESSAGE),
+        )
+        .expect("scripted authentication signature succeeds after fall-through");
+
+        assert_eq!(result.bytes.len(), RSA_3072_SIG_BYTES);
+        assert_eq!(transport.credential_calls, 1);
+        assert_eq!(transport.public_calls, FULL_RSA_PUBLIC_CALLS + 1);
+        assert!(transport.public_responses.is_empty());
     }
 }

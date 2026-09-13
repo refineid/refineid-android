@@ -19,9 +19,9 @@
 //! comparison. The resolved reference scheme is retained beside the status so
 //! a later credential operation can use the same numbering explicitly.
 
-use refineid_apdu::{CardTransport, TransportOutcome};
+use refineid_apdu::{CardTransport, StatusWord, TransportOutcome};
 use refineid_auth::{
-    AuthError, PinOps, PinReferenceScheme, PinSlot, PinStatus,
+    AuthError, PinOps, PinReferenceScheme, PinSlot, PinStatus, classify_pin_status_sw,
     pin1_status_permits_consumer_authentication,
 };
 
@@ -71,12 +71,27 @@ pub(crate) fn probe_pin1_preflight<T>(
 where
     T: CardTransport,
 {
-    let scheme = transport
-        .resolve_pin_reference_scheme()
+    let citizen_sw = transport
+        .probe_status_word(PinReferenceScheme::Citizen, PinSlot::Pin1)
         .map_err(map_auth_error)?;
-    let status = transport
-        .pin_status_with_scheme(scheme, PinSlot::Pin1)
-        .map_err(map_auth_error)?;
+    let (scheme, status) = if citizen_sw != StatusWord::ReferenceDataNotFound {
+        (
+            PinReferenceScheme::Citizen,
+            classify_pin_status_sw(citizen_sw),
+        )
+    } else {
+        let org_sw = transport
+            .probe_status_word(PinReferenceScheme::Organizational, PinSlot::Pin1)
+            .map_err(map_auth_error)?;
+        let org_status = classify_pin_status_sw(org_sw);
+        match org_status {
+            PinStatus::Other(_) => (PinReferenceScheme::Citizen, PinStatus::Other(citizen_sw)),
+            PinStatus::Verified
+            | PinStatus::Remaining(_)
+            | PinStatus::NoInfo
+            | PinStatus::Locked => (PinReferenceScheme::Organizational, org_status),
+        }
+    };
     let state = match status {
         PinStatus::Verified => Pin1State::Verified,
         PinStatus::Remaining(retries) => Pin1State::Remaining(retries.get()),
@@ -188,7 +203,7 @@ mod tests {
         let status = StatusWord::PinIncorrect {
             retries: retries(SAFE_RETRIES),
         };
-        let mut transport = ScriptedTransport::new(&[status, status]);
+        let mut transport = ScriptedTransport::new(&[status]);
 
         let result = match probe_pin1_preflight(&mut transport) {
             Ok(result) => result,
@@ -198,7 +213,7 @@ mod tests {
         assert_eq!(result.scheme, PinReferenceScheme::Citizen);
         assert_eq!(result.state, Pin1State::Remaining(SAFE_RETRIES));
         assert!(result.consumer_authentication_permitted);
-        assert_eq!(transport.public_commands.len(), 2);
+        assert_eq!(transport.public_commands.len(), 1);
         assert_eq!(transport.credential_calls, 0);
         for command in transport.public_commands {
             assert_eq!(command.len(), VERIFY_HEADER_LENGTH);
@@ -211,11 +226,8 @@ mod tests {
         let organizational_status = StatusWord::PinIncorrect {
             retries: retries(SAFE_RETRIES),
         };
-        let mut transport = ScriptedTransport::new(&[
-            StatusWord::ReferenceDataNotFound,
-            organizational_status,
-            organizational_status,
-        ]);
+        let mut transport =
+            ScriptedTransport::new(&[StatusWord::ReferenceDataNotFound, organizational_status]);
 
         let result = match probe_pin1_preflight(&mut transport) {
             Ok(result) => result,
@@ -223,7 +235,7 @@ mod tests {
         };
 
         assert_eq!(result.scheme, PinReferenceScheme::Organizational);
-        assert_eq!(transport.public_commands.len(), 3);
+        assert_eq!(transport.public_commands.len(), 2);
         assert_eq!(
             transport.public_commands[CITIZEN_PROBE_COMMAND_INDEX]
                 .get(P2_OFFSET)
@@ -251,7 +263,7 @@ mod tests {
             (StatusWord::AuthenticationFailed, Pin1State::NoInformation),
             (StatusWord::WrongLength, Pin1State::Unrecognised),
         ] {
-            let mut transport = ScriptedTransport::new(&[status, status]);
+            let mut transport = ScriptedTransport::new(&[status]);
             let result = match probe_pin1_preflight(&mut transport) {
                 Ok(result) => result,
                 Err(failure) => panic!("scripted preflight failed: {failure:?}"),

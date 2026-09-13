@@ -86,8 +86,6 @@ pub(crate) fn contactless_close() {
     if let Ok(mut slot) = HELD_SESSION.lock() {
         *slot = None;
     }
-    set_last_read_root_ca(None);
-    set_last_read_intermediate_ca(None);
     set_last_read_face_photo(None);
     set_last_read_document_number(None);
 }
@@ -215,31 +213,27 @@ pub(crate) fn set_last_read_intermediate_ca(cert: Option<IntermediateCaCertifica
 }
 
 fn read_on_card_ca_certificates_if_needed<T: CardTransport + Pkcs15Ops>(secure: &mut T) {
+    if get_last_read_root_ca().is_some() && get_last_read_intermediate_ca().is_some() {
+        return;
+    }
+    let mut read_any = false;
     if get_last_read_root_ca().is_none()
         && let Ok(cert) = secure.read_certificate(CertSlot::RootCa)
         && let Ok(root_ca) = RootCaCertificate::from_unvalidated(cert)
     {
         set_last_read_root_ca(Some(root_ca));
+        read_any = true;
     }
     if get_last_read_intermediate_ca().is_none()
         && let Ok(cert) = secure.read_certificate(CertSlot::IssuingCaEcc)
         && let Ok(inter_ca) = IntermediateCaCertificate::from_unvalidated(cert)
     {
         set_last_read_intermediate_ca(Some(inter_ca));
+        read_any = true;
     }
-    let _ = secure.select_pkcs15_application();
-}
-
-fn read_document_number_from_secure_channel<T: CardTransport + Pkcs15Ops + EmrtdOps>(
-    secure: &mut T,
-) {
-    set_last_read_document_number(None);
-    if secure.select_emrtd_application().is_ok()
-        && let Ok(Some(mrz)) = secure.read_mrz_td1()
-    {
-        set_last_read_document_number(Some(mrz.document_number));
+    if read_any {
+        let _ = secure.select_pkcs15_application();
     }
-    let _ = secure.select_pkcs15_application();
 }
 
 pub(crate) enum ContactlessOpenOutcome {
@@ -273,7 +267,6 @@ pub(crate) fn contactless_open<Exchange: SingleBlockExchange>(
                     Err(failure) => ContactlessOpenOutcome::Failure(failure),
                     Ok(certificate) => {
                         read_on_card_ca_certificates_if_needed(&mut secure);
-                        read_document_number_from_secure_channel(&mut secure);
                         if is_activation_required(&mut secure, certificate.profile()) {
                             ContactlessOpenOutcome::ActivationRequired(certificate)
                         } else {
@@ -351,7 +344,6 @@ pub(crate) fn contactless_connect<Exchange: SingleBlockExchange>(
                     Err(failure) => ContactlessOpenOutcome::Failure(failure),
                     Ok(certificate) => {
                         read_on_card_ca_certificates_if_needed(&mut secure);
-                        read_document_number_from_secure_channel(&mut secure);
                         if is_activation_required(&mut secure, certificate.profile()) {
                             ContactlessOpenOutcome::ActivationRequired(certificate)
                         } else {

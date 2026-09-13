@@ -3,13 +3,14 @@
 package fi.refineid.android.trust
 
 import android.content.Context
-import fi.refineid.android.browser.BundledIssuerCertificates
 import fi.refineid.android.core.AuthenticationIssuerCertificateSource
 import java.io.File
 import java.io.FileOutputStream
 import java.security.GeneralSecurityException
 import java.security.MessageDigest
+import java.security.cert.CertificateExpiredException
 import java.security.cert.CertificateFactory
+import java.security.cert.CertificateNotYetValidException
 import java.security.cert.X509Certificate
 import java.util.Locale
 
@@ -41,14 +42,6 @@ internal class CaCertificateStore(
             cachedRootDer = null
             cachedIntermediateDer = null
 
-            val bundled =
-                context?.let {
-                    runCatching { BundledIssuerCertificates.load(it) }.getOrDefault(emptyList())
-                } ?: emptyList()
-            for (cert in bundled) {
-                indexCertificateLocked(cert, persistToDisk = false)
-            }
-
             if (!directory.exists()) {
                 directory.mkdirs()
             }
@@ -58,7 +51,24 @@ internal class CaCertificateStore(
                     runCatching { file.readBytes() }
                         .getOrNull()
                         ?.let(::parseCertificate)
-                if (cert != null) {
+                if (cert == null) {
+                    file.delete()
+                    continue
+                }
+                val isExpired =
+                    try {
+                        cert.checkValidity()
+                        false
+                    } catch (_: CertificateExpiredException) {
+                        true
+                    } catch (_: CertificateNotYetValidException) {
+                        true
+                    } catch (_: GeneralSecurityException) {
+                        true
+                    }
+                if (isExpired) {
+                    file.delete()
+                } else {
                     indexCertificateLocked(cert, persistToDisk = false)
                 }
             }
