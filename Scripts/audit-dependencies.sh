@@ -33,7 +33,7 @@ if command -v dependency-check > /dev/null; then
     --format HTML --format JSON \
     --out build/reports/dependency-check \
     --failOnCVSS 7 \
-    "${nvd_args[@]}" || true
+    ${nvd_args[@]:+"${nvd_args[@]}"} || true
   if [[ -f build/reports/dependency-check/dependency-check-report.html ]]; then
     echo "OWASP report generated at build/reports/dependency-check/dependency-check-report.html"
   else
