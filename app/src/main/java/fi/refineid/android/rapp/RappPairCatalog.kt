@@ -1,10 +1,11 @@
 package fi.refineid.android.rapp
 
 import android.content.Context
-import android.util.Base64
+import android.content.SharedPreferences
 import androidx.core.content.edit
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Base64
 
 internal data class PairedPeer(
     val pairIdHex: String,
@@ -17,9 +18,11 @@ internal data class PairedPeer(
 
 /** Persists authenticated RAPP paired devices locally on Android. */
 internal class RappPairCatalog(
-    context: Context,
+    private val prefs: SharedPreferences,
 ) {
-    private val prefs = context.getSharedPreferences("fi.refineid.rapp.pairs", Context.MODE_PRIVATE)
+    constructor(context: Context) : this(
+        context.getSharedPreferences("fi.refineid.rapp.pairs", Context.MODE_PRIVATE),
+    )
 
     companion object {
         private const val KEY_PAIRS = "paired_devices"
@@ -91,7 +94,7 @@ internal class RappPairCatalog(
         pairIdHex: String,
         certDer: ByteArray,
     ) {
-        val b64 = Base64.encodeToString(certDer, Base64.NO_WRAP)
+        val b64 = Base64.getEncoder().encodeToString(certDer)
         val current =
             listPairs().map { peer ->
                 if (peer.pairIdHex == pairIdHex) {

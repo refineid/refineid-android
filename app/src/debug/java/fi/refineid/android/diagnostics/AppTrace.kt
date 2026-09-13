@@ -597,6 +597,21 @@ internal object AppTrace {
         debug("rapp:pairing-completed peer=" + peerName)
     }
 
+    fun rappOperationApproveFailed(error: String) {
+        debug("rapp:approve-failed error=" + error)
+    }
+
+    fun rappOperationDenyFailed(error: String) {
+        debug("rapp:deny-failed error=" + error)
+    }
+
+    fun rappProgressReportFailed(
+        stage: String,
+        error: String,
+    ) {
+        debug("rapp:progress-failed stage=" + stage + " error=" + error)
+    }
+
     fun browserOpened() {
         debug("browser:opened")
     }

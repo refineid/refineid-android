@@ -117,6 +117,7 @@ internal class RappPhoneProxyDispatcher(
         pairRecord = null
         vault = null
         _connectedPeer.value = null
+        lastReadAuthCertDer = null
         pendingPins.clear()
         inbox.dismissAll()
     }
@@ -129,6 +130,7 @@ internal class RappPhoneProxyDispatcher(
         operationBridge?.close()
         operationBridge = null
         _connectedPeer.value = null
+        lastReadAuthCertDer = null
         pendingPins.clear()
         inbox.dismissAll()
         val currentPair = pairRecord
@@ -268,6 +270,7 @@ internal class RappPhoneProxyDispatcher(
                 operationBridge?.close()
                 operationBridge = null
                 _connectedPeer.value = null
+                lastReadAuthCertDer = null
                 pendingPins.clear()
                 inbox.dismissAll()
             }
@@ -366,7 +369,7 @@ internal class RappPhoneProxyDispatcher(
                             .firstOrNull()
                             ?.displayName
                             ?.takeIf { it.isNotBlank() }
-                            ?: "Computer"
+                            ?: DEFAULT_REQUESTER_DISPLAY_NAME
                     inbox.ask(
                         requestId = opIdHex,
                         requester = requesterName,
@@ -391,7 +394,7 @@ internal class RappPhoneProxyDispatcher(
                         .firstOrNull()
                         ?.displayName
                         ?.takeIf { it.isNotBlank() }
-                        ?: "Computer"
+                        ?: DEFAULT_REQUESTER_DISPLAY_NAME
                 inbox.ask(
                     requestId = opIdHex,
                     requester = requesterName,
@@ -423,7 +426,7 @@ internal class RappPhoneProxyDispatcher(
                     val resp = bridge.approve(opId, RappClock.monotonicMs())
                     handleBridgeAction(resp, bridge)
                 } catch (e: Exception) {
-                    android.util.Log.e("PROXY_DISPATCH", "approve failed", e)
+                    AppTrace.rappOperationApproveFailed(e.message ?: e.javaClass.simpleName)
                 }
             }
     }
@@ -433,6 +436,7 @@ internal class RappPhoneProxyDispatcher(
         AppTrace.rappConnectionDropped("proxy dispatcher dropConnection")
         activeOperationJob?.cancel()
         activeOperationJob = null
+        lastReadAuthCertDer = null
         activeListener?.disconnectClient()
         operationBridge?.close()
         operationBridge = null
@@ -457,7 +461,7 @@ internal class RappPhoneProxyDispatcher(
                     val resp = bridge.deny(opId)
                     handleBridgeAction(resp, bridge)
                 } catch (e: Exception) {
-                    android.util.Log.e("PROXY_DISPATCH", "deny failed", e)
+                    AppTrace.rappOperationDenyFailed(e.message ?: e.javaClass.simpleName)
                 }
                 // Drop the client stream so Mac cannot immediately re-request on the same session.
                 dropConnection()
@@ -505,7 +509,7 @@ internal class RappPhoneProxyDispatcher(
                 .firstOrNull()
                 ?.displayName
                 ?.takeIf { it.isNotBlank() }
-                ?: "Computer"
+                ?: DEFAULT_REQUESTER_DISPLAY_NAME
         var cancelled = false
         AppTrace.rappCardPromptShown(opIdHex, action.name)
         try {
@@ -513,7 +517,7 @@ internal class RappPhoneProxyDispatcher(
                 bridge.reportProgress(opId, uniffi.refineid_rapp.RappProgressEvent.WAITING_FOR_CARD)
             handleBridgeAction(progressAction, bridge)
         } catch (e: Exception) {
-            android.util.Log.w("PROXY_DISPATCH", "failed to report waiting_for_card progress", e)
+            AppTrace.rappProgressReportFailed("waiting_for_card", e.message ?: e.javaClass.simpleName)
         }
         inbox.showTapPrompt(
             requestId = opIdHex,
@@ -532,7 +536,7 @@ internal class RappPhoneProxyDispatcher(
                         bridge.reportProgress(opId, uniffi.refineid_rapp.RappProgressEvent.CARD_WAIT_ENDED)
                     handleBridgeAction(progressAction, bridge)
                 } catch (e: Exception) {
-                    android.util.Log.w("PROXY_DISPATCH", "failed to report card_wait_ended progress", e)
+                    AppTrace.rappProgressReportFailed("card_wait_ended", e.message ?: e.javaClass.simpleName)
                 }
             }
         return when {
@@ -577,15 +581,10 @@ internal class RappPhoneProxyDispatcher(
         get() = lastReadAuthCertDer?.copyOf()
 
     private fun resolveCachedAuthCertificate(): ByteArray? {
+        if (!isCardReady()) return null
         lastReadAuthCertDer?.let { return it.copyOf() }
         activeAuthCertDer()?.let { return it.copyOf() }
-        primedCanStore?.readAuthCertificateDer()?.let { return it }
-        val encoded = catalog.listPairs().firstOrNull()?.certificateDerBase64 ?: return null
-        return try {
-            Base64.decode(encoded, Base64.NO_WRAP)
-        } catch (_: Exception) {
-            null
-        }
+        return null
     }
 
     internal fun storeReadAuthCertificate(certDer: ByteArray) {
@@ -599,6 +598,7 @@ internal class RappPhoneProxyDispatcher(
         opId: ByteArray,
         bridge: RappOperationBridge,
     ) {
+        lastReadAuthCertDer = null
         try {
             val resp = bridge.cardRemovedBeforeTransmit(opId)
             handleBridgeAction(resp, bridge)
@@ -683,8 +683,8 @@ internal class RappPhoneProxyDispatcher(
         activeOperationJob?.cancel()
         activeOperationJob =
             scope.launch(Dispatchers.IO) {
-                if (sessionBridge == null || activeListener == null) return@launch
-                if (tryCompleteFromCachedAuthCert(opId, opIdHex, desc.kind.name, isAuth, bridge)) {
+                if (sessionBridge == null || activeListener == null) {
+                    respondCardRemoved(opId, bridge)
                     return@launch
                 }
                 val authAction =
@@ -790,7 +790,10 @@ internal class RappPhoneProxyDispatcher(
         activeOperationJob?.cancel()
         activeOperationJob =
             scope.launch(Dispatchers.IO) {
-                if (sessionBridge == null || activeListener == null) return@launch
+                if (sessionBridge == null || activeListener == null) {
+                    respondCardRemoved(opId, bridge)
+                    return@launch
+                }
                 val startedNs = System.nanoTime()
                 val opIdHex = opId.joinToString("") { "%02x".format(it) }
                 val algorithm = resolveSignAlgorithm(desc)
@@ -1000,7 +1003,10 @@ internal class RappPhoneProxyDispatcher(
         activeOperationJob?.cancel()
         activeOperationJob =
             scope.launch(Dispatchers.IO) {
-                if (sessionBridge == null || activeListener == null) return@launch
+                if (sessionBridge == null || activeListener == null) {
+                    respondCardRemoved(opId, bridge)
+                    return@launch
+                }
                 val startedNs = System.nanoTime()
                 val opIdHex = opId.joinToString("") { "%02x".format(it) }
                 val algorithm = resolveQualifiedAlgorithm(desc)
@@ -1104,16 +1110,21 @@ internal class RappPhoneProxyDispatcher(
             }
             val retryService = qualifiedCardService()
             if (retryService != null) {
-                val retryDeferred = CompletableDeferred<QualifiedSignResult>()
-                retryService.requestQualifiedDigestSignature(
-                    algorithm = algorithm,
-                    pin2 = Pin2Submission.from(pin2),
-                    digest = desc.digest,
-                    expectedCertificate = expectedCert,
-                ) { rResult ->
-                    retryDeferred.complete(rResult)
+                val freshCert = readSignatureCertificateWithTimeout() ?: return null
+                try {
+                    val retryDeferred = CompletableDeferred<QualifiedSignResult>()
+                    retryService.requestQualifiedDigestSignature(
+                        algorithm = algorithm,
+                        pin2 = Pin2Submission.from(pin2),
+                        digest = desc.digest,
+                        expectedCertificate = freshCert,
+                    ) { rResult ->
+                        retryDeferred.complete(rResult)
+                    }
+                    signResult = retryDeferred.await()
+                } finally {
+                    freshCert.close()
                 }
-                signResult = retryDeferred.await()
             }
         }
         return signResult

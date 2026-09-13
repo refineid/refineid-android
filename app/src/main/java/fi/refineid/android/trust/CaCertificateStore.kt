@@ -18,10 +18,11 @@ import java.util.Locale
  * certificates discovered on smart cards.
  */
 internal class CaCertificateStore(
-    private val context: Context,
+    private val context: Context? = null,
+    baseDirectory: File? = null,
 ) : AuthenticationIssuerCertificateSource {
     private val lock = Any()
-    private val directory = File(context.filesDir, CA_CERTIFICATES_DIRECTORY_NAME)
+    private val directory = File(baseDirectory ?: context?.filesDir ?: File("."), CA_CERTIFICATES_DIRECTORY_NAME)
     private val certificates = mutableListOf<X509Certificate>()
     private val certsByFingerprint = mutableMapOf<String, ByteArray>()
     private var cachedRootDer: ByteArray? = null
@@ -40,7 +41,10 @@ internal class CaCertificateStore(
             cachedRootDer = null
             cachedIntermediateDer = null
 
-            val bundled = runCatching { BundledIssuerCertificates.load(context) }.getOrDefault(emptyList())
+            val bundled =
+                context?.let {
+                    runCatching { BundledIssuerCertificates.load(it) }.getOrDefault(emptyList())
+                } ?: emptyList()
             for (cert in bundled) {
                 indexCertificateLocked(cert, persistToDisk = false)
             }

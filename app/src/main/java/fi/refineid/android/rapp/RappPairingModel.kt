@@ -543,14 +543,16 @@ internal class RappPairingModel(
         activeConnectedPeer = null
     }
 
-    private fun decodeHexOrNull(hex: String): ByteArray? {
-        if (hex.length % 2 != 0) return null
-        val result = ByteArray(hex.length / 2)
-        for (i in result.indices) {
-            val byte = hex.substring(i * 2, i * 2 + 2).toIntOrNull(16) ?: return null
-            result[i] = byte.toByte()
+    companion object {
+        internal fun decodeHexOrNull(hex: String): ByteArray? {
+            if (hex.isEmpty() || hex.length % 2 != 0) return null
+            val result = ByteArray(hex.length / 2)
+            for (i in result.indices) {
+                val byte = hex.substring(i * 2, i * 2 + 2).toIntOrNull(16) ?: return null
+                result[i] = byte.toByte()
+            }
+            return result
         }
-        return result
     }
 
     private fun localDeviceDisplayName(): String {

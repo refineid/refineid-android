@@ -324,6 +324,15 @@ internal object AppTrace {
 
     fun rappPairingCompleted(peerName: String) = Unit
 
+    fun rappOperationApproveFailed(error: String) = Unit
+
+    fun rappOperationDenyFailed(error: String) = Unit
+
+    fun rappProgressReportFailed(
+        stage: String,
+        error: String,
+    ) = Unit
+
     fun usbPermissionRequestFailed() = Unit
 
     fun usbSessionOpenStarted() = Unit

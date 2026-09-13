@@ -265,28 +265,26 @@ internal class NfcReaderController(
             status = latestSnapshot.status.name,
             hasResting = resting != null,
         )
-        if (!isOpeningSession.get() && resting != null) {
+        if (resting != null && isOpeningSession.compareAndSet(false, true)) {
             val inMemoryCan = CanSessionStore.canBytes()
             val generation = probeGeneration
-            if (isOpeningSession.compareAndSet(false, true)) {
-                try {
-                    probeExecutor.execute {
-                        val storedCan = inMemoryCan ?: primedCanStore.read()
-                        if (storedCan == null) {
-                            isOpeningSession.set(false)
-                            return@execute
-                        }
-                        openSessionBytes(
-                            canBytes = storedCan,
-                            generation = generation,
-                            mintOnSuccess = false,
-                            pin1 = null,
-                            isoDepTarget = resting,
-                        )
+            try {
+                probeExecutor.execute {
+                    val storedCan = inMemoryCan ?: primedCanStore.read()
+                    if (storedCan == null) {
+                        isOpeningSession.set(false)
+                        return@execute
                     }
-                } catch (_: RejectedExecutionException) {
-                    isOpeningSession.set(false)
+                    openSessionBytes(
+                        canBytes = storedCan,
+                        generation = generation,
+                        mintOnSuccess = false,
+                        pin1 = null,
+                        isoDepTarget = resting,
+                    )
                 }
+            } catch (_: RejectedExecutionException) {
+                isOpeningSession.set(false)
             }
         }
         return withTimeoutOrNull(timeoutMs) {
@@ -352,9 +350,13 @@ internal class NfcReaderController(
             )
             return
         }
+        if (!isOpeningSession.compareAndSet(false, true)) {
+            inMemoryCanBytes?.fill(0)
+            pin1?.close()
+            return
+        }
         publish(NfcReaderSnapshot(status = NfcReaderStatus.CONNECTING))
         AppTrace.nfcConnectStarted()
-        isOpeningSession.set(true)
         try {
             probeExecutor.execute {
                 // primedCanStore.read() decrypts Android Keystore ciphertext;
@@ -453,7 +455,10 @@ internal class NfcReaderController(
         val storedCan = CanSessionStore.canBytes() ?: primedCanStore.read()
         if (storedCan != null) {
             feedback.onCardDiscovered()
-            isOpeningSession.set(true)
+            if (!isOpeningSession.compareAndSet(false, true)) {
+                storedCan.fill(0)
+                return
+            }
             try {
                 probeExecutor.execute {
                     openSessionBytes(
