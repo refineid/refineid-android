@@ -163,6 +163,14 @@ internal class RappRequesterClient(
                                         }
                                         deferred.complete(result.bytes)
                                         cleanup()
+                                    } else if (action.kind == RappBridgeActionKind.PROGRESS) {
+                                        if (BuildConfig.DEBUG) {
+                                            android.util.Log.i(
+                                                "REQUESTER_CLIENT",
+                                                "Operation progress: ${action.progressEvent}",
+                                            )
+                                        }
+                                        return@StreamRelayBrowser
                                     } else if (action.kind == RappBridgeActionKind.SEND_FRAME) {
                                         action.frame?.let { f -> browser?.send(f) }
                                     } else if (action.kind == RappBridgeActionKind.TERMINAL ||

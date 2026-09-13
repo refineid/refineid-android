@@ -490,8 +490,10 @@ internal class RappPhoneProxyDispatcher(
     }
 
     private suspend fun ensureCardReady(
+        opId: ByteArray,
         opIdHex: String,
         action: RappAuthAction,
+        bridge: RappOperationBridge,
         forcePrompt: Boolean = false,
     ): CardReadyOutcome {
         if (!forcePrompt && isCardReady()) return CardReadyOutcome.READY
@@ -504,6 +506,13 @@ internal class RappPhoneProxyDispatcher(
                 ?: "Computer"
         var cancelled = false
         AppTrace.rappCardPromptShown(opIdHex, action.name)
+        try {
+            val progressAction =
+                bridge.reportProgress(opId, uniffi.refineid_rapp.RappProgressEvent.WAITING_FOR_CARD)
+            handleBridgeAction(progressAction, bridge)
+        } catch (e: Exception) {
+            android.util.Log.w("PROXY_DISPATCH", "failed to report waiting_for_card progress", e)
+        }
         inbox.showTapPrompt(
             requestId = opIdHex,
             requester = requesterName,
@@ -516,6 +525,13 @@ internal class RappPhoneProxyDispatcher(
             } finally {
                 AppTrace.rappCardPromptDismissed(opIdHex)
                 inbox.dismissTapPrompt(opIdHex)
+                try {
+                    val progressAction =
+                        bridge.reportProgress(opId, uniffi.refineid_rapp.RappProgressEvent.CARD_WAIT_ENDED)
+                    handleBridgeAction(progressAction, bridge)
+                } catch (e: Exception) {
+                    android.util.Log.w("PROXY_DISPATCH", "failed to report card_wait_ended progress", e)
+                }
             }
         return when {
             cancelled -> CardReadyOutcome.CANCELLED
@@ -531,7 +547,7 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
         forcePrompt: Boolean = false,
     ): Boolean =
-        when (ensureCardReady(opIdHex, action, forcePrompt = forcePrompt)) {
+        when (ensureCardReady(opId, opIdHex, action, bridge, forcePrompt = forcePrompt)) {
             CardReadyOutcome.CANCELLED -> {
                 AppTrace.rappOperationDenied(opIdHex, "user_cancelled")
                 respondBridgeDeny(opId, bridge)
@@ -682,7 +698,7 @@ internal class RappPhoneProxyDispatcher(
                         readSignatureCertWithTimeout()
                     }
                 if (certDer == null) {
-                    when (ensureCardReady(opIdHex, authAction, forcePrompt = true)) {
+                    when (ensureCardReady(opId, opIdHex, authAction, bridge, forcePrompt = true)) {
                         CardReadyOutcome.CANCELLED, CardReadyOutcome.TIMEOUT -> {}
 
                         CardReadyOutcome.READY -> {
