@@ -17,6 +17,7 @@ val rappGeneratedKotlin = rappCrateDirectory.dir("generated")
 val minimumAndroidApi = 33
 val currentAndroidApi = 37
 val androidAbis = listOf("arm64-v8a", "x86_64")
+val abiTargetArgs = androidAbis.flatMap { abi -> listOf("-t", abi) }
 val javaToolchainVersion = 25
 val calendarYearBase = 2000
 val maximumUtcHour = 23
@@ -149,7 +150,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += setOf("arm64-v8a")
+            abiFilters += androidAbis
         }
     }
 
@@ -312,8 +313,7 @@ fun registerRappBuild(
         mutableListOf(
             "cargo",
             "ndk",
-            "-t",
-            "arm64-v8a",
+            *abiTargetArgs.toTypedArray(),
             "-P",
             minimumAndroidApi,
             "-o",
@@ -346,8 +346,7 @@ val buildRustDebug =
         commandLine(
             "cargo",
             "ndk",
-            "-t",
-            "arm64-v8a",
+            *abiTargetArgs.toTypedArray(),
             "-P",
             minimumAndroidApi,
             "-o",
@@ -373,8 +372,7 @@ val buildRustRelease =
         commandLine(
             "cargo",
             "ndk",
-            "-t",
-            "arm64-v8a",
+            *abiTargetArgs.toTypedArray(),
             "-P",
             minimumAndroidApi,
             "-o",

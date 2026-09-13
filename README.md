@@ -7,7 +7,7 @@ authentication, qualified PDF signing, and contactless NFC operation.
 
 - Android 13+
 - USB CCID smart-card reader or NFC
-- JDK, Rust (aarch64-linux-android target), cargo-ndk, Android SDK/NDK
+- JDK, Rust (aarch64-linux-android and x86_64-linux-android targets), cargo-ndk, Android SDK/NDK
 
 ## Quick start
 
