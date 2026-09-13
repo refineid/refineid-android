@@ -184,6 +184,40 @@ fun findServiceAccountFile(): File {
     fail("Could not find play-service-account.json in working directory or play.properties")
 }
 
+fun extractReleasesArray(json: String): String? {
+    val keyIndex = json.indexOf("\"releases\"")
+    if (keyIndex < 0) return null
+    val arrayStart = json.indexOf('[', keyIndex)
+    if (arrayStart < 0) return null
+    var depth = 0
+    var inString = false
+    var escaped = false
+    var index = arrayStart
+    while (index < json.length) {
+        val c = json[index]
+        if (inString) {
+            if (escaped) {
+                escaped = false
+            } else if (c == '\\') {
+                escaped = true
+            } else if (c == '"') {
+                inString = false
+            }
+        } else {
+            when (c) {
+                '"' -> inString = true
+                '[' -> depth++
+                ']' -> {
+                    depth--
+                    if (depth == 0) return json.substring(arrayStart, index + 1)
+                }
+            }
+        }
+        index++
+    }
+    return null
+}
+
 fun parseGoogleGroups(json: String): MutableList<String> {
     val groups = mutableListOf<String>()
     val match = "\"googleGroups\"\\s*:\\s*\\[([^\\]]*)\\]".toRegex().find(json) ?: return groups
@@ -363,10 +397,8 @@ fun main(args: Array<String>) {
                     fail("Failed to fetch source track '$fromTrack': ${sourceResp.body()}")
                 }
 
-                val releasesMatch = "\"releases\"\\s*:\\s*(\\[[\\s\\S]*?\\])".toRegex().find(sourceResp.body())
+                val releasesJson = extractReleasesArray(sourceResp.body())
                     ?: fail("Source track '$fromTrack' has no releases to promote.")
-
-                val releasesJson = releasesMatch.groupValues[1]
                 val destBody = """{"track":"$toTrack","releases":$releasesJson}"""
 
                 val updateResp = client.request("PUT", "$API_BASE/applications/$APP_PACKAGE/edits/$editId/tracks/$toTrack", destBody)
