@@ -689,6 +689,9 @@ val verifyReleaseAbis =
                     "release APK is missing native libraries for $abi"
                 }
             }
+            check(librariesByAbi.keys == requiredAbis.toSet()) {
+                "release APK has unexpected ABIs: expected $requiredAbis, found ${librariesByAbi.keys}"
+            }
             val referenceLibraries = librariesByAbi.getValue(requiredAbis.first())
             librariesByAbi.forEach { (abi, libraries) ->
                 check(libraries == referenceLibraries) {
