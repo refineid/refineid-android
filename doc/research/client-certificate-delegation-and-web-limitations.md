@@ -200,7 +200,7 @@ smart-card authentication:
 * **Windows**: Smart Card Minidrivers plug into CAPI / CNG.
 * **macOS**: CryptoTokenKit persistent extensions plug into Security.framework.
 * **iOS 26**: Apple expanded **CryptoTokenKit** with built-in NFC smart-card
-  slots, allowing apps like ReFineID-Apple to expose card certificates and
+  slots, allowing apps like RefineID-Apple to expose card certificates and
   on-chip signing system-wide, including Safari.
 * **Linux**: NSS and `p11-kit` allow userspace PKCS#11 module registration.
 * **ChromeOS**: `chrome.certificateProvider` allows extension-backed card

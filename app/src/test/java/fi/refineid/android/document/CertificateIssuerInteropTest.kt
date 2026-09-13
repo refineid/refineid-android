@@ -242,9 +242,9 @@ class CertificateIssuerInteropTest {
         const val LEAF_SERIAL_NUMBER = "2"
         const val UNRELATED_SERIAL_NUMBER = "3"
 
-        const val ISSUER_SUBJECT = "/CN=ReFineID synthetic issuer"
-        const val LEAF_SUBJECT = "/CN=ReFineID synthetic leaf"
-        const val UNRELATED_SUBJECT = "/CN=ReFineID unrelated issuer"
+        const val ISSUER_SUBJECT = "/CN=RefineID synthetic issuer"
+        const val LEAF_SUBJECT = "/CN=RefineID synthetic leaf"
+        const val UNRELATED_SUBJECT = "/CN=RefineID unrelated issuer"
         const val ISSUER_BASIC_CONSTRAINTS = "basicConstraints=critical,CA:TRUE,pathlen:1"
         const val ISSUER_KEY_USAGE = "keyUsage=critical,keyCertSign,cRLSign"
         const val LEAF_EXTENSIONS =

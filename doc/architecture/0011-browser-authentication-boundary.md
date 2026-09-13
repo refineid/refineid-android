@@ -6,7 +6,7 @@ Date: 2026-08-15
 
 ## Context
 
-ReFineID ultimately needs Finnish identity-card authentication from the user's
+RefineID ultimately needs Finnish identity-card authentication from the user's
 normal Android browser, including services reached through Suomi.fi. An
 embedded browser is a useful first consumer of the card stack, but it is not
 equivalent to system-wide browser support.
@@ -21,7 +21,7 @@ Android exposes two materially different client-certificate seams:
   alias; it does not let an ordinary app publish a process-external virtual
   private key whose operations are delegated to a USB smart card.
 
-A Java security provider is also process-local. Installing the ReFineID
+A Java security provider is also process-local. Installing the RefineID
 provider in the application therefore cannot change the providers seen by
 Chrome, Firefox, or another separately installed browser.
 
@@ -53,7 +53,7 @@ The diagnostic path:
 The system-browser target remains a separate platform integration. The
 preferred route is an AOSP/OEM implementation that presents the card identity
 as a normal grantable `KeyChain` alias and routes its private-key operations to
-an authenticated ReFineID card service. That work requires a privileged system
+an authenticated RefineID card service. That work requires a privileged system
 component plus Keystore/KeyChain integration and corresponding Binder, SELinux,
 lifecycle, consent, and browser-compatibility tests. A cooperating browser fork
 could use the same card service sooner, but would not satisfy the all-browsers

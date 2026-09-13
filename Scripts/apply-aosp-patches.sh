@@ -16,7 +16,7 @@ readonly EXPECTED_POSITIONAL_ARGUMENT_COUNT=1
 readonly FRAMEWORKS_BASE_RELATIVE_PATH="frameworks/base"
 readonly KEYCHAIN_RELATIVE_PATH="packages/apps/KeyChain"
 readonly PIXEL_DEVICE_RELATIVE_PATH="device/google/coral"
-readonly REFINEID_RELATIVE_PATH="packages/apps/ReFineID"
+readonly REFINEID_RELATIVE_PATH="packages/apps/RefineID"
 
 readonly FRAMEWORKS_BASE_COMMIT="9cc5d58d0254f472ae071b29ccf4fae93ca1cc3d"
 readonly KEYCHAIN_BASE_COMMIT="97a7bc2ba75391487ecd3f23153cfb1ce293d6fe" # gitleaks:allow
@@ -59,11 +59,11 @@ AOSP_ROOT="$(cd "$1" && pwd -P)"
 readonly AOSP_ROOT
 readonly EXPECTED_REPOSITORY_ROOT="${AOSP_ROOT}/${REFINEID_RELATIVE_PATH}"
 [[ -d "$EXPECTED_REPOSITORY_ROOT" ]] ||
-  fail "ReFineID must be checked out at ${REFINEID_RELATIVE_PATH}"
+  fail "RefineID must be checked out at ${REFINEID_RELATIVE_PATH}"
 RESOLVED_EXPECTED_REPOSITORY_ROOT="$(cd "$EXPECTED_REPOSITORY_ROOT" && pwd -P)"
 readonly RESOLVED_EXPECTED_REPOSITORY_ROOT
 [[ "$RESOLVED_EXPECTED_REPOSITORY_ROOT" == "$REPOSITORY_ROOT" ]] ||
-  fail "this repository must be the AOSP packages/apps/ReFineID checkout"
+  fail "this repository must be the AOSP packages/apps/RefineID checkout"
 
 preflight_series() {
   local label="$1"
@@ -142,7 +142,7 @@ verify_applied_series() {
   actual_tree="$(git -C "$project_directory" rev-parse 'HEAD^{tree}')"
   wanted_tree="$(expected_tree "$label" "$project_directory" "$base_commit" "$patch_directory")"
   [[ "$actual_tree" == "$wanted_tree" ]] ||
-    fail "${label} does not exactly match the ReFineID patch series"
+    fail "${label} does not exactly match the RefineID patch series"
   echo "${label}=applied"
 }
 

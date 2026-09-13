@@ -565,8 +565,8 @@ class OcspResponseInteropTest {
         const val INITIAL_CERTIFICATE_SERIAL = "1000\n"
         const val EMPTY_DATABASE = ""
 
-        const val ISSUER_SUBJECT = "/CN=ReFineID synthetic OCSP issuer"
-        const val LEAF_SUBJECT = "/CN=ReFineID synthetic OCSP leaf"
+        const val ISSUER_SUBJECT = "/CN=RefineID synthetic OCSP issuer"
+        const val LEAF_SUBJECT = "/CN=RefineID synthetic OCSP leaf"
         const val ISSUER_BASIC_CONSTRAINTS = "basicConstraints=critical,CA:TRUE,pathlen:1"
         const val ISSUER_KEY_USAGE = "keyUsage=critical,keyCertSign,cRLSign"
         const val OCSP_NO_CHECK_IDENTIFIER = "1.3.6.1.5.5.7.48.1.5"
@@ -595,7 +595,7 @@ class OcspResponseInteropTest {
                 key = "delegated.key",
                 request = "delegated.csr",
                 certificate = "delegated.pem",
-                subject = "/CN=ReFineID synthetic delegated OCSP responder",
+                subject = "/CN=RefineID synthetic delegated OCSP responder",
                 extensionSection = "delegated_responder_extensions",
             )
         val UNCHECKED_RESPONDER =
@@ -603,7 +603,7 @@ class OcspResponseInteropTest {
                 key = "unchecked.key",
                 request = "unchecked.csr",
                 certificate = "unchecked.pem",
-                subject = "/CN=ReFineID synthetic unchecked OCSP responder",
+                subject = "/CN=RefineID synthetic unchecked OCSP responder",
                 extensionSection = "unchecked_responder_extensions",
             )
         val UNAUTHORIZED_RESPONDER =
@@ -611,7 +611,7 @@ class OcspResponseInteropTest {
                 key = "unauthorized.key",
                 request = "unauthorized.csr",
                 certificate = "unauthorized.pem",
-                subject = "/CN=ReFineID synthetic unauthorized OCSP responder",
+                subject = "/CN=RefineID synthetic unauthorized OCSP responder",
                 extensionSection = "unauthorized_responder_extensions",
             )
     }

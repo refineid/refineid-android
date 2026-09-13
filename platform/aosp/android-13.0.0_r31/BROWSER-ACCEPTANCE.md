@@ -29,7 +29,7 @@ For each browser, begin without an alias grant:
 2. Confirm Android's KeyChain chooser offers the active external identity only
    when the card and verified issuing certificate are available.
 3. Select the identity and grant it to that browser.
-4. Confirm the unexported ReFineID prompt identifies the requesting browser.
+4. Confirm the unexported RefineID prompt identifies the requesting browser.
 5. Enter PIN1 manually. Automation must not read, inject, paste, or submit it.
 6. Confirm one locally verified card operation produces the browser signature.
 7. Repeat after killing the browser during the prompt; the prompt and pending
@@ -37,7 +37,7 @@ For each browser, begin without an alias grant:
 8. Repeat after detaching the reader and after replacing the active card; both
    stale-generation paths must fail closed.
 
-The KeyChain chooser and ReFineID prompt are expected holder interactions.
+The KeyChain chooser and RefineID prompt are expected holder interactions.
 "Automatic browser support" means the unmodified browser uses Android's
 normal KeyChain/JCA path; it does not mean silent alias selection or PIN entry.
 

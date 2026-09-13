@@ -1,4 +1,4 @@
-# ReFineID for Android
+# RefineID for Android
 
 Native Android support for Finnish identity cards: in-app and system browser
 authentication, qualified PDF signing, and contactless NFC operation.
@@ -41,7 +41,7 @@ The TCP listener survives until reboot or a USB-debugging toggle.
 | fineid-spec | Protocol behavior specification |
 | refineid-core | Reusable Rust implementation |
 | refineid-mono-internal | Compatibility and coverage oracle |
-| ReFineID-Apple | Product-behavior and UX reference |
+| RefineID-Apple | Product-behavior and UX reference |
 
 ## AOSP integration
 

@@ -235,8 +235,8 @@ class AuthenticationIssuerCertificateStoreInteropTest {
         const val CERTIFICATE_AUTHORITY_ARGUMENT = "-CA"
         const val CERTIFICATE_AUTHORITY_KEY_ARGUMENT = "-CAkey"
         const val CREATE_CERTIFICATE_AUTHORITY_SERIAL_ARGUMENT = "-CAcreateserial"
-        const val ISSUER_SUBJECT = "/CN=ReFineID synthetic authentication issuer"
-        const val LEAF_SUBJECT = "/CN=ReFineID synthetic authentication leaf"
+        const val ISSUER_SUBJECT = "/CN=RefineID synthetic authentication issuer"
+        const val LEAF_SUBJECT = "/CN=RefineID synthetic authentication leaf"
         const val AUTHORITY_BASIC_CONSTRAINTS = "basicConstraints=critical,CA:true"
         const val AUTHORITY_KEY_USAGE = "keyUsage=critical,keyCertSign"
         const val SUCCESSFUL_PROCESS_EXIT_CODE = 0

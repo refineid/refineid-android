@@ -71,7 +71,7 @@ internal class ReFineIdCardProvider : Provider(NAME, VERSION, DESCRIPTION) {
     }
 
     internal companion object {
-        const val NAME = "ReFineIDCard"
+        const val NAME = "RefineIDCard"
         const val JCA_SHA256_WITH_RSA = "SHA256withRSA"
         const val JCA_SHA256_WITH_RSA_PSS = "SHA256withRSA/PSS"
         const val JCA_SHA384_WITH_RSA = "SHA384withRSA"
@@ -84,7 +84,7 @@ internal class ReFineIdCardProvider : Provider(NAME, VERSION, DESCRIPTION) {
         private const val SIGNATURE_SERVICE = "Signature"
         private const val SUPPORTED_KEY_CLASSES_ATTRIBUTE = "SupportedKeyClasses"
         private const val VERSION = 1.0
-        private const val DESCRIPTION = "ReFineID external smart-card signatures"
+        private const val DESCRIPTION = "RefineID external smart-card signatures"
     }
 }
 
@@ -151,7 +151,7 @@ internal abstract class CardBackedSignatureSpi(
         reset()
         val cardKey =
             privateKey as? CardBackedPrivateKey
-                ?: throw InvalidKeyException("a ReFineID card key is required")
+                ?: throw InvalidKeyException("a RefineID card key is required")
         if (cardKey.algorithm != algorithm.jcaKeyAlgorithm()) {
             throw InvalidKeyException("card key algorithm does not match the signature")
         }

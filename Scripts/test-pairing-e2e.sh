@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Copyright 2026 Petri Koistinen. Licensed under the Apache License, Version 2.0.
 
-# End-to-end automated pairing test between ReFineID Mac and connected Android device.
+# End-to-end automated pairing test between RefineID Mac and connected Android device.
 #
 # Drives the complete pairing ceremony:
 # 1. Resets stale pairing state on both Mac and Android.
-# 2. Starts ReFineID on Mac in pairing offer mode (--offer-remote-reader).
+# 2. Starts RefineID on Mac in pairing offer mode (--offer-remote-reader).
 # 3. Extracts the 6-digit numeric pairing code from Mac.
 # 4. Injects the pairing code into Android via ADB intent (REFINEID_PAIR_OFFER).
 # 5. Monitors the mutual Noise handshake, Hello exchange, and Confirmation over mDNS.
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAC_APP="/Applications/ReFineID.app/Contents/MacOS/ReFineID"
+MAC_APP="/Applications/RefineID.app/Contents/MacOS/RefineID"
 MAC_LOG="$(mktemp /tmp/refineid_e2e_mac_XXXXXX.log)"
 SERIAL="${ANDROID_SERIAL:-}"
 
@@ -28,7 +28,7 @@ if [[ -z "$SERIAL" ]]; then
 fi
 
 if [[ ! -x "$MAC_APP" ]]; then
-  echo "Error: ReFineID not found at $MAC_APP. Run Scripts/install-macos.sh first." >&2
+  echo "Error: RefineID not found at $MAC_APP. Run Scripts/install-macos.sh first." >&2
   exit 1
 fi
 

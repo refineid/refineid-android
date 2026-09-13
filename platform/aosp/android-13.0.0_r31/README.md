@@ -1,6 +1,6 @@
 # Android 13 Pixel 4 platform patches
 
-This directory carries the ReFineID AOSP patch series for the Pixel 4 build
+This directory carries the RefineID AOSP patch series for the Pixel 4 build
 `TP1A.221005.002.B2`, which maps to the AOSP tag `android-13.0.0_r31`.
 
 The series currently contains the descriptor, exact-digest contract, full
@@ -44,7 +44,7 @@ and platform-test boundary without printing raw device test output. Independent
 browser acceptance remains a separate physical gate described in
 [`BROWSER-ACCEPTANCE.md`](BROWSER-ACCEPTANCE.md).
 
-Place this repository at `packages/apps/ReFineID` in the AOSP tree and run
+Place this repository at `packages/apps/RefineID` in the AOSP tree and run
 `Scripts/stage-aosp-prebuilt.sh` before starting the platform build. The script
 stages the minimized unsigned release APK at the path consumed by `Android.bp`.
 Soong installs it under the product priv-app directory and signs it with the
@@ -104,8 +104,8 @@ repository.
   A credential-free physical Pixel test verified that complete chain on the
   attached card, and the minimized release APK retains all four issuer
   resources.
-- On the Linux builder, the patched ReFineID, KeyChain, framework, test, and
-  host signer modules build. The staged ReFineID and KeyChain APKs validate
+- On the Linux builder, the patched RefineID, KeyChain, framework, test, and
+  host signer modules build. The staged RefineID and KeyChain APKs validate
   with AOSP's installed host signer and have the same platform certificate.
 - The app, framework, KeyChain, and product-integration diffs pass Gitleaks.
 - The sparse audit has independently replayed the complete series from the

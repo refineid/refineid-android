@@ -11,18 +11,18 @@ crate-type = ["cdylib"]
 
 [dependencies]
 jni = "=0.22.4"
-refineid-apdu = { git = "https://github.com/ReFineID/refineid-core.git", branch = "main" }
-refineid-auth = { git = "https://github.com/ReFineID/refineid-core.git", branch = "main" }
-refineid-ber = { git = "https://github.com/ReFineID/refineid-core.git", branch = "main" }
-refineid-atr = { git = "https://github.com/ReFineID/refineid-core.git", branch = "main" }
-refineid-digest = { git = "https://github.com/ReFineID/refineid-core.git", branch = "main" }
-refineid-pace = { git = "https://github.com/ReFineID/refineid-core.git", branch = "main" }
-refineid-emrtd = { git = "https://github.com/ReFineID/refineid-core.git", branch = "main" }
-refineid-pkcs15 = { git = "https://github.com/ReFineID/refineid-core.git", branch = "main" }
-refineid-sign = { git = "https://github.com/ReFineID/refineid-core.git", branch = "main" }
-refineid-x509 = { git = "https://github.com/ReFineID/refineid-core.git", branch = "main" }
+refineid-apdu = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+refineid-auth = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+refineid-ber = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+refineid-atr = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+refineid-digest = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+refineid-pace = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+refineid-emrtd = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+refineid-pkcs15 = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+refineid-sign = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+refineid-x509 = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 
-[patch."https://github.com/ReFineID/refineid-core.git"]
+[patch."https://github.com/RefineID/refineid-core.git"]
 refineid-apdu = { path = "../../../refineid-core/crates/apdu" }
 refineid-atr = { path = "../../../refineid-core/crates/atr" }
 refineid-auth = { path = "../../../refineid-core/crates/auth" }

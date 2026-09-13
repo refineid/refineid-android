@@ -1,4 +1,4 @@
-# ReFineID Android repository instructions
+# RefineID Android repository instructions
 
 - RULE #1: PIN CODES NEVER TRAVEL OVER ANY NETWORK.
   PIN1 and PIN2 NEVER leave the phone when accessed via RAPP.
@@ -17,7 +17,7 @@
 - System-browser authentication remains the end state. The in-app browser is
   a supported login vehicle on stock Android: any HTTPS site, both card
   transports, every signature behind the holder's PIN.
-- Android also serves as the RAPP reader for the other ReFineID platforms.
+- Android also serves as the RAPP reader for the other RefineID platforms.
 - User-facing UI is terse. Explanations, status, and diagnostics belong in
   documentation and developer tooling, not product copy.
 - Keep card transport, identity-card protocol, browser integration, and UI as
@@ -25,7 +25,7 @@
   JVM unit tests can use synthetic descriptors and byte sequences.
 - fineid-spec governs protocol behavior. Prefer refineid-core for reusable
   shipped logic; refineid-mono-internal is the implementation oracle and
-  ReFineID-Apple the product-behavior and UX reference.
+  RefineID-Apple the product-behavior and UX reference.
 
 ## Security
 
@@ -69,9 +69,9 @@
 - Add tests for malformed and truncated inputs, not just successful paths.
 - No magic codes: name every protocol code, size, offset, and limit, or derive
   it from a named domain constant.
-- Comments describe what the code does or the constraint it honors, never why
-  it changed. A past bug, a deprecation, the reasoning for a fix belongs in
-  the git commit message, not the source.
+- Comments explain what the code does now and the constraints it honors.
+  Past bugs, previous implementations, and explanations of what a fix changed
+  belong in commit messages, not source comments.
 - Record findings and durable knowledge as repository documentation under
   `doc/`, written for public distribution, not in private or per-session
   assistant memory. A committed document is the shared source of truth; redact
@@ -107,6 +107,15 @@
 
 ## Licensing
 
-- This repository and the referenced ReFineID sources are Apache-2.0.
+- This repository and the referenced RefineID sources are Apache-2.0.
 - Retain existing copyright and license notices when adapting source between
   repositories.
+
+## Commits and integration
+
+- Commits are cheap backups. Make small, focused commits often, without
+  asking for permission, once the required commit checks pass.
+- Complete the integration without waiting for another instruction: push
+  the task branch, open a pull request, and merge it into `main` once the
+  required checks pass. Sync local `main` with the merged remote.
+  Use merge commits to preserve the branch history; do not squash it.

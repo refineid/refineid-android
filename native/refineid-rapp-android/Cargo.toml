@@ -22,12 +22,12 @@ name = "refineid_rapp"
 crate-type = ["cdylib"]
 
 [dependencies]
-refineid-rapp = { git = "https://github.com/ReFineID/refineid-core.git", branch = "main", features = ["bindings"] }
+refineid-rapp = { git = "https://github.com/RefineID/refineid-core.git", branch = "main", features = ["bindings"] }
 uniffi = "0.32"
 
 # The same sibling-checkout pattern the refineid-android-core crate uses
 # for the other refineid-core crates.
-[patch."https://github.com/ReFineID/refineid-core.git"]
+[patch."https://github.com/RefineID/refineid-core.git"]
 refineid-rapp = { path = "../../../refineid-core/crates/rapp" }
 
 [[bin]]

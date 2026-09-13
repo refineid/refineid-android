@@ -6,7 +6,7 @@ Date: 2026-08-31
 
 ## Architecture
 
-ReFineID releases are secured by combining developer hardware identity card signatures with Google Play Cloud HSM protection:
+RefineID releases are secured by combining developer hardware identity card signatures with Google Play Cloud HSM protection:
 
 ```
 [ Physical Identity Card (PIN 2 Qualified Key) ]

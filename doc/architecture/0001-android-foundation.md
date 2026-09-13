@@ -6,7 +6,7 @@ Date: 2026-08-15
 
 ## Context
 
-ReFineID needs to use a Finnish identity card for authentication and signing
+RefineID needs to use a Finnish identity card for authentication and signing
 without exporting its private keys. Android provides USB Host and NFC APIs, but
 its public KeyChain API does not let an application register a non-exportable
 private key residing on an external smart card as a system client-certificate
@@ -52,7 +52,7 @@ separate compatibility decision.
 
 Protocol decisions come from fineid-spec. Shipped reusable Rust should come
 from a pinned public refineid-core revision. The broader internal monorepo is
-an oracle for coverage and compatibility, and ReFineID-Apple is the UI and
+an oracle for coverage and compatibility, and RefineID-Apple is the UI and
 behavior reference. All of these sources are licensed under Apache-2.0.
 
 ## Security consequences

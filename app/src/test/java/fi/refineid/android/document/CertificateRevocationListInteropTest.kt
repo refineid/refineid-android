@@ -460,9 +460,9 @@ class CertificateRevocationListInteropTest {
         const val INITIAL_CRL_NUMBER = "1000\n"
         const val EMPTY_DATABASE = ""
 
-        const val ISSUER_SUBJECT = "/CN=ReFineID synthetic CRL issuer"
-        const val LEAF_SUBJECT = "/CN=ReFineID synthetic CRL leaf"
-        const val UNRELATED_SUBJECT = "/CN=ReFineID unrelated CRL issuer"
+        const val ISSUER_SUBJECT = "/CN=RefineID synthetic CRL issuer"
+        const val LEAF_SUBJECT = "/CN=RefineID synthetic CRL leaf"
+        const val UNRELATED_SUBJECT = "/CN=RefineID unrelated CRL issuer"
         const val ISSUER_BASIC_CONSTRAINTS = "basicConstraints=critical,CA:TRUE,pathlen:1"
         const val ISSUER_KEY_USAGE = "keyUsage=critical,keyCertSign,cRLSign"
         const val UNAUTHORIZED_ISSUER_KEY_USAGE = "keyUsage=critical,keyCertSign"

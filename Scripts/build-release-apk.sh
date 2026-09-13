@@ -56,7 +56,7 @@ if [[ -f "app/build/outputs/apk/release/app-release-unsigned.apk" ]] && [[ ! -f 
   pkcs11_cfg=$(mktemp)
   trap 'rm -f "${pkcs11_cfg}"' EXIT
   cat << EOF > "${pkcs11_cfg}"
-name = ReFineIDSign
+name = RefineIDSign
 library = ${pkcs11_lib}
 slotListIndex = 0
 EOF

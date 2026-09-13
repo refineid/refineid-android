@@ -22,16 +22,16 @@ readonly EXPECTED_APP_SELINUX_CONTEXT_PREFIX="u:r:refineid_app:s0"
 readonly LUNCH_TARGET="aosp_flame-userdebug"
 readonly MANIFEST_RELATIVE_PATH=".repo/manifests"
 readonly EXPECTED_MANIFEST_COMMIT="012e197f31592b82d79ed2d4e03c5fb3ada38b62"
-readonly REFINEID_RELATIVE_PATH="packages/apps/ReFineID"
+readonly REFINEID_RELATIVE_PATH="packages/apps/RefineID"
 readonly HOST_APKSIGNER_RELATIVE_PATH="out/host/linux-x86/bin/apksigner"
 readonly REFINEID_PACKAGE="fi.refineid.android"
 readonly REFINEID_ACTIVITY="${REFINEID_PACKAGE}/.MainActivity"
 readonly REFINEID_PROVIDER_COMPONENT="${REFINEID_PACKAGE}/.keychain.ExternalKeyProviderService"
 readonly PROVIDER_INTERFACE_ACTION="com.android.keychain.external.IExternalKeyProviderService"
 readonly KEYCHAIN_PACKAGE="com.android.keychain"
-readonly DEVICE_REFINEID_APK="/product/priv-app/ReFineID/ReFineID.apk"
+readonly DEVICE_REFINEID_APK="/product/priv-app/RefineID/RefineID.apk"
 readonly DEVICE_KEYCHAIN_APK="/system/app/KeyChain/KeyChain.apk"
-readonly BUILT_REFINEID_APK="product/priv-app/ReFineID/ReFineID.apk"
+readonly BUILT_REFINEID_APK="product/priv-app/RefineID/RefineID.apk"
 readonly BUILT_KEYCHAIN_APK="system/app/KeyChain/KeyChain.apk"
 readonly BACKGROUND_ACTIVITY_PERMISSION="android.permission.START_ACTIVITIES_FROM_BACKGROUND"
 readonly INTERNET_PERMISSION="android.permission.INTERNET"
@@ -262,13 +262,13 @@ fi
   fail "the patched Pixel verifier requires x86_64"
 [[ -f "${AOSP_ROOT}/build/envsetup.sh" ]] || fail "AOSP build/envsetup.sh is missing"
 [[ -d "$EXPECTED_REPOSITORY_ROOT" ]] ||
-  fail "ReFineID must be checked out at ${REFINEID_RELATIVE_PATH}"
+  fail "RefineID must be checked out at ${REFINEID_RELATIVE_PATH}"
 RESOLVED_EXPECTED_REPOSITORY_ROOT="$(cd "$EXPECTED_REPOSITORY_ROOT" && pwd -P)"
 readonly RESOLVED_EXPECTED_REPOSITORY_ROOT
 [[ "$RESOLVED_EXPECTED_REPOSITORY_ROOT" == "$REPOSITORY_ROOT" ]] ||
-  fail "this repository must be the AOSP packages/apps/ReFineID checkout"
+  fail "this repository must be the AOSP packages/apps/RefineID checkout"
 [[ -z "$(git -C "$REPOSITORY_ROOT" status --porcelain --untracked-files=normal)" ]] ||
-  fail "ReFineID checkout has local changes"
+  fail "RefineID checkout has local changes"
 
 readonly MANIFEST_PROJECT="${AOSP_ROOT}/${MANIFEST_RELATIVE_PATH}"
 git -C "$MANIFEST_PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
@@ -340,7 +340,7 @@ readonly -a ADB_DEVICE=("$ADB" -t "$selected_adb_transport_id")
 [[ -n "${ANDROID_PRODUCT_OUT:-}" ]] || fail "Android product output is unset"
 readonly PRODUCT_REFINEID_APK="${ANDROID_PRODUCT_OUT}/${BUILT_REFINEID_APK}"
 readonly PRODUCT_KEYCHAIN_APK="${ANDROID_PRODUCT_OUT}/${BUILT_KEYCHAIN_APK}"
-[[ -f "$PRODUCT_REFINEID_APK" ]] || fail "built ReFineID APK is missing"
+[[ -f "$PRODUCT_REFINEID_APK" ]] || fail "built RefineID APK is missing"
 [[ -f "$PRODUCT_KEYCHAIN_APK" ]] || fail "built KeyChain APK is missing"
 APKSIGNER="${AOSP_ROOT}/${HOST_APKSIGNER_RELATIVE_PATH}"
 readonly APKSIGNER
@@ -369,33 +369,33 @@ readonly installed_refineid_apk
 installed_keychain_apk="$(device_package_path "$KEYCHAIN_PACKAGE")"
 readonly installed_keychain_apk
 [[ "$installed_refineid_apk" == "$DEVICE_REFINEID_APK" ]] ||
-  fail "ReFineID is not the product priv-app"
+  fail "RefineID is not the product priv-app"
 [[ "$installed_keychain_apk" == "$DEVICE_KEYCHAIN_APK" ]] ||
   fail "KeyChain is not the system image app"
 
 package_dump="$(device_shell dumpsys package "$REFINEID_PACKAGE")"
 readonly package_dump
 printf '%s\n' "$package_dump" | grep -Eq 'flags=\[[^]]*SYSTEM' ||
-  fail "ReFineID is not a system package"
+  fail "RefineID is not a system package"
 printf '%s\n' "$package_dump" | grep -Eq 'privateFlags=\[[^]]*PRIVILEGED' ||
-  fail "ReFineID is not a privileged package"
+  fail "RefineID is not a privileged package"
 application_uid="$(
   printf '%s\n' "$package_dump" |
     awk -F= '/^[[:space:]]*userId=/{gsub(/[[:space:]]/, "", $2); print $2; exit}'
 )"
 readonly application_uid
-[[ "$application_uid" =~ ^[0-9]+$ ]] || fail "ReFineID UID cannot be identified"
+[[ "$application_uid" =~ ^[0-9]+$ ]] || fail "RefineID UID cannot be identified"
 application_id=$((application_uid % ANDROID_UIDS_PER_USER))
 readonly application_id
 [[ "$application_id" -ge "$FIRST_APPLICATION_UID" ]] ||
-  fail "ReFineID does not use a regular application UID"
+  fail "RefineID does not use a regular application UID"
 
 package_requests_permission "$BACKGROUND_ACTIVITY_PERMISSION" ||
-  fail "ReFineID does not request the background activity permission"
+  fail "RefineID does not request the background activity permission"
 package_has_install_permission "$BACKGROUND_ACTIVITY_PERMISSION" ||
-  fail "ReFineID was not granted the background activity permission"
+  fail "RefineID was not granted the background activity permission"
 if package_requests_permission "$INTERNET_PERMISSION"; then
-  fail "ReFineID requests Internet access"
+  fail "RefineID requests Internet access"
 fi
 require_device_value \
   "external-key provider service" \
@@ -404,28 +404,28 @@ require_device_value \
   -a "$PROVIDER_INTERFACE_ACTION"
 
 "${ADB_DEVICE[@]}" pull "$installed_refineid_apk" \
-  "${device_audit_directory}/ReFineID.apk" >/dev/null 2>&1 ||
-  fail "installed ReFineID APK cannot be read"
+  "${device_audit_directory}/RefineID.apk" >/dev/null 2>&1 ||
+  fail "installed RefineID APK cannot be read"
 "${ADB_DEVICE[@]}" pull "$installed_keychain_apk" \
   "${device_audit_directory}/KeyChain.apk" >/dev/null 2>&1 ||
   fail "installed KeyChain APK cannot be read"
-cmp -s "${device_audit_directory}/ReFineID.apk" "$PRODUCT_REFINEID_APK" ||
-  fail "installed ReFineID APK differs from the built image"
+cmp -s "${device_audit_directory}/RefineID.apk" "$PRODUCT_REFINEID_APK" ||
+  fail "installed RefineID APK differs from the built image"
 cmp -s "${device_audit_directory}/KeyChain.apk" "$PRODUCT_KEYCHAIN_APK" ||
   fail "installed KeyChain APK differs from the built image"
-"$APKSIGNER" verify "${device_audit_directory}/ReFineID.apk" >/dev/null 2>&1 ||
-  fail "installed ReFineID APK signature is invalid"
+"$APKSIGNER" verify "${device_audit_directory}/RefineID.apk" >/dev/null 2>&1 ||
+  fail "installed RefineID APK signature is invalid"
 "$APKSIGNER" verify "${device_audit_directory}/KeyChain.apk" >/dev/null 2>&1 ||
   fail "installed KeyChain APK signature is invalid"
-refineid_signer="$(signer_digest "${device_audit_directory}/ReFineID.apk")"
+refineid_signer="$(signer_digest "${device_audit_directory}/RefineID.apk")"
 readonly refineid_signer
 keychain_signer="$(signer_digest "${device_audit_directory}/KeyChain.apk")"
 readonly keychain_signer
 [[ -n "$refineid_signer" && "$refineid_signer" == "$keychain_signer" ]] ||
-  fail "installed ReFineID and KeyChain signers differ"
+  fail "installed RefineID and KeyChain signers differ"
 
 "${ADB_DEVICE[@]}" shell am start -W -n "$REFINEID_ACTIVITY" >/dev/null 2>&1 ||
-  fail "ReFineID activity cannot start"
+  fail "RefineID activity cannot start"
 process_context=""
 for ((attempt = 0; attempt < PROCESS_CONTEXT_ATTEMPTS; attempt++)); do
   process_context="$(
@@ -436,7 +436,7 @@ for ((attempt = 0; attempt < PROCESS_CONTEXT_ATTEMPTS; attempt++)); do
   sleep "$PROCESS_CONTEXT_INTERVAL_SECONDS"
 done
 [[ "$process_context" == "$EXPECTED_APP_SELINUX_CONTEXT_PREFIX"* ]] ||
-  fail "ReFineID process is not confined to refineid_app"
+  fail "RefineID process is not confined to refineid_app"
 
 run_atest_suite "platform-tests" "${FRAMEWORK_TESTS[@]}" "${KEYCHAIN_TESTS[@]}"
 

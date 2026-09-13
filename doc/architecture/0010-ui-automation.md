@@ -7,7 +7,7 @@ Date: 2026-08-15
 ## Context
 
 The Android port needs the same kind of user-journey automation that the Apple
-application obtains from XCUITest. ReFineID also has two distinct UI scopes:
+application obtains from XCUITest. RefineID also has two distinct UI scopes:
 its own Compose hierarchy and flows that cross into Android system UI or a
 browser. A single Android framework is not the best tool for both scopes.
 

@@ -1062,7 +1062,7 @@ internal class UsbReaderController(
     private companion object {
         const val USB_PERMISSION_REQUEST_CODE = 0x5246
         const val CARD_POLL_INTERVAL_MILLISECONDS = 1000L
-        const val DIAGNOSTIC_AUTHENTICATION_MESSAGE = "ReFineID signing test"
+        const val DIAGNOSTIC_AUTHENTICATION_MESSAGE = "RefineID signing test"
     }
 }
 

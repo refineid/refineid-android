@@ -45,9 +45,9 @@ The vendor files remain only in the private AOSP worktree. Do not copy them
 into this public repository.
 
 The application release gate and provider-contract comparison pass on the
-builder. The changed ReFineID, KeyChain, framework, `KeystoreTests`,
+builder. The changed RefineID, KeyChain, framework, `KeystoreTests`,
 `KeyChainTests`, and host `apksigner` modules built successfully. The product
-ReFineID APK, system KeyChain APK, and system framework JAR are present.
+RefineID APK, system KeyChain APK, and system framework JAR are present.
 AOSP's installed host signer validates both APKs, and their signer digests
 match; the digest was compared only in memory and was not recorded.
 
@@ -95,8 +95,8 @@ First fast-forward the application checkout, verify host compatibility, then
 run the same build script against the preserved output tree:
 
     cd /srv/refineid-aosp
-    git -C packages/apps/ReFineID pull --ff-only
-    sudo packages/apps/ReFineID/Scripts/configure-aosp-host-compat.sh
+    git -C packages/apps/RefineID pull --ff-only
+    sudo packages/apps/RefineID/Scripts/configure-aosp-host-compat.sh
 
     export JAVA_HOME=/usr/lib/jvm/java-26-openjdk-amd64
     export ANDROID_HOME=/srv/refineid-tools/android-sdk
@@ -108,7 +108,7 @@ run the same build script against the preserved output tree:
     export USE_CCACHE=1
     export NINJA_ARGS=-j8
     export PATH="$CARGO_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
-    packages/apps/ReFineID/Scripts/build-aosp-flame.sh
+    packages/apps/RefineID/Scripts/build-aosp-flame.sh
 
 Do not start another clean build. The immediate milestone is the script's
 `aosp_flame_image=ready` result. If it fails, diagnose the first terminal

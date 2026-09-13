@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-PRODUCT_PACKAGES += ReFineID
+PRODUCT_PACKAGES += RefineID
 
 PRODUCT_PRIVATE_SEPOLICY_DIRS += \
-    packages/apps/ReFineID/platform/aosp/android-13.0.0_r31/sepolicy/private
+    packages/apps/RefineID/platform/aosp/android-13.0.0_r31/sepolicy/private

@@ -1,4 +1,4 @@
-//! Narrow JNI border between Android and the reviewed ReFineID core.
+//! Narrow JNI border between Android and the reviewed RefineID core.
 //!
 //! ATR bytes return only a small typed status. Public authentication and
 //! qualified-signature certificates cross back only after the core has bounded

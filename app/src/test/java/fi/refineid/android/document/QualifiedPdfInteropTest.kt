@@ -415,7 +415,7 @@ class QualifiedPdfInteropTest {
         const val OPENSSL_VALIDITY_DAYS = "1"
         const val OPENSSL_UNENCRYPTED_KEY_ARGUMENT = "-nodes"
         const val OPENSSL_SUBJECT_ARGUMENT = "-subj"
-        const val OPENSSL_SYNTHETIC_SUBJECT = "/CN=ReFineID synthetic PDF interop"
+        const val OPENSSL_SYNTHETIC_SUBJECT = "/CN=RefineID synthetic PDF interop"
         const val OPENSSL_KEY_OUTPUT_ARGUMENT = "-keyout"
         const val OPENSSL_CERTIFICATE_OUTPUT_ARGUMENT = "-out"
         const val OPENSSL_CERTIFICATE_COMMAND = "x509"

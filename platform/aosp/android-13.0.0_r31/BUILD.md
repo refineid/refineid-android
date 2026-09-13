@@ -11,7 +11,7 @@ space; after checkout, the build script requires 150 GiB to remain free. Google
 recommends 64 GiB of RAM. These are the current
 [AOSP workstation requirements](https://source.android.com/docs/setup/start/requirements).
 
-The ReFineID Gradle build requires OpenJDK 26 through `JAVA_HOME`. After staging
+The RefineID Gradle build requires OpenJDK 26 through `JAVA_HOME`. After staging
 the app, the build script clears `JAVA_HOME` so AOSP can select its pinned Java
 toolchain.
 
@@ -20,7 +20,7 @@ Current Linux distributions such as Ubuntu 26.04 may provide only ncurses 6.
 After syncing AOSP, install the matching compatibility libraries already
 contained in the pinned AOSP tree:
 
-    sudo packages/apps/ReFineID/Scripts/configure-aosp-host-compat.sh
+    sudo packages/apps/RefineID/Scripts/configure-aosp-host-compat.sh
 
 The script refuses conflicting library files, installs root-owned copies of
 only AOSP's matching 64-bit ncurses and tinfo libraries under `/usr/local/lib`,
@@ -69,20 +69,20 @@ After extraction, these files must exist:
     vendor/google_devices/flame/device-partial.mk
     vendor/qcom/flame/device-partial.mk
 
-The binaries and generated `vendor/` trees are not part of ReFineID and must
+The binaries and generated `vendor/` trees are not part of RefineID and must
 not be copied into this public repository.
 
-## ReFineID and patches
+## RefineID and patches
 
 Clone this repository at its fixed product path:
 
     git clone \
-      https://github.com/ReFineID/refineid-android \
-      packages/apps/ReFineID
+      https://github.com/RefineID/refineid-android \
+      packages/apps/RefineID
 
 From the AOSP root, first verify all pinned bases without changing them:
 
-    packages/apps/ReFineID/Scripts/apply-aosp-patches.sh \
+    packages/apps/RefineID/Scripts/apply-aosp-patches.sh \
       --check-base "$PWD"
 
 Configure a Git committer identity before this check; applying the patch series
@@ -90,7 +90,7 @@ creates local AOSP commits.
 
 Then build the unsigned, minimized app and apply all patch series:
 
-    packages/apps/ReFineID/Scripts/apply-aosp-patches.sh "$PWD"
+    packages/apps/RefineID/Scripts/apply-aosp-patches.sh "$PWD"
 
 The command preflights every complete series in a temporary Git index before
 modifying any AOSP project. It stops on a dirty or mismatched checkout.
@@ -99,12 +99,12 @@ modifying any AOSP project. It stops on a dirty or mismatched checkout.
 
 With `JAVA_HOME` still selecting OpenJDK 26, run:
 
-    packages/apps/ReFineID/Scripts/build-aosp-flame.sh
+    packages/apps/RefineID/Scripts/build-aosp-flame.sh
 
 The script verifies the exact final patch trees and vendor files, stages the
 unsigned release APK, builds the changed framework modules plus `KeystoreTests`
 and `KeyChainTests`, builds the full image, and checks that the installed
-ReFineID and KeyChain APKs share the platform signer. It also refuses an AOSP
+RefineID and KeyChain APKs share the platform signer. It also refuses an AOSP
 tree whose manifest checkout is not the exact `android-13.0.0_r31` commit.
 
 ## Current Linux-builder handoff
@@ -121,7 +121,7 @@ The 2026-08-16 builder state is preserved under `/srv/refineid-aosp`:
   present, and no vendor file is in this repository;
 - the application release gate, provider-contract comparison, changed runtime
   modules, `KeystoreTests`, and `KeyChainTests` built successfully;
-- the product ReFineID APK, system KeyChain APK, and system framework JAR are
+- the product RefineID APK, system KeyChain APK, and system framework JAR are
   present; AOSP's installed host `apksigner` validates both APKs and their
   platform signer digests match without recording the digest; and
 - the public application checkout passed its 98-task `check` gate, including
@@ -142,14 +142,14 @@ legacy ncurses 5 ABI used by RenderScript Clang; the guarded compatibility
 installer copies AOSP's exact libraries as root-owned system files and verifies
 that compiler before a build starts.
 
-Before resuming, fast-forward `packages/apps/ReFineID`, run the compatibility
+Before resuming, fast-forward `packages/apps/RefineID`, run the compatibility
 installer once to verify the host, then reuse the preserved output tree with
 eight direct Ninja jobs. Do not set `CCACHE_EXEC`; forcing the cold compiler
 cache into the command graph was slower than the direct build.
 
     cd /srv/refineid-aosp
-    git -C packages/apps/ReFineID pull --ff-only
-    sudo packages/apps/ReFineID/Scripts/configure-aosp-host-compat.sh
+    git -C packages/apps/RefineID pull --ff-only
+    sudo packages/apps/RefineID/Scripts/configure-aosp-host-compat.sh
 
     export JAVA_HOME=/usr/lib/jvm/java-26-openjdk-amd64
     export ANDROID_HOME=/srv/refineid-tools/android-sdk
@@ -161,7 +161,7 @@ cache into the command graph was slower than the direct build.
     export USE_CCACHE=1
     export NINJA_ARGS=-j8
     export PATH="$CARGO_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
-    packages/apps/ReFineID/Scripts/build-aosp-flame.sh
+    packages/apps/RefineID/Scripts/build-aosp-flame.sh
 
 The next concrete milestone is `aosp_flame_image=ready`, followed by explicit
 inspection of every required Pixel image, `verify-aosp-flame-device.sh`, and
@@ -173,7 +173,7 @@ wipe, flash, or production relying-party login has been performed.
 After the patched image is running, verify it from the same clean Linux
 checkout:
 
-    packages/apps/ReFineID/Scripts/verify-aosp-flame-device.sh
+    packages/apps/RefineID/Scripts/verify-aosp-flame-device.sh
 
 The verifier checks the exact source and manifest revisions, device build,
 installed product paths and bytes, platform signer relationship, privileged

@@ -6,7 +6,7 @@ Date: 2026-08-15
 
 ## Context
 
-ReFineID is one product on Apple and Android. Its releases should carry the
+RefineID is one product on Apple and Android. Its releases should carry the
 same human-readable version and build pair on both platforms. The Apple policy
 uses a `YY.M.D` UTC date and a ten-minute UTC build bucket. Apple build numbers
 may restart when the marketing version changes, while Android `versionCode`

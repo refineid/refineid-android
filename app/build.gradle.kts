@@ -331,7 +331,7 @@ val buildRappRelease = registerRappBuild("buildRappRelease", rappReleaseJniLibs,
 val buildRustDebug =
     tasks.register<Exec>("buildRustDebug") {
         group = "build"
-        description = "Build the pinned ReFineID Rust bridge for debug ABIs."
+        description = "Build the pinned RefineID Rust bridge for debug ABIs."
         workingDir(rustCrateDirectory)
         inputs.file(rustCrateDirectory.file("Cargo.toml"))
         inputs.file(rustCrateDirectory.file("Cargo.lock"))
@@ -358,7 +358,7 @@ val buildRustDebug =
 val buildRustRelease =
     tasks.register<Exec>("buildRustRelease") {
         group = "build"
-        description = "Build the pinned ReFineID Rust bridge for release ABIs."
+        description = "Build the pinned RefineID Rust bridge for release ABIs."
         workingDir(rustCrateDirectory)
         inputs.file(rustCrateDirectory.file("Cargo.toml"))
         inputs.file(rustCrateDirectory.file("Cargo.lock"))

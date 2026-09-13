@@ -616,9 +616,9 @@ class TimestampTokenVerifierInteropTest {
         const val TIMESTAMP_VERIFY_ARGUMENT = "-verify"
         const val CERTIFICATE_AUTHORITY_FILE_ARGUMENT = "-CAfile"
 
-        const val TIMESTAMP_CERTIFICATE_SUBJECT = "/CN=ReFineID synthetic timestamp authority"
-        const val ROOT_CERTIFICATE_SUBJECT = "/CN=ReFineID synthetic timestamp root"
-        const val UNRELATED_CERTIFICATE_SUBJECT = "/CN=ReFineID unrelated synthetic authority"
+        const val TIMESTAMP_CERTIFICATE_SUBJECT = "/CN=RefineID synthetic timestamp authority"
+        const val ROOT_CERTIFICATE_SUBJECT = "/CN=RefineID synthetic timestamp root"
+        const val UNRELATED_CERTIFICATE_SUBJECT = "/CN=RefineID unrelated synthetic authority"
         const val SUBJECT_KEY_IDENTIFIER_EXTENSION = "subjectKeyIdentifier=hash"
         const val TIMESTAMP_CERTIFICATE_EXTENSIONS =
             "basicConstraints=critical,CA:false\n" +

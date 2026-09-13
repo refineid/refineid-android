@@ -34,7 +34,7 @@ fi
 pkcs11_cfg="$(mktemp /tmp/pkcs11_export.XXXXXX.cfg)"
 trap 'rm -f "${pkcs11_cfg}"' EXIT
 cat << EOF > "${pkcs11_cfg}"
-name = ReFineIDSign
+name = RefineIDSign
 library = ${pkcs11_lib}
 slotListIndex = 0
 EOF

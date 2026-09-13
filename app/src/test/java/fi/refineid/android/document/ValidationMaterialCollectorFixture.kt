@@ -481,9 +481,9 @@ internal class ValidationMaterialCollectorFixture private constructor(
         private const val CA_ISSUERS_ACCESS_METHOD_IDENTIFIER = "1.3.6.1.5.5.7.48.2"
         private const val CRL_DISTRIBUTION_POINTS_IDENTIFIER = "2.5.29.31"
 
-        private const val ISSUER_COMMON_NAME = "ReFineID synthetic collector issuer"
-        private const val DOCUMENT_SIGNER_COMMON_NAME = "ReFineID synthetic document signer"
-        private const val TIMESTAMP_AUTHORITY_COMMON_NAME = "ReFineID synthetic timestamp authority"
+        private const val ISSUER_COMMON_NAME = "RefineID synthetic collector issuer"
+        private const val DOCUMENT_SIGNER_COMMON_NAME = "RefineID synthetic document signer"
+        private const val TIMESTAMP_AUTHORITY_COMMON_NAME = "RefineID synthetic timestamp authority"
         private const val CERTIFICATE_NOT_BEFORE = "20250101000000Z"
         private const val CERTIFICATE_NOT_AFTER = "20300101000000Z"
         private const val REVOCATION_LIST_THIS_UPDATE = "20260801000000Z"

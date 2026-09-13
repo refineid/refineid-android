@@ -102,7 +102,7 @@ checkout for local development.
   authentication certificate (`EF.4331`) over the stream relay in 540 ms.
 - **Browser Authentication Signing**: Safari on macOS requested TLS 1.3 client
   certificate authentication for `https://card.refineid.fi`. The request routed
-  through macOS `ReFineIDRappTokenExtension` across the encrypted stream relay
+  through macOS `RefineIDRappTokenExtension` across the encrypted stream relay
   to the phone. The phone presented `RappAuthorizationDialog` ("Requested by m1"),
   verified PIN 1 on the physical card via NFC, and returned a valid 96-byte
   ECDSA P-384 hardware signature. Safari verified the signature and completed

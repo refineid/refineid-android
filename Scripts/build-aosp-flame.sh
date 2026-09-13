@@ -16,17 +16,17 @@ readonly REQUIRED_GRADLE_JAVA_FEATURE=26
 readonly LUNCH_TARGET="aosp_flame-userdebug"
 readonly MANIFEST_RELATIVE_PATH=".repo/manifests"
 readonly EXPECTED_MANIFEST_COMMIT="012e197f31592b82d79ed2d4e03c5fb3ada38b62"
-readonly REFINEID_RELATIVE_PATH="packages/apps/ReFineID"
+readonly REFINEID_RELATIVE_PATH="packages/apps/RefineID"
 readonly LEGACY_CLANG_RELATIVE_PATH="prebuilts/clang/host/linux-x86/clang-3289846/bin/clang.real"
 readonly SHARED_VENDOR_MAKEFILE="vendor/google_devices/coral/proprietary/device-vendor.mk"
 readonly GOOGLE_VENDOR_MAKEFILE="vendor/google_devices/flame/device-partial.mk"
 readonly QUALCOMM_VENDOR_MAKEFILE="vendor/qcom/flame/device-partial.mk"
 readonly HOST_APKSIGNER_RELATIVE_PATH="out/host/linux-x86/bin/apksigner"
-readonly BUILT_REFINEID_APK="product/priv-app/ReFineID/ReFineID.apk"
+readonly BUILT_REFINEID_APK="product/priv-app/RefineID/RefineID.apk"
 readonly BUILT_KEYCHAIN_APK="system/app/KeyChain/KeyChain.apk"
 readonly CERTIFICATE_DIGEST_LABEL="Signer #1 certificate SHA-256 digest"
 readonly -a CHANGED_BUILD_MODULES=(
-  "ReFineID"
+  "RefineID"
   "KeyChain"
   "framework-minus-apex"
   "KeystoreTests"
@@ -75,11 +75,11 @@ git -C "$MANIFEST_PROJECT" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
 [[ -z "$(git -C "$MANIFEST_PROJECT" status --porcelain --untracked-files=normal)" ]] ||
   fail "AOSP manifest checkout has local changes"
 [[ -d "$EXPECTED_REPOSITORY_ROOT" ]] ||
-  fail "ReFineID must be checked out at ${REFINEID_RELATIVE_PATH}"
+  fail "RefineID must be checked out at ${REFINEID_RELATIVE_PATH}"
 RESOLVED_EXPECTED_REPOSITORY_ROOT="$(cd "$EXPECTED_REPOSITORY_ROOT" && pwd -P)"
 readonly RESOLVED_EXPECTED_REPOSITORY_ROOT
 [[ "$RESOLVED_EXPECTED_REPOSITORY_ROOT" == "$REPOSITORY_ROOT" ]] ||
-  fail "this repository must be the AOSP packages/apps/ReFineID checkout"
+  fail "this repository must be the AOSP packages/apps/RefineID checkout"
 
 FREE_SPACE_KIB="$(df -Pk "$AOSP_ROOT" | awk 'NR == 2 {print $4}')"
 readonly FREE_SPACE_KIB
@@ -121,21 +121,21 @@ set -u
 [[ -n "${ANDROID_PRODUCT_OUT:-}" ]] || fail "Android product output is unset"
 readonly PRODUCT_APK="${ANDROID_PRODUCT_OUT}/${BUILT_REFINEID_APK}"
 readonly KEYCHAIN_APK="${ANDROID_PRODUCT_OUT}/${BUILT_KEYCHAIN_APK}"
-[[ -f "$PRODUCT_APK" ]] || fail "the product image is missing ReFineID"
+[[ -f "$PRODUCT_APK" ]] || fail "the product image is missing RefineID"
 [[ -f "$KEYCHAIN_APK" ]] || fail "the product image is missing KeyChain"
 APKSIGNER="${AOSP_ROOT}/${HOST_APKSIGNER_RELATIVE_PATH}"
 readonly APKSIGNER
 [[ -x "$APKSIGNER" ]] || fail "the AOSP host apksigner is missing"
 "$APKSIGNER" verify "$PRODUCT_APK" >/dev/null 2>&1 ||
-  fail "the product ReFineID APK is not signed"
+  fail "the product RefineID APK is not signed"
 "$APKSIGNER" verify "$KEYCHAIN_APK" >/dev/null 2>&1 ||
   fail "the product KeyChain APK is not signed"
 REFINEID_SIGNER_DIGEST="$(signer_digest "$PRODUCT_APK")"
 readonly REFINEID_SIGNER_DIGEST
 KEYCHAIN_SIGNER_DIGEST="$(signer_digest "$KEYCHAIN_APK")"
 readonly KEYCHAIN_SIGNER_DIGEST
-[[ -n "$REFINEID_SIGNER_DIGEST" ]] || fail "the ReFineID signer cannot be identified"
+[[ -n "$REFINEID_SIGNER_DIGEST" ]] || fail "the RefineID signer cannot be identified"
 [[ "$REFINEID_SIGNER_DIGEST" == "$KEYCHAIN_SIGNER_DIGEST" ]] ||
-  fail "ReFineID and KeyChain are not signed by the same platform certificate"
+  fail "RefineID and KeyChain are not signed by the same platform certificate"
 
 echo "aosp_flame_image=ready"

@@ -83,7 +83,7 @@ or encounters an initial probe failure.
 
 ## Cross-Platform Alignment
 
-This behavior matches findings on other ReFineID platforms:
+This behavior matches findings on other RefineID platforms:
 
 - **Apple (`refineid-apple`):** In `SmartCardProtocolNegotiation.swift`, CryptoTokenKit
   offers `[.any, .t0, .t1]` because readers botch multi-protocol negotiation when

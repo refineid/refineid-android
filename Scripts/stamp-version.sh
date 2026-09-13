@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copyright 2026 Petri Koistinen. Licensed under the Apache License, Version 2.0.
 
-# Stamp the same release pair used by ReFineID-Apple:
+# Stamp the same release pair used by RefineID-Apple:
 #
 #   versionName = YY.M.D
 #   buildNumber = H * 10 + M / 10

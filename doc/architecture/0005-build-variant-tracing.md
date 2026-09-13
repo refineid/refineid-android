@@ -10,7 +10,7 @@ Card and browser work crosses process, USB, JNI, and protocol boundaries. A
 development build needs enough evidence to distinguish those boundaries, while
 a production authentication app must not leave a diagnostic trail.
 
-The Apple implementation already establishes the ReFineID policy: development
+The Apple implementation already establishes the RefineID policy: development
 builds retain all instruments, shipped builds say nothing, and credentials and
 personal card data are never trace material.
 
@@ -28,7 +28,7 @@ Release builds use a separate empty trace sink. R8 also removes Android Logcat,
 console, `java.util.logging`, and Android performance-trace emission from
 bundled dependencies, and folds their enablement checks to false. Release
 verification parses the optimized DEX method table and rejects every admitted
-output method as well as ReFineID trace literals and trace classes; a
+output method as well as RefineID trace literals and trace classes; a
 successful compile is not sufficient evidence.
 
 Call sites pass typed, already-sanitized values to the trace boundary. They do

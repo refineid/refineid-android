@@ -41,7 +41,7 @@ Google has shipped the missing hook twice on its other platforms:
 
 - macOS/iOS CryptoTokenKit: third-party persistent token extensions
   serve certificates and signing system-wide, Safari included; iOS 26
-  added a built-in NFC smart-card slot. ReFineID-Apple ships on it.
+  added a built-in NFC smart-card slot. RefineID-Apple ships on it.
 - ChromeOS `chrome.certificateProvider`: middleware extensions inject
   certificates and proxy TLS-handshake signing to a smart card over a
   PC/SC connector application.

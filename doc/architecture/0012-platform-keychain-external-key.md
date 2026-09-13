@@ -31,7 +31,7 @@ URI, but the current grant path still requires the alias to identify an
 AndroidKeyStore key. Policy can remove a chooser interaction; it cannot create
 an external key.
 
-The current ReFineID application now has both complete-message and
+The current RefineID application now has both complete-message and
 exact-digest signing boundaries. Both routes use one holder-entered PIN1,
 serialize USB use, validate the card key profile, and locally verify the card
 signature before returning it.
@@ -50,7 +50,7 @@ The platform branch consists of four boundaries:
    `PrivateKey` for an external alias.
 3. A framework JCA provider recognizes only that private-key class, hashes or
    validates its input, and asks `KeyChainService` to sign an exact digest.
-4. A privileged ReFineID service obtains a fresh PIN1 through its secure UI,
+4. A privileged RefineID service obtains a fresh PIN1 through its secure UI,
    signs through the retained USB session, locally verifies the result, and
    returns only the verified signature or a coarse failure.
 
@@ -148,7 +148,7 @@ The request carries:
 It does not carry a caller UID or package as a trusted field.
 `KeyChainService` derives the Binder caller UID, verifies the alias grant and
 active generation, resolves the installed package for holder-facing consent,
-and only then proxies to the trusted ReFineID service.
+and only then proxies to the trusted RefineID service.
 
 The private provider call includes that KeyChain-derived UID and its resolved
 package names. The provider accepts such fields only from the statically bound
@@ -163,7 +163,7 @@ only the Android platform versus AndroidX annotation dialect required by their
 two build environments.
 
 The liveness token is not caller identity and grants no authority. The
-ReFineID service links to its death while an operation or secure prompt is
+RefineID service links to its death while an operation or secure prompt is
 pending, allowing browser-process death to cancel and clear that work without
 trusting any browser-supplied identity claim.
 
@@ -238,7 +238,7 @@ the output length and again to obtain the signature. Performing two card
 operations would prompt twice and spend two PIN-protected operations for one
 TLS signature.
 
-After one locally verified result, the ReFineID service therefore retains a
+After one locally verified result, the RefineID service therefore retains a
 one-result replay lease keyed by:
 
 - the browser UID derived and forwarded by KeyChain;
@@ -270,7 +270,7 @@ different salts and therefore do not match the lease key.
   does not carry a trustworthy web origin, so the design does not claim
   origin-level consent beyond Android's existing UID grant model.
 - The browser controls the data it asks its granted key to sign, as it already
-  does for ordinary KeyChain keys. ReFineID accepts only the narrow
+  does for ordinary KeyChain keys. RefineID accepts only the narrow
   authentication algorithms and still requires holder action.
 - Every signature is verified against the currently selected authentication
   certificate before it crosses the provider boundary.
@@ -279,7 +279,7 @@ different salts and therefore do not match the lease key.
   prompt cancellation, timeout, and caller interruption fail closed and clear
   pending state.
 - Debug builds record only sanitized type, length, caller, timing, and outcome
-  metadata. ReFineID release builds emit no logs.
+  metadata. RefineID release builds emit no logs.
 - Platform signing keys, priv-app allowlists for a particular build, and any
   real card or identity material are never committed.
 
@@ -299,7 +299,7 @@ the next one depends on it:
 6. Carry browser-process liveness through the request and add the
    signature-protected, exact-component KeyChain binding with static package,
    privilege, UID, and signing-certificate trust checks.
-7. Add the ReFineID privileged service, system-image declarations, SELinux
+7. Add the RefineID privileged service, system-image declarations, SELinux
    policy, secure prompt coordinator, and one-result replay lease over the
    existing digest-signing boundary. These sources are implemented; their
    first full Soong image build remains pending on the Linux builder.
@@ -341,13 +341,13 @@ the platform image builder.
   behavior.
 - Framework provider tests prove exact algorithm/input mapping and ordinary-key
   provider fall-through.
-- ReFineID tests prove one fresh PIN per card operation, mandatory local
+- RefineID tests prove one fresh PIN per card operation, mandatory local
   verification, one-result replay, zeroization, detach, timeout, and process
   death behavior.
 - Physical Pixel tests prove that Chrome and Firefox independently receive the
   alias through `KeyChain`, complete a supported TLS client-authentication
   handshake, and cannot use the alias without a grant and holder action.
-- Release artifact inspection continues to prove that ReFineID contains no
+- Release artifact inspection continues to prove that RefineID contains no
   logging calls or trace literals.
 
 ## Upstream references

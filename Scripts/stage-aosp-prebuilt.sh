@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 readonly RELEASE_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
 readonly RELEASE_MERGED_MANIFEST="app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml"
 readonly AOSP_PREBUILT_DIRECTORY="aosp-prebuilt"
-readonly AOSP_PREBUILT_APK="${AOSP_PREBUILT_DIRECTORY}/ReFineID.apk"
+readonly AOSP_PREBUILT_APK="${AOSP_PREBUILT_DIRECTORY}/RefineID.apk"
 readonly APK_SIGNATURE_ENTRY_PATTERN='^META-INF/[^/]+\.(RSA|DSA|EC|SF)$'
 readonly PREBUILT_FILE_MODE="0644"
 readonly RELEASE_PACKAGE='package="fi.refineid.android"'

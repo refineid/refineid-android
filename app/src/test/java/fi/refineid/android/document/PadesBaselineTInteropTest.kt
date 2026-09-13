@@ -930,9 +930,9 @@ private class PadesInteropEnvironment private constructor(
         const val QPDF_CHECK_ARGUMENT = "--check"
         const val PDFSIG_NO_CERTIFICATE_ARGUMENT = "-nocert"
 
-        const val TIMESTAMP_CERTIFICATE_SUBJECT = "/CN=ReFineID synthetic timestamp authority"
-        const val ROOT_CERTIFICATE_SUBJECT = "/CN=ReFineID synthetic timestamp root"
-        const val QUALIFIED_CERTIFICATE_SUBJECT = "/CN=ReFineID synthetic qualified PDF signer"
+        const val TIMESTAMP_CERTIFICATE_SUBJECT = "/CN=RefineID synthetic timestamp authority"
+        const val ROOT_CERTIFICATE_SUBJECT = "/CN=RefineID synthetic timestamp root"
+        const val QUALIFIED_CERTIFICATE_SUBJECT = "/CN=RefineID synthetic qualified PDF signer"
         const val SUBJECT_KEY_IDENTIFIER_EXTENSION = "subjectKeyIdentifier=hash"
         const val TIMESTAMP_REVOCATION_LIST_ADDRESS = "https://tsa.example/root.crl"
         const val TIMESTAMP_CERTIFICATE_EXTENSIONS =

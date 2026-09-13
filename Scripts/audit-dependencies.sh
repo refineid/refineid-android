@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copyright 2026 Petri Koistinen. Licensed under the Apache License, Version 2.0.
 #
-# Deep dependency vulnerability audit script for ReFineID Android.
+# Deep dependency vulnerability audit script for RefineID Android.
 # Audits Rust native crates (cargo-audit and osv-scanner) and Android / Gradle
 # release artifacts (OWASP dependency-check).
 

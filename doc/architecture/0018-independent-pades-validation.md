@@ -8,7 +8,7 @@ Accepted.
 
 The PDF writer, CMS encoder, and orchestration tests can agree with one another
 while sharing the same defect. A complete baseline signature therefore needs a
-verifier that does not reuse any ReFineID parsing or cryptographic code.
+verifier that does not reuse any RefineID parsing or cryptographic code.
 
 Permanent private-key fixtures are also inappropriate for a public repository,
 even when they are labelled as synthetic.

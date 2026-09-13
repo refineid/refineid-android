@@ -47,7 +47,7 @@ zip -d "${bundle_path}" "META-INF/*.SF" "META-INF/*.RSA" "META-INF/*.DSA" "META-
 pkcs11_cfg="$(mktemp /tmp/refineid_bundle_pkcs11.XXXXXX.cfg)"
 trap 'rm -f "${pkcs11_cfg}"' EXIT
 cat << EOF > "${pkcs11_cfg}"
-name = ReFineIDSign
+name = RefineIDSign
 library = ${pkcs11_lib}
 slotListIndex = 0
 EOF

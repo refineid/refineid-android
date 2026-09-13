@@ -6,7 +6,7 @@ Date: 2026-08-22
 
 ## Context
 
-The ReFineID Android app is distributed through the Google Play Store and as a
+The RefineID Android app is distributed through the Google Play Store and as a
 direct download (APK) from the official website. This document outlines the
 automated workflows for both paths.
 

@@ -34,7 +34,7 @@ jobs:
       - name: Check out the sibling refineid-core
         uses: actions/checkout@v7
         with:
-          repository: ReFineID/refineid-core
+          repository: RefineID/refineid-core
           path: refineid-core
 
       - name: Set up JDK

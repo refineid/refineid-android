@@ -4,7 +4,7 @@
 # Build, install, and launch the latest diagnostic debug build on one connected Android device.
 #
 # The calendar version and ten-minute build number are dynamically passed as command-line
-# Gradle overrides, matching ReFineID-Apple's install-ios-development.sh.
+# Gradle overrides, matching RefineID-Apple's install-ios-development.sh.
 #
 # Usage:
 #
@@ -38,7 +38,7 @@ if [[ -n "$device" ]]; then
   export ANDROID_SERIAL="$device"
 fi
 
-echo "building ReFineID ${version} (${build}) for ${target_msg}..."
+echo "building RefineID ${version} (${build}) for ${target_msg}..."
 ./gradlew installDebug -PversionName="${version}" -PbuildNumber="${build}"
 
 if [[ -n "$device" ]]; then
@@ -47,4 +47,4 @@ else
   adb shell am start -n fi.refineid.android/.MainActivity
 fi
 
-echo "installed and launched ReFineID ${version} (${build})"
+echo "installed and launched RefineID ${version} (${build})"

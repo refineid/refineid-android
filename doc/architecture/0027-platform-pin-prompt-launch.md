@@ -7,15 +7,15 @@ Accepted.
 ## Context
 
 The framework JCA signature call is synchronous and originates in a browser
-crypto worker. KeyChain proxies it to ReFineID's bound provider service, which
+crypto worker. KeyChain proxies it to RefineID's bound provider service, which
 must ask the holder for a fresh PIN1 before touching the card. At that point
-ReFineID can have no visible activity. Android 10 and newer restrict activity
+RefineID can have no visible activity. Android 10 and newer restrict activity
 launches from background processes, so a plain `startActivity` may suppress
 the prompt and leave the TLS operation waiting until timeout.
 
 The pinned Android 13 framework provides the hidden
 `android.permission.START_ACTIVITIES_FROM_BACKGROUND` permission for this
-class of privileged system integration. The AOSP product signs ReFineID with
+class of privileged system integration. The AOSP product signs RefineID with
 the same platform certificate that signs the framework and KeyChain.
 
 ## Decision
@@ -47,7 +47,7 @@ Binder-death, secure-field, and UI tests exercise prompt ownership without a
 real credential.
 
 The final platform image test must additionally prove that an independent
-browser signature request raises the prompt while ReFineID has no foreground
+browser signature request raises the prompt while RefineID has no foreground
 activity. That observation cannot be made on the stock image because the debug
 APK is not platform-signed.
 

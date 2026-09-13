@@ -13,7 +13,7 @@ readonly AOSP_TAG="android-13.0.0_r31"
 readonly FRAMEWORKS_BASE_UPSTREAM="https://android.googlesource.com/platform/frameworks/base"
 readonly KEYCHAIN_UPSTREAM="https://android.googlesource.com/platform/packages/apps/KeyChain"
 readonly PIXEL_DEVICE_UPSTREAM="https://android.googlesource.com/device/google/coral"
-readonly REFINEID_RELATIVE_PATH="packages/apps/ReFineID"
+readonly REFINEID_RELATIVE_PATH="packages/apps/RefineID"
 readonly FRAMEWORKS_BASE_RELATIVE_PATH="frameworks/base"
 readonly KEYCHAIN_RELATIVE_PATH="packages/apps/KeyChain"
 readonly PIXEL_DEVICE_RELATIVE_PATH="device/google/coral"
@@ -79,7 +79,7 @@ fi
 
 repository_status="$(git -C "$REPOSITORY_ROOT" status --porcelain --untracked-files=normal)"
 [[ -z "$repository_status" ]] ||
-  fail "AOSP patch audit requires a clean committed ReFineID checkout"
+  fail "AOSP patch audit requires a clean committed RefineID checkout"
 
 audit_root="$(mktemp -d "$AUDIT_PARENT/$AUDIT_DIRECTORY_PREFIX"XXXXXX)"
 trap cleanup EXIT
