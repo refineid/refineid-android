@@ -2,6 +2,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <string name="section_document">Asiakirja</string>
     <string name="read_identity_card">Lue kortti</string>
+    <string name="no_card_in_reader">Ei korttia lukijassa</string>
     <string name="pin1_optional">PIN 1 (valinnainen)</string>
     <string name="usb_reader">USB-lukija</string>
     <string name="not_connected">Ei yhteyttä</string>

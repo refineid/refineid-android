@@ -273,6 +273,22 @@ internal fun MainScreen(
         } else {
             nfcSnapshot.cardDetails ?: snapshot.cardDetails
         }
+
+    // A removed card leaves an empty Person page: with a USB reader
+    // attached, drop back to the front page once the last identity is
+    // gone. Re-probes and readerless NFC flows never trigger this.
+    LaunchedEffect(destination, usbReaderPresent, snapshot.status, effectiveHolderName) {
+        if (shouldClosePersonPage(
+                isPersonPage = destination == MainDestination.PERSON,
+                usbReaderPresent = usbReaderPresent,
+                usbReaderChecking = snapshot.status == ReaderConnectionStatus.CHECKING,
+                hasIdentity = effectiveHolderName != null,
+            )
+        ) {
+            activePersonDetails = null
+            destination = MainDestination.HOME
+        }
+    }
     val performFullIdentityReset: () -> Unit = {
         onForgetPrimedCard()
         CanSessionStore.drop()
@@ -308,6 +324,7 @@ internal fun MainScreen(
                             isSelected = reader.isSelected,
                             details = if (reader.isSelected) snapshot.cardDetails else null,
                             onSelect = { onSelectUsbDevice(reader.deviceId) },
+                            hasCard = reader.cardPresence != CardPresence.NOT_PRESENT,
                         ),
                     )
                 }
@@ -360,6 +377,7 @@ internal fun MainScreen(
                 browserAvailable = browserAvailable,
                 holderName = effectiveHolderName,
                 hasNfc = hasNfc,
+                usbReaderPresent = usbReaderPresent,
                 isActivationRequired = isActivationRequired,
                 unactivatedCardLabel = unactivatedCardLabel,
                 isMultipleUnactivated = isMultipleUnactivated,
@@ -634,6 +652,7 @@ private fun HomeScreen(
     browserAvailable: Boolean = false,
     holderName: String?,
     hasNfc: Boolean = true,
+    usbReaderPresent: Boolean,
     isActivationRequired: Boolean = false,
     unactivatedCardLabel: String? = null,
     isMultipleUnactivated: Boolean = false,
@@ -752,6 +771,7 @@ private fun HomeScreen(
             IdentitySection(
                 holderName = holderName,
                 hasNfc = hasNfc,
+                usbReaderPresent = usbReaderPresent,
                 isActivationRequired = isActivationRequired,
                 onForget = onForgetIdentity,
                 onOpenPerson = onOpenPerson,
@@ -813,6 +833,7 @@ private fun DiagnosticsFooter(onOpenDiagnostics: () -> Unit) {
 private fun IdentitySection(
     holderName: String?,
     hasNfc: Boolean = true,
+    usbReaderPresent: Boolean,
     isActivationRequired: Boolean = false,
     onForget: (() -> Unit)?,
     onOpenPerson: () -> Unit,
@@ -825,6 +846,13 @@ private fun IdentitySection(
 ) {
     var showsForgetConfirmation by remember { mutableStateOf(false) }
     var showsNfcReadDialog by remember { mutableStateOf(false) }
+    val rowAction =
+        identityRowAction(
+            hasHolder = holderName != null,
+            usbCanRequested = onRequestUsbCan != null,
+            hasNfc = hasNfc,
+            usbReaderPresent = usbReaderPresent,
+        )
 
     Section(stringResource(R.string.section_identity)) {
         NavigationGroup {
@@ -839,84 +867,24 @@ private fun IdentitySection(
                             card.onSelect?.invoke()
                             if (card.isSelected && onRequestUsbCan != null && card.details == null) {
                                 onRequestUsbCan()
-                            } else if (card.details != null || card.title.isNotEmpty()) {
+                            } else if ((card.details != null || card.title.isNotEmpty()) && card.hasCard) {
                                 onOpenPersonForCard?.invoke(card) ?: onOpenPerson()
                             }
                         },
                     )
                 }
             } else {
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                val personPageComplete = holderName != null
-                                if (personPageComplete) {
-                                    onOpenPerson()
-                                } else if (onRequestUsbCan != null) {
-                                    onRequestUsbCan()
-                                } else if (!hasNfc) {
-                                    onOpenPairing()
-                                } else {
-                                    showsNfcReadDialog = true
-                                }
-                            }.padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING)
-                            .testTag(UiAutomationIds.IDENTITY_ROW),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(ROW_ITEM_SPACING),
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Person,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(ROW_ICON_SIZE),
-                    )
-                    Text(
-                        text =
-                            holderName
-                                ?: stringResource(
-                                    if (onRequestUsbCan != null) {
-                                        R.string.access_number_required
-                                    } else if (hasNfc) {
-                                        R.string.read_identity_card
-                                    } else {
-                                        R.string.connect_id_card
-                                    },
-                                ),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color =
-                            if (holderName != null) {
-                                MaterialTheme.colorScheme.onSurface
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        modifier = Modifier.weight(ROW_LABEL_WEIGHT),
-                    )
-                    if ((holderName != null || pinCache?.hasPin == true) && onForget != null) {
-                        IconButton(
-                            onClick = { showsForgetConfirmation = true },
-                            modifier =
-                                Modifier
-                                    .size(44.dp)
-                                    .testTag("forgetCardIdentityButton"),
-                        ) {
-                            Icon(
-                                imageVector = MinusCircleIcon,
-                                contentDescription = stringResource(R.string.forget_identity),
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
-                    } else {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
+                SingleIdentityRow(
+                    holderName = holderName,
+                    rowAction = rowAction,
+                    pinCache = pinCache,
+                    onForget = onForget,
+                    onOpenPerson = onOpenPerson,
+                    onOpenPairing = onOpenPairing,
+                    onShowNfcRead = { showsNfcReadDialog = true },
+                    onShowForgetConfirmation = { showsForgetConfirmation = true },
+                    onRequestUsbCan = onRequestUsbCan,
+                )
             }
         }
     }
@@ -958,6 +926,88 @@ private fun IdentitySection(
             },
             isActivationRequired = isActivationRequired,
         )
+    }
+}
+
+@Suppress("FunctionName", "ktlint:standard:function-naming", "LongParameterList")
+@Composable
+private fun SingleIdentityRow(
+    holderName: String?,
+    rowAction: IdentityRowAction,
+    pinCache: AuthenticationPinCache?,
+    onForget: (() -> Unit)?,
+    onOpenPerson: () -> Unit,
+    onOpenPairing: () -> Unit,
+    onShowNfcRead: () -> Unit,
+    onShowForgetConfirmation: () -> Unit,
+    onRequestUsbCan: (() -> Unit)?,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable {
+                    when (rowAction) {
+                        IdentityRowAction.OPEN_PERSON -> onOpenPerson()
+                        IdentityRowAction.REQUEST_USB_CAN -> onRequestUsbCan?.invoke()
+                        IdentityRowAction.OPEN_PAIRING -> onOpenPairing()
+                        IdentityRowAction.ASK_NFC_READ -> onShowNfcRead()
+                        IdentityRowAction.NOTHING -> Unit
+                    }
+                }.padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING)
+                .testTag(UiAutomationIds.IDENTITY_ROW),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ROW_ITEM_SPACING),
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Person,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(ROW_ICON_SIZE),
+        )
+        Text(
+            text =
+                holderName
+                    ?: stringResource(
+                        when (rowAction) {
+                            IdentityRowAction.REQUEST_USB_CAN -> R.string.access_number_required
+                            IdentityRowAction.ASK_NFC_READ -> R.string.read_identity_card
+                            IdentityRowAction.NOTHING -> R.string.no_card_in_reader
+                            else -> R.string.connect_id_card
+                        },
+                    ),
+            style = MaterialTheme.typography.bodyLarge,
+            color =
+                if (holderName != null) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            modifier = Modifier.weight(ROW_LABEL_WEIGHT),
+        )
+        if ((holderName != null || pinCache?.hasPin == true) && onForget != null) {
+            IconButton(
+                onClick = onShowForgetConfirmation,
+                modifier =
+                    Modifier
+                        .size(44.dp)
+                        .testTag("forgetCardIdentityButton"),
+            ) {
+                Icon(
+                    imageVector = MinusCircleIcon,
+                    contentDescription = stringResource(R.string.forget_identity),
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        } else if (rowAction != IdentityRowAction.NOTHING) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 

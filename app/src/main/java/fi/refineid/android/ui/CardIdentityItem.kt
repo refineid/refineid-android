@@ -34,6 +34,7 @@ internal data class CardIdentityItem(
     val details: PersonCardDetails? = null,
     val onSelect: (() -> Unit)? = null,
     val onForget: (() -> Unit)? = null,
+    val hasCard: Boolean = true,
 )
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
