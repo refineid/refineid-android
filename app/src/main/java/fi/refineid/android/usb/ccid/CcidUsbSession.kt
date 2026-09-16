@@ -14,8 +14,6 @@ import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
 import fi.refineid.android.core.CardManagementResult
 import fi.refineid.android.core.CardManagementScheme
-import fi.refineid.android.core.CardPhotoStore
-import fi.refineid.android.core.CertificateHolderName
 import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativeAuthenticationCertificate
@@ -225,19 +223,28 @@ internal class CcidUsbSession(
             contactlessSessionActive = true
             sessionMaterial.cacheAuthenticationCertificate(result.certificate)
             sessionMaterial.cachePin1Preflight(result.preflight)
-            NativeCore.readCardFacePhoto()?.let { photo ->
-                val holderName = CertificateHolderName.fromCertificate(result.certificate)
-                CardPhotoStore.savePhoto(photo, holderName, NativeCore.readCardDocumentNumber())
-            }
         } else if (result is NativeContactlessOpenResult.ActivationRequired) {
             contactlessSessionActive = true
             sessionMaterial.cacheAuthenticationCertificate(result.certificate)
-            NativeCore.readCardFacePhoto()?.let { photo ->
-                val holderName = CertificateHolderName.fromCertificate(result.certificate)
-                CardPhotoStore.savePhoto(photo, holderName, NativeCore.readCardDocumentNumber())
-            }
         }
         return result
+    }
+
+    /**
+     * Face photo over the secure-messaging channel a prior
+     * [openContactless] left open, without a second PACE handshake; null
+     * when no contactless session is held.
+     */
+    fun readFacePhoto(): ByteArray? {
+        checkOwnerThread()
+        check(!isClosed) {
+            "CCID session is closed"
+        }
+        return if (contactlessSessionActive) {
+            NativeContactlessSession.readFacePhotoOnSession(nativeExchange)
+        } else {
+            null
+        }
     }
 
     fun cacheAuthenticationCertificate(): NativeCertificateReadResult<NativeAuthenticationCertificate> {
