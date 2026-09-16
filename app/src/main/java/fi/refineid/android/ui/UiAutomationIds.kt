@@ -76,6 +76,8 @@ internal object UiAutomationIds {
     const val ACTIVATION_NEW_PIN2_FIELD = "managementNewPin2"
     const val ACTIVATION_NEW_PIN2_REPEAT_FIELD = "managementNewPin2Repeat"
     const val ACTIVATION_SUBMIT_ACTION = "managementActivate"
+    const val COPY_PHOTO_ACTION = "copyPhotoAction"
+    const val SHARE_PHOTO_ACTION = "sharePhotoAction"
 
     fun timestampAddressField(index: Int): String = TIMESTAMP_ADDRESS_FIELD_PREFIX + index
 

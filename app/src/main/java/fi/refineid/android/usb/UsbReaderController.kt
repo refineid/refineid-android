@@ -533,7 +533,7 @@ internal class UsbReaderController(
             if (result is NativeContactlessOpenResult.Success) {
                 activeProviderGeneration = providerGenerationRandom.nextProviderGeneration()
             }
-            val photoBytes = NativeCore.readCardFacePhoto()
+            val photoBytes = activeSession?.readFacePhoto()
             val documentNumber = NativeCore.readCardDocumentNumber()
             val tamperProofVerified = NativeVerification.readCardVerificationPassed()
             val certificate =

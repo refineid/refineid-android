@@ -288,6 +288,12 @@ val rustCrateDirectory =
     rootProject.layout.projectDirectory.dir("native/refineid-android-core")
 val androidNdkDirectory = androidComponents.sdkComponents.ndkDirectory
 
+// Path-patched refineid-core crates both Rust bridges compile against (see
+// the [patch] sections). Without this input, core edits silently reuse
+// stale .so files because Cargo.lock never changes for path patches.
+val sharedRefineIdCoreCrates =
+    rootProject.layout.projectDirectory.dir("../refineid-core/crates")
+
 // --- RAPP -----------------------------------------------------------------
 //
 // The Remote Authorization Proxy Protocol is implemented once, in Rust, in the
@@ -307,6 +313,7 @@ fun registerRappBuild(
     inputs.file(rappCrateDirectory.file("Cargo.toml"))
     inputs.file(rappCrateDirectory.file("Cargo.lock"))
     inputs.dir(rappCrateDirectory.dir("src"))
+    inputs.dir(sharedRefineIdCoreCrates)
     outputs.dir(output)
     environment("ANDROID_NDK_HOME", androidNdkDirectory.get().asFile.absolutePath)
     val arguments =
@@ -338,6 +345,7 @@ val buildRustDebug =
         inputs.file(rustCrateDirectory.file("Cargo.toml"))
         inputs.file(rustCrateDirectory.file("Cargo.lock"))
         inputs.dir(rustCrateDirectory.dir("src"))
+        inputs.dir(sharedRefineIdCoreCrates)
         outputs.dir(rustDebugJniLibs)
         environment(
             "ANDROID_NDK_HOME",
@@ -364,6 +372,7 @@ val buildRustRelease =
         inputs.file(rustCrateDirectory.file("Cargo.toml"))
         inputs.file(rustCrateDirectory.file("Cargo.lock"))
         inputs.dir(rustCrateDirectory.dir("src"))
+        inputs.dir(sharedRefineIdCoreCrates)
         outputs.dir(rustReleaseJniLibs)
         environment(
             "ANDROID_NDK_HOME",

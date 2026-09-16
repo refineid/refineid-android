@@ -458,6 +458,8 @@ internal object AppTrace {
         detail: String = "",
     ) = Unit
 
+    fun ccidPpsLinkCheck(alive: Boolean) = Unit
+
     fun ccidCardState(state: CcidCardStatus) = Unit
 
     fun ccidCommandFailed(

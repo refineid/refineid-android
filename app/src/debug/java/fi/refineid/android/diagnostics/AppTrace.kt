@@ -986,6 +986,10 @@ internal object AppTrace {
         debug("ccid:set-parameters succeeded=" + succeeded + extra)
     }
 
+    fun ccidPpsLinkCheck(alive: Boolean) {
+        debug("ccid:pps-link-check alive=" + alive)
+    }
+
     fun ccidCardState(state: CcidCardStatus) {
         debug("ccid:card-state " + state)
     }
