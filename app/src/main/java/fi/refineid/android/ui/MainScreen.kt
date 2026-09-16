@@ -557,7 +557,6 @@ internal fun MainScreen(
                         context = context,
                         nfcReaderStatus = nfcSnapshot.status,
                         usbReaderStatus = snapshot.status,
-                        holderName = effectiveHolderName,
                         cardDetails = effectiveDetails,
                     )
                 }

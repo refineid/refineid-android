@@ -56,7 +56,6 @@ internal object DiagnosticsCollector {
         context: Context,
         nfcReaderStatus: NfcReaderStatus? = null,
         usbReaderStatus: ReaderConnectionStatus? = null,
-        holderName: String? = null,
         cardDetails: PersonCardDetails? = null,
         rappStatus: String? = null,
     ): DiagnosticsSnapshot {
@@ -101,16 +100,7 @@ internal object DiagnosticsCollector {
                 }
             }.trimEnd()
 
-        val cardStatus =
-            buildString {
-                appendLine("Holder: ${holderName ?: "(none)"}")
-                appendLine("Document Number: ${cardDetails?.documentNumber ?: "(none)"}")
-                appendLine("Valid: ${cardDetails?.issuedDate ?: "?"} .. ${cardDetails?.expiryDate ?: "?"}")
-                appendLine("Issuer: ${cardDetails?.issuer ?: "(none)"}")
-                appendLine("Generation: ${cardGenerationLabel(cardDetails?.issuedDate)}")
-                appendLine("Signature Algorithm: ${cardDetails?.signatureAlgorithm ?: "(unknown)"}")
-                appendLine("Tamper-Proof Verified: ${cardDetails?.isTamperProofVerified ?: false}")
-            }.trimEnd()
+        val cardStatus = cardStatusText(cardDetails)
 
         return DiagnosticsSnapshot(
             appInfo = appInfo,
@@ -126,6 +116,20 @@ internal object DiagnosticsCollector {
     private const val HEX_RADIX = 16
     private const val HEX_DIGITS_SHORT = 4
 }
+
+/**
+ * Card and identity summary for diagnostics. Holder identity (name,
+ * document number, validity dates) is omitted: it identifies the
+ * holder without helping a bug report. The generation bucket keeps
+ * the activation scheme debuggable without leaking dates.
+ */
+internal fun cardStatusText(cardDetails: PersonCardDetails?): String =
+    buildString {
+        appendLine("Issuer: ${cardDetails?.issuer ?: "(none)"}")
+        appendLine("Generation: ${cardGenerationLabel(cardDetails?.issuedDate)}")
+        appendLine("Signature Algorithm: ${cardDetails?.signatureAlgorithm ?: "(unknown)"}")
+        appendLine("Tamper-Proof Verified: ${cardDetails?.isTamperProofVerified ?: false}")
+    }.trimEnd()
 
 /**
  * Card generation from the authentication certificate's issued date

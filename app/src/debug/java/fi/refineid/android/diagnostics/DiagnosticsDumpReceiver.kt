@@ -32,7 +32,6 @@ class DiagnosticsDumpReceiver : BroadcastReceiver() {
                 val app = context.applicationContext as? RefineIdApplication
                 val nfcSnapshot = app?.nfcReaderController?.snapshot
                 val usbSnapshot = app?.readerController?.snapshot
-                val holder = nfcSnapshot?.holderName ?: usbSnapshot?.holderName
                 val details = nfcSnapshot?.cardDetails ?: usbSnapshot?.cardDetails
 
                 val pairs = app?.rappPairCatalog?.listPairs() ?: emptyList()
@@ -60,7 +59,6 @@ class DiagnosticsDumpReceiver : BroadcastReceiver() {
                         context = context,
                         nfcReaderStatus = nfcSnapshot?.status,
                         usbReaderStatus = usbSnapshot?.status,
-                        holderName = holder,
                         cardDetails = details,
                         rappStatus = rappStatus,
                     )
