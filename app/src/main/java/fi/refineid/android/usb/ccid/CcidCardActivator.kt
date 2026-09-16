@@ -14,6 +14,7 @@ internal enum class CcidActivationResult {
 internal class CcidCardActivator(
     private val validateAtr: (ByteArray) -> AtrValidation,
     private val sequenceCounter: CcidSequenceCounter,
+    private val hostPpsRequired: Boolean,
 ) {
     fun activate(
         exchange: CcidCommandExchange,
@@ -181,10 +182,13 @@ internal class CcidCardActivator(
 
     /**
      * Run the T=0 parameter negotiation: enforce the T=0 protocol and,
-     * when the ATR proposes a faster rate, switch the reader to it and
-     * prove the faster link with one card exchange. A rejected switch
-     * keeps the current speed; a dead link after an accepted switch
-     * resets the card and activates once more at the default rate.
+     * when the ATR proposes a faster rate, move the card and the reader
+     * to it and prove the faster link with one card exchange. A reader
+     * without automatic PPS needs a host-driven PPS exchange first;
+     * without it SetParameters retunes only the reader and the link
+     * dies. A rejected switch keeps the current speed; a dead link
+     * after an accepted switch resets the card and activates once more
+     * at the default rate.
      */
     private fun negotiateParameters(
         exchange: CcidCommandExchange,
@@ -194,7 +198,11 @@ internal class CcidCardActivator(
         allowPps: Boolean,
     ): CcidActivationResult {
         if (!isT0(validation)) return CcidActivationResult.READY
-        val targetFiDi = if (allowPps) proposedFiDi(atr) ?: DEFAULT_FIDI else DEFAULT_FIDI
+        val proposed = if (allowPps) proposedFiDi(atr) else null
+        var targetFiDi = proposed ?: DEFAULT_FIDI
+        if (proposed != null && hostPpsRequired) {
+            targetFiDi = exchangePps(exchange, proposed) ?: proposed
+        }
         val currentProtocol = readCurrentProtocol(exchange)
         if (currentProtocol != T0_PROTOCOL_NUMBER || targetFiDi != DEFAULT_FIDI) {
             if (!setParameters(exchange, validation, targetFiDi)) {
@@ -220,6 +228,146 @@ internal class CcidCardActivator(
         if (atr[ATR_T0_INDEX].toInt() and T0_TA1_PRESENT_MASK == 0) return null
         val ta1 = atr[ATR_TA1_INDEX].toInt() and CcidWire.BYTE_MAX
         return if (ta1 == DEFAULT_FIDI) null else ta1
+    }
+
+    /**
+     * Drive the PPS exchange with the card over one TPDU-for-PPS block
+     * (CCID Rev 1.1 section 3.2.1), returning the FiDi the card
+     * confirmed: its echo, or its counter-proposal when it answers a
+     * different rate. A response without a rate byte confirms the
+     * default rate. Null when the reader refuses the exchange, the card
+     * stays mute, or the response is malformed; the caller then still
+     * attempts its proposal, and the link probe arbitrates.
+     */
+    private fun exchangePps(
+        exchange: CcidCommandExchange,
+        proposedFiDi: Int,
+    ): Int? {
+        val request =
+            byteArrayOf(
+                PPS_PPSS.toByte(),
+                PPS_PPS0_T0_WITH_PPS1.toByte(),
+                proposedFiDi.toByte(),
+                (PPS_PPSS xor PPS_PPS0_T0_WITH_PPS1 xor proposedFiDi).toByte(),
+            )
+        val command =
+            CcidCommand.transferBlock(
+                slot = FIRST_SLOT,
+                sequence = sequenceCounter.take(),
+                block = request,
+            )
+        request.fill(0)
+        try {
+            when (val result = exchange.exchange(command)) {
+                is CcidExchangeResult.Response -> {
+                    when (val response = result.value) {
+                        is CcidDataBlock -> {
+                            return adoptPpsResponse(response, proposedFiDi)
+                        }
+
+                        is CcidCommandFailure -> {
+                            AppTrace.ccidPpsExchange("reader-error=" + response.errorCode)
+                        }
+
+                        else -> {
+                            AppTrace.ccidPpsExchange("unexpected-response")
+                        }
+                    }
+                }
+
+                is CcidExchangeResult.Failure -> {
+                    AppTrace.ccidPpsExchange("exchange-failed=" + result.kind)
+                }
+            }
+        } finally {
+            command.close()
+        }
+        return null
+    }
+
+    /**
+     * Read the card's PPS answer: the echoed rate, its
+     * counter-proposal, or the default rate when the card answers
+     * without a rate byte. Anything else is not a usable answer.
+     */
+    private fun adoptPpsResponse(
+        response: CcidDataBlock,
+        proposedFiDi: Int,
+    ): Int? =
+        response.use {
+            if (response.cardStatus != CcidCardStatus.ACTIVE ||
+                response.chainParameter != CcidChainParameter.COMPLETE
+            ) {
+                AppTrace.ccidPpsExchange("card-unavailable")
+                return null
+            }
+            val bytes = response.copyPayload()
+            try {
+                when (val answer = parsePpsResponse(bytes)) {
+                    is PpsAnswer.Rate -> {
+                        AppTrace.ccidPpsExchange(
+                            "proposed=" + proposedFiDi.toHexByte() +
+                                " adopted=" + answer.fiDi.toHexByte(),
+                        )
+                        answer.fiDi
+                    }
+
+                    is PpsAnswer.DefaultRate -> {
+                        AppTrace.ccidPpsExchange(
+                            "proposed=" + proposedFiDi.toHexByte() + " adopted=default",
+                        )
+                        DEFAULT_FIDI
+                    }
+
+                    is PpsAnswer.Malformed -> {
+                        AppTrace.ccidPpsExchange("malformed-response")
+                        null
+                    }
+                }
+            } finally {
+                bytes.fill(0)
+            }
+        }
+
+    /**
+     * The card's PPS1 answer: a rate, the default rate when the card
+     * answers without a rate byte, or malformed when the response has
+     * the wrong opener, a protocol other than T=0, an unexpected
+     * length, or a bad checksum.
+     */
+    private fun parsePpsResponse(bytes: ByteArray): PpsAnswer {
+        if (bytes.isEmpty() || bytes[PPS_PPSS_INDEX].unsigned() != PPS_PPSS) {
+            return PpsAnswer.Malformed
+        }
+        if (bytes.size != PPS_RESPONSE_MIN_LENGTH && bytes.size != PPS_RESPONSE_MAX_LENGTH) {
+            return PpsAnswer.Malformed
+        }
+        val pps0 = bytes[PPS_PPS0_INDEX].unsigned()
+        if (pps0 and PPS_PROTOCOL_MASK != T0_PROTOCOL_NUMBER) return PpsAnswer.Malformed
+        val pps1Present = pps0 and PPS_PPS1_PRESENT_MASK != 0
+        if (pps1Present != (bytes.size == PPS_RESPONSE_MAX_LENGTH)) return PpsAnswer.Malformed
+        var checksum = 0
+        for (index in 0 until bytes.size - 1) {
+            checksum = checksum xor bytes[index].unsigned()
+        }
+        if (checksum != bytes[bytes.size - 1].unsigned()) return PpsAnswer.Malformed
+        return if (pps1Present) {
+            PpsAnswer.Rate(bytes[PPS_PPS1_INDEX].unsigned())
+        } else {
+            PpsAnswer.DefaultRate
+        }
+    }
+
+    private fun Byte.unsigned(): Int = toInt() and CcidWire.BYTE_MAX
+
+    private sealed interface PpsAnswer {
+        data class Rate(
+            val fiDi: Int,
+        ) : PpsAnswer
+
+        data object DefaultRate : PpsAnswer
+
+        data object Malformed : PpsAnswer
     }
 
     private fun readCurrentProtocol(exchange: CcidCommandExchange): Int? {
@@ -402,6 +550,15 @@ internal class CcidCardActivator(
         const val ATR_T0_INDEX = 1
         const val ATR_TA1_INDEX = 2
         const val T0_TA1_PRESENT_MASK = 0x10
+        const val PPS_PPSS = 0xFF
+        const val PPS_PPS0_T0_WITH_PPS1 = 0x10
+        const val PPS_PPSS_INDEX = 0
+        const val PPS_PPS0_INDEX = 1
+        const val PPS_PPS1_INDEX = 2
+        const val PPS_RESPONSE_MIN_LENGTH = 3
+        const val PPS_RESPONSE_MAX_LENGTH = 4
+        const val PPS_PROTOCOL_MASK = 0x0F
+        const val PPS_PPS1_PRESENT_MASK = 0x10
         const val SELECT_CLA: Byte = 0x00
         const val SELECT_INS = 0xA4
         const val SELECT_MF_P1: Byte = 0x00
@@ -410,6 +567,9 @@ internal class CcidCardActivator(
             byteArrayOf(SELECT_CLA, SELECT_INS.toByte(), SELECT_MF_P1, SELECT_MF_P2_NO_RESPONSE)
     }
 }
+
+/** Lowercase hex of one public parameter byte. */
+private fun Int.toHexByte(): String = toString(HEX_RADIX).padStart(BYTE_HEX_DIGITS, '0')
 
 /** Lowercase hex of public reset bytes; the ATR identifies the card model. */
 private fun ByteArray.toHex(): String =

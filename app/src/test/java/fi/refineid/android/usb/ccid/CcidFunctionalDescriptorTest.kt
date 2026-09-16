@@ -1,7 +1,9 @@
 package fi.refineid.android.usb.ccid
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CcidFunctionalDescriptorTest {
@@ -82,6 +84,69 @@ class CcidFunctionalDescriptorTest {
             MAXIMUM_T0_TPDU_LENGTH,
             descriptor.maximumTransferBlockLength,
         )
+    }
+
+    @Test
+    fun tpduWithoutAutomaticPpsRequiresHostPps() {
+        val descriptor =
+            CcidFunctionalDescriptor.parse(
+                rawDescriptors =
+                    descriptors(
+                        features = TPDU_WITHOUT_AUTOMATIC_PPS_FEATURES,
+                        maximumMessageLength = MAXIMUM_MESSAGE_LENGTH.toLong(),
+                    ),
+                interfaceNumber = TARGET_INTERFACE,
+                alternateSetting = TARGET_ALTERNATE_SETTING,
+            )
+
+        assertTrue(descriptor.hostPpsExchangeRequired)
+    }
+
+    @Test
+    fun tpduWithAutomaticPpsSkipsHostPps() {
+        val descriptor =
+            CcidFunctionalDescriptor.parse(
+                rawDescriptors =
+                    descriptors(
+                        features = TPDU_EXCHANGE or AUTOMATIC_PPS,
+                        maximumMessageLength = MAXIMUM_MESSAGE_LENGTH.toLong(),
+                    ),
+                interfaceNumber = TARGET_INTERFACE,
+                alternateSetting = TARGET_ALTERNATE_SETTING,
+            )
+
+        assertFalse(descriptor.hostPpsExchangeRequired)
+    }
+
+    @Test
+    fun tpduWithAutomaticNegotiationSkipsHostPps() {
+        val descriptor =
+            CcidFunctionalDescriptor.parse(
+                rawDescriptors =
+                    descriptors(
+                        features = TPDU_EXCHANGE or AUTOMATIC_PARAMETER_NEGOTIATION,
+                        maximumMessageLength = MAXIMUM_MESSAGE_LENGTH.toLong(),
+                    ),
+                interfaceNumber = TARGET_INTERFACE,
+                alternateSetting = TARGET_ALTERNATE_SETTING,
+            )
+
+        assertFalse(descriptor.hostPpsExchangeRequired)
+    }
+
+    @Test
+    fun apduExchangeNeverRequiresHostPps() {
+        val descriptor =
+            CcidFunctionalDescriptor.parse(
+                rawDescriptors =
+                    descriptors(
+                        features = VALID_SHORT_APDU_FEATURES,
+                    ),
+                interfaceNumber = TARGET_INTERFACE,
+                alternateSetting = TARGET_ALTERNATE_SETTING,
+            )
+
+        assertFalse(descriptor.hostPpsExchangeRequired)
     }
 
     @Test
@@ -400,6 +465,10 @@ class CcidFunctionalDescriptorTest {
         const val AUTOMATIC_PARAMETER_NEGOTIATION = 0x00000040L
         const val AUTOMATIC_PPS = 0x00000080L
         const val TPDU_EXCHANGE = 0x00010000L
+        const val AUTOMATIC_CLOCK_CHANGE = 0x00000010L
+        const val AUTOMATIC_BAUD_CHANGE = 0x00000020L
+        const val TPDU_WITHOUT_AUTOMATIC_PPS_FEATURES =
+            TPDU_EXCHANGE or AUTOMATIC_CLOCK_CHANGE or AUTOMATIC_BAUD_CHANGE
         const val HEX_RADIX = 16
         const val SHORT_APDU_EXCHANGE = 0x00020000L
         const val SHORT_AND_EXTENDED_APDU_EXCHANGE = 0x00040000L
