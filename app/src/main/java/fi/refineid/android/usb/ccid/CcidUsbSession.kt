@@ -1049,6 +1049,7 @@ internal class CcidUsbSessionOpener(
                     CcidCardActivator(
                         validateAtr = validateAtr,
                         sequenceCounter = sequenceCounter,
+                        hostPpsRequired = descriptor.hostPpsExchangeRequired,
                     ).activate(
                         exchange = exchange,
                         exchangeLevel = descriptor.exchangeLevel,

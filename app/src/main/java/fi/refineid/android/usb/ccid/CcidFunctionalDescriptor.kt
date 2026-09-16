@@ -15,6 +15,19 @@ internal class CcidFunctionalDescriptor private constructor(
     val maximumPayloadLength: Int
         get() = maximumMessageLength - CcidWire.HEADER_SIZE
 
+    /**
+     * True when the host must drive the PPS exchange itself: a TPDU
+     * reader declaring neither automatic parameter negotiation nor
+     * automatic PPS (CCID Rev 1.1 section 5.1, footnote 4).
+     * SetParameters alone only retunes such a reader while the card
+     * stays at the default rate.
+     */
+    val hostPpsExchangeRequired: Boolean
+        get() =
+            exchangeLevel == CcidExchangeLevel.TPDU &&
+                features and AUTOMATIC_PARAMETER_NEGOTIATION == 0L &&
+                features and AUTOMATIC_PPS == 0L
+
     val maximumTransferBlockLength: Int
         get() =
             when (exchangeLevel) {

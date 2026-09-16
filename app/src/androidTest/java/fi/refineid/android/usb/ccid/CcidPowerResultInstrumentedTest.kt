@@ -29,6 +29,7 @@ class CcidPowerResultInstrumentedTest {
                 CcidCardActivator(
                     validateAtr = { AtrValidation.INVALID },
                     sequenceCounter = CcidSequenceCounter(),
+                    hostPpsRequired = false,
                 )
             val exchange =
                 CcidCommandExchange(

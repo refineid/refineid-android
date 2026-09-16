@@ -140,6 +140,7 @@ class CcidCardActivatorTest {
                     AtrValidation.VALID_T0_DIRECT
                 },
                 sequenceCounter = CcidSequenceCounter(TEST_SEQUENCE),
+                hostPpsRequired = false,
             )
 
         val result = activator.activate(exchange(io), CcidExchangeLevel.SHORT_AND_EXTENDED_APDU)
@@ -298,6 +299,220 @@ class CcidCardActivatorTest {
     }
 
     @Test
+    fun hostPpsExchangeDrivesFastSwitch() {
+        val io = poweredCardIoWithAtr(SYNTHETIC_ATR_FAST_TA1)
+        io.appendResponse(
+            dataBlockFrame(
+                sequence = TEST_SEQUENCE + PPS_COMMAND_INDEX,
+                payload = PPS_ECHO_FAST,
+            ),
+        )
+        io.appendResponse(
+            parametersFrame(
+                sequence = TEST_SEQUENCE + PPS_GET_PARAMETERS_COMMAND_INDEX,
+                protocolNum = T0_PROTOCOL_NUMBER,
+            ),
+        )
+        io.appendResponse(
+            parametersFrame(
+                sequence = TEST_SEQUENCE + PPS_SET_PARAMETERS_COMMAND_INDEX,
+                protocolNum = T0_PROTOCOL_NUMBER,
+            ),
+        )
+        io.appendResponse(
+            dataBlockFrame(
+                sequence = TEST_SEQUENCE + PPS_LINK_CHECK_COMMAND_INDEX,
+                payload = SELECT_MF_RESPONSE,
+            ),
+        )
+
+        val result =
+            activateWithAtr(
+                io,
+                SYNTHETIC_ATR_FAST_TA1,
+                CcidExchangeLevel.TPDU,
+                hostPpsRequired = true,
+            )
+
+        assertEquals(CcidActivationResult.READY, result)
+        assertEquals(PPS_LINK_CHECK_COMMAND_INDEX + 1, io.writtenFrames.size)
+        assertEquals(
+            CcidWire.PC_TO_RDR_XFR_BLOCK,
+            io.writtenFrames[PPS_COMMAND_INDEX].unsignedByte(CcidWire.MESSAGE_TYPE_OFFSET),
+        )
+        assertPpsRequest(io.writtenFrames[PPS_COMMAND_INDEX], SYNTHETIC_TA1_FAST, PPS_PCK_FAST)
+        assertEquals(
+            SYNTHETIC_TA1_FAST,
+            io.writtenFrames[PPS_SET_PARAMETERS_COMMAND_INDEX]
+                .unsignedByte(SET_PARAMETERS_FIDI_OFFSET),
+        )
+        assertSelectMf(io.writtenFrames[PPS_LINK_CHECK_COMMAND_INDEX])
+        io.close()
+    }
+
+    @Test
+    fun hostPpsCounterProposalIsAdopted() {
+        val io = poweredCardIoWithAtr(SYNTHETIC_ATR_FAST_TA1)
+        io.appendResponse(
+            dataBlockFrame(
+                sequence = TEST_SEQUENCE + PPS_COMMAND_INDEX,
+                payload = PPS_COUNTER_SLOWER,
+            ),
+        )
+        io.appendResponse(
+            parametersFrame(
+                sequence = TEST_SEQUENCE + PPS_GET_PARAMETERS_COMMAND_INDEX,
+                protocolNum = T0_PROTOCOL_NUMBER,
+            ),
+        )
+        io.appendResponse(
+            parametersFrame(
+                sequence = TEST_SEQUENCE + PPS_SET_PARAMETERS_COMMAND_INDEX,
+                protocolNum = T0_PROTOCOL_NUMBER,
+            ),
+        )
+        io.appendResponse(
+            dataBlockFrame(
+                sequence = TEST_SEQUENCE + PPS_LINK_CHECK_COMMAND_INDEX,
+                payload = SELECT_MF_RESPONSE,
+            ),
+        )
+
+        val result =
+            activateWithAtr(
+                io,
+                SYNTHETIC_ATR_FAST_TA1,
+                CcidExchangeLevel.TPDU,
+                hostPpsRequired = true,
+            )
+
+        assertEquals(CcidActivationResult.READY, result)
+        assertEquals(
+            SYNTHETIC_TA1_COUNTER,
+            io.writtenFrames[PPS_SET_PARAMETERS_COMMAND_INDEX]
+                .unsignedByte(SET_PARAMETERS_FIDI_OFFSET),
+        )
+        io.close()
+    }
+
+    @Test
+    fun refusedHostPpsStillAttemptsProposal() {
+        val io = poweredCardIoWithAtr(SYNTHETIC_ATR_FAST_TA1)
+        io.appendResponse(
+            cardMuteFrame(sequence = TEST_SEQUENCE + PPS_COMMAND_INDEX),
+        )
+        io.appendResponse(
+            parametersFrame(
+                sequence = TEST_SEQUENCE + PPS_GET_PARAMETERS_COMMAND_INDEX,
+                protocolNum = T0_PROTOCOL_NUMBER,
+            ),
+        )
+        io.appendResponse(
+            parametersFrame(
+                sequence = TEST_SEQUENCE + PPS_SET_PARAMETERS_COMMAND_INDEX,
+                protocolNum = T0_PROTOCOL_NUMBER,
+            ),
+        )
+        io.appendResponse(
+            dataBlockFrame(
+                sequence = TEST_SEQUENCE + PPS_LINK_CHECK_COMMAND_INDEX,
+                payload = SELECT_MF_RESPONSE,
+            ),
+        )
+
+        val result =
+            activateWithAtr(
+                io,
+                SYNTHETIC_ATR_FAST_TA1,
+                CcidExchangeLevel.TPDU,
+                hostPpsRequired = true,
+            )
+
+        assertEquals(CcidActivationResult.READY, result)
+        assertEquals(
+            SYNTHETIC_TA1_FAST,
+            io.writtenFrames[PPS_SET_PARAMETERS_COMMAND_INDEX]
+                .unsignedByte(SET_PARAMETERS_FIDI_OFFSET),
+        )
+        assertSelectMf(io.writtenFrames[PPS_LINK_CHECK_COMMAND_INDEX])
+        io.close()
+    }
+
+    @Test
+    fun malformedHostPpsResponseFallsBackToProposal() {
+        val io = poweredCardIoWithAtr(SYNTHETIC_ATR_FAST_TA1)
+        io.appendResponse(
+            dataBlockFrame(
+                sequence = TEST_SEQUENCE + PPS_COMMAND_INDEX,
+                payload = PPS_BAD_CHECKSUM,
+            ),
+        )
+        io.appendResponse(
+            parametersFrame(
+                sequence = TEST_SEQUENCE + PPS_GET_PARAMETERS_COMMAND_INDEX,
+                protocolNum = T0_PROTOCOL_NUMBER,
+            ),
+        )
+        io.appendResponse(
+            parametersFrame(
+                sequence = TEST_SEQUENCE + PPS_SET_PARAMETERS_COMMAND_INDEX,
+                protocolNum = T0_PROTOCOL_NUMBER,
+            ),
+        )
+        io.appendResponse(
+            dataBlockFrame(
+                sequence = TEST_SEQUENCE + PPS_LINK_CHECK_COMMAND_INDEX,
+                payload = SELECT_MF_RESPONSE,
+            ),
+        )
+
+        val result =
+            activateWithAtr(
+                io,
+                SYNTHETIC_ATR_FAST_TA1,
+                CcidExchangeLevel.TPDU,
+                hostPpsRequired = true,
+            )
+
+        assertEquals(CcidActivationResult.READY, result)
+        assertEquals(
+            SYNTHETIC_TA1_FAST,
+            io.writtenFrames[PPS_SET_PARAMETERS_COMMAND_INDEX]
+                .unsignedByte(SET_PARAMETERS_FIDI_OFFSET),
+        )
+        io.close()
+    }
+
+    @Test
+    fun hostPpsDefaultAnswerSkipsFastSwitch() {
+        val io = poweredCardIoWithAtr(SYNTHETIC_ATR_FAST_TA1)
+        io.appendResponse(
+            dataBlockFrame(
+                sequence = TEST_SEQUENCE + PPS_COMMAND_INDEX,
+                payload = PPS_DEFAULT_RATE,
+            ),
+        )
+        io.appendResponse(
+            parametersFrame(
+                sequence = TEST_SEQUENCE + PPS_GET_PARAMETERS_COMMAND_INDEX,
+                protocolNum = T0_PROTOCOL_NUMBER,
+            ),
+        )
+
+        val result =
+            activateWithAtr(
+                io,
+                SYNTHETIC_ATR_FAST_TA1,
+                CcidExchangeLevel.TPDU,
+                hostPpsRequired = true,
+            )
+
+        assertEquals(CcidActivationResult.READY, result)
+        assertEquals(PPS_GET_PARAMETERS_COMMAND_INDEX + 1, io.writtenFrames.size)
+        io.close()
+    }
+
+    @Test
     fun emptySlotDoesNotPowerOrValidate() {
         val io =
             ScriptedBulkIo(
@@ -316,6 +531,7 @@ class CcidCardActivatorTest {
                     AtrValidation.VALID_T0_DIRECT
                 },
                 sequenceCounter = CcidSequenceCounter(TEST_SEQUENCE),
+                hostPpsRequired = false,
             )
 
         val result = activator.activate(exchange(io), CcidExchangeLevel.TPDU)
@@ -330,6 +546,7 @@ class CcidCardActivatorTest {
         io: ScriptedBulkIo,
         validation: AtrValidation,
         exchangeLevel: CcidExchangeLevel,
+        hostPpsRequired: Boolean = false,
     ): CcidActivationResult {
         var validationCalls = 0
         val activator =
@@ -340,6 +557,7 @@ class CcidCardActivatorTest {
                     validation
                 },
                 sequenceCounter = CcidSequenceCounter(TEST_SEQUENCE),
+                hostPpsRequired = hostPpsRequired,
             )
 
         return activator.activate(exchange(io), exchangeLevel).also {
@@ -374,6 +592,7 @@ class CcidCardActivatorTest {
         atr: ByteArray,
         exchangeLevel: CcidExchangeLevel,
         expectedValidations: Int = SINGLE_VALIDATION_COUNT,
+        hostPpsRequired: Boolean = false,
     ): CcidActivationResult {
         var validationCalls = 0
         val activator =
@@ -384,6 +603,7 @@ class CcidCardActivatorTest {
                     AtrValidation.VALID_T0_DIRECT
                 },
                 sequenceCounter = CcidSequenceCounter(TEST_SEQUENCE),
+                hostPpsRequired = hostPpsRequired,
             )
 
         return activator.activate(exchange(io), exchangeLevel).also {
@@ -393,6 +613,18 @@ class CcidCardActivatorTest {
 
     private fun assertSelectMf(frame: ByteArray) {
         val expected = intArrayOf(SELECT_MF_CLA, SELECT_MF_INS, SELECT_MF_P1, SELECT_MF_P2)
+        expected.forEachIndexed { index, byte ->
+            assertEquals(byte, frame.unsignedByte(CcidWire.HEADER_SIZE + index))
+        }
+    }
+
+    private fun assertPpsRequest(
+        frame: ByteArray,
+        pps1: Int,
+        checksum: Int,
+    ) {
+        val expected = intArrayOf(PPS_PPSS, PPS_PPS0_T0_WITH_PPS1, pps1, checksum)
+        assertEquals(CcidWire.HEADER_SIZE + expected.size, frame.size)
         expected.forEachIndexed { index, byte ->
             assertEquals(byte, frame.unsignedByte(CcidWire.HEADER_SIZE + index))
         }
@@ -543,6 +775,45 @@ class CcidCardActivatorTest {
         const val RECOVERY_GET_PARAMETERS_COMMAND_INDEX = 7
         const val SINGLE_VALIDATION_COUNT = 1
         const val RECOVERY_VALIDATION_COUNT = 2
+        const val PPS_COMMAND_INDEX = 2
+        const val PPS_GET_PARAMETERS_COMMAND_INDEX = 3
+        const val PPS_SET_PARAMETERS_COMMAND_INDEX = 4
+        const val PPS_LINK_CHECK_COMMAND_INDEX = 5
+        const val PPS_PPSS = 0xFF
+        const val PPS_PPS0_T0_WITH_PPS1 = 0x10
+        const val PPS_PPS0_T0_NO_RATE = 0x00
+        const val PPS_PCK_FAST = 0x79
+        const val SYNTHETIC_TA1_COUNTER = 0x95
+        const val PPS_PCK_COUNTER = 0x7A
+        const val PPS_PCK_DEFAULT_RATE = 0xFF
+        const val PPS_PCK_WRONG = 0x00
+        val PPS_ECHO_FAST =
+            byteArrayOf(
+                PPS_PPSS.toByte(),
+                PPS_PPS0_T0_WITH_PPS1.toByte(),
+                SYNTHETIC_TA1_FAST.toByte(),
+                PPS_PCK_FAST.toByte(),
+            )
+        val PPS_COUNTER_SLOWER =
+            byteArrayOf(
+                PPS_PPSS.toByte(),
+                PPS_PPS0_T0_WITH_PPS1.toByte(),
+                SYNTHETIC_TA1_COUNTER.toByte(),
+                PPS_PCK_COUNTER.toByte(),
+            )
+        val PPS_DEFAULT_RATE =
+            byteArrayOf(
+                PPS_PPSS.toByte(),
+                PPS_PPS0_T0_NO_RATE.toByte(),
+                PPS_PCK_DEFAULT_RATE.toByte(),
+            )
+        val PPS_BAD_CHECKSUM =
+            byteArrayOf(
+                PPS_PPSS.toByte(),
+                PPS_PPS0_T0_WITH_PPS1.toByte(),
+                SYNTHETIC_TA1_FAST.toByte(),
+                PPS_PCK_WRONG.toByte(),
+            )
         const val SET_PARAMETERS_FIDI_OFFSET = CcidWire.HEADER_SIZE
         const val SYNTHETIC_T0_TA1_PRESENT: Byte = 0x10
         const val SYNTHETIC_TA1_FAST = 0x96
