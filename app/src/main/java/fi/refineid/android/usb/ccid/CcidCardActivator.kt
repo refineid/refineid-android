@@ -166,7 +166,7 @@ internal class CcidCardActivator(
                         isSupported = result == CcidActivationResult.READY,
                         atrHex = atr.toHex(),
                     )
-                    if (result == CcidActivationResult.READY && exchangeLevel != CcidExchangeLevel.TPDU) {
+                    if (result == CcidActivationResult.READY) {
                         configureParametersIfRequired(exchange, validation)
                     }
                     result

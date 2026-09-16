@@ -68,6 +68,15 @@ with standard transmission parameters (`FiDi = 0x11`) prior to sending APDUs.
 This resolves the ACR1581 `ICC_MUTE` failure and guarantees the reader slot and card
 operate on the same transmission protocol.
 
+Since 2026-09-16 the same configuration runs for TPDU-level readers as well.
+Observed on an Axagon CRE-SMPC (Realtek `VID 0x0BDA PID 0x0165`, `dwFeatures 0x10030`):
+without explicit parameters the reader answers the first `PC_to_RDR_XfrBlock`
+with command-failed/`bError 0x00`, while `PC_to_RDR_GetParameters` fails with
+`0xFE` and a subsequent `PC_to_RDR_SetParameters` (T=0, `FiDi = 0x11`) succeeds
+and unblocks the exchange. The configuration stays best-effort: a reader that
+rejects the parameter commands keeps its previous activation outcome, so
+self-configuring TPDU readers only gain one extra round trip.
+
 ### 3. CCID Descriptor Acceptance
 
 `CcidFunctionalDescriptor` relaxes the `dwFeatures` validation rule to permit APDU-level

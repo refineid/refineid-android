@@ -9,11 +9,17 @@ class CcidCardActivatorTest {
     @Test
     fun acceptsT0AtrForTpduReader() {
         val io = poweredCardIo()
+        io.appendResponse(
+            parametersFrame(
+                sequence = TEST_SEQUENCE + GET_PARAMETERS_COMMAND_INDEX,
+                protocolNum = T0_PROTOCOL_NUMBER,
+            ),
+        )
 
         val result = activate(io, AtrValidation.VALID_T0_DIRECT, CcidExchangeLevel.TPDU)
 
         assertEquals(CcidActivationResult.READY, result)
-        assertEquals(2, io.writtenFrames.size)
+        assertEquals(GET_PARAMETERS_COMMAND_INDEX + 1, io.writtenFrames.size)
         assertEquals(
             CcidWire.PC_TO_RDR_GET_SLOT_STATUS,
             io.writtenFrames[SLOT_STATUS_COMMAND_INDEX].unsignedByte(CcidWire.MESSAGE_TYPE_OFFSET),
@@ -21,6 +27,45 @@ class CcidCardActivatorTest {
         assertEquals(
             CcidWire.PC_TO_RDR_ICC_POWER_ON,
             io.writtenFrames[POWER_ON_COMMAND_INDEX].unsignedByte(CcidWire.MESSAGE_TYPE_OFFSET),
+        )
+        assertEquals(
+            CcidWire.PC_TO_RDR_GET_PARAMETERS,
+            io.writtenFrames[GET_PARAMETERS_COMMAND_INDEX].unsignedByte(CcidWire.MESSAGE_TYPE_OFFSET),
+        )
+        io.close()
+    }
+
+    @Test
+    fun tpduReaderWithoutParametersGetsT0Configuration() {
+        val io = poweredCardIo()
+        io.appendResponse(
+            commandFailureFrame(
+                sequence = TEST_SEQUENCE + GET_PARAMETERS_COMMAND_INDEX,
+                error = NO_PARAMETERS_CONFIGURED_ERROR,
+            ),
+        )
+        io.appendResponse(
+            parametersFrame(
+                sequence = TEST_SEQUENCE + SET_PARAMETERS_COMMAND_INDEX,
+                protocolNum = T0_PROTOCOL_NUMBER,
+            ),
+        )
+
+        val result = activate(io, AtrValidation.VALID_T0_DIRECT, CcidExchangeLevel.TPDU)
+
+        assertEquals(CcidActivationResult.READY, result)
+        assertEquals(SET_PARAMETERS_COMMAND_INDEX + 1, io.writtenFrames.size)
+        assertEquals(
+            CcidWire.PC_TO_RDR_GET_PARAMETERS,
+            io.writtenFrames[GET_PARAMETERS_COMMAND_INDEX].unsignedByte(CcidWire.MESSAGE_TYPE_OFFSET),
+        )
+        assertEquals(
+            CcidWire.PC_TO_RDR_SET_PARAMETERS,
+            io.writtenFrames[SET_PARAMETERS_COMMAND_INDEX].unsignedByte(CcidWire.MESSAGE_TYPE_OFFSET),
+        )
+        assertEquals(
+            T0_PROTOCOL_NUMBER,
+            io.writtenFrames[SET_PARAMETERS_COMMAND_INDEX].unsignedByte(CcidWire.STATUS_OFFSET),
         )
         io.close()
     }
@@ -198,6 +243,38 @@ class CcidCardActivatorTest {
             payload = payload,
         )
 
+    private fun parametersFrame(
+        sequence: Int,
+        protocolNum: Int,
+    ): ByteArray =
+        responseFrame(
+            messageType = CcidWire.RDR_TO_PC_PARAMETERS,
+            sequence = sequence,
+            cardStatus = CcidWire.CARD_STATUS_ACTIVE,
+            responseParameter = protocolNum,
+            payload = ByteArray(T0_PARAMETER_RESPONSE_LENGTH),
+        )
+
+    private fun commandFailureFrame(
+        sequence: Int,
+        error: Int,
+    ): ByteArray {
+        val frame =
+            responseFrame(
+                messageType = CcidWire.RDR_TO_PC_PARAMETERS,
+                sequence = sequence,
+                cardStatus = CcidWire.CARD_STATUS_ACTIVE,
+                responseParameter = 0,
+            )
+        frame[CcidWire.STATUS_OFFSET] =
+            (
+                (CcidWire.COMMAND_STATUS_FAILED shl CcidWire.COMMAND_STATUS_SHIFT) or
+                    CcidWire.CARD_STATUS_ACTIVE
+            ).toByte()
+        frame[CcidWire.ERROR_OFFSET] = error.toByte()
+        return frame
+    }
+
     private fun responseFrame(
         messageType: Int,
         sequence: Int,
@@ -231,6 +308,10 @@ class CcidCardActivatorTest {
         private val responses = responses.map(ByteArray::copyOf).toMutableList()
         val writtenFrames = mutableListOf<ByteArray>()
 
+        fun appendResponse(frame: ByteArray) {
+            responses += frame.copyOf()
+        }
+
         override fun write(frame: ByteArray): Int {
             writtenFrames += frame.copyOf()
             return frame.size
@@ -259,9 +340,14 @@ class CcidCardActivatorTest {
         const val FIRST_SLOT = 0
         const val SLOT_STATUS_COMMAND_INDEX = 0
         const val POWER_ON_COMMAND_INDEX = 1
+        const val GET_PARAMETERS_COMMAND_INDEX = 2
+        const val SET_PARAMETERS_COMMAND_INDEX = 3
         const val TEST_SEQUENCE = 41
         const val LENGTH_FIELD_SIZE = 4
         const val MAXIMUM_MESSAGE_LENGTH = 512
+        const val T0_PROTOCOL_NUMBER = 0
+        const val T0_PARAMETER_RESPONSE_LENGTH = 5
+        const val NO_PARAMETERS_CONFIGURED_ERROR = 0xFE
         const val SYNTHETIC_TS_DIRECT: Byte = 0x3B
         const val SYNTHETIC_T0_NO_INTERFACE_BYTES: Byte = 0x00
         val SYNTHETIC_ATR =
