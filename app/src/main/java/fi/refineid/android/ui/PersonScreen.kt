@@ -55,11 +55,14 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.graphics.createBitmap
@@ -221,10 +224,7 @@ internal fun PersonScreen(
                     }
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
+                AdaptiveButtonRow(modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = {
                             if (photoBitmap != null) {
@@ -235,7 +235,7 @@ internal fun PersonScreen(
                                 }
                             }
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.testTag(UiAutomationIds.COPY_PHOTO_ACTION),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         colors = ButtonDefaults.outlinedButtonColors(),
                     ) {
@@ -262,7 +262,7 @@ internal fun PersonScreen(
                                 }
                             }
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.testTag(UiAutomationIds.SHARE_PHOTO_ACTION),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         colors = ButtonDefaults.outlinedButtonColors(),
                     ) {
@@ -311,6 +311,67 @@ internal fun PersonScreen(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+/**
+ * Two action buttons side by side when each fits in half the width,
+ * otherwise stacked full-width on their own lines so labels are never
+ * truncated to an ellipsis.
+ */
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Composable
+private fun AdaptiveButtonRow(
+    modifier: Modifier = Modifier,
+    spacing: Dp = BUTTON_ROW_SPACING,
+    content: @Composable () -> Unit,
+) {
+    Layout(
+        content = content,
+        modifier = modifier,
+    ) { measurables, constraints ->
+        require(measurables.size == ADAPTIVE_BUTTON_COUNT) {
+            "AdaptiveButtonRow expects exactly two buttons"
+        }
+        val spacingPx = spacing.roundToPx()
+        // Intrinsic widths decide the arrangement; each child is measured
+        // exactly once, since re-measuring is not allowed.
+        val firstIntrinsic = measurables[0].maxIntrinsicWidth(constraints.maxHeight)
+        val secondIntrinsic = measurables[1].maxIntrinsicWidth(constraints.maxHeight)
+        val maxWidth = constraints.maxWidth
+        val halfWidth = (maxWidth - spacingPx) / 2
+        if (maxWidth != Constraints.Infinity &&
+            halfWidth > 0 &&
+            firstIntrinsic <= halfWidth &&
+            secondIntrinsic <= halfWidth
+        ) {
+            val rowConstraints = constraints.copy(minWidth = halfWidth, maxWidth = halfWidth)
+            val firstPlaced = measurables[0].measure(rowConstraints)
+            val secondPlaced = measurables[1].measure(rowConstraints)
+            layout(maxWidth, maxOf(firstPlaced.height, secondPlaced.height)) {
+                firstPlaced.placeRelative(0, 0)
+                secondPlaced.placeRelative(halfWidth + spacingPx, 0)
+            }
+        } else {
+            val columnConstraints =
+                if (maxWidth == Constraints.Infinity) {
+                    constraints.copy(minWidth = 0, minHeight = 0)
+                } else {
+                    constraints.copy(minWidth = maxWidth, maxWidth = maxWidth)
+                }
+            val firstPlaced = measurables[0].measure(columnConstraints)
+            val secondPlaced = measurables[1].measure(columnConstraints)
+            val width =
+                if (maxWidth == Constraints.Infinity) {
+                    maxOf(firstPlaced.width, secondPlaced.width)
+                } else {
+                    maxWidth
+                }
+            layout(width, firstPlaced.height + spacingPx + secondPlaced.height) {
+                firstPlaced.placeRelative(0, 0)
+                secondPlaced.placeRelative(0, firstPlaced.height + spacingPx)
+            }
+        }
     }
 }
 
@@ -407,6 +468,9 @@ private val PHOTO_SECTION_SPACING = 16.dp
 private val AVATAR_CONTAINER_SIZE = 64.dp
 private val AVATAR_ICON_SIZE = 36.dp
 private val BUTTON_ICON_SIZE = 18.dp
+private val BUTTON_ROW_SPACING = 12.dp
+
+private const val ADAPTIVE_BUTTON_COUNT = 2
 
 private const val BADGE_CANVAS_WIDTH = 300
 private const val BADGE_CANVAS_HEIGHT = 380
