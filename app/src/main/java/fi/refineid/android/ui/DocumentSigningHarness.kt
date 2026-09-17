@@ -80,19 +80,17 @@ internal fun DocumentSigningHarness(
     timestampAuthorityRepository: TimestampAuthorityRepository?,
     onComplete: () -> Unit = {},
 ) {
-    if (
-        !signingAvailable ||
-        cardService == null ||
-        timestampAuthorityRepository == null
-    ) {
+    if (timestampAuthorityRepository == null) {
         return
     }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // The tap's begin/end are stable controller references, so it is
-    // deliberately not a session key: a fresh DocumentSignTap on each
-    // recomposition must not discard a document already chosen. The tap
-    // is captured through a holder the session reads at sign time.
+    // The session, its scope, and every picker registration below live
+    // for the whole signing visit. Card readiness, the chosen service,
+    // and the tap are deliberately not session keys: a transient
+    // CHECKING state must neither discard a document already chosen
+    // nor reroute the signing, so the session reads them through
+    // holders at sign time and only the sign action is gated.
     val tapHolder =
         remember {
             object {
@@ -100,12 +98,27 @@ internal fun DocumentSigningHarness(
             }
         }
     tapHolder.value = tap
+    val serviceHolder =
+        remember {
+            object {
+                var value: QualifiedCardService? = null
+            }
+        }
+    serviceHolder.value = cardService
+    val availabilityHolder =
+        remember {
+            object {
+                var value = true
+            }
+        }
+    availabilityHolder.value = signingAvailable
     val session =
-        remember(cardService, context.contentResolver, scope, timestampAuthorityRepository) {
+        remember(context.contentResolver, scope, timestampAuthorityRepository) {
             DocumentSigningHarnessSession(
                 context = context.applicationContext,
                 contentResolver = context.contentResolver,
-                cardService = cardService,
+                cardService = { serviceHolder.value },
+                isAvailable = { availabilityHolder.value },
                 scope = scope,
                 timestampAuthorityRepository = timestampAuthorityRepository,
                 tap = { tapHolder.value },
@@ -172,6 +185,7 @@ internal fun DocumentSigningHarness(
         canSignPdf = session.canSignPdf,
         progressText = session.progressText,
         canRequired = tap?.canRequired == true,
+        canSign = signingAvailable,
         status = session.status,
         onChooseDocuments = { chooseFilesLauncher.launch(arrayOf(ANY_MEDIA_TYPE)) },
         onAddDocument = { addFilesLauncher.launch(arrayOf(ANY_MEDIA_TYPE)) },
@@ -193,16 +207,15 @@ private data class SelectedItem(
 )
 
 @Suppress("LargeClass")
-private class DocumentSigningHarnessSession(
+internal class DocumentSigningHarnessSession(
     private val context: Context,
     private val contentResolver: ContentResolver,
-    cardService: QualifiedCardService,
+    private val cardService: () -> QualifiedCardService?,
+    private val isAvailable: () -> Boolean,
     private val scope: CoroutineScope,
     private val timestampAuthorityRepository: TimestampAuthorityRepository,
     private val tap: () -> DocumentSignTap?,
 ) : AutoCloseable {
-    private val coordinator = QualifiedPdfSigningCoordinator(cardService)
-    private val asicCoordinator = AsicSigningCoordinator(cardService)
     private var selectedItems by mutableStateOf<List<SelectedItem>>(emptyList())
     private var isClosed = false
     private var signingSetupJob: Job? = null
@@ -307,8 +320,10 @@ private class DocumentSigningHarnessSession(
             ?: throw IOException("file cannot be opened")
 
     /**
-     * Commit the chosen document. A wired session signs at once; a
-     * contactless card first waits for the tap behind a hold prompt.
+     * Commit the chosen document. Signing needs a currently ready card;
+     * without one the request is refused visibly and the submission is
+     * discarded. A wired session signs at once; a contactless card first
+     * waits for the tap behind a hold prompt.
      */
     fun sign(
         targetFormat: SignatureFormat,
@@ -320,10 +335,17 @@ private class DocumentSigningHarnessSession(
             can?.close()
             return
         }
+        val service = cardService()
+        if (!isAvailable() || service == null) {
+            pin2.close()
+            can?.close()
+            status = DocumentSigningStatus.UNAVAILABLE
+            return
+        }
         withOpenCard(pin2, can) { granted ->
             when (targetFormat) {
-                SignatureFormat.PDF -> preparePdf(granted)
-                SignatureFormat.CONTAINER -> prepareContainer(granted)
+                SignatureFormat.PDF -> preparePdf(service, granted)
+                SignatureFormat.CONTAINER -> prepareContainer(service, granted)
             }
         }
     }
@@ -361,13 +383,17 @@ private class DocumentSigningHarnessSession(
         )
     }
 
-    private fun prepareContainer(pin2: Pin2Submission) {
+    private fun prepareContainer(
+        service: QualifiedCardService,
+        pin2: Pin2Submission,
+    ) {
         val items = selectedItems
         if (isClosed || items.isEmpty()) {
             pin2.close()
             tap()?.end?.invoke()
             return
         }
+        val asicCoordinator = AsicSigningCoordinator(service)
         status = DocumentSigningStatus.SIGNING
         val running =
             scope.launch {
@@ -501,13 +527,17 @@ private class DocumentSigningHarnessSession(
         )
     }
 
-    private fun preparePdf(pin2: Pin2Submission) {
+    private fun preparePdf(
+        service: QualifiedCardService,
+        pin2: Pin2Submission,
+    ) {
         val items = selectedItems
         if (isClosed || items.isEmpty()) {
             pin2.close()
             tap()?.end?.invoke()
             return
         }
+        val coordinator = QualifiedPdfSigningCoordinator(service)
         status = DocumentSigningStatus.SIGNING
         val total = items.size
         val pinBytes = pin2.consume { it.copyOf() }

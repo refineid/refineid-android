@@ -1,5 +1,6 @@
 package fi.refineid.android.ui
 
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -19,8 +20,19 @@ import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.NativeAuthenticationCertificate
+import fi.refineid.android.core.NativeCertificateReadResult
+import fi.refineid.android.core.NativePin2PreflightResult
+import fi.refineid.android.core.NativeQualifiedCertificate
 import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.Pin2Submission
+import fi.refineid.android.core.QualifiedCardService
+import fi.refineid.android.core.QualifiedSignResult
+import fi.refineid.android.core.QualifiedSigningAlgorithm
+import fi.refineid.android.nfc.NfcReaderSnapshot
+import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.settings.TimestampAuthorityConfiguration
+import fi.refineid.android.settings.TimestampAuthorityRepository
 import fi.refineid.android.usb.CardPresence
 import fi.refineid.android.usb.ReaderConnectionStatus
 import fi.refineid.android.usb.UsbReaderSnapshot
@@ -174,6 +186,49 @@ internal class MainScreenTest {
     }
 
     @Test
+    fun usbCheckingDuringSigningKeepsUsbServiceWithoutCanPrompt() {
+        val snapshotState =
+            mutableStateOf(
+                UsbReaderSnapshot(
+                    status = ReaderConnectionStatus.READY,
+                    cardPresence = CardPresence.PRESENT,
+                ),
+            )
+        showSigning(snapshotState)
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.SIGN_ROW)
+            .performScrollTo()
+            .performClick()
+        composeRule
+            .onNodeWithTag(UiAutomationIds.SIGN_SCREEN)
+            .assertIsDisplayed()
+        composeRule
+            .onNodeWithTag(UiAutomationIds.DOCUMENT_SIGNING_CARD)
+            .assertIsDisplayed()
+        composeRule
+            .onNodeWithTag(UiAutomationIds.DOCUMENT_CAN_FIELD)
+            .assertDoesNotExist()
+
+        snapshotState.value =
+            snapshotState.value.copy(status = ReaderConnectionStatus.CHECKING)
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.DOCUMENT_SIGNING_CARD)
+            .assertIsDisplayed()
+        composeRule
+            .onNodeWithTag(UiAutomationIds.DOCUMENT_CAN_FIELD)
+            .assertDoesNotExist()
+
+        snapshotState.value =
+            snapshotState.value.copy(status = ReaderConnectionStatus.READY)
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.DOCUMENT_SIGNING_CARD)
+            .assertIsDisplayed()
+    }
+
+    @Test
     fun removingCardClosesPersonPageBackToFront() {
         var snapshot by mutableStateOf(
             READY_WITH_CARD.copy(
@@ -235,6 +290,24 @@ internal class MainScreenTest {
         }
     }
 
+    private fun showSigning(snapshotState: MutableState<UsbReaderSnapshot>) {
+        composeRule.setContent {
+            ReFineIdTheme {
+                MainScreen(
+                    snapshot = snapshotState.value,
+                    onRequestPermission = {},
+                    qualifiedCardService = STRICT_SERVICE,
+                    nfcQualifiedCardService = STRICT_SERVICE,
+                    timestampAuthorityRepository = BENIGN_REPOSITORY,
+                    nfcSnapshot =
+                        NfcReaderSnapshot(
+                            status = NfcReaderStatus.WAITING_FOR_CARD,
+                        ),
+                )
+            }
+        }
+    }
+
     private companion object {
         const val SYNTHETIC_HOLDER_NAME = "MEIKALAINEN MATTI SAKARI"
         const val EXPECTED_PERMISSION_REQUEST_COUNT = 1
@@ -245,6 +318,41 @@ internal class MainScreenTest {
                 status = ReaderConnectionStatus.READY,
                 cardPresence = CardPresence.PRESENT,
             )
+
+        val STRICT_SERVICE =
+            object : QualifiedCardService {
+                override fun requestQualifiedCertificate(
+                    onResult: (NativeCertificateReadResult<NativeQualifiedCertificate>) -> Unit,
+                ): Unit = error("card service must not be touched")
+
+                override fun requestPin2Preflight(onResult: (NativePin2PreflightResult) -> Unit): Unit =
+                    error("card service must not be touched")
+
+                override fun requestQualifiedSignature(
+                    algorithm: QualifiedSigningAlgorithm,
+                    pin2: Pin2Submission,
+                    content: ByteArray,
+                    expectedCertificate: NativeQualifiedCertificate,
+                    onResult: (QualifiedSignResult) -> Unit,
+                ): Unit = error("card service must not be touched")
+
+                override fun requestQualifiedDigestSignature(
+                    algorithm: QualifiedSigningAlgorithm,
+                    pin2: Pin2Submission,
+                    digest: ByteArray,
+                    expectedCertificate: NativeQualifiedCertificate,
+                    onResult: (QualifiedSignResult) -> Unit,
+                ): Unit = error("card service must not be touched")
+            }
+
+        val BENIGN_REPOSITORY =
+            object : TimestampAuthorityRepository {
+                override fun load(): List<TimestampAuthorityConfiguration> = emptyList()
+
+                override fun save(authorities: List<TimestampAuthorityConfiguration>) = Unit
+
+                override fun restoreDefaults() = Unit
+            }
 
         val INERT_BROWSER_CARD_SERVICE =
             object : AuthenticationCardService {

@@ -346,7 +346,7 @@ internal class UsbReaderController(
             AppTrace.usbRefreshIgnored()
             return
         }
-        probeGeneration += 1
+        val previousDeviceId = selectedDevice?.deviceId
         val devices = usbManager.deviceList.values.toList()
         val descriptors = devices.map { device -> device.toDescriptor() }
         val allMatches = CcidReaderClassifier.classifyAll(descriptors)
@@ -360,6 +360,22 @@ internal class UsbReaderController(
             hasCcidReader = match != null && device != null,
             hasPermission = device?.let(usbManager::hasPermission),
         )
+        if (device != null &&
+            match != null &&
+            usbManager.hasPermission(device) &&
+            shouldKeepSessionOnRefresh(
+                previousDeviceId = previousDeviceId,
+                deviceId = device.deviceId,
+                status = latestSnapshot.status,
+                cardPresence = latestSnapshot.cardPresence,
+                hasSession = activeSession != null,
+            )
+        ) {
+            AppTrace.usbRefreshSessionKept()
+            publish(latestSnapshot.copy(availableReaders = emptyList()))
+            return
+        }
+        probeGeneration += 1
         publish(
             when {
                 device == null || match == null -> {

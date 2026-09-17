@@ -82,6 +82,7 @@ internal fun DocumentSigningCard(
     canSignPdf: Boolean = true,
     progressText: String? = null,
     canRequired: Boolean,
+    canSign: Boolean,
     status: DocumentSigningStatus,
     onChooseDocuments: () -> Unit,
     onAddDocument: () -> Unit,
@@ -240,7 +241,7 @@ internal fun DocumentSigningCard(
                             Modifier
                                 .fillMaxWidth()
                                 .testTag(UiAutomationIds.DOCUMENT_SIGN_ACTION),
-                        enabled = !isWorking && canReady && pinReady,
+                        enabled = canSign && !isWorking && canReady && pinReady,
                     ) {
                         Text(pdfButtonText)
                     }
@@ -251,7 +252,7 @@ internal fun DocumentSigningCard(
                         Modifier
                             .fillMaxWidth()
                             .testTag(UiAutomationIds.DOCUMENT_FORMAT_CONTAINER),
-                    enabled = !isWorking && canReady && pinReady,
+                    enabled = canSign && !isWorking && canReady && pinReady,
                 ) {
                     Text(stringResource(R.string.sign_container))
                 }

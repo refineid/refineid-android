@@ -692,6 +692,10 @@ internal object AppTrace {
         debug("usb:refresh ignored=not-started")
     }
 
+    fun usbRefreshSessionKept() {
+        debug("usb:refresh kept=healthy-session")
+    }
+
     fun usbPermissionResult(isGranted: Boolean) {
         debug("usb:permission-result granted=" + isGranted)
     }
