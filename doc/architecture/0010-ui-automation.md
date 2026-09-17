@@ -95,3 +95,22 @@ semantics, decimal and length bounds, one synthetic one-shot submission,
 immediate field clearing, disabled working state, and terse status text. A
 separate device test verifies bounded PDF input ownership and zeroization. No
 automated test enters PIN2 into the real card service.
+
+The signing session survives the transient card-readiness loss that a
+foreground USB refresh causes on activity return: the session, its scope,
+and the picker registrations live for the whole signing visit, signing is
+refused visibly while unavailable, and the visit latches its card transport
+so USB signing is never silently rerouted. Compose tests drive a nonempty
+picker result across READY to CHECKING to READY in both callback orderings
+and cover adding, cancellation, and save-result delivery. With a live card
+and reader present, run the real picker round trip separately:
+
+    ./gradlew connectedDebugAndroidTest \
+      -Pandroid.testInstrumentationRunnerArguments.class=fi.refineid.android.ui.LiveDocumentSigningEntryUiAutomatorTest \
+      -Pandroid.testInstrumentationRunnerArguments.refineidLiveDocumentEntry=true
+
+The test stages a synthetic PDF, picks it through the system file picker,
+and asserts the selection stays on the signing screen; a second cancelled
+pick must keep the screen as well. It handles the system USB grant and the
+notification runtime prompt that a fresh installation raises, enters no
+credential, and therefore must not consume a retry.
