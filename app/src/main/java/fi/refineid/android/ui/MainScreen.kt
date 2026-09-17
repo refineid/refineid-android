@@ -444,6 +444,16 @@ internal fun MainScreen(
         }
 
         MainDestination.SIGN -> {
+            var latchedTransport by remember { mutableStateOf<SigningTransport?>(null) }
+            val usbTransportPresent = snapshot.status != ReaderConnectionStatus.NOT_CONNECTED
+            val nfcTransportPresent =
+                nfcSnapshot.status != NfcReaderStatus.NOT_AVAILABLE &&
+                    nfcSnapshot.status != NfcReaderStatus.TURNED_OFF
+            val effectiveTransport =
+                nextSigningTransport(latchedTransport, usbTransportPresent, nfcTransportPresent)
+            LaunchedEffect(effectiveTransport) {
+                latchedTransport = effectiveTransport
+            }
             SubScreen(
                 title = stringResource(R.string.sign),
                 tag = UiAutomationIds.SIGN_SCREEN,
@@ -452,20 +462,20 @@ internal fun MainScreen(
                 DocumentSigningHarness(
                     signingAvailable = signingAvailable,
                     cardService =
-                        if (usbCardReady) {
-                            qualifiedCardService
-                        } else {
-                            nfcQualifiedCardService
+                        when (effectiveTransport) {
+                            SigningTransport.USB -> qualifiedCardService
+                            SigningTransport.NFC -> nfcQualifiedCardService
+                            null -> null
                         },
                     tap =
-                        if (usbCardReady) {
-                            null
-                        } else {
+                        if (effectiveTransport == SigningTransport.NFC) {
                             DocumentSignTap(
                                 begin = onSignBeginTap,
                                 end = onSignEndTap,
                                 canRequired = !nfcSnapshot.isPrimed,
                             )
+                        } else {
+                            null
                         },
                     timestampAuthorityRepository = timestampAuthorityRepository,
                     onComplete = { destination = MainDestination.HOME },

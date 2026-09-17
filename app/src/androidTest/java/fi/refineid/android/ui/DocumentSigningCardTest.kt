@@ -57,7 +57,11 @@ internal class DocumentSigningCardTest {
     fun selectedPdfPromptsForPin2WithoutAccessNumberWhenPrimed() {
         show(hasDocument = true)
 
-        composeRule.onNodeWithTag(UiAutomationIds.DOCUMENT_SELECTED_STATUS).assertIsDisplayed()
+        composeRule
+            .onNodeWithTag(
+                UiAutomationIds.DOCUMENT_SELECTED_STATUS,
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
         composeRule.onNodeWithTag(UiAutomationIds.PIN2_FIELD).assertIsDisplayed()
         composeRule.onNodeWithTag(UiAutomationIds.DOCUMENT_CAN_FIELD).assertDoesNotExist()
         composeRule.onNodeWithTag(UiAutomationIds.DOCUMENT_SIGN_ACTION).assertIsNotEnabled()
@@ -67,12 +71,25 @@ internal class DocumentSigningCardTest {
     fun selectedPdfPromptsForPin2WithoutAccessNumberWhenCanIsRememberedInSession() {
         fi.refineid.android.core.CanSessionStore
             .remember(SYNTHETIC_CAN)
-        show(hasDocument = true, canRequired = true)
+        try {
+            show(hasDocument = true, canRequired = true)
 
-        composeRule.onNodeWithTag(UiAutomationIds.DOCUMENT_SELECTED_STATUS).assertIsDisplayed()
-        composeRule.onNodeWithTag(UiAutomationIds.PIN2_FIELD).assertIsDisplayed()
-        composeRule.onNodeWithTag(UiAutomationIds.DOCUMENT_CAN_FIELD).assertDoesNotExist()
-        composeRule.onNodeWithTag(UiAutomationIds.DOCUMENT_SIGN_ACTION).assertIsNotEnabled()
+            composeRule
+                .onNodeWithTag(
+                    UiAutomationIds.DOCUMENT_SELECTED_STATUS,
+                    useUnmergedTree = true,
+                ).assertIsDisplayed()
+            composeRule.onNodeWithTag(UiAutomationIds.PIN2_FIELD).assertIsDisplayed()
+            // The field stays visible for verification, but the
+            // remembered access number already satisfies readiness: PIN2
+            // alone enables signing.
+            composeRule.onNodeWithTag(UiAutomationIds.DOCUMENT_CAN_FIELD).assertIsDisplayed()
+            composeRule.onNodeWithTag(UiAutomationIds.PIN2_FIELD).performTextInput(SYNTHETIC_PIN2)
+            composeRule.onNodeWithTag(UiAutomationIds.DOCUMENT_SIGN_ACTION).assertIsEnabled()
+        } finally {
+            fi.refineid.android.core.CanSessionStore
+                .clearForTesting()
+        }
     }
 
     @Test
@@ -131,6 +148,33 @@ internal class DocumentSigningCardTest {
     }
 
     @Test
+    fun unavailableCardKeepsSignDisabledWithCompleteCredentials() {
+        var submissionCount = NO_ACTIONS
+        show(
+            hasDocument = true,
+            canSign = false,
+            onSign = { _, pin2, can ->
+                submissionCount += ACTION_COUNT_STEP
+                pin2.close()
+                can?.close()
+            },
+        )
+        val pinField = composeRule.onNodeWithTag(UiAutomationIds.PIN2_FIELD)
+        val signAction = composeRule.onNodeWithTag(UiAutomationIds.DOCUMENT_SIGN_ACTION)
+        val containerAction = composeRule.onNodeWithTag(UiAutomationIds.DOCUMENT_FORMAT_CONTAINER)
+
+        pinField.performTextInput(SYNTHETIC_PIN2)
+        signAction.assertIsNotEnabled()
+        containerAction.assertIsNotEnabled()
+        composeRule
+            .onNodeWithTag(UiAutomationIds.DOCUMENT_CHOOSE_ACTION)
+            .assertIsEnabled()
+        composeRule.runOnIdle {
+            assertEquals(NO_ACTIONS, submissionCount)
+        }
+    }
+
+    @Test
     fun pin2InputRejectsNonDecimalAndOverlengthValues() {
         show(hasDocument = true)
         val pinField = composeRule.onNodeWithTag(UiAutomationIds.PIN2_FIELD)
@@ -183,6 +227,7 @@ internal class DocumentSigningCardTest {
     private fun show(
         hasDocument: Boolean = false,
         canRequired: Boolean = false,
+        canSign: Boolean = true,
         status: DocumentSigningStatus = DocumentSigningStatus.IDLE,
         onChooseDocuments: () -> Unit = {},
         onAddDocument: () -> Unit = {},
@@ -198,6 +243,7 @@ internal class DocumentSigningCardTest {
                     documentNames = if (hasDocument) listOf("test_document.pdf") else emptyList(),
                     canSignPdf = true,
                     canRequired = canRequired,
+                    canSign = canSign,
                     status = status,
                     onChooseDocuments = onChooseDocuments,
                     onAddDocument = onAddDocument,

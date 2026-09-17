@@ -256,6 +256,8 @@ internal object AppTrace {
 
     fun usbRefreshIgnored() = Unit
 
+    fun usbRefreshSessionKept() = Unit
+
     fun usbPermissionResult(isGranted: Boolean) = Unit
 
     fun usbDeviceAttached() = Unit
