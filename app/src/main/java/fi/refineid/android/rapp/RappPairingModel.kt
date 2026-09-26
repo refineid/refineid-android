@@ -41,6 +41,14 @@ internal sealed interface PairingPhase {
 }
 
 private const val LISTENER_CLOSE_DELAY_MS = 2000L
+private const val HANDSHAKE_DEADLINE_MS = 10_000L
+private const val DEFAULT_PAIRING_COUNTDOWN_SECONDS = 180
+private val DEFAULT_PAIRING_PROFILES =
+    listOf(
+        "fi.refineid.card-status.v1",
+        "fi.refineid.authentication.v1",
+        "fi.refineid.document-signing.v1",
+    )
 
 internal class RappPairingModel(
     private val context: Context,
@@ -51,6 +59,9 @@ internal class RappPairingModel(
     private var browser: StreamRelayBrowser? = null
     private var pairingBridge: RappPairingBridge? = null
     private var timerJob: Job? = null
+    private var handshakeDeadlineJob: Job? = null
+    private var activeOfferingCode: String? = null
+    private var secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
     private var proxyHandshakeStep = 0
     private var requesterHandshakeStep = 0
     private var receivedPeerHello: uniffi.refineid_rapp.RappPeerHello? = null
@@ -83,6 +94,8 @@ internal class RappPairingModel(
     fun createOffer() {
         reset()
         val code = RappPairingCode.generate()
+        activeOfferingCode = code
+        secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
         val offerId = RappPairingCode.offerIdentifier(code)
         val pairingSecret = RappPairingCode.pairingSecret(code)
         val candidates =
@@ -115,7 +128,7 @@ internal class RappPairingModel(
             val offerUri = bridge.offerUri(nowMonotonicMs = startedAtMonotonicMs)
             val rendezvousName = StreamRendezvousName.name(sharingOfferUri = offerUri)
 
-            phase = PairingPhase.Offering(code = code, secondsRemaining = 180)
+            phase = PairingPhase.Offering(code = code, secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS)
             startCountdown()
 
             bridge.begin(candidateId = "stream-1", nowMonotonicMs = startedAtMonotonicMs)
@@ -263,18 +276,9 @@ internal class RappPairingModel(
         val code = RappPairingCode.normalize(rawCode)
         if (!RappPairingCode.isValid(code)) return
 
-        listener?.close()
-        listener = null
-        browser?.close()
-        browser = null
-        try {
-            pairingBridge?.cancelPairing()
-        } catch (_: Exception) {
-        }
-        pairingBridge = null
-        receivedPeerHello = null
-
+        reset()
         phase = PairingPhase.Connecting("Connecting...")
+        startCountdown()
         val offerId = RappPairingCode.offerIdentifier(code)
         val pairingSecret = RappPairingCode.pairingSecret(code)
         val candidates =
@@ -322,7 +326,11 @@ internal class RappPairingModel(
 
             if (BuildConfig.DEBUG) android.util.Log.i("RAPP_PAIR", "Step 6: StreamRelayListener start $rendezvousName")
             val relayListener =
-                StreamRelayListener(context, scope) { event ->
+                StreamRelayListener(
+                    context = context,
+                    scope = scope,
+                    handshakeTimeoutMs = HANDSHAKE_DEADLINE_MS,
+                ) { event ->
                     handleProxyListenerEvent(event, proxyBridge)
                 }
             listener = relayListener
@@ -341,6 +349,7 @@ internal class RappPairingModel(
             is StreamRelayEvent.Connected -> {
                 phase = PairingPhase.Connecting("Connected! Starting security handshake...")
                 proxyHandshakeStep = 0
+                startHandshakeDeadline()
             }
 
             is StreamRelayEvent.Frame -> {
@@ -358,6 +367,7 @@ internal class RappPairingModel(
                             val response = bridge.writeHandshakeFrame(nowMonotonicMs)
                             listener?.send(response)
                             proxyHandshakeStep = 1
+                            startHandshakeDeadline()
                         }
 
                         1 -> {
@@ -366,32 +376,28 @@ internal class RappPairingModel(
                             if (bridge.handshakeComplete(nowMonotonicMs)) {
                                 bridge.enterConfirmation(nowMonotonicMs)
                                 val hello =
-                                    bridge.sendHello(
-                                        displayName = localDeviceDisplayName(),
-                                        platform = "Android",
-                                    )
+                                    bridge.sendHello(displayName = localDeviceDisplayName(), platform = "Android")
                                 listener?.send(hello)
                                 proxyHandshakeStep = 2
+                                startHandshakeDeadline()
                             }
                         }
 
                         2 -> {
                             // Peer sent Hello
                             receivedPeerHello = bridge.receiveHello(event.data, RappClock.wallMs())
-                            val grantedProfiles =
-                                listOf(
-                                    "fi.refineid.card-status.v1",
-                                    "fi.refineid.authentication.v1",
-                                    "fi.refineid.document-signing.v1",
-                                )
-                            val confirmation = bridge.sendConfirmation(grantedProfiles)
+                            val confirmation = bridge.sendConfirmation(DEFAULT_PAIRING_PROFILES)
                             listener?.send(confirmation)
                             proxyHandshakeStep = 3
+                            startHandshakeDeadline()
                         }
 
                         3 -> {
                             // Peer sent Confirmation
                             bridge.receiveConfirmation(event.data, RappClock.wallMs())
+                            handshakeDeadlineJob?.cancel()
+                            handshakeDeadlineJob = null
+                            listener?.clearSocketTimeout()
                             val nowMs = RappClock.wallMs()
                             val record = bridge.finishPairing(nowMs)
                             val hello = receivedPeerHello
@@ -440,6 +446,8 @@ internal class RappPairingModel(
                         }
                     }
                 } catch (e: Throwable) {
+                    handshakeDeadlineJob?.cancel()
+                    handshakeDeadlineJob = null
                     android.util.Log.e(
                         "RAPP_PAIR",
                         "handleProxyListenerEvent failed: ${e.javaClass.name}: ${e.message}",
@@ -450,6 +458,8 @@ internal class RappPairingModel(
             }
 
             is StreamRelayEvent.Disconnected -> {
+                handshakeDeadlineJob?.cancel()
+                handshakeDeadlineJob = null
                 if (phase is PairingPhase.Connecting) {
                     if (proxyHandshakeStep > 0) {
                         phase = PairingPhase.Failed("Peer disconnected")
@@ -460,28 +470,60 @@ internal class RappPairingModel(
                                 "Connection dropped before handshake; continuing to wait for peer...",
                             )
                         }
+                        restoreOfferingOrWaiting()
                     }
                 }
             }
 
             is StreamRelayEvent.Error -> {
+                handshakeDeadlineJob?.cancel()
+                handshakeDeadlineJob = null
                 phase = PairingPhase.Failed(event.cause.message ?: "Connection error")
             }
         }
+    }
+
+    private fun startHandshakeDeadline() {
+        handshakeDeadlineJob?.cancel()
+        handshakeDeadlineJob =
+            scope.launch(Dispatchers.Main) {
+                delay(HANDSHAKE_DEADLINE_MS)
+                if (phase is PairingPhase.Connecting) {
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.w(
+                            "RAPP_PAIR",
+                            "Handshake deadline reached at step $proxyHandshakeStep; disconnecting client",
+                        )
+                    }
+                    listener?.disconnectClient()
+                    restoreOfferingOrWaiting()
+                }
+            }
+    }
+
+    private fun restoreOfferingOrWaiting() {
+        val code = activeOfferingCode
+        if (code != null) {
+            phase = PairingPhase.Offering(code = code, secondsRemaining = secondsRemaining)
+        } else {
+            phase = PairingPhase.Connecting("Waiting for peer...")
+        }
+        proxyHandshakeStep = 0
     }
 
     private fun startCountdown() {
         timerJob?.cancel()
         timerJob =
             scope.launch(Dispatchers.Main) {
-                for (sec in 180 downTo 0) {
+                for (sec in DEFAULT_PAIRING_COUNTDOWN_SECONDS downTo 0) {
+                    secondsRemaining = sec
                     val current = phase
                     if (current is PairingPhase.Offering) {
                         phase = current.copy(secondsRemaining = sec)
                     }
                     delay(1000L)
                 }
-                if (phase is PairingPhase.Offering) {
+                if (phase is PairingPhase.Offering || phase is PairingPhase.Connecting) {
                     phase = PairingPhase.Failed("Pairing timed out")
                     reset()
                 }
@@ -507,8 +549,12 @@ internal class RappPairingModel(
     }
 
     fun reset() {
+        handshakeDeadlineJob?.cancel()
+        handshakeDeadlineJob = null
         timerJob?.cancel()
         timerJob = null
+        activeOfferingCode = null
+        secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
         listener?.close()
         listener = null
         browser?.close()
@@ -519,6 +565,8 @@ internal class RappPairingModel(
         }
         pairingBridge = null
         receivedPeerHello = null
+        proxyHandshakeStep = 0
+        requesterHandshakeStep = 0
         phase = PairingPhase.Idle
         pairedDevices = catalog.listPairs()
     }
