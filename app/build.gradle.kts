@@ -242,6 +242,10 @@ android {
         )
         getByName("main").kotlin.directories.add(rappGeneratedKotlin.asFile.absolutePath)
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 kotlin {

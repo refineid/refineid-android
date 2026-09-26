@@ -40,10 +40,12 @@ internal sealed interface StreamRelayEvent {
 internal class StreamRelayListener(
     private val context: Context,
     private val scope: CoroutineScope,
+    private val handshakeTimeoutMs: Long = DEFAULT_HANDSHAKE_TIMEOUT_MS,
     private val onEvent: (StreamRelayEvent) -> Unit,
 ) : AutoCloseable {
     companion object {
         const val SERVICE_TYPE = "_refineid-stream._tcp"
+        const val DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000L
     }
 
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
@@ -152,6 +154,13 @@ internal class StreamRelayListener(
                                 } catch (_: Exception) {
                                 }
                             } else {
+                                if (handshakeTimeoutMs > 0) {
+                                    try {
+                                        socket.soTimeout =
+                                            handshakeTimeoutMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                                    } catch (_: Exception) {
+                                    }
+                                }
                                 AppTrace.rappConnectionAccepted(socket.remoteSocketAddress.toString())
                                 if (BuildConfig.DEBUG) {
                                     android.util.Log.i(
@@ -252,6 +261,15 @@ internal class StreamRelayListener(
             }
             clientSocket = null
             outputStream = null
+        }
+    }
+
+    fun clearSocketTimeout() {
+        synchronized(this) {
+            try {
+                clientSocket?.soTimeout = 0
+            } catch (_: Exception) {
+            }
         }
     }
 

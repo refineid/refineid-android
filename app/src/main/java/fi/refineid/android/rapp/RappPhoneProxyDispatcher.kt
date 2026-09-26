@@ -218,6 +218,7 @@ internal class RappPhoneProxyDispatcher(
                 try {
                     currentSession.receiveReady(event.data, RappClock.wallMs())
                     currentSession.enterEstablished()
+                    activeListener?.clearSocketTimeout()
 
                     val liveness =
                         RappLivenessConfiguration(
