@@ -73,6 +73,7 @@ internal class AndroidKeystoreTimestampAuthorityPasswordVault(
             cipher.init(
                 Cipher.DECRYPT_MODE,
                 decryptionKey(),
+                // nosemgrep: kotlin.lang.security.gcm-detection.gcm-detection
                 GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv),
             )
             cipher.updateAAD(addressBytes)

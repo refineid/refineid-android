@@ -27,28 +27,28 @@ jobs:
       contents: read
     steps:
       - name: Check out refineid-android
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: refineid-android
 
       - name: Check out the sibling refineid-core
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: RefineID/refineid-core
           path: refineid-core
 
       - name: Set up JDK
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: '25'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       - name: Cache Android NDK
         id: cache-ndk
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /usr/local/lib/android/sdk/ndk
           key: ndk-${{ runner.os }}-${{ hashFiles('refineid-android/app/build.gradle.kts') }}
@@ -73,12 +73,12 @@ jobs:
         run: rustup target add aarch64-linux-android x86_64-linux-android
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-ndk
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.7.8
         with:
           workspaces: |
             refineid-android/native/refineid-android-core
