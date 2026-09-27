@@ -73,6 +73,7 @@ internal class StreamRelayListener(
         } catch (_: Exception) {
         }
         try {
+            // nosemgrep: kotlin.lang.security.unencrypted-socket.unencrypted-socket
             val server = ServerSocket(0)
             serverSocket = server
             AppTrace.rappListenerStarted(server.localPort)

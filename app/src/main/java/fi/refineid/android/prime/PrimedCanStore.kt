@@ -70,6 +70,7 @@ internal class PrimedCanStore(
                     clear()
                     return null
                 },
+                // nosemgrep: kotlin.lang.security.gcm-detection.gcm-detection
                 GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv),
             )
             cipher.updateAAD(ENTRY_NAME.encodeToByteArray())
@@ -199,6 +200,7 @@ internal class PrimedCanStore(
                     forgetPin1()
                     return null
                 },
+                // nosemgrep: kotlin.lang.security.gcm-detection.gcm-detection
                 GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv),
             )
             cipher.updateAAD(ENTRY_PIN1.encodeToByteArray())

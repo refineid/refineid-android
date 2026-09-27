@@ -9,6 +9,8 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 10
     groups:
       gradle-dependencies:
@@ -30,6 +32,8 @@ updates:
     directory: "/native/refineid-android-core"
     schedule:
       interval: "daily"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 10
     groups:
       cargo-dependencies:
@@ -40,6 +44,8 @@ updates:
     directory: "/native/refineid-rapp-android"
     schedule:
       interval: "daily"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 10
     groups:
       cargo-dependencies:
@@ -50,6 +56,8 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 10
     groups:
       actions-dependencies:

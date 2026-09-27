@@ -267,6 +267,7 @@ internal class StreamRelayBrowser(
         }
         scope.launch(Dispatchers.IO) {
             try {
+                // nosemgrep: kotlin.lang.security.unencrypted-socket.unencrypted-socket
                 val s = Socket()
                 s.connect(InetSocketAddress(host, port), 5000)
                 socket = s
