@@ -1,23 +1,14 @@
 # WHATSUP
 
-branch: agent/signing-lifecycle
-purpose: Fix signing document-selection lifecycle bug: picker results lost when USB refresh on activity return drops the signing composable.
-started: 2026-09-17T00:44+0300 by rain-daphnis (Muse Code)
-heartbeat: 2026-09-17T05:05+0300
-status: done-pending-merge
+branch: agent/cargo-outdated
+purpose: Update cargo dependencies flagged in audit report cargo-outdated.txt.
+started: 2026-09-27T21:57:35+03:00 by antigravity (Antigravity)
+heartbeat: 2026-09-27T22:08:50+03:00
+status: in-progress
 
 Done:
-- Session/scopes/pickers live for the whole signing visit; sign refused
-  visibly while unavailable (UNAVAILABLE); transport latched per visit;
-  healthy USB sessions kept across foreground refresh.
-- Regression cover: lifecycle compose 7/7, card 9/9, MainScreen 8/8,
-  unit latch 9/9 + policy 8/8, MainActivity UI test green, live picker
-  round trip green (USB kept=healthy-session observed twice live).
-- Live entry test rewritten: synthetic MediaStore PDF, real system
-  picker select + cancel, startup-dialog dismissal with USB-grant retry.
-- MainActivity test fixed: current home surface (mainScreen + verifyRow)
-  plus startup-dialog dismissal (was asserting removed reader cards).
-- Gates: ./gradlew check exit 0, verify-commit exit 0, audits clean.
-- Note: connectedDebugAndroidTest exits 1 even for all-pass suites in
-  this environment (untouched MainScreen 8/8 control shows the same);
-  XML verdicts are authoritative.
+- Updated cargo dependencies in native/refineid-android-core and native/refineid-rapp-android
+  (cfg-if, thiserror, unicode-ident, syn, camino, clap, rustix, siphasher, textwrap, toml, uniffi).
+- Regenerated UniFFI Kotlin bindings in refineid-rapp-android.
+- Audited with cargo audit and osv-scanner.
+- Verified with ./gradlew check and git pre-push gates.
