@@ -2,7 +2,9 @@ package fi.refineid.android.core
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -76,7 +78,7 @@ class AuthenticationPinCacheTest {
         val copy = entry?.copyBytes()
         assertArrayEquals(PIN_BYTES, copy)
         entry?.close()
-        assertNull(entry?.copyBytes())
+        assertThrows(IllegalStateException::class.java) { entry?.copyBytes() }
     }
 
     @Test
@@ -94,6 +96,25 @@ class AuthenticationPinCacheTest {
         cache.clear()
         assertFalse(cache.hasPin)
         assertNull(cache.take())
+    }
+
+    @Test
+    fun independentOwnershipPreservesCachedPinWhenSecondaryConsumerZeroizes() {
+        val cache = AuthenticationPinCache(lifetimeMillis = WINDOW, clock = { 0L })
+        val submission = Pin1Submission.fromOwnedBytes(pinBytes())
+
+        val cachePin = submission.copyBytes()
+        cache.recordVerified(cachePin)
+
+        val consumerPin = submission.copyBytes()
+        // Simulate consumer taking ownership and zeroizing its array (as writePin1 does)
+        consumerPin.fill(0)
+
+        val held = cache.take()
+        assertNotNull(held)
+        assertArrayEquals(PIN_BYTES, held?.copyBytes())
+        held?.close()
+        submission.close()
     }
 
     private fun pinBytes(): ByteArray = PIN_BYTES.copyOf()

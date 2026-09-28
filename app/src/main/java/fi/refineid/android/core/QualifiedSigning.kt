@@ -111,14 +111,15 @@ internal class Pin2Submission private constructor(
         }
     }
 
-    fun copyBytes(): ByteArray? =
-        synchronized(this) {
-            ownedBytes?.copyOf()
-        }
-
-    fun rawBytes(): ByteArray =
+    fun copyBytes(): ByteArray =
         synchronized(this) {
             checkNotNull(ownedBytes) { "PIN2 submission has already been closed" }.copyOf()
+        }
+
+    fun <T> peekBytes(operation: (ByteArray) -> T): T =
+        synchronized(this) {
+            val bytes = checkNotNull(ownedBytes) { "PIN2 submission has already been closed" }
+            operation(bytes)
         }
 
     override fun close() {

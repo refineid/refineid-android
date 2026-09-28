@@ -7,6 +7,8 @@ package fi.refineid.android.rapp
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
+import org.junit.Before
 import org.junit.Test
 import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappPairingBridge
@@ -16,19 +18,18 @@ import java.security.SecureRandom
 
 class RappCpacePairingFlowTest {
     companion object {
+        private const val STREAM_CANDIDATE_ID = "stream-1"
+        private const val STREAM_PROFILE = "fi.refineid.stream.v1"
+        private val EMPTY_CBOR_MAP = byteArrayOf(0xa0.toByte())
+        private const val CPACE_RANDOM_BYTES = 64
+        private var libraryFound: Boolean = false
+
         init {
-            var dir: File? = File(".").canonicalFile
-            var dylibFile: File? = null
-            while (dir != null && dylibFile == null) {
-                val candidate = File(dir, "native/refineid-rapp-android/target/debug/librefineid_rapp.dylib")
-                if (candidate.exists()) {
-                    dylibFile = candidate
-                } else {
-                    dir = dir.parentFile
-                }
-            }
-            dylibFile?.let { file ->
-                val parentDir = file.parentFile?.canonicalPath ?: file.parent ?: ""
+            val libNames = listOf("librefineid_rapp.dylib", "librefineid_rapp.so", "refineid_rapp.dll")
+            val candidate = findNativeLibrary(libNames)
+            if (candidate != null) {
+                libraryFound = true
+                val parentDir = candidate.parentFile?.canonicalPath ?: candidate.parent ?: ""
                 val existing = System.getProperty("jna.library.path")
                 System.setProperty(
                     "jna.library.path",
@@ -36,9 +37,24 @@ class RappCpacePairingFlowTest {
                 )
                 System.setProperty(
                     "uniffi.component.refineid_rapp.libraryOverride",
-                    file.canonicalPath,
+                    candidate.canonicalPath,
                 )
             }
+        }
+
+        private fun findNativeLibrary(names: List<String>): File? {
+            var dir: File? = File(".").canonicalFile
+            while (dir != null) {
+                val found =
+                    names
+                        .map { File(dir, "native/refineid-rapp-android/target/debug/$it") }
+                        .firstOrNull { it.exists() }
+                if (found != null) {
+                    return found
+                }
+                dir = dir.parentFile
+            }
+            return null
         }
     }
 
@@ -52,11 +68,16 @@ class RappCpacePairingFlowTest {
     private val candidates: List<RappTransportCandidate> =
         listOf(
             RappTransportCandidate(
-                profile = "fi.refineid.stream.v1",
-                candidateId = "stream-1",
-                parametersCbor = byteArrayOf(0xa0.toByte()),
+                profile = STREAM_PROFILE,
+                candidateId = STREAM_CANDIDATE_ID,
+                parametersCbor = EMPTY_CBOR_MAP,
             ),
         )
+
+    @Before
+    fun setUp() {
+        assumeTrue("RAPP native library available", libraryFound)
+    }
 
     @Test
     fun cpacePairingSucceedsBetweenRequesterAndProxy() {
@@ -80,62 +101,67 @@ class RappCpacePairingFlowTest {
                 startedAtMonotonicMs = nowMono,
             )
 
-        val randomReq = ByteArray(64).apply { SecureRandom().nextBytes(this) }
-        val randomProxy = ByteArray(64).apply { SecureRandom().nextBytes(this) }
+        val randomReq = ByteArray(CPACE_RANDOM_BYTES).apply { SecureRandom().nextBytes(this) }
+        val randomProxy = ByteArray(CPACE_RANDOM_BYTES).apply { SecureRandom().nextBytes(this) }
 
-        requester.beginCpace(
-            candidateId = "stream-1",
-            pairingCode = code,
-            randomBytes64 = randomReq,
-            nowMonotonicMs = RappClock.monotonicMs(),
-        )
-        proxy.beginCpace(
-            candidateId = "stream-1",
-            pairingCode = code,
-            randomBytes64 = randomProxy,
-            nowMonotonicMs = RappClock.monotonicMs(),
-        )
+        try {
+            requester.beginCpace(
+                candidateId = STREAM_CANDIDATE_ID,
+                pairingCode = code,
+                randomBytes64 = randomReq,
+                nowMonotonicMs = RappClock.monotonicMs(),
+            )
+            proxy.beginCpace(
+                candidateId = STREAM_CANDIDATE_ID,
+                pairingCode = code,
+                randomBytes64 = randomProxy,
+                nowMonotonicMs = RappClock.monotonicMs(),
+            )
 
-        // 1. CPace frame exchange
-        val reqCpaceFrame = requester.writeCpaceFrame(RappClock.monotonicMs())
-        val proxyCpaceFrame = proxy.writeCpaceFrame(RappClock.monotonicMs())
-        proxy.readCpaceFrame(reqCpaceFrame, RappClock.monotonicMs())
-        requester.readCpaceFrame(proxyCpaceFrame, RappClock.monotonicMs())
+            // 1. CPace frame exchange
+            val reqCpaceFrame = requester.writeCpaceFrame(RappClock.monotonicMs())
+            val proxyCpaceFrame = proxy.writeCpaceFrame(RappClock.monotonicMs())
+            proxy.readCpaceFrame(reqCpaceFrame, RappClock.monotonicMs())
+            requester.readCpaceFrame(proxyCpaceFrame, RappClock.monotonicMs())
 
-        // 2. Noise handshake
-        val h1 = requester.writeHandshakeFrame(RappClock.monotonicMs())
-        proxy.readHandshakeFrame(h1, RappClock.monotonicMs())
+            // 2. Noise handshake
+            val h1 = requester.writeHandshakeFrame(RappClock.monotonicMs())
+            proxy.readHandshakeFrame(h1, RappClock.monotonicMs())
 
-        val h2 = proxy.writeHandshakeFrame(RappClock.monotonicMs())
-        requester.readHandshakeFrame(h2, RappClock.monotonicMs())
+            val h2 = proxy.writeHandshakeFrame(RappClock.monotonicMs())
+            requester.readHandshakeFrame(h2, RappClock.monotonicMs())
 
-        val h3 = requester.writeHandshakeFrame(RappClock.monotonicMs())
-        proxy.readHandshakeFrame(h3, RappClock.monotonicMs())
+            val h3 = requester.writeHandshakeFrame(RappClock.monotonicMs())
+            proxy.readHandshakeFrame(h3, RappClock.monotonicMs())
 
-        assertTrue(requester.handshakeComplete(RappClock.monotonicMs()))
-        assertTrue(proxy.handshakeComplete(RappClock.monotonicMs()))
+            assertTrue(requester.handshakeComplete(RappClock.monotonicMs()))
+            assertTrue(proxy.handshakeComplete(RappClock.monotonicMs()))
 
-        // 3. Bilateral confirmation
-        requester.enterConfirmation(RappClock.monotonicMs())
-        proxy.enterConfirmation(RappClock.monotonicMs())
+            // 3. Bilateral confirmation
+            requester.enterConfirmation(RappClock.monotonicMs())
+            proxy.enterConfirmation(RappClock.monotonicMs())
 
-        val reqHello = requester.sendHello(displayName = "MacBook Pro", platform = "macOS")
-        val proxyHello = proxy.sendHello(displayName = "Pixel Phone", platform = "Android")
+            val reqHello = requester.sendHello(displayName = "MacBook Pro", platform = "macOS")
+            val proxyHello = proxy.sendHello(displayName = "Pixel Phone", platform = "Android")
 
-        requester.receiveHello(proxyHello, RappClock.wallMs())
-        proxy.receiveHello(reqHello, RappClock.wallMs())
+            requester.receiveHello(proxyHello, RappClock.wallMs())
+            proxy.receiveHello(reqHello, RappClock.wallMs())
 
-        val proxyConfirm = proxy.sendConfirmation(profiles)
-        val reqConfirm = requester.sendConfirmation(profiles)
+            val proxyConfirm = proxy.sendConfirmation(profiles)
+            val reqConfirm = requester.sendConfirmation(profiles)
 
-        requester.receiveConfirmation(proxyConfirm, RappClock.wallMs())
-        proxy.receiveConfirmation(reqConfirm, RappClock.wallMs())
+            requester.receiveConfirmation(proxyConfirm, RappClock.wallMs())
+            proxy.receiveConfirmation(reqConfirm, RappClock.wallMs())
 
-        // 4. Session established with matching pair ID
-        val reqPair = requester.finishPairing(RappClock.wallMs())
-        val proxyPair = proxy.finishPairing(RappClock.wallMs())
+            // 4. Session established with matching pair ID
+            val reqPair = requester.finishPairing(RappClock.wallMs())
+            val proxyPair = proxy.finishPairing(RappClock.wallMs())
 
-        assertArrayEquals(reqPair.metadata().pairId, proxyPair.metadata().pairId)
+            assertArrayEquals(reqPair.metadata().pairId, proxyPair.metadata().pairId)
+        } finally {
+            randomReq.fill(0)
+            randomProxy.fill(0)
+        }
     }
 
     @Test
@@ -161,32 +187,37 @@ class RappCpacePairingFlowTest {
                 startedAtMonotonicMs = nowMono,
             )
 
-        val randomReq = ByteArray(64).apply { SecureRandom().nextBytes(this) }
-        val randomProxy = ByteArray(64).apply { SecureRandom().nextBytes(this) }
+        val randomReq = ByteArray(CPACE_RANDOM_BYTES).apply { SecureRandom().nextBytes(this) }
+        val randomProxy = ByteArray(CPACE_RANDOM_BYTES).apply { SecureRandom().nextBytes(this) }
 
-        requester.beginCpace(
-            candidateId = "stream-1",
-            pairingCode = correctCode,
-            randomBytes64 = randomReq,
-            nowMonotonicMs = RappClock.monotonicMs(),
-        )
-        proxy.beginCpace(
-            candidateId = "stream-1",
-            pairingCode = wrongCode,
-            randomBytes64 = randomProxy,
-            nowMonotonicMs = RappClock.monotonicMs(),
-        )
+        try {
+            requester.beginCpace(
+                candidateId = STREAM_CANDIDATE_ID,
+                pairingCode = correctCode,
+                randomBytes64 = randomReq,
+                nowMonotonicMs = RappClock.monotonicMs(),
+            )
+            proxy.beginCpace(
+                candidateId = STREAM_CANDIDATE_ID,
+                pairingCode = wrongCode,
+                randomBytes64 = randomProxy,
+                nowMonotonicMs = RappClock.monotonicMs(),
+            )
 
-        // CPace frame exchange
-        val reqCpaceFrame = requester.writeCpaceFrame(RappClock.monotonicMs())
-        val proxyCpaceFrame = proxy.writeCpaceFrame(RappClock.monotonicMs())
-        proxy.readCpaceFrame(reqCpaceFrame, RappClock.monotonicMs())
-        requester.readCpaceFrame(proxyCpaceFrame, RappClock.monotonicMs())
+            // CPace frame exchange
+            val reqCpaceFrame = requester.writeCpaceFrame(RappClock.monotonicMs())
+            val proxyCpaceFrame = proxy.writeCpaceFrame(RappClock.monotonicMs())
+            proxy.readCpaceFrame(reqCpaceFrame, RappClock.monotonicMs())
+            requester.readCpaceFrame(proxyCpaceFrame, RappClock.monotonicMs())
 
-        // Noise handshake must fail because CPace derived different symmetric keys
-        val h1 = requester.writeHandshakeFrame(RappClock.monotonicMs())
-        assertThrows(RappBindingException::class.java) {
-            proxy.readHandshakeFrame(h1, RappClock.monotonicMs())
+            // Noise handshake must fail because CPace derived different symmetric keys
+            val h1 = requester.writeHandshakeFrame(RappClock.monotonicMs())
+            assertThrows(RappBindingException::class.java) {
+                proxy.readHandshakeFrame(h1, RappClock.monotonicMs())
+            }
+        } finally {
+            randomReq.fill(0)
+            randomProxy.fill(0)
         }
     }
 }

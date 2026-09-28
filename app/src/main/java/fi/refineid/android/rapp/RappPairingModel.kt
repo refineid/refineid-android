@@ -43,6 +43,8 @@ internal sealed interface PairingPhase {
 private const val LISTENER_CLOSE_DELAY_MS = 2000L
 private const val HANDSHAKE_DEADLINE_MS = 10_000L
 private const val DEFAULT_PAIRING_COUNTDOWN_SECONDS = 180
+private const val CPACE_RANDOM_BYTES = 64
+private const val STREAM_CANDIDATE_ID = "stream-1"
 private val DEFAULT_PAIRING_PROFILES =
     listOf(
         "fi.refineid.card-status.v1",
@@ -143,11 +145,11 @@ internal class RappPairingModel(
             is StreamRelayEvent.Connected -> {
                 phase = PairingPhase.Connecting("Peer connected! Starting security handshake...")
                 requesterHandshakeStep = 0
+                val random64 = ByteArray(CPACE_RANDOM_BYTES).apply { java.security.SecureRandom().nextBytes(this) }
                 try {
-                    val random64 = ByteArray(64).apply { java.security.SecureRandom().nextBytes(this) }
                     val nowMonotonicMs = RappClock.monotonicMs()
                     bridge.beginCpace(
-                        candidateId = "stream-1",
+                        candidateId = STREAM_CANDIDATE_ID,
                         pairingCode = code,
                         randomBytes64 = random64,
                         nowMonotonicMs = nowMonotonicMs,
@@ -156,13 +158,20 @@ internal class RappPairingModel(
                     val frame = bridge.writeCpaceFrame(nowMonotonicMs)
                     browser?.send(frame)
                     requesterHandshakeStep = 0
-                } catch (e: Exception) {
-                    phase = PairingPhase.Failed("Handshake write error: ${e.message}")
+                } catch (_: Exception) {
+                    phase = PairingPhase.Failed("Handshake negotiation failed")
+                } finally {
+                    random64.fill(0)
                 }
             }
 
             is StreamRelayEvent.Frame -> {
                 try {
+                    val preamble = rappStreamPairingPreamble()
+                    if (event.data.contentEquals(preamble)) {
+                        return
+                    }
+
                     val nowMonotonicMs = RappClock.monotonicMs()
                     when (requesterHandshakeStep) {
                         0 -> {
@@ -193,13 +202,7 @@ internal class RappPairingModel(
                         2 -> {
                             // Responder sent Hello
                             receivedPeerHello = bridge.receiveHello(event.data, RappClock.wallMs())
-                            val grantedProfiles =
-                                listOf(
-                                    "fi.refineid.card-status.v1",
-                                    "fi.refineid.authentication.v1",
-                                    "fi.refineid.document-signing.v1",
-                                )
-                            val conf = bridge.sendConfirmation(grantedProfiles)
+                            val conf = bridge.sendConfirmation(DEFAULT_PAIRING_PROFILES)
                             browser?.send(conf)
                             requesterHandshakeStep = 3
                         }
@@ -257,7 +260,7 @@ internal class RappPairingModel(
                         }
                     }
                 } catch (e: Exception) {
-                    phase = PairingPhase.Failed("Handshake error: ${e.message}")
+                    phase = PairingPhase.Failed("Handshake error: ${e.javaClass.simpleName}")
                 }
             }
 
@@ -356,16 +359,18 @@ internal class RappPairingModel(
         phase = PairingPhase.Connecting("Connected! Starting security handshake...")
         proxyHandshakeStep = 0
         startHandshakeDeadline()
+        val random64 = ByteArray(CPACE_RANDOM_BYTES).apply { java.security.SecureRandom().nextBytes(this) }
         try {
-            val random64 = ByteArray(64).apply { java.security.SecureRandom().nextBytes(this) }
             bridge.beginCpace(
-                candidateId = "stream-1",
+                candidateId = STREAM_CANDIDATE_ID,
                 pairingCode = code,
                 randomBytes64 = random64,
                 nowMonotonicMs = RappClock.monotonicMs(),
             )
-        } catch (e: Exception) {
-            phase = PairingPhase.Failed("Failed to initialize CPace: ${e.message}")
+        } catch (_: Exception) {
+            phase = PairingPhase.Failed("Failed to initialize security handshake")
+        } finally {
+            random64.fill(0)
         }
     }
 
@@ -436,7 +441,7 @@ internal class RappPairingModel(
         } catch (e: Throwable) {
             handshakeDeadlineJob?.cancel()
             handshakeDeadlineJob = null
-            phase = PairingPhase.Failed("Pairing error: ${e.javaClass.simpleName}: ${e.message ?: "unknown"}")
+            phase = PairingPhase.Failed("Pairing error: ${e.javaClass.simpleName}")
         }
     }
 

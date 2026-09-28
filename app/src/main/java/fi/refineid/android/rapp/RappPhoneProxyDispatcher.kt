@@ -88,6 +88,8 @@ internal class RappPhoneProxyDispatcher(
         private const val CERT_READ_TIMEOUT_MS = 5_000L
         private const val NANOS_PER_MICROSECOND = 1_000L
         private const val LIVENESS_POLL_INTERVAL_MS = 1_000L
+        private const val LIVENESS_CHALLENGE_BYTES = 32
+        private const val LIVENESS_JITTER_MS = 0L
         private const val SHA256_DIGEST_LENGTH = 32
         private const val SHA384_DIGEST_LENGTH = 48
     }
@@ -303,21 +305,28 @@ internal class RappPhoneProxyDispatcher(
         livenessJob?.cancel()
         livenessJob =
             scope.launch(Dispatchers.IO) {
-                val challenge = ByteArray(32)
-                while (isActive) {
-                    delay(LIVENESS_POLL_INTERVAL_MS)
-                    try {
-                        SecureRandom().nextBytes(challenge)
-                        val action =
-                            bridge.pollLiveness(
-                                nowMs = RappClock.monotonicMs(),
-                                challenge = challenge.copyOf(),
-                                jitterMs = 0L,
-                            )
-                        handleBridgeAction(action, bridge)
-                    } catch (_: Exception) {
-                        break
+                val challenge = ByteArray(LIVENESS_CHALLENGE_BYTES)
+                val secureRandom = SecureRandom()
+                try {
+                    while (isActive) {
+                        delay(LIVENESS_POLL_INTERVAL_MS)
+                        try {
+                            secureRandom.nextBytes(challenge)
+                            val challengeCopy = challenge.copyOf()
+                            val action =
+                                bridge.pollLiveness(
+                                    nowMs = RappClock.monotonicMs(),
+                                    challenge = challengeCopy,
+                                    jitterMs = LIVENESS_JITTER_MS,
+                                )
+                            challengeCopy.fill(0)
+                            handleBridgeAction(action, bridge)
+                        } catch (_: Exception) {
+                            break
+                        }
                     }
+                } finally {
+                    challenge.fill(0)
                 }
             }
     }
@@ -326,13 +335,19 @@ internal class RappPhoneProxyDispatcher(
         action: uniffi.refineid_rapp.RappBridgeAction,
         bridge: RappOperationBridge,
     ) {
-        if (action.kind == RappBridgeActionKind.SEND_FRAME) {
-            handleSendFrameAction(action)
-            return
+        action.frame?.let { frame ->
+            try {
+                activeListener?.send(frame)
+            } catch (_: Exception) {
+            }
         }
 
         if (action.closeSessionAfterSend) {
             dropConnection()
+            return
+        }
+
+        if (action.kind == RappBridgeActionKind.SEND_FRAME) {
             return
         }
 
@@ -344,18 +359,6 @@ internal class RappPhoneProxyDispatcher(
         }
 
         handleOperationAction(action, opId, opIdHex, bridge)
-    }
-
-    private fun handleSendFrameAction(action: uniffi.refineid_rapp.RappBridgeAction) {
-        action.frame?.let { frame ->
-            try {
-                activeListener?.send(frame)
-            } catch (_: Exception) {
-            }
-        }
-        if (action.closeSessionAfterSend) {
-            dropConnection()
-        }
     }
 
     private fun handleLifecycleAction(
@@ -380,7 +383,9 @@ internal class RappPhoneProxyDispatcher(
 
             RappBridgeActionKind.CANCELLED, RappBridgeActionKind.TERMINAL -> {
                 if (opIdHex != null) {
-                    inbox.dismiss(opIdHex)
+                    scope.launch(Dispatchers.Main) {
+                        inbox.dismiss(opIdHex)
+                    }
                     pendingPin1.remove(opIdHex)?.close()
                     pendingPin2.remove(opIdHex)?.close()
                 }
@@ -461,7 +466,7 @@ internal class RappPhoneProxyDispatcher(
                             cachedPin.consume { pinBytes ->
                                 Pin1Submission.fromOwnedBytes(pinBytes.copyOf())
                             }
-                        if (pinCache.isRejected(sub.rawBytes())) {
+                        if (pinCache.isRejected(sub)) {
                             sub.close()
                             null
                         } else {
@@ -471,7 +476,7 @@ internal class RappPhoneProxyDispatcher(
                         val stored = primedCanStore?.readPin1()
                         if (stored != null) {
                             val sub = Pin1Submission.fromOwnedBytes(stored)
-                            if (pinCache?.isRejected(sub.rawBytes()) == true) {
+                            if (pinCache?.isRejected(sub) == true) {
                                 sub.close()
                                 null
                             } else {
@@ -498,7 +503,7 @@ internal class RappPhoneProxyDispatcher(
                         requestId = opIdHex,
                         requester = requesterName,
                         onApproved = { pin1Submission ->
-                            if (pinCache?.isRejected(pin1Submission.rawBytes()) == true) {
+                            if (pinCache?.isRejected(pin1Submission) == true) {
                                 pin1Submission.close()
                                 respondCredentialRejected(opId, bridge)
                             } else {
@@ -943,7 +948,7 @@ internal class RappPhoneProxyDispatcher(
                     }
 
                     // Check if candidate PIN was already rejected
-                    if (pinCache?.isRejected(pin1Submission.rawBytes()) == true) {
+                    if (pinCache?.isRejected(pin1Submission) == true) {
                         AppTrace.rappOperationDenied(opIdHex, "known_rejected_pin")
                         respondCredentialRejected(opId, bridge)
                         return@launch
@@ -1023,17 +1028,24 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
     ): Pair<AuthenticationCardService, AuthenticationSignResult>? {
         var service = initialService
-        val pinBytes = pin1Submission.rawBytes()
         var result =
             service.signAuthenticationDigest(
                 algorithm = algorithm,
-                pin1 = Pin1Submission.fromOwnedBytes(pinBytes.copyOf()),
+                pin1 = Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes()),
                 digest = digest,
             )
         if (result is AuthenticationSignResult.Failure &&
             result.kind == AuthenticationSignFailure.CARD_UNAVAILABLE
         ) {
-            if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.BROWSER_AUTH, bridge, forcePrompt = true)) {
+            val cardReady =
+                ensureCardOrAbort(
+                    opId = opId,
+                    opIdHex = opIdHex,
+                    action = RappAuthAction.BROWSER_AUTH,
+                    bridge = bridge,
+                    forcePrompt = true,
+                )
+            if (!cardReady) {
                 return null
             }
             val retryService = authCardService()
@@ -1042,7 +1054,7 @@ internal class RappPhoneProxyDispatcher(
                 result =
                     retryService.signAuthenticationDigest(
                         algorithm = algorithm,
-                        pin1 = Pin1Submission.fromOwnedBytes(pinBytes.copyOf()),
+                        pin1 = Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes()),
                         digest = digest,
                     )
             }
@@ -1059,10 +1071,9 @@ internal class RappPhoneProxyDispatcher(
         result: AuthenticationSignResult.Success,
         bridge: RappOperationBridge,
     ) {
-        val pinBytes = pin1Submission.rawBytes()
-        pinCache?.recordVerified(pinBytes)
+        pinCache?.recordVerified(pin1Submission.copyBytes())
         if (primedCanStore?.isPrimed() == true) {
-            primedCanStore.writePin1(pinBytes)
+            primedCanStore.writePin1(pin1Submission.copyBytes())
         }
         ensureAuthCertCached(service)
         try {
@@ -1109,7 +1120,7 @@ internal class RappPhoneProxyDispatcher(
     ) {
         AppTrace.rappOperationFailed("browser_auth", opIdHex, result.kind.name)
         if (result.kind == AuthenticationSignFailure.WRONG_PIN) {
-            pinCache?.recordRejected(pin1Submission.rawBytes())
+            pinCache?.recordRejected(pin1Submission.copyBytes())
             primedCanStore?.forgetPin1()
             respondCredentialRejected(opId, bridge)
         } else {
@@ -1250,7 +1261,7 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
     ): QualifiedSignResult? {
         val service = qualifiedCardService() ?: return null
-        val pinBytes = pin2Submission.copyBytes() ?: return null
+        val pinBytes = pin2Submission.copyBytes()
         val deferred = CompletableDeferred<QualifiedSignResult>()
         service.requestQualifiedDigestSignature(
             algorithm = algorithm,
@@ -1271,10 +1282,6 @@ internal class RappPhoneProxyDispatcher(
             if (retryService != null) {
                 val freshCert = readSignatureCertificateWithTimeout() ?: return null
                 val retryPinBytes = pin2Submission.copyBytes()
-                if (retryPinBytes == null) {
-                    freshCert.close()
-                    return null
-                }
                 try {
                     val retryDeferred = CompletableDeferred<QualifiedSignResult>()
                     retryService.requestQualifiedDigestSignature(

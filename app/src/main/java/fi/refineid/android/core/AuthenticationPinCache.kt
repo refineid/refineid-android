@@ -54,6 +54,9 @@ internal class AuthenticationPinCache(
         return synchronized(lock) { fingerprint in rejected }
     }
 
+    /** True when this submission's digits were already card-rejected this process. */
+    fun isRejected(submission: Pin1Submission): Boolean = submission.peekBytes { isRejected(it) }
+
     /** Retain PIN1 digits the card accepted, taking ownership of them. */
     fun recordVerified(pinBytes: ByteArray) {
         val fingerprint = fingerprintOf(pinBytes)

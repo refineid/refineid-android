@@ -3,8 +3,20 @@
 branch: agent/security-fixes
 purpose: Fix security issues in RefineID Android: CPace pairing, credential custody, zeroization, FLAG_SECURE, and RAPP lifecycle.
 started: 2026-09-28T18:20+03:00 by petri
-heartbeat: 2026-09-28T19:13+03:00
+heartbeat: 2026-09-28T19:30+03:00
 status: verified
+
+## Review Fixes Applied (Round 1)
+- Fixed double-ownership bug in `handleBrowserAuthSuccess` by providing independent `copyBytes()` buffers to `pinCache.recordVerified` and `primedCanStore.writePin1`.
+- Added regression test `independentOwnershipPreservesCachedPinWhenSecondaryConsumerZeroizes` in `AuthenticationPinCacheTest`.
+- Replaced `rawBytes()` in `Pin1Submission` and `Pin2Submission` with non-copying borrowing accessor `peekBytes { ... }`.
+- Added `AuthenticationPinCache.isRejected(submission: Pin1Submission)` to check rejection status without exposing or leaking byte copies.
+- Eliminated raw intermediate copies in `performBrowserAuthWithRetry` and `BrowserPinCoordinator`.
+- Extracted named constants for magic values (`CPACE_RANDOM_BYTES`, `STREAM_CANDIDATE_ID`, `LIVENESS_CHALLENGE_BYTES`, `LIVENESS_JITTER_MS`, `DEFAULT_PAIRING_PROFILES`) and zeroized CPace random arrays in `finally`.
+- Transmitted attached frames on all bridge actions before evaluating close/drop triggers.
+- Ensured inbox dismissal is dispatched to `Dispatchers.Main`.
+- Made `RappCpacePairingFlowTest` cross-platform across macOS (`.dylib`), Linux (`.so`), and Windows (`.dll`).
+- Updated remediation report documentation regarding UI String GC limits and static-rendezvous collision model.
 
 ## Completed Tasks
 1. CPace Pairing & Relay Hardening:

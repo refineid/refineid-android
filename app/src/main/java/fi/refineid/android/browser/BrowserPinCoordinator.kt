@@ -116,14 +116,11 @@ internal class BrowserPinCoordinator(
                 }
             // A value the card already rejected this process is refused
             // locally rather than offered again to burn another retry.
-            val rejectedCheck = pin1.copyBytes()
-            if (rejectedCheck != null && pinCache?.isRejected(rejectedCheck) == true) {
-                rejectedCheck.fill(0)
+            if (pinCache?.isRejected(pin1) == true) {
                 pin1.close()
                 publishStatus(BrowserSignatureStatus.WRONG_PIN)
                 throw SignatureException("PIN1 was already rejected this session")
             }
-            rejectedCheck?.fill(0)
             return signWith(algorithm, message, pin1)
         } finally {
             operationLock.unlock()

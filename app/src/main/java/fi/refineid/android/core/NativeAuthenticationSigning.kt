@@ -213,15 +213,15 @@ internal class Pin1Submission private constructor(
         }
     }
 
-    /** Copy the digits without consuming the submission, or null if spent. */
-    fun copyBytes(): ByteArray? =
-        synchronized(this) {
-            ownedBytes?.copyOf()
-        }
-
-    fun rawBytes(): ByteArray =
+    fun copyBytes(): ByteArray =
         synchronized(this) {
             checkNotNull(ownedBytes) { "PIN1 submission has already been closed" }.copyOf()
+        }
+
+    fun <T> peekBytes(operation: (ByteArray) -> T): T =
+        synchronized(this) {
+            val bytes = checkNotNull(ownedBytes) { "PIN1 submission has already been closed" }
+            operation(bytes)
         }
 
     override fun close() {
