@@ -178,7 +178,7 @@ internal class RappPhoneProxyDispatcher(
             is StreamRelayEvent.Disconnected, is StreamRelayEvent.Error -> {
                 AppTrace.rappConnectionDropped(
                     if (event is StreamRelayEvent.Error) {
-                        event.cause.message ?: "unknown error"
+                        event.cause.javaClass.simpleName
                     } else {
                         "stream disconnected"
                     },
@@ -1121,6 +1121,7 @@ internal class RappPhoneProxyDispatcher(
                 primedCanStore.writePin1(pin1Submission.copyBytes())
             }
         } catch (_: IllegalStateException) {
+            // If the submission was already closed or consumed, skip caching and proceed.
         }
         ensureAuthCertCached(service)
         try {

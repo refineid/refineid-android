@@ -85,6 +85,10 @@ jobs:
             refineid-android/native/refineid-rapp-android
             refineid-core
 
+      - name: Build host RAPP shared library for unit tests
+        working-directory: refineid-android/native/refineid-rapp-android
+        run: cargo build --locked
+
       - name: Run the full quality floor
         working-directory: refineid-android
         env:

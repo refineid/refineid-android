@@ -3,8 +3,18 @@
 branch: agent/security-fixes
 purpose: Fix security issues in RefineID Android: CPace pairing, credential custody, zeroization, FLAG_SECURE, and RAPP lifecycle.
 started: 2026-09-28T18:20+03:00 by petri
-heartbeat: 2026-09-28T19:55+03:00
+heartbeat: 2026-09-28T20:05+03:00
 status: verified
+
+## Review Fixes Applied (Round 3)
+- Registered `buildRappHostDebug` task in `app/build.gradle.kts` and wired into `testDebugUnitTest` dependency.
+- Configured `jna.library.path` in `unitTests.all` and updated `RappCpacePairingFlowTest.kt` to check `jna.library.path` before filesystem lookup.
+- Enforced `assertTrue("RAPP native host library must be built and available on CI", libraryFound)` in `RappCpacePairingFlowTest.kt` when `CI == "true"` or `GITHUB_ACTIONS == "true"` (guaranteeing regression tests never skip silently in CI).
+- Added explicit `cargo build --locked` step for host RAPP shared library in `.github/workflows/check.yml`.
+- Sanitized remaining `event.cause.message` trace in `RappPhoneProxyDispatcher.kt` to `simpleName`.
+- Added clarifying comment to empty `IllegalStateException` catch in `handleBrowserAuthSuccess`.
+- Fixed race condition in `StreamRelayListener.disconnectClient()` to reliably fire `Disconnected` event when an active client is disconnected without holding lock during event callback.
+
 
 ## Review Fixes Applied (Round 2)
 - Replaced dynamic exception messages with static strings in `RappPairingModel` failure phases and `RappPhoneProxyDispatcher` traces.

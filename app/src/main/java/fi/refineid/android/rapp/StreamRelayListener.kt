@@ -168,11 +168,17 @@ internal class StreamRelayListener(
                                     authDeadlineJob =
                                         scope.launch(Dispatchers.IO) {
                                             delay(handshakeTimeoutMs)
-                                            synchronized(this@StreamRelayListener) {
-                                                if (clientSocket === socket) {
-                                                    AppTrace.rappListenerFailed("handshake_auth_deadline_expired")
-                                                    disconnectClient()
+                                            val shouldDisconnect =
+                                                synchronized(this@StreamRelayListener) {
+                                                    if (clientSocket === socket) {
+                                                        AppTrace.rappListenerFailed("handshake_auth_deadline_expired")
+                                                        true
+                                                    } else {
+                                                        false
+                                                    }
                                                 }
+                                            if (shouldDisconnect) {
+                                                disconnectClient()
                                             }
                                         }
                                 }
@@ -271,17 +277,23 @@ internal class StreamRelayListener(
     }
 
     fun disconnectClient() {
-        synchronized(this) {
-            authDeadlineJob?.cancel()
-            authDeadlineJob = null
-            readJob?.cancel()
-            readJob = null
-            try {
-                clientSocket?.close()
-            } catch (_: Exception) {
+        val notifyDisconnect =
+            synchronized(this) {
+                val activeSocket = clientSocket
+                authDeadlineJob?.cancel()
+                authDeadlineJob = null
+                readJob?.cancel()
+                readJob = null
+                try {
+                    activeSocket?.close()
+                } catch (_: Exception) {
+                }
+                clientSocket = null
+                outputStream = null
+                !isClosed.get() && activeSocket != null
             }
-            clientSocket = null
-            outputStream = null
+        if (notifyDisconnect) {
+            onEvent(StreamRelayEvent.Disconnected)
         }
     }
 

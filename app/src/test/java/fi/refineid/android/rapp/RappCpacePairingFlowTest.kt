@@ -43,6 +43,17 @@ class RappCpacePairingFlowTest {
         }
 
         private fun findNativeLibrary(names: List<String>): File? {
+            val jnaPath = System.getProperty("jna.library.path")
+            if (!jnaPath.isNullOrBlank()) {
+                val jnaDirs = jnaPath.split(File.pathSeparator).map { File(it) }
+                for (dir in jnaDirs) {
+                    for (name in names) {
+                        val file = File(dir, name)
+                        if (file.exists()) return file
+                    }
+                }
+            }
+
             var dir: File? = File(".").canonicalFile
             while (dir != null) {
                 val found =
@@ -76,7 +87,12 @@ class RappCpacePairingFlowTest {
 
     @Before
     fun setUp() {
-        assumeTrue("RAPP native library available", libraryFound)
+        val isCi = System.getenv("CI") == "true" || System.getenv("GITHUB_ACTIONS") == "true"
+        if (isCi) {
+            assertTrue("RAPP native host library must be built and available on CI", libraryFound)
+        } else {
+            assumeTrue("RAPP native library available", libraryFound)
+        }
     }
 
     @Test
