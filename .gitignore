@@ -71,3 +71,6 @@ traces/
 
 # Public CSCA trust anchors ship with the application.
 !app/src/main/assets/csca/**/*.der
+
+WHATSUP.md
+

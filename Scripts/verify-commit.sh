@@ -12,5 +12,12 @@ cd "$(dirname "$0")/.."
 # shellcheck source=Scripts/gradle-environment.sh
 source Scripts/gradle-environment.sh
 
+whatsup_files=$(git ls-files | grep -i -E '(^|/)WHATSUP\.md$' || true)
+if [[ -n "$whatsup_files" ]]; then
+  echo "WHATSUP.md files are forbidden:"
+  printf '%s\n' "$whatsup_files"
+  exit 1
+fi
+
 ./gradlew --quiet spotlessCheck detekt :app:detekt rustFormatCheck shellCheck lintDebug
 echo "pre-commit gates passed"
