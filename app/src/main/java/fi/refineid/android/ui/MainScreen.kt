@@ -76,6 +76,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import fi.refineid.android.BuildConfig
 import fi.refineid.android.R
 import fi.refineid.android.core.AuthenticationCardService
@@ -1071,6 +1073,7 @@ private fun ReadCardNfcDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = {
             Text(
                 text = stringResource(R.string.read_identity_card),
@@ -1196,6 +1199,7 @@ private fun ReaderCanDialog(
                 onDismiss()
             }
         },
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = {
             Text(
                 text =

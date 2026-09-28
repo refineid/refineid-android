@@ -66,8 +66,6 @@ private fun applyCredentialsAndConnect(
     }
     val pin1Submission =
         if (Pin1Submission.isComplete(pin1Input)) {
-            val pinBytes = pin1Input.toByteArray(Charsets.US_ASCII)
-            pinCache?.recordVerified(pinBytes)
             Pin1Submission.from(pin1Input)
         } else if (pinCache?.hasPin == true) {
             pinCache.take()
@@ -121,7 +119,6 @@ internal fun RappPairingScreen(
                     )
                 }
                 val initialCan = remember { CanSessionStore.currentCan ?: "" }
-                val initialPin1 = remember { pinCache?.peekPin() ?: "" }
                 CodeEntryCard(
                     onConnectWithCode = { code, can, pin1 ->
                         applyCredentialsAndConnect(can, pin1, pinCache, onConnectCard)
@@ -132,7 +129,6 @@ internal fun RappPairingScreen(
                         model.createOffer()
                     },
                     initialCan = initialCan,
-                    initialPin1 = initialPin1,
                 )
             }
 
@@ -267,11 +263,10 @@ private fun CodeEntryCard(
     onConnectWithCode: (String, String, String) -> Unit,
     onShowPairingCode: (String, String) -> Unit,
     initialCan: String,
-    initialPin1: String,
 ) {
     var codeInput by remember { mutableStateOf("") }
     var canInput by remember { mutableStateOf(initialCan) }
-    var pin1Input by remember { mutableStateOf(initialPin1) }
+    var pin1Input by remember { mutableStateOf("") }
     val canValid = CanSubmission.isComplete(canInput)
     val codeValid = RappPairingCode.isValid(codeInput)
 
@@ -336,7 +331,11 @@ private fun CodeEntryCard(
             )
 
             Button(
-                onClick = { onConnectWithCode(codeInput, canInput, pin1Input) },
+                onClick = {
+                    val pin = pin1Input
+                    pin1Input = ""
+                    onConnectWithCode(codeInput, canInput, pin)
+                },
                 enabled = codeValid && canValid,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -344,7 +343,11 @@ private fun CodeEntryCard(
             }
 
             OutlinedButton(
-                onClick = { onShowPairingCode(canInput, pin1Input) },
+                onClick = {
+                    val pin = pin1Input
+                    pin1Input = ""
+                    onShowPairingCode(canInput, pin)
+                },
                 modifier =
                     Modifier
                         .fillMaxWidth()

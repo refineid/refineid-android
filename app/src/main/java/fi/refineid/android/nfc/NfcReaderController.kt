@@ -321,10 +321,6 @@ internal class NfcReaderController(
             val candidateCan = can?.peekDigits()
             val currentCan = CanSessionStore.currentCan
             if (candidateCan == null || candidateCan == currentCan) {
-                pin1?.copyBytes()?.let(pinCache::recordVerified)
-                if (primedCardStored) {
-                    pin1?.copyBytes()?.let(primedCanStore::writePin1)
-                }
                 pin1?.close()
                 can?.close()
                 inMemoryCanBytes?.fill(0)
@@ -337,7 +333,6 @@ internal class NfcReaderController(
         // openSessionBytes read it at execution time instead.
         if (latestIsoDep == null) {
             inMemoryCanBytes?.fill(0)
-            pin1?.copyBytes()?.let(pinCache::recordVerified)
             pin1?.close()
             refreshReaderMode()
             // The holder asked to connect with no tag in the field:
@@ -616,10 +611,6 @@ internal class NfcReaderController(
                 primedCanStore.writeHolderName(holderName)
             }
             primedCanStore.writeAuthCertificateDer(certDer)
-        }
-        pin1?.copyBytes()?.let(pinCache::recordVerified)
-        if (mintOnSuccess || primedCardStored) {
-            pin1?.copyBytes()?.let(primedCanStore::writePin1)
         }
         pin1?.close()
         activeSession =

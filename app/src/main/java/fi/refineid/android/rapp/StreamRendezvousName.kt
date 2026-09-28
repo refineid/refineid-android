@@ -5,6 +5,7 @@ import java.security.MessageDigest
 
 /** Derives published rendezvous names for mDNS discovery. */
 internal object StreamRendezvousName {
+    const val MANUAL_PAIRING_SERVICE_NAME = "rf-pairing"
     private const val DIGEST_PREFIX_BYTE_COUNT = 8
     private const val PREFIX = "rf-"
 

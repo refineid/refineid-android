@@ -58,6 +58,28 @@ class AuthenticationPinCacheTest {
     }
 
     @Test
+    fun rejectingPinRetainsRejectionStatusAcrossClear() {
+        val cache = AuthenticationPinCache(lifetimeMillis = WINDOW, clock = { 0L })
+        cache.recordRejected(pinBytes())
+        assertTrue(cache.isRejected(pinBytes()))
+
+        cache.clear()
+        assertTrue(cache.isRejected(pinBytes()))
+    }
+
+    @Test
+    fun takeDoesNotLeakOrKeepDanglingReferencesAfterClose() {
+        val cache = AuthenticationPinCache(lifetimeMillis = WINDOW, clock = { 0L })
+        cache.recordVerified(pinBytes())
+
+        val entry = cache.take()
+        val copy = entry?.copyBytes()
+        assertArrayEquals(PIN_BYTES, copy)
+        entry?.close()
+        assertNull(entry?.copyBytes())
+    }
+
+    @Test
     fun defaultCacheHoldsVerifiedPinIndefinitely() {
         val cache = AuthenticationPinCache()
         assertFalse(cache.hasPin)

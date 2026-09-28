@@ -48,12 +48,6 @@ internal class AuthenticationPinCache(
             Pin1Submission.fromOwnedBytes(held.copyOf())
         }
 
-    /** Returns currently cached PIN1 as string without consuming, or null. */
-    fun peekPin(): String? =
-        synchronized(lock) {
-            heldPin?.let { String(it, Charsets.US_ASCII) }
-        }
-
     /** True when these digits were already card-rejected this process. */
     fun isRejected(pinBytes: ByteArray): Boolean {
         val fingerprint = fingerprintOf(pinBytes)

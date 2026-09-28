@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.core.net.toUri
 import fi.refineid.android.R
 import fi.refineid.android.browser.BrowserClientCertificateMatcher
@@ -240,6 +241,7 @@ private fun BrowserDialog(
                 dismissOnClickOutside = false,
                 usePlatformDefaultWidth = false,
                 decorFitsSystemWindows = false,
+                securePolicy = SecureFlagPolicy.SecureOn,
             ),
     ) {
         BrowserDialogContent(
@@ -625,7 +627,11 @@ private fun BrowserPinDialog(request: BrowserPinRequest) {
 
     Dialog(
         onDismissRequest = request::cancel,
-        properties = DialogProperties(dismissOnClickOutside = false),
+        properties =
+            DialogProperties(
+                dismissOnClickOutside = false,
+                securePolicy = SecureFlagPolicy.SecureOn,
+            ),
     ) {
         Surface(
             modifier = Modifier.semantics { testTagsAsResourceId = true },

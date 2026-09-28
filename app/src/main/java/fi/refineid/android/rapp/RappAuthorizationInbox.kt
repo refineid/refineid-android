@@ -4,19 +4,38 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.Pin2Submission
 
 internal enum class RappAuthAction {
     BROWSER_AUTH,
     DOCUMENT_SIGN,
 }
 
-internal data class RappAuthRequest(
-    val requestId: String,
-    val requester: String,
-    val action: RappAuthAction,
-    val onApproved: (pin: String) -> Unit,
-    val onDenied: () -> Unit,
-)
+internal sealed interface RappAuthRequest {
+    val requestId: String
+    val requester: String
+    val action: RappAuthAction
+    val onDenied: () -> Unit
+
+    data class BrowserAuth(
+        override val requestId: String,
+        override val requester: String,
+        val onApproved: (Pin1Submission) -> Unit,
+        override val onDenied: () -> Unit,
+    ) : RappAuthRequest {
+        override val action: RappAuthAction get() = RappAuthAction.BROWSER_AUTH
+    }
+
+    data class DocumentSign(
+        override val requestId: String,
+        override val requester: String,
+        val onApproved: (Pin2Submission) -> Unit,
+        override val onDenied: () -> Unit,
+    ) : RappAuthRequest {
+        override val action: RappAuthAction get() = RappAuthAction.DOCUMENT_SIGN
+    }
+}
 
 internal data class RappCardTapPrompt(
     val requestId: String,
@@ -55,22 +74,47 @@ internal class RappAuthorizationInbox(
         }
     }
 
-    fun ask(
+    fun askBrowserAuth(
         requestId: String,
         requester: String,
-        action: RappAuthAction,
-        onApproved: (pin: String) -> Unit,
+        onApproved: (Pin1Submission) -> Unit,
         onDenied: () -> Unit,
     ) {
         val req =
-            RappAuthRequest(
+            RappAuthRequest.BrowserAuth(
                 requestId = requestId,
                 requester = requester,
-                action = action,
-                onApproved = { pin ->
+                onApproved = { pin1 ->
                     notificationManager.dismissNotification()
                     currentRequest = null
-                    onApproved(pin)
+                    onApproved(pin1)
+                },
+                onDenied = {
+                    notificationManager.dismissNotification()
+                    currentRequest = null
+                    onDenied()
+                },
+            )
+        currentRequest = req
+        if (!isForeground) {
+            notificationManager.postAuthorizationNotification(requestId)
+        }
+    }
+
+    fun askDocumentSign(
+        requestId: String,
+        requester: String,
+        onApproved: (Pin2Submission) -> Unit,
+        onDenied: () -> Unit,
+    ) {
+        val req =
+            RappAuthRequest.DocumentSign(
+                requestId = requestId,
+                requester = requester,
+                onApproved = { pin2 ->
+                    notificationManager.dismissNotification()
+                    currentRequest = null
+                    onApproved(pin2)
                 },
                 onDenied = {
                     notificationManager.dismissNotification()
@@ -107,6 +151,17 @@ internal class RappAuthorizationInbox(
 
     fun dismissTapPrompt(requestId: String? = null) {
         if (requestId == null || currentTapPrompt?.requestId == requestId) {
+            currentTapPrompt = null
+            notificationManager.dismissNotification()
+        }
+    }
+
+    fun dismiss(requestId: String) {
+        if (currentRequest?.requestId == requestId) {
+            currentRequest = null
+            notificationManager.dismissNotification()
+        }
+        if (currentTapPrompt?.requestId == requestId) {
             currentTapPrompt = null
             notificationManager.dismissNotification()
         }

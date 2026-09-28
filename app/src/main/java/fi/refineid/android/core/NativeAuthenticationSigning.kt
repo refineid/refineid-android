@@ -219,6 +219,11 @@ internal class Pin1Submission private constructor(
             ownedBytes?.copyOf()
         }
 
+    fun rawBytes(): ByteArray =
+        synchronized(this) {
+            checkNotNull(ownedBytes) { "PIN1 submission has already been closed" }.copyOf()
+        }
+
     override fun close() {
         synchronized(this) {
             ownedBytes?.fill(0)

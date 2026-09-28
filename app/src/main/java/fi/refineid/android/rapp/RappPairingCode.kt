@@ -1,7 +1,5 @@
 package fi.refineid.android.rapp
 
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.security.SecureRandom
 
 /** Generates, formats, and validates 6-digit numeric pairing codes for RAPP pairing. */
@@ -10,8 +8,6 @@ internal object RappPairingCode {
     const val GROUP_SIZE = 3
     const val DEFAULT_LIFETIME_MS: Long = 180_000L
     private const val ALPHABET = "0123456789"
-    private const val PAIRING_SECRET_BYTE_COUNT = 32
-    private const val OFFER_ID_BYTE_COUNT = 32
 
     fun generate(): String {
         val random = SecureRandom()
@@ -39,19 +35,5 @@ internal object RappPairingCode {
 
     fun isValid(code: String): Boolean {
         return normalize(code).length == CODE_LENGTH
-    }
-
-    fun pairingSecret(rawCode: String): ByteArray {
-        val code = normalize(rawCode)
-        val md = MessageDigest.getInstance("SHA-256")
-        val hash = md.digest("refineid-rapp-pairing-secret-v1:$code".toByteArray(StandardCharsets.UTF_8))
-        return hash.copyOf(PAIRING_SECRET_BYTE_COUNT)
-    }
-
-    fun offerIdentifier(rawCode: String): ByteArray {
-        val code = normalize(rawCode)
-        val md = MessageDigest.getInstance("SHA-256")
-        val hash = md.digest("refineid-rapp-offer-id-v1:$code".toByteArray(StandardCharsets.UTF_8))
-        return hash.copyOf(OFFER_ID_BYTE_COUNT)
     }
 }

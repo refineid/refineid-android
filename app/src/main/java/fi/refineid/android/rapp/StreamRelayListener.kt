@@ -11,6 +11,7 @@ import fi.refineid.android.diagnostics.AppTrace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.DataInputStream
@@ -46,6 +47,7 @@ internal class StreamRelayListener(
     companion object {
         const val SERVICE_TYPE = "_refineid-stream._tcp"
         const val DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000L
+        const val ESTABLISHED_READ_TIMEOUT_MS = 60_000
     }
 
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
@@ -60,6 +62,7 @@ internal class StreamRelayListener(
     private var outputStream: DataOutputStream? = null
     private var listenerJob: Job? = null
     private var readJob: Job? = null
+    private var authDeadlineJob: Job? = null
     private val isClosed = AtomicBoolean(false)
     private var registrationListener: NsdManager.RegistrationListener? = null
 
@@ -161,6 +164,17 @@ internal class StreamRelayListener(
                                             handshakeTimeoutMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                                     } catch (_: Exception) {
                                     }
+                                    authDeadlineJob?.cancel()
+                                    authDeadlineJob =
+                                        scope.launch(Dispatchers.IO) {
+                                            delay(handshakeTimeoutMs)
+                                            synchronized(this@StreamRelayListener) {
+                                                if (clientSocket === socket) {
+                                                    AppTrace.rappListenerFailed("handshake_auth_deadline_expired")
+                                                    disconnectClient()
+                                                }
+                                            }
+                                        }
                                 }
                                 AppTrace.rappConnectionAccepted(socket.remoteSocketAddress.toString())
                                 if (BuildConfig.DEBUG) {
@@ -215,6 +229,8 @@ internal class StreamRelayListener(
             val notifyDisconnect =
                 synchronized(this) {
                     if (!isClosed.get() && clientSocket === socket) {
+                        authDeadlineJob?.cancel()
+                        authDeadlineJob = null
                         clientSocket = null
                         outputStream = null
                         true
@@ -232,6 +248,8 @@ internal class StreamRelayListener(
             }
             synchronized(this) {
                 if (clientSocket === socket) {
+                    authDeadlineJob?.cancel()
+                    authDeadlineJob = null
                     clientSocket = null
                     outputStream = null
                 }
@@ -254,6 +272,8 @@ internal class StreamRelayListener(
 
     fun disconnectClient() {
         synchronized(this) {
+            authDeadlineJob?.cancel()
+            authDeadlineJob = null
             readJob?.cancel()
             readJob = null
             try {
@@ -267,8 +287,10 @@ internal class StreamRelayListener(
 
     fun clearSocketTimeout() {
         synchronized(this) {
+            authDeadlineJob?.cancel()
+            authDeadlineJob = null
             try {
-                clientSocket?.soTimeout = 0
+                clientSocket?.soTimeout = ESTABLISHED_READ_TIMEOUT_MS
             } catch (_: Exception) {
             }
         }
@@ -277,6 +299,8 @@ internal class StreamRelayListener(
     override fun close() {
         if (isClosed.compareAndSet(false, true)) {
             if (BuildConfig.DEBUG) android.util.Log.i("STREAM_LISTENER", "close() called")
+            authDeadlineJob?.cancel()
+            authDeadlineJob = null
             registrationListener?.let {
                 try {
                     nsdManager?.unregisterService(it)
