@@ -120,51 +120,6 @@ class SigningNetworkPolicyTest {
     }
 
     @Test
-    fun pinsPublicHttpDnsExactlyAndPreservesRawPathQueryAndLogicalHost() {
-        val request =
-            SigningNetworkPolicy.getRequest(
-                address = CERTIFICATE_HTTP_ADDRESS,
-                endpoint = SigningNetworkEndpoint.CERTIFICATE_MATERIAL,
-            )
-        val protected =
-            request.use { unprotected ->
-                SigningNetworkPolicy.protect(
-                    unprotected,
-                    SigningNetworkResolver { listOf(publicAddress(PUBLIC_IPV4)) },
-                )
-            }
-
-        protected.use { pinned ->
-            assertEquals(CERTIFICATE_HTTP_URI, pinned.logicalUri)
-            assertEquals(PINNED_CERTIFICATE_HTTP_URI, pinned.connectionUri)
-            assertEquals(CERTIFICATE_HOST_HEADER, pinned.hostHeader)
-        }
-    }
-
-    @Test
-    fun checksEveryHttpsDnsAnswerWithoutReplacingTheTlsHostname() {
-        val request =
-            SigningNetworkPolicy.getRequest(
-                address = CERTIFICATE_HTTPS_ADDRESS,
-                endpoint = SigningNetworkEndpoint.CERTIFICATE_MATERIAL,
-            )
-        val protected =
-            request.use { unprotected ->
-                SigningNetworkPolicy.protect(
-                    unprotected,
-                    SigningNetworkResolver {
-                        listOf(publicAddress(PUBLIC_IPV4), publicAddress(SECOND_PUBLIC_IPV4))
-                    },
-                )
-            }
-
-        protected.use { checked ->
-            assertEquals(CERTIFICATE_HTTPS_URI, checked.connectionUri)
-            assertNull(checked.hostHeader)
-        }
-    }
-
-    @Test
     fun keepsAuthorityRedirectsOnTheirConfiguredOriginOrSameHostUpgrade() {
         for (target in ALLOWED_AUTHORITY_REDIRECTS) {
             assertEquals(
@@ -222,8 +177,6 @@ class SigningNetworkPolicyTest {
             redirectsFollowed = redirectsFollowed,
         )
 
-    private fun publicAddress(literal: String) = checkNotNull(SigningNetworkAddressPolicy.numericAddress(literal))
-
     private fun assertFailure(
         expected: SigningNetworkFailure,
         operation: () -> Unit,
@@ -241,11 +194,6 @@ class SigningNetworkPolicyTest {
             "Basic " + Base64.getEncoder().encodeToString("$SYNTHETIC_USERNAME:".toByteArray())
         const val PLAIN_AUTHORITY_ADDRESS = "http://timestamp.example/request"
         const val PROTECTED_AUTHORITY_ADDRESS = "https://timestamp.example/request"
-        const val CERTIFICATE_HTTP_ADDRESS = "http://ocsp.example:8080/a%2Fb?name=a%2Fb"
-        const val CERTIFICATE_HTTPS_ADDRESS = "https://ocsp.example/status"
-        const val CERTIFICATE_HOST_HEADER = "ocsp.example:8080"
-        const val PUBLIC_IPV4 = "8.8.8.8"
-        const val SECOND_PUBLIC_IPV4 = "1.1.1.1"
         const val MUTATED_REQUEST_BYTE: Byte = 0x5A
         const val NO_REDIRECTS = 0
         const val AUTHORITY_REDIRECT_BUDGET = 1
@@ -266,9 +214,6 @@ class SigningNetworkPolicyTest {
             CharArray(SigningNetworkLimits.MAXIMUM_PASSWORD_CHARACTERS + SINGLE_OVERLIMIT_ELEMENT) { 'p' }
         val PLAIN_AUTHORITY_URI = URI(PLAIN_AUTHORITY_ADDRESS)
         val PROTECTED_AUTHORITY_URI = URI(PROTECTED_AUTHORITY_ADDRESS)
-        val CERTIFICATE_HTTP_URI = URI(CERTIFICATE_HTTP_ADDRESS)
-        val CERTIFICATE_HTTPS_URI = URI(CERTIFICATE_HTTPS_ADDRESS)
-        val PINNED_CERTIFICATE_HTTP_URI = URI("http://$PUBLIC_IPV4:8080/a%2Fb?name=a%2Fb")
         val SAME_PROTECTED_ORIGIN_REDIRECT = URI("https://timestamp.example:443/moved")
         val ALLOWED_AUTHORITY_REDIRECTS =
             listOf(

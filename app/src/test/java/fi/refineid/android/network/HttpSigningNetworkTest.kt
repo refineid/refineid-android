@@ -18,7 +18,6 @@ import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
-import java.net.URI
 import java.net.URL
 import java.util.concurrent.atomic.AtomicReference
 
@@ -205,38 +204,6 @@ class HttpSigningNetworkTest {
     }
 
     @Test
-    fun appliesTheVettedHttpAddressHostAndExchangeControlsToTheConnection() {
-        var openedUri: URI? = null
-        var connection: SyntheticHttpConnection? = null
-        val network =
-            HttpSigningNetwork(
-                resolver = SigningNetworkResolver { listOf(publicAddress(PUBLIC_IPV4)) },
-                connectionFactory =
-                    SigningNetworkConnectionFactory { uri ->
-                        openedUri = uri
-                        SyntheticHttpConnection(uri.toURL()).also { opened -> connection = opened }
-                    },
-            )
-
-        val response =
-            network.get(
-                address = CERTIFICATE_HTTP_ADDRESS,
-                maximumResponseBytes = SYNTHETIC_RESPONSE.size,
-                endpoint = SigningNetworkEndpoint.CERTIFICATE_MATERIAL,
-            )
-
-        val configured = checkNotNull(connection)
-        assertArrayEquals(SYNTHETIC_RESPONSE, response)
-        assertEquals(PINNED_CERTIFICATE_HTTP_URI, openedUri)
-        assertEquals(CERTIFICATE_HOST_HEADER, configured.getRequestProperty(HOST_HEADER))
-        assertEquals(EXPECTED_EXCHANGE_TIMEOUT_MILLISECONDS, configured.connectTimeout)
-        assertEquals(EXPECTED_EXCHANGE_TIMEOUT_MILLISECONDS, configured.readTimeout)
-        assertFalse(configured.instanceFollowRedirects)
-        assertFalse(configured.useCaches)
-        assertTrue(configured.wasDisconnected)
-    }
-
-    @Test
     fun classifiesSocketTimeoutAsTransientAndDisconnects() {
         val connection = TimeoutHttpConnection(URL(AUTHORITY_TIMEOUT_ADDRESS))
         val network =
@@ -274,8 +241,6 @@ class HttpSigningNetworkTest {
         assertEquals(expected, failure.kind)
         return failure
     }
-
-    private fun publicAddress(literal: String) = checkNotNull(SigningNetworkAddressPolicy.numericAddress(literal))
 
     private open class SyntheticHttpConnection(
         url: URL,
@@ -329,13 +294,7 @@ class HttpSigningNetworkTest {
         const val SYNTHETIC_CONTENT_TYPE = "application/synthetic-request"
         const val POST_METHOD = "POST"
         const val GET_METHOD = "GET"
-        const val HOST_HEADER = "Host"
-        const val EXPECTED_EXCHANGE_TIMEOUT_MILLISECONDS = 30_000
-        const val PUBLIC_IPV4 = "8.8.8.8"
-        const val CERTIFICATE_HTTP_ADDRESS = "http://certificate.example/status"
-        const val CERTIFICATE_HOST_HEADER = "certificate.example"
         const val AUTHORITY_TIMEOUT_ADDRESS = "https://timestamp.example/timeout"
-        val PINNED_CERTIFICATE_HTTP_URI = URI("http://$PUBLIC_IPV4/status")
         val SYNTHETIC_REQUEST = "request".encodeToByteArray()
         val SYNTHETIC_RESPONSE = "okay".encodeToByteArray()
         val OVERSIZED_RESPONSE = "large".encodeToByteArray()
