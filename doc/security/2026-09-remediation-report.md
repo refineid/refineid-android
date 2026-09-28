@@ -20,7 +20,7 @@ Previously, manual pairing code exchange embedded an offer identifier and pairin
 
 ### Static Rendezvous & Collision Threat Model
 - **Offline Attack Elimination**: Replacing dynamic offer-specific rendezvous names with static `rf-pairing` prevents eavesdroppers on the local subnet from capturing candidate offer identifiers or pre-computing offline dictionary hashes.
-- **Subnet Collision Handling**: When multiple devices initiate pairing concurrently on the same subnet, mDNS service registration resolves name collisions using standard mDNS numeric disambiguation (`rf-pairing-2`, etc.), or peers may connect to an existing listener.
+- **Subnet Collision & NsdManager Conflict Handling**: When multiple devices initiate pairing concurrently on the same subnet, Android `NsdManager` and RFC 6762 §9 resolve name collisions automatically by appending numeric disambiguation suffixes (e.g. `rf-pairing (2)`) reported via `RegistrationListener.onServiceRegistered`. Requesters browsing the `_refineid-pair._tcp` service type discover all active instances.
 - **Cryptographic Fail-Closed**: In the event that a proxy connects to an unrelated requester, or a malicious peer pre-advertises `rf-pairing`, CPace mutual PAKE ensures that without the exact shared pairing code, key derivation fails. The handshake terminates immediately at step 0 without exposing certificates, device identifiers, or protocol secrets.
 - **Graceful Recovery**: Any failed handshake or early socket disconnection drops cleanly and resets `RappPairingModel` back to the offering or waiting state for subsequent attempts.
 
@@ -36,11 +36,13 @@ Unverified candidate PINs were prematurely recorded into `AuthenticationPinCache
   - `NfcReaderController.kt` (lines previously setting verified state on submission rather than upon verified card response)
   - `RappPairingScreen.kt`
   - `RappPhoneProxyDispatcher.kt`
+- **Verified Local Ingestion**: Confirmed that local NFC card authentication continues to populate `AuthenticationPinCache` via `BrowserPinCoordinator.retainOutcome(PinOutcome.VERIFIED)` upon receiving confirmed card verification (`AuthenticationSignResult.Success`).
 - **Rejection Verification Preflight**: In `RappPhoneProxyDispatcher.kt`, candidate PINs are checked against `pinCache.isRejected(sub)` prior to card presentation. If previously rejected, the request is rejected immediately with `respondCredentialRejected()` without contacting the card.
 - **Zero-Allocation Fingerprinting**: Added `AuthenticationPinCache.isRejected(submission: Pin1Submission)`, which uses `submission.peekBytes { ... }` to borrow the buffer under lock and hash it without heap copy or memory leakage.
 - **Independent Ownership**: In `handleBrowserAuthSuccess`, independent copies via `pin1Submission.copyBytes()` are supplied to `pinCache.recordVerified()` and `primedCanStore.writePin1()`, ensuring that `writePin1`'s consumer zeroization in `finally` does not mutate the cached PIN.
 - **Rejection History Retention**: In `AuthenticationPinCache`, `clear()` zeroizes the cached PIN memory while strictly preserving the recorded rejection history (`rejectedPinDigests`).
 - **Clean Fallback**: Removed `peekPin()` from `AuthenticationPinCache` to prevent external modules from reading credentials without consuming them.
+- **Synthetic Testing Invariants**: Confirmed that test digits in `AuthenticationPinCacheTest` (e.g. `"0000"`) are synthetic mock fixtures used solely for structural shape validation, preserving the invariant that real or development credentials are never committed.
 
 ---
 

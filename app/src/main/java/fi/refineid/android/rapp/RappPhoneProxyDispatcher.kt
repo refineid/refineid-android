@@ -90,8 +90,19 @@ internal class RappPhoneProxyDispatcher(
         private const val LIVENESS_POLL_INTERVAL_MS = 1_000L
         private const val LIVENESS_CHALLENGE_BYTES = 32
         private const val LIVENESS_JITTER_MS = 0L
+        private const val SESSION_NONCE_BYTES = 32
         private const val SHA256_DIGEST_LENGTH = 32
         private const val SHA384_DIGEST_LENGTH = 48
+    }
+
+    private fun dismissInbox(opIdHex: String? = null) {
+        scope.launch(Dispatchers.Main) {
+            if (opIdHex != null) {
+                inbox.dismiss(opIdHex)
+            } else {
+                inbox.dismissAll()
+            }
+        }
     }
 
     fun startListening(
@@ -125,7 +136,7 @@ internal class RappPhoneProxyDispatcher(
         _connectedPeer.value = null
         lastReadAuthCertDer = null
         clearPendingPins()
-        inbox.dismissAll()
+        dismissInbox()
     }
 
     fun disconnectClient() {
@@ -140,7 +151,7 @@ internal class RappPhoneProxyDispatcher(
         _connectedPeer.value = null
         lastReadAuthCertDer = null
         clearPendingPins()
-        inbox.dismissAll()
+        dismissInbox()
         val currentPair = pairRecord
         val vlt = vault
         if (currentPair != null && vlt != null && !isClosed) {
@@ -161,107 +172,7 @@ internal class RappPhoneProxyDispatcher(
             }
 
             is StreamRelayEvent.Frame -> {
-                val pair = pairRecord ?: return
-                val vlt = vault ?: return
-
-                val opBridge = operationBridge
-                if (opBridge != null) {
-                    try {
-                        val action = opBridge.receiveFrame(event.data, RappClock.monotonicMs())
-                        handleBridgeAction(action, opBridge)
-                    } catch (_: Exception) {
-                    }
-                    return
-                }
-
-                val currentSession = sessionBridge
-                if (currentSession == null) {
-                    try {
-                        val token = pair.metadata().rendezvousToken
-                        val preamble = rappStreamSessionPreamble(token)
-                        if (event.data.contentEquals(preamble)) {
-                            sessionBridge = RappSessionBridge.beginProxy(pair = pair, vault = vlt)
-                            return
-                        }
-                    } catch (_: Exception) {
-                    }
-
-                    // Not preamble or preamble was skipped: treat as Noise Message 1
-                    try {
-                        val sess = RappSessionBridge.beginProxy(pair = pair, vault = vlt)
-                        sessionBridge = sess
-                        sess.readHandshakeFrame(event.data)
-                        val reply = sess.writeHandshakeFrame()
-                        activeListener?.send(reply)
-                        if (sess.handshakeComplete()) {
-                            sessionHandshakeDone = true
-                            sess.enterAuthentication()
-                            val nonce = ByteArray(32).also { SecureRandom().nextBytes(it) }
-                            val ready = sess.sendReady(nonce)
-                            activeListener?.send(ready)
-                        }
-                    } catch (_: Exception) {
-                    }
-                    return
-                }
-
-                if (!sessionHandshakeDone) {
-                    try {
-                        currentSession.readHandshakeFrame(event.data)
-                        val reply = currentSession.writeHandshakeFrame()
-                        activeListener?.send(reply)
-                        if (currentSession.handshakeComplete()) {
-                            sessionHandshakeDone = true
-                            currentSession.enterAuthentication()
-                            val nonce = ByteArray(32).also { SecureRandom().nextBytes(it) }
-                            val ready = currentSession.sendReady(nonce)
-                            activeListener?.send(ready)
-                        }
-                    } catch (_: Exception) {
-                    }
-                    return
-                }
-
-                // Bilateral ready confirmation
-                try {
-                    currentSession.receiveReady(event.data, RappClock.wallMs())
-                    currentSession.enterEstablished()
-                    activeListener?.clearSocketTimeout()
-
-                    val liveness =
-                        RappLivenessConfiguration(
-                            baseIntervalMs = 5_000UL,
-                            responseTimeoutMs = 10_000UL,
-                            maximumIntervalMs = 60_000UL,
-                            maximumJitterMs = 500UL,
-                            maximumMisses = 3.toUByte(),
-                        )
-                    val newOpBridge =
-                        RappOperationBridge.beginProxy(
-                            session = currentSession,
-                            vault = vlt,
-                            maximumLifetimeMs = 120_000UL,
-                            liveness = liveness,
-                            nowMs = RappClock.monotonicMs(),
-                        )
-                    operationBridge = newOpBridge
-                    startLivenessLoop(newOpBridge)
-                    val currentPair = pairRecord
-                    if (currentPair != null) {
-                        val hex = currentPair.metadata().pairId.joinToString("") { "%02x".format(it) }
-                        val peer =
-                            catalog.listPairs().firstOrNull { it.pairIdHex == hex }
-                                ?: PairedPeer(
-                                    pairIdHex = hex,
-                                    displayName = DEFAULT_REQUESTER_DISPLAY_NAME,
-                                    platform = "macOS",
-                                    createdAtMs = System.currentTimeMillis(),
-                                )
-                        _connectedPeer.value = peer
-                        AppTrace.rappPairingCompleted(peer.displayName)
-                    }
-                } catch (_: Exception) {
-                }
+                handleRelayFrame(event)
             }
 
             is StreamRelayEvent.Disconnected, is StreamRelayEvent.Error -> {
@@ -284,8 +195,120 @@ internal class RappPhoneProxyDispatcher(
                 _connectedPeer.value = null
                 lastReadAuthCertDer = null
                 clearPendingPins()
-                inbox.dismissAll()
+                dismissInbox()
             }
+        }
+    }
+
+    private fun handleRelayFrame(event: StreamRelayEvent.Frame) {
+        val pair = pairRecord ?: return
+        val vlt = vault ?: return
+
+        val opBridge = operationBridge
+        if (opBridge != null) {
+            try {
+                val action = opBridge.receiveFrame(event.data, RappClock.monotonicMs())
+                handleBridgeAction(action, opBridge)
+            } catch (_: Exception) {
+            }
+            return
+        }
+
+        val currentSession = sessionBridge
+        if (currentSession == null) {
+            try {
+                val token = pair.metadata().rendezvousToken
+                val preamble = rappStreamSessionPreamble(token)
+                if (event.data.contentEquals(preamble)) {
+                    sessionBridge = RappSessionBridge.beginProxy(pair = pair, vault = vlt)
+                    return
+                }
+            } catch (_: Exception) {
+            }
+
+            // Not preamble or preamble was skipped: treat as Noise Message 1
+            try {
+                val sess = RappSessionBridge.beginProxy(pair = pair, vault = vlt)
+                sessionBridge = sess
+                sess.readHandshakeFrame(event.data)
+                val reply = sess.writeHandshakeFrame()
+                activeListener?.send(reply)
+                if (sess.handshakeComplete()) {
+                    sessionHandshakeDone = true
+                    sess.enterAuthentication()
+                    val nonce = ByteArray(SESSION_NONCE_BYTES).also { SecureRandom().nextBytes(it) }
+                    try {
+                        val ready = sess.sendReady(nonce)
+                        activeListener?.send(ready)
+                    } finally {
+                        nonce.fill(0)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            return
+        }
+
+        if (!sessionHandshakeDone) {
+            try {
+                currentSession.readHandshakeFrame(event.data)
+                val reply = currentSession.writeHandshakeFrame()
+                activeListener?.send(reply)
+                if (currentSession.handshakeComplete()) {
+                    sessionHandshakeDone = true
+                    currentSession.enterAuthentication()
+                    val nonce = ByteArray(SESSION_NONCE_BYTES).also { SecureRandom().nextBytes(it) }
+                    try {
+                        val ready = currentSession.sendReady(nonce)
+                        activeListener?.send(ready)
+                    } finally {
+                        nonce.fill(0)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            return
+        }
+
+        // Bilateral ready confirmation
+        try {
+            currentSession.receiveReady(event.data, RappClock.wallMs())
+            currentSession.enterEstablished()
+            activeListener?.clearSocketTimeout()
+
+            val liveness =
+                RappLivenessConfiguration(
+                    baseIntervalMs = 5_000UL,
+                    responseTimeoutMs = 10_000UL,
+                    maximumIntervalMs = 60_000UL,
+                    maximumJitterMs = 500UL,
+                    maximumMisses = 3.toUByte(),
+                )
+            val newOpBridge =
+                RappOperationBridge.beginProxy(
+                    session = currentSession,
+                    vault = vlt,
+                    maximumLifetimeMs = 120_000UL,
+                    liveness = liveness,
+                    nowMs = RappClock.monotonicMs(),
+                )
+            operationBridge = newOpBridge
+            startLivenessLoop(newOpBridge)
+            val currentPair = pairRecord
+            if (currentPair != null) {
+                val hex = currentPair.metadata().pairId.joinToString("") { "%02x".format(it) }
+                val peer =
+                    catalog.listPairs().firstOrNull { it.pairIdHex == hex }
+                        ?: PairedPeer(
+                            pairIdHex = hex,
+                            displayName = DEFAULT_REQUESTER_DISPLAY_NAME,
+                            platform = "macOS",
+                            createdAtMs = System.currentTimeMillis(),
+                        )
+                _connectedPeer.value = peer
+                AppTrace.rappPairingCompleted(peer.displayName)
+            }
+        } catch (_: Exception) {
         }
     }
 
@@ -313,14 +336,17 @@ internal class RappPhoneProxyDispatcher(
                         try {
                             secureRandom.nextBytes(challenge)
                             val challengeCopy = challenge.copyOf()
-                            val action =
-                                bridge.pollLiveness(
-                                    nowMs = RappClock.monotonicMs(),
-                                    challenge = challengeCopy,
-                                    jitterMs = LIVENESS_JITTER_MS,
-                                )
-                            challengeCopy.fill(0)
-                            handleBridgeAction(action, bridge)
+                            try {
+                                val action =
+                                    bridge.pollLiveness(
+                                        nowMs = RappClock.monotonicMs(),
+                                        challenge = challengeCopy,
+                                        jitterMs = LIVENESS_JITTER_MS,
+                                    )
+                                handleBridgeAction(action, bridge)
+                            } finally {
+                                challengeCopy.fill(0)
+                            }
                         } catch (_: Exception) {
                             break
                         }
@@ -383,9 +409,7 @@ internal class RappPhoneProxyDispatcher(
 
             RappBridgeActionKind.CANCELLED, RappBridgeActionKind.TERMINAL -> {
                 if (opIdHex != null) {
-                    scope.launch(Dispatchers.Main) {
-                        inbox.dismiss(opIdHex)
-                    }
+                    dismissInbox(opIdHex)
                     pendingPin1.remove(opIdHex)?.close()
                     pendingPin2.remove(opIdHex)?.close()
                 }
@@ -499,21 +523,23 @@ internal class RappPhoneProxyDispatcher(
                             ?.displayName
                             ?.takeIf { it.isNotBlank() }
                             ?: DEFAULT_REQUESTER_DISPLAY_NAME
-                    inbox.askBrowserAuth(
-                        requestId = opIdHex,
-                        requester = requesterName,
-                        onApproved = { pin1Submission ->
-                            if (pinCache?.isRejected(pin1Submission) == true) {
-                                pin1Submission.close()
-                                respondCredentialRejected(opId, bridge)
-                            } else {
-                                pendingPin1.remove(opIdHex)?.close()
-                                pendingPin1[opIdHex] = pin1Submission
-                                approve(opId, bridge)
-                            }
-                        },
-                        onDenied = { deny(opId, bridge) },
-                    )
+                    scope.launch(Dispatchers.Main) {
+                        inbox.askBrowserAuth(
+                            requestId = opIdHex,
+                            requester = requesterName,
+                            onApproved = { pin1Submission ->
+                                if (pinCache?.isRejected(pin1Submission) == true) {
+                                    pin1Submission.close()
+                                    respondCredentialRejected(opId, bridge)
+                                } else {
+                                    pendingPin1.remove(opIdHex)?.close()
+                                    pendingPin1[opIdHex] = pin1Submission
+                                    approve(opId, bridge)
+                                }
+                            },
+                            onDenied = { deny(opId, bridge) },
+                        )
+                    }
                 }
             }
 
@@ -525,16 +551,18 @@ internal class RappPhoneProxyDispatcher(
                         ?.displayName
                         ?.takeIf { it.isNotBlank() }
                         ?: DEFAULT_REQUESTER_DISPLAY_NAME
-                inbox.askDocumentSign(
-                    requestId = opIdHex,
-                    requester = requesterName,
-                    onApproved = { pin2Submission ->
-                        pendingPin2.remove(opIdHex)?.close()
-                        pendingPin2[opIdHex] = pin2Submission
-                        approve(opId, bridge)
-                    },
-                    onDenied = { deny(opId, bridge) },
-                )
+                scope.launch(Dispatchers.Main) {
+                    inbox.askDocumentSign(
+                        requestId = opIdHex,
+                        requester = requesterName,
+                        onApproved = { pin2Submission ->
+                            pendingPin2.remove(opIdHex)?.close()
+                            pendingPin2[opIdHex] = pin2Submission
+                            approve(opId, bridge)
+                        },
+                        onDenied = { deny(opId, bridge) },
+                    )
+                }
             }
 
             else -> {
@@ -555,8 +583,8 @@ internal class RappPhoneProxyDispatcher(
                 try {
                     val resp = bridge.approve(opId, RappClock.monotonicMs())
                     handleBridgeAction(resp, bridge)
-                } catch (e: Exception) {
-                    AppTrace.rappOperationApproveFailed(e.message ?: e.javaClass.simpleName)
+                } catch (_: Exception) {
+                    AppTrace.rappOperationApproveFailed("approve_failed")
                 }
             }
     }
@@ -577,7 +605,7 @@ internal class RappPhoneProxyDispatcher(
         sessionHandshakeDone = false
         clearPendingPins()
         _connectedPeer.value = null
-        inbox.dismissAll()
+        dismissInbox()
     }
 
     private fun deny(
@@ -592,8 +620,8 @@ internal class RappPhoneProxyDispatcher(
                 try {
                     val resp = bridge.deny(opId)
                     handleBridgeAction(resp, bridge)
-                } catch (e: Exception) {
-                    AppTrace.rappOperationDenyFailed(e.message ?: e.javaClass.simpleName)
+                } catch (_: Exception) {
+                    AppTrace.rappOperationDenyFailed("deny_failed")
                 }
                 // Drop the client stream so Mac cannot immediately re-request on the same session.
                 dropConnection()
@@ -660,26 +688,30 @@ internal class RappPhoneProxyDispatcher(
                 bridge.reportProgress(opId, uniffi.refineid_rapp.RappProgressEvent.WAITING_FOR_CARD)
             handleBridgeAction(progressAction, bridge)
         } catch (e: Exception) {
-            AppTrace.rappProgressReportFailed("waiting_for_card", e.message ?: e.javaClass.simpleName)
+            AppTrace.rappProgressReportFailed("waiting_for_card", e.javaClass.simpleName)
         }
-        inbox.showTapPrompt(
-            requestId = opIdHex,
-            requester = requesterName,
-            action = action,
-            onCancel = { cancelled = true },
-        )
+        scope.launch(Dispatchers.Main) {
+            inbox.showTapPrompt(
+                requestId = opIdHex,
+                requester = requesterName,
+                action = action,
+                onCancel = { cancelled = true },
+            )
+        }
         val ready =
             try {
                 awaitCardReady()
             } finally {
                 AppTrace.rappCardPromptDismissed(opIdHex)
-                inbox.dismissTapPrompt(opIdHex)
+                scope.launch(Dispatchers.Main) {
+                    inbox.dismissTapPrompt(opIdHex)
+                }
                 try {
                     val progressAction =
                         bridge.reportProgress(opId, uniffi.refineid_rapp.RappProgressEvent.CARD_WAIT_ENDED)
                     handleBridgeAction(progressAction, bridge)
                 } catch (e: Exception) {
-                    AppTrace.rappProgressReportFailed("card_wait_ended", e.message ?: e.javaClass.simpleName)
+                    AppTrace.rappProgressReportFailed("card_wait_ended", e.javaClass.simpleName)
                 }
             }
         return when {
@@ -1028,10 +1060,16 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
     ): Pair<AuthenticationCardService, AuthenticationSignResult>? {
         var service = initialService
+        val initialBytes =
+            try {
+                pin1Submission.copyBytes()
+            } catch (_: IllegalStateException) {
+                return null
+            }
         var result =
             service.signAuthenticationDigest(
                 algorithm = algorithm,
-                pin1 = Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes()),
+                pin1 = Pin1Submission.fromOwnedBytes(initialBytes),
                 digest = digest,
             )
         if (result is AuthenticationSignResult.Failure &&
@@ -1051,10 +1089,16 @@ internal class RappPhoneProxyDispatcher(
             val retryService = authCardService()
             if (retryService != null) {
                 service = retryService
+                val retryBytes =
+                    try {
+                        pin1Submission.copyBytes()
+                    } catch (_: IllegalStateException) {
+                        return null
+                    }
                 result =
                     retryService.signAuthenticationDigest(
                         algorithm = algorithm,
-                        pin1 = Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes()),
+                        pin1 = Pin1Submission.fromOwnedBytes(retryBytes),
                         digest = digest,
                     )
             }
@@ -1071,9 +1115,12 @@ internal class RappPhoneProxyDispatcher(
         result: AuthenticationSignResult.Success,
         bridge: RappOperationBridge,
     ) {
-        pinCache?.recordVerified(pin1Submission.copyBytes())
-        if (primedCanStore?.isPrimed() == true) {
-            primedCanStore.writePin1(pin1Submission.copyBytes())
+        try {
+            pinCache?.recordVerified(pin1Submission.copyBytes())
+            if (primedCanStore?.isPrimed() == true) {
+                primedCanStore.writePin1(pin1Submission.copyBytes())
+            }
+        } catch (_: IllegalStateException) {
         }
         ensureAuthCertCached(service)
         try {
@@ -1261,7 +1308,12 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
     ): QualifiedSignResult? {
         val service = qualifiedCardService() ?: return null
-        val pinBytes = pin2Submission.copyBytes()
+        val pinBytes =
+            try {
+                pin2Submission.copyBytes()
+            } catch (_: IllegalStateException) {
+                return null
+            }
         val deferred = CompletableDeferred<QualifiedSignResult>()
         service.requestQualifiedDigestSignature(
             algorithm = algorithm,
@@ -1281,8 +1333,8 @@ internal class RappPhoneProxyDispatcher(
             val retryService = qualifiedCardService()
             if (retryService != null) {
                 val freshCert = readSignatureCertificateWithTimeout() ?: return null
-                val retryPinBytes = pin2Submission.copyBytes()
                 try {
+                    val retryPinBytes = pin2Submission.copyBytes()
                     val retryDeferred = CompletableDeferred<QualifiedSignResult>()
                     retryService.requestQualifiedDigestSignature(
                         algorithm = algorithm,
@@ -1293,6 +1345,8 @@ internal class RappPhoneProxyDispatcher(
                         retryDeferred.complete(rResult)
                     }
                     signResult = retryDeferred.await()
+                } catch (_: IllegalStateException) {
+                    return null
                 } finally {
                     freshCert.close()
                 }
@@ -1375,6 +1429,6 @@ internal class RappPhoneProxyDispatcher(
         operationBridge = null
         sessionBridge?.close()
         sessionBridge = null
-        inbox.dismissAll()
+        dismissInbox()
     }
 }

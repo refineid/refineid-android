@@ -45,6 +45,7 @@ private const val HANDSHAKE_DEADLINE_MS = 10_000L
 private const val DEFAULT_PAIRING_COUNTDOWN_SECONDS = 180
 private const val CPACE_RANDOM_BYTES = 64
 private const val STREAM_CANDIDATE_ID = "stream-1"
+private const val EMPTY_CBOR_MAP_BYTE = 0xa0.toByte()
 private val DEFAULT_PAIRING_PROFILES =
     listOf(
         "fi.refineid.card-status.v1",
@@ -102,8 +103,8 @@ internal class RappPairingModel(
             listOf(
                 RappTransportCandidate(
                     profile = "fi.refineid.stream.v1",
-                    candidateId = "stream-1",
-                    parametersCbor = byteArrayOf(0xa0.toByte()),
+                    candidateId = STREAM_CANDIDATE_ID,
+                    parametersCbor = byteArrayOf(EMPTY_CBOR_MAP_BYTE),
                 ),
             )
 
@@ -131,8 +132,8 @@ internal class RappPairingModel(
                 }
             browser = relayBrowser
             relayBrowser.start()
-        } catch (e: Exception) {
-            phase = PairingPhase.Failed(e.message ?: "Failed to generate pairing offer")
+        } catch (_: Exception) {
+            phase = PairingPhase.Failed("Failed to generate pairing offer")
         }
     }
 
@@ -271,7 +272,7 @@ internal class RappPairingModel(
             }
 
             is StreamRelayEvent.Error -> {
-                phase = PairingPhase.Failed(event.cause.message ?: "Connection error")
+                phase = PairingPhase.Failed("Connection error")
             }
         }
     }
@@ -293,8 +294,8 @@ internal class RappPairingModel(
             listOf(
                 RappTransportCandidate(
                     profile = "fi.refineid.stream.v1",
-                    candidateId = "stream-1",
-                    parametersCbor = byteArrayOf(0xa0.toByte()),
+                    candidateId = STREAM_CANDIDATE_ID,
+                    parametersCbor = byteArrayOf(EMPTY_CBOR_MAP_BYTE),
                 ),
             )
 
@@ -321,8 +322,8 @@ internal class RappPairingModel(
                 }
             listener = relayListener
             relayListener.start(StreamRendezvousName.MANUAL_PAIRING_SERVICE_NAME)
-        } catch (e: Throwable) {
-            phase = PairingPhase.Failed("${e.javaClass.simpleName}: ${e.message ?: "unknown"}")
+        } catch (_: Throwable) {
+            phase = PairingPhase.Failed("Failed to initialize proxy pairing")
         }
     }
 
@@ -347,7 +348,7 @@ internal class RappPairingModel(
             is StreamRelayEvent.Error -> {
                 handshakeDeadlineJob?.cancel()
                 handshakeDeadlineJob = null
-                phase = PairingPhase.Failed(event.cause.message ?: "Connection error")
+                phase = PairingPhase.Failed("Connection error")
             }
         }
     }

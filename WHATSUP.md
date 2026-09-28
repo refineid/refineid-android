@@ -3,8 +3,18 @@
 branch: agent/security-fixes
 purpose: Fix security issues in RefineID Android: CPace pairing, credential custody, zeroization, FLAG_SECURE, and RAPP lifecycle.
 started: 2026-09-28T18:20+03:00 by petri
-heartbeat: 2026-09-28T19:30+03:00
+heartbeat: 2026-09-28T19:55+03:00
 status: verified
+
+## Review Fixes Applied (Round 2)
+- Replaced dynamic exception messages with static strings in `RappPairingModel` failure phases and `RappPhoneProxyDispatcher` traces.
+- Named constants extracted (`SESSION_NONCE_BYTES = 32`, `EMPTY_CBOR_MAP_BYTE = 0xa0.toByte()`, `STREAM_CANDIDATE_ID = "stream-1"`) and session nonces zeroized in `finally` across handshake paths.
+- Enforced unified `Dispatchers.Main` policy for all `RappAuthorizationInbox` operations (`dismissInbox`, `askBrowserAuth`, `askDocumentSign`, `showTapPrompt`, `dismissTapPrompt`).
+- Moved `freshCert` into `try-finally` before `pin2Submission.copyBytes()` to guarantee certificate cleanup, and added graceful `IllegalStateException` handling.
+- Zeroized liveness challenge copy in `finally` block to protect against polling exceptions.
+- Added strict KDoc on `peekBytes` in `Pin1Submission` and `Pin2Submission` prohibiting retention or mutation.
+- Extracted `handleRelayFrame` to resolve detekt `LongMethod` gate cleanly.
+- Updated `2026-09-remediation-report.md` with Android `NsdManager` conflict resolution, local NFC cache retention, and synthetic test PIN invariant documentation.
 
 ## Review Fixes Applied (Round 1)
 - Fixed double-ownership bug in `handleBrowserAuthSuccess` by providing independent `copyBytes()` buffers to `pinCache.recordVerified` and `primedCanStore.writePin1`.

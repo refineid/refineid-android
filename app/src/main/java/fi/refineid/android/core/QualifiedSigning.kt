@@ -116,6 +116,10 @@ internal class Pin2Submission private constructor(
             checkNotNull(ownedBytes) { "PIN2 submission has already been closed" }.copyOf()
         }
 
+    /**
+     * Borrows the owned byte buffer under lock for scoped inspection (e.g., hashing or fingerprinting).
+     * The passed [operation] MUST NOT retain, leak, or mutate the borrowed array.
+     */
     fun <T> peekBytes(operation: (ByteArray) -> T): T =
         synchronized(this) {
             val bytes = checkNotNull(ownedBytes) { "PIN2 submission has already been closed" }
