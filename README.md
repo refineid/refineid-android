@@ -24,6 +24,18 @@ Release APK (signed with hardware identity card, PIN 2):
 Scripts/build-release-apk.sh
 ```
 
+### Managing build cache
+
+During development, Cargo build artifacts (under `native/*/target`) and `rustc` incremental compilation caches can grow significantly.
+
+```sh
+# Sweep unused native build artifacts older than 14 days
+cargo sweep -t 14 -r native
+
+# Clean native incremental compilation caches if disk space is needed
+find native -type d -name "incremental" -prune -exec rm -rf {} +
+```
+
 ## Wireless debugging
 
 ```sh
