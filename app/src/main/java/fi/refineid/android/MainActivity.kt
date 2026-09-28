@@ -45,9 +45,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         AppTrace.activityCreated()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        if (!BuildDiagnostics.SCREEN_CAPTURE_ALLOWED) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        }
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        setRecentsScreenshotEnabled(false)
         window.setHideOverlayWindows(true)
         window.decorView.importantForAutofill =
             View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
@@ -134,7 +133,6 @@ class MainActivity : ComponentActivity() {
         AppTrace.activityReceivedIntent()
         readerController.refresh()
         handlePairIntent(intent)
-        handleAuthPinIntent(intent)
     }
 
     private fun handlePairIntent(intent: Intent?) {
@@ -143,16 +141,6 @@ class MainActivity : ComponentActivity() {
                 ?: intent?.getStringExtra("pair_code")
         if (!pairOffer.isNullOrBlank()) {
             rappPairingModel?.connectWithCode(pairOffer)
-        }
-    }
-
-    private fun handleAuthPinIntent(intent: Intent?) {
-        val pin = intent?.getStringExtra("REFINEID_AUTH_PIN")
-        if (!pin.isNullOrBlank()) {
-            val app = application as? RefineIdApplication ?: return
-            app.rappAuthorizationInbox.currentRequest
-                ?.onApproved
-                ?.invoke(pin)
         }
     }
 

@@ -38,8 +38,11 @@
   short-lived memory, and zeroizes them after use.
 - Debug tracing serves development and may record whatever protocol detail the
   work needs; keep credential values out of anything persisted or committed.
-  Release builds emit no logs and no Internet access; keep the sink in variant
-  source sets and inspect release artifacts for trace literals.
+  Release builds emit no logs, zero telemetry, and zero third-party network egress.
+  Network access (android.permission.INTERNET) in release builds is strictly reserved
+  for RAPP (local-network TCP stream relay to paired requesters) and the user-directed
+  in-app browser authentication harness. Keep tracing sinks in variant source sets
+  and inspect release artifacts for trace literals.
 - Do not deliberately consume a PIN retry unless the recovery procedure and
   retry count are known.
 - Disable application backup and screen capture wherever sensitive data can

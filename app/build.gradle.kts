@@ -245,6 +245,12 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.all { testTask ->
+            testTask.systemProperty(
+                "jna.library.path",
+                rappCrateDirectory.dir("target/debug").asFile.absolutePath,
+            )
+        }
     }
 }
 
@@ -275,6 +281,7 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.json)
+    testImplementation(libs.jna)
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.activity)
@@ -397,10 +404,24 @@ val buildRustRelease =
         )
     }
 
+val buildRappHostDebug =
+    tasks.register<Exec>("buildRappHostDebug") {
+        group = "build"
+        description = "Build the host RAPP cdylib for JVM unit tests."
+        workingDir(rappCrateDirectory)
+        inputs.file(rappCrateDirectory.file("Cargo.toml"))
+        inputs.file(rappCrateDirectory.file("Cargo.lock"))
+        inputs.dir(rappCrateDirectory.dir("src"))
+        inputs.dir(sharedRefineIdCoreCrates)
+        outputs.dir(rappCrateDirectory.dir("target/debug"))
+        commandLine("cargo", "build", "--locked")
+    }
+
 tasks.configureEach {
     when (name) {
         "mergeDebugJniLibFolders" -> dependsOn(buildRustDebug, buildRappDebug)
         "mergeReleaseJniLibFolders" -> dependsOn(buildRustRelease, buildRappRelease)
+        "testDebugUnitTest" -> dependsOn(buildRappHostDebug)
     }
 }
 

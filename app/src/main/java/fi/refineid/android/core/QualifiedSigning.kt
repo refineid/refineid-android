@@ -111,6 +111,21 @@ internal class Pin2Submission private constructor(
         }
     }
 
+    fun copyBytes(): ByteArray =
+        synchronized(this) {
+            checkNotNull(ownedBytes) { "PIN2 submission has already been closed" }.copyOf()
+        }
+
+    /**
+     * Borrows the owned byte buffer under lock for scoped inspection (e.g., hashing or fingerprinting).
+     * The passed [operation] MUST NOT retain, leak, or mutate the borrowed array.
+     */
+    fun <T> peekBytes(operation: (ByteArray) -> T): T =
+        synchronized(this) {
+            val bytes = checkNotNull(ownedBytes) { "PIN2 submission has already been closed" }
+            operation(bytes)
+        }
+
     override fun close() {
         synchronized(this) {
             ownedBytes?.fill(ZERO_BYTE)
@@ -133,6 +148,18 @@ internal class Pin2Submission private constructor(
             val bytes = ByteArray(input.length)
             for (index in input.indices) {
                 bytes[index] = input[index].code.toByte()
+            }
+            return Pin2Submission(bytes)
+        }
+
+        /** Wrap already-validated digit bytes, taking ownership of them. */
+        fun fromOwnedBytes(bytes: ByteArray): Pin2Submission {
+            val isValidShape =
+                bytes.size in PIN2_MINIMUM_LENGTH..PIN2_MAXIMUM_LENGTH &&
+                    bytes.all { it in '0'.code.toByte()..'9'.code.toByte() }
+            if (!isValidShape) {
+                bytes.fill(0)
+                throw IllegalArgumentException("PIN2 has an invalid shape")
             }
             return Pin2Submission(bytes)
         }

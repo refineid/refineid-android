@@ -33,22 +33,33 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import fi.refineid.android.R
+import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.Pin2Submission
 import fi.refineid.android.rapp.RappAuthAction
 import fi.refineid.android.rapp.RappAuthRequest
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 internal fun RappAuthorizationDialog(request: RappAuthRequest) {
-    var pin by remember { mutableStateOf("") }
-    val isPinValid = pin.length in 4..8
+    var pin by remember(request.requestId) { mutableStateOf("") }
+    val isPinValid =
+        when (request) {
+            is RappAuthRequest.BrowserAuth -> Pin1Submission.isComplete(pin)
+            is RappAuthRequest.DocumentSign -> Pin2Submission.isComplete(pin)
+        }
 
     Dialog(
-        onDismissRequest = { request.onDenied() },
+        onDismissRequest = {
+            pin = ""
+            request.onDenied()
+        },
         properties =
             DialogProperties(
                 dismissOnBackPress = request.action == RappAuthAction.BROWSER_AUTH,
                 dismissOnClickOutside = false,
+                securePolicy = SecureFlagPolicy.SecureOn,
             ),
     ) {
         Card(
@@ -89,7 +100,17 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
 
                 OutlinedTextField(
                     value = pin,
-                    onValueChange = { typed -> pin = typed.filter { it in '0'..'9' }.take(8) },
+                    onValueChange = { typed ->
+                        val digits = typed.filter { it in '0'..'9' }
+                        val accepts =
+                            when (request) {
+                                is RappAuthRequest.BrowserAuth -> Pin1Submission.acceptsEntry(digits)
+                                is RappAuthRequest.DocumentSign -> Pin2Submission.acceptsEntry(digits)
+                            }
+                        if (accepts) {
+                            pin = digits
+                        }
+                    },
                     label = {
                         Text(
                             when (request.action) {
@@ -109,7 +130,10 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                     horizontalArrangement = Arrangement.End,
                 ) {
                     OutlinedButton(
-                        onClick = { request.onDenied() },
+                        onClick = {
+                            pin = ""
+                            request.onDenied()
+                        },
                         modifier = Modifier.padding(end = 8.dp),
                     ) {
                         // Browser auth: Cancel (no conceptual denial, just close).
@@ -122,7 +146,19 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                         )
                     }
                     Button(
-                        onClick = { request.onApproved(pin) },
+                        onClick = {
+                            val currentPin = pin
+                            pin = ""
+                            when (request) {
+                                is RappAuthRequest.BrowserAuth -> {
+                                    request.onApproved(Pin1Submission.from(currentPin))
+                                }
+
+                                is RappAuthRequest.DocumentSign -> {
+                                    request.onApproved(Pin2Submission.from(currentPin))
+                                }
+                            }
+                        },
                         enabled = isPinValid,
                     ) {
                         Text(
@@ -143,7 +179,12 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
 internal fun RappCardTapDialog(prompt: fi.refineid.android.rapp.RappCardTapPrompt) {
     Dialog(
         onDismissRequest = { prompt.onCancel() },
-        properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false),
+        properties =
+            DialogProperties(
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false,
+                securePolicy = SecureFlagPolicy.SecureOn,
+            ),
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
