@@ -1,17 +1,16 @@
 # Copyright 2026 Petri Koistinen. Licensed under the Apache License, Version 2.0.
 #
-# The full quality floor on every push and pull request: the same
-# `./gradlew check` the mandatory pre-push hook runs locally. The native
-# crates patch their refineid-core git dependencies to a sibling checkout,
-# so the workflow clones refineid-core next to this repository.
+# Weekly/manual Linux-host verification for the Android toolchain. The
+# mandatory local pre-push hook runs this same quality floor for each push.
+# The native crates patch their refineid-core git dependencies to a sibling
+# checkout, so the workflow clones refineid-core next to this repository.
 
 name: check
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 8 * * 1'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
