@@ -34,6 +34,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: RefineID/refineid-core
+          # Keep aligned with the refineid-core package versions in native/**/Cargo.lock.
+          ref: fa3ef06a679b9f27c32979b11bbd2b7b0446e4c1
           path: refineid-core
 
       - name: Set up JDK
