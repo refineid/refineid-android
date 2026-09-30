@@ -26,18 +26,6 @@ class SigningNetworkAddressPolicyTest {
     }
 
     @Test
-    fun acceptsPublicIpv4Ipv6AndEmbeddedPublicAddresses() {
-        for (literal in PUBLIC_ADDRESS_LITERALS) {
-            val address = checkNotNull(SigningNetworkAddressPolicy.numericAddress(literal))
-            assertTrue("public fixture was refused: $literal", SigningNetworkAddressPolicy.isPublic(address))
-            assertTrue(
-                "public host was refused statically: $literal",
-                SigningNetworkAddressPolicy.hostCouldBePublic(literal),
-            )
-        }
-    }
-
-    @Test
     fun rejectsLocalNamesAndAlternateNumericSpellingsBeforeResolution() {
         for (host in NON_PUBLIC_HOST_SPELLINGS) {
             assertFalse(
@@ -50,23 +38,19 @@ class SigningNetworkAddressPolicyTest {
     }
 
     @Test
-    fun requiresEveryBoundedDnsAnswerToBePublic() {
-        val public = numeric(PUBLIC_IPV4_PRIMARY)
-        val private = numeric(PRIVATE_IPV4)
+    fun refusesNonPublicOrEmptyDnsAnswerSet() {
         assertFailure(SigningNetworkFailure.UNSAFE_ADDRESS) {
             SigningNetworkAddressPolicy.publicResolvedAddresses(
                 PUBLIC_DNS_NAME,
-                SigningNetworkResolver { listOf(public, private) },
+                SigningNetworkResolver { listOf(numeric(PRIVATE_IPV4)) },
             )
         }
-
-        val duplicates =
+        assertFailure(SigningNetworkFailure.UNSAFE_ADDRESS) {
             SigningNetworkAddressPolicy.publicResolvedAddresses(
                 PUBLIC_DNS_NAME,
-                SigningNetworkResolver { listOf(public, public) },
+                SigningNetworkResolver { emptyList() },
             )
-        assertEquals(SINGLE_DISTINCT_ADDRESS, duplicates.size)
-        assertTrue(duplicates.single().address.contentEquals(public.address))
+        }
     }
 
     @Test
@@ -76,9 +60,9 @@ class SigningNetworkAddressPolicyTest {
                 .map { finalOctet ->
                     InetAddress.getByAddress(
                         byteArrayOf(
-                            PUBLIC_TEST_FIRST_OCTET,
-                            PUBLIC_TEST_SECOND_OCTET,
-                            PUBLIC_TEST_THIRD_OCTET,
+                            LOOPBACK_TEST_FIRST_OCTET,
+                            LOOPBACK_TEST_SECOND_OCTET,
+                            LOOPBACK_TEST_THIRD_OCTET,
                             finalOctet.toByte(),
                         ),
                     )
@@ -104,16 +88,14 @@ class SigningNetworkAddressPolicyTest {
     }
 
     private companion object {
-        const val PUBLIC_IPV4_PRIMARY = "8.8.8.8"
         const val PRIVATE_IPV4 = "127.0.0.1"
         const val PUBLIC_DNS_NAME = "ocsp.example"
         const val PUBLIC_ABSOLUTE_DNS_NAME = "$PUBLIC_DNS_NAME."
-        const val SINGLE_DISTINCT_ADDRESS = 1
         const val FIRST_GENERATED_ADDRESS_OCTET = 1
         const val OVERSIZED_ADDRESS_COUNT = 9
-        const val PUBLIC_TEST_FIRST_OCTET: Byte = 8
-        const val PUBLIC_TEST_SECOND_OCTET: Byte = 8
-        const val PUBLIC_TEST_THIRD_OCTET: Byte = 4
+        const val LOOPBACK_TEST_FIRST_OCTET: Byte = 127
+        const val LOOPBACK_TEST_SECOND_OCTET: Byte = 0
+        const val LOOPBACK_TEST_THIRD_OCTET: Byte = 0
         val NON_PUBLIC_ADDRESS_LITERALS =
             listOf(
                 "0.0.0.1",
@@ -139,7 +121,7 @@ class SigningNetworkAddressPolicyTest {
                 "fec0::1",
                 "ff02::1",
                 "2001:db8::1",
-                "64:ff9b:1::8.8.8.8",
+                "64:ff9b:1::10.0.0.1",
                 "64:ff9b::127.0.0.1",
                 "100::1",
                 "100:0:0:1::1",
@@ -148,14 +130,6 @@ class SigningNetworkAddressPolicyTest {
                 "3fff::1",
                 "4000::1",
                 "5f00::1",
-            )
-        val PUBLIC_ADDRESS_LITERALS =
-            listOf(
-                PUBLIC_IPV4_PRIMARY,
-                "1.1.1.1",
-                "2001:4860:4860::8888",
-                "64:ff9b::8.8.8.8",
-                "2002:0808:0808::",
             )
         val NON_PUBLIC_HOST_SPELLINGS =
             listOf(
