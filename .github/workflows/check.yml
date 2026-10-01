@@ -79,7 +79,7 @@ jobs:
           tool: cargo-ndk
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.7.8
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.7.8
         with:
           workspaces: |
             refineid-android/native/refineid-android-core
