@@ -54,7 +54,6 @@
     <string name="peer_connected">%1$s yhdistetty.</string>
     <string name="hold_card_against_back">Pidä henkilökorttia taustaa vasten.</string>
     <string name="connect_id_card">Yhdistä henkilökortti</string>
-    <string name="enter_code_on_computer">Syötä tämä koodi tietokoneellesi</string>
     <string name="regenerate_code">Luo uusi koodi</string>
     <string name="pair_new_computer">Yhdistä uusi tietokone</string>
     <string name="card_pins">Tunnusluvut</string>
