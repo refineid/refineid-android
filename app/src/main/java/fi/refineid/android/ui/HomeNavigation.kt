@@ -31,6 +31,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -109,13 +110,20 @@ internal fun NavigationRow(
     }
 }
 
-@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Suppress(
+    "FunctionName",
+    "ktlint:standard:function-naming",
+    "ComposableLambdaParameterNaming",
+    "ComposableLambdaParameterPosition",
+)
 @Composable
 internal fun NavigationRow(
     icon: Painter,
     label: String,
     tag: String,
     enabled: Boolean = true,
+    iconTint: Color? = null,
+    badge: @Composable (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val contentColor =
@@ -138,11 +146,12 @@ internal fun NavigationRow(
             painter = icon,
             contentDescription = null,
             tint =
-                if (enabled) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                iconTint
+                    ?: if (enabled) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
             modifier = Modifier.size(ROW_ICON_SIZE),
         )
         Text(
@@ -150,7 +159,9 @@ internal fun NavigationRow(
             color = contentColor,
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.weight(ROW_LABEL_WEIGHT),
+            maxLines = 1,
         )
+        badge?.invoke()
         Icon(
             imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
             contentDescription = null,
@@ -209,17 +220,22 @@ internal fun SubScreen(
 }
 
 internal val SECTION_ITEM_SPACING = 8.dp
-internal val GROUP_DIVIDER_INSET = 60.dp
-internal val GROUP_CORNER_RADIUS = 22.dp
-internal val GROUP_ELEVATION = 2.dp
-internal val ROW_HORIZONTAL_PADDING = 20.dp
-internal val ROW_VERTICAL_PADDING = 18.dp
-internal val ROW_ITEM_SPACING = 14.dp
-internal val ROW_ICON_SIZE = 26.dp
+internal val GROUP_DIVIDER_INSET = 52.dp
+internal val GROUP_CORNER_RADIUS = 16.dp
+internal val GROUP_ELEVATION = 0.dp
+internal val ROW_HORIZONTAL_PADDING = 16.dp
+internal val ROW_VERTICAL_PADDING = 14.dp
+internal val ROW_ITEM_SPACING = 12.dp
+internal val ROW_ICON_SIZE = 24.dp
 internal const val ROW_LABEL_WEIGHT = 1f
-internal val SUBSCREEN_HORIZONTAL_PADDING = 20.dp
+internal val SUBSCREEN_HORIZONTAL_PADDING = 16.dp
 internal val SUBSCREEN_VERTICAL_PADDING = 8.dp
 internal val SUBSCREEN_ITEM_SPACING = 14.dp
+internal const val CONNECTED_STATUS_COLOR_HEX = 0xFF34C759
+internal val CONNECTED_STATUS_COLOR = Color(CONNECTED_STATUS_COLOR_HEX)
+internal const val CONNECTED_STATUS_BADGE_ALPHA = 0.15f
+internal val STATUS_BADGE_CORNER_RADIUS = 12.dp
+internal val PAIRED_PEER_ROW_VERTICAL_PADDING = 12.dp
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
@@ -243,6 +259,7 @@ internal fun SectionHeader(title: String) {
         text = title,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp),
     )
 }
 

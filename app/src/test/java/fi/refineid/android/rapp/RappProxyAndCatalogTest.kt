@@ -112,6 +112,48 @@ class RappProxyAndCatalogTest {
     }
 
     @Test
+    fun rappSettingsDefaultsToFalseWhenNoPairsExist() {
+        val prefs = FakeSharedPreferences()
+        val settings = RappSettings(prefs, pairCatalogSupplier = { emptyList() })
+        assertFalse(settings.isCardRemoteAccessEnabled)
+    }
+
+    @Test
+    fun rappSettingsDefaultsToTrueWhenPairsAlreadyExist() {
+        val prefs = FakeSharedPreferences()
+        val peer =
+            PairedPeer(
+                pairIdHex = "01020304",
+                displayName = "Laptop",
+                platform = "Linux",
+                createdAtMs = 123456789L,
+            )
+        val settings = RappSettings(prefs, pairCatalogSupplier = { listOf(peer) })
+        assertTrue(settings.isCardRemoteAccessEnabled)
+    }
+
+    @Test
+    fun rappSettingsRespectsExplicitlyConfiguredValue() {
+        val prefs = FakeSharedPreferences()
+        val peer =
+            PairedPeer(
+                pairIdHex = "01020304",
+                displayName = "Laptop",
+                platform = "Linux",
+                createdAtMs = 123456789L,
+            )
+        val settings = RappSettings(prefs, pairCatalogSupplier = { listOf(peer) })
+
+        // Explicitly turn off
+        settings.isCardRemoteAccessEnabled = false
+        assertFalse(settings.isCardRemoteAccessEnabled)
+
+        // Explicitly turn on
+        settings.isCardRemoteAccessEnabled = true
+        assertTrue(settings.isCardRemoteAccessEnabled)
+    }
+
+    @Test
     fun caCertificateStoreRejectsLeafAndAcceptsCaCertificates() {
         val openssl = findExecutable(OPENSSL_EXECUTABLE_NAME)
         assumeTrue("OpenSSL required for CA store test", openssl != null)

@@ -44,8 +44,9 @@
     <string name="wrong_pin">Wrong PIN</string>
     <string name="pin_locked">PIN locked</string>
     <string name="unavailable">Unavailable</string>
-    <string name="pair_computer">Remote access</string>
-    <string name="section_identity">Person</string>
+    <string name="pair_computer">Remote Access</string>
+    <string name="section_identity">Identity</string>
+    <string name="person_label">Person</string>
     <string name="forget_identity_title">Forget identity?</string>
     <string name="forget_identity">Forget identity</string>
     <string name="card_untampered">Card is genuine and untampered.</string>
@@ -55,12 +56,11 @@
     <string name="disconnect">Disconnect</string>
     <string name="pairing_failed">Pairing failed</string>
     <string name="peer_connected">%1$s connected.</string>
-    <string name="pairing_code">Pairing code</string>
-    <string name="hold_card_to_phone">Hold your ID card to the back of the phone…</string>
     <string name="hold_card_against_back">Please hold your ID card against the back of the phone.</string>
     <string name="connect_id_card">Connect ID card</string>
-    <string name="show_pairing_code">Show pairing code</string>
-    <string name="enter_pairing_code">Enter pairing code</string>
+    <string name="enter_code_on_computer">Enter this code on your computer</string>
+    <string name="regenerate_code">Regenerate code</string>
+    <string name="pair_new_computer">Pair new computer</string>
     <string name="card_pins">PINs</string>
     <string name="change_pin1">Change PIN 1</string>
     <string name="change_pin2">Change PIN 2</string>
@@ -119,4 +119,6 @@
     <string name="pin2_section_title">Signature PIN (PIN 2)</string>
     <string name="paired_devices">Paired computers</string>
     <string name="connected_status">Connected</string>
+    <string name="card_remote_access">Card Remote Access</string>
+    <string name="no_paired_devices">No paired computers</string>
 </resources>

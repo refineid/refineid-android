@@ -2,7 +2,10 @@
 
 package fi.refineid.android.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,6 +44,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,6 +53,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -72,12 +77,15 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
+import androidx.core.content.ContextCompat
 import fi.refineid.android.BuildConfig
 import fi.refineid.android.R
 import fi.refineid.android.core.AuthenticationCardService
@@ -92,7 +100,9 @@ import fi.refineid.android.diagnostics.BuildDiagnostics
 import fi.refineid.android.diagnostics.DiagnosticsCollector
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappAuthorizationInbox
+import fi.refineid.android.rapp.RappPairingCode
 import fi.refineid.android.rapp.RappPairingModel
 import fi.refineid.android.settings.TimestampAuthorityRepository
 import fi.refineid.android.usb.CardPresence
@@ -429,6 +439,7 @@ internal fun MainScreen(
                     } else {
                         null
                     },
+                rappPairingModel = rappPairingModel,
             )
         }
 
@@ -497,12 +508,6 @@ internal fun MainScreen(
                 rappPairingModel?.let { model ->
                     RappPairingScreen(
                         model = model,
-                        hasNfc = hasNfc,
-                        pinCache = pinCache,
-                        holderName = effectiveHolderName,
-                        onConnectCard = { can, pin1 ->
-                            onNfcConnect(can, pin1)
-                        },
                         onBack = {
                             model.reset()
                             destination = MainDestination.HOME
@@ -686,6 +691,7 @@ private fun HomeScreen(
     onOpenPairing: () -> Unit,
     onOpenCardManagement: () -> Unit,
     onRequestUsbCan: (() -> Unit)? = null,
+    rappPairingModel: RappPairingModel? = null,
 ) {
     Scaffold(
         modifier =
@@ -744,6 +750,47 @@ private fun HomeScreen(
             if (!isActivationRequired) {
                 Section(stringResource(R.string.card)) {
                     NavigationGroup {
+                        val isConnected = rappPairingModel?.activeConnectedPeer != null
+                        val isRemoteEnabled = rappPairingModel?.isRemoteAccessEnabled ?: false
+                        NavigationRow(
+                            icon = painterResource(R.drawable.ic_satellite_alt),
+                            label = stringResource(R.string.pair_computer),
+                            tag = "RappPairingRow",
+                            iconTint =
+                                when {
+                                    isConnected -> CONNECTED_STATUS_COLOR
+                                    isRemoteEnabled -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            badge =
+                                if (isConnected) {
+                                    {
+                                        Surface(
+                                            shape = RoundedCornerShape(STATUS_BADGE_CORNER_RADIUS),
+                                            color = CONNECTED_STATUS_COLOR.copy(alpha = CONNECTED_STATUS_BADGE_ALPHA),
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.connected_status),
+                                                color = CONNECTED_STATUS_COLOR,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    null
+                                },
+                            onClick = onOpenPairing,
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
+                        NavigationRow(
+                            icon = Icons.Outlined.Lock,
+                            label = stringResource(R.string.card_pins),
+                            tag = "manageCard",
+                            onClick = onOpenCardManagement,
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
                         BrowserHarness(
                             cardService = browserCardService,
                             pinCache = pinCache,
@@ -761,20 +808,6 @@ private fun HomeScreen(
                                     onClick = onOpen,
                                 )
                             },
-                        )
-                        HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
-                        NavigationRow(
-                            icon = painterResource(R.drawable.ic_satellite_alt),
-                            label = stringResource(R.string.pair_computer),
-                            tag = "RappPairingRow",
-                            onClick = onOpenPairing,
-                        )
-                        HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
-                        NavigationRow(
-                            icon = Icons.Outlined.Lock,
-                            label = stringResource(R.string.card_pins),
-                            tag = "manageCard",
-                            onClick = onOpenCardManagement,
                         )
                     }
                 }
@@ -977,10 +1010,23 @@ private fun SingleIdentityRow(
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(ROW_ICON_SIZE),
         )
-        Text(
-            text =
-                holderName
-                    ?: stringResource(
+        if (holderName != null) {
+            Column(modifier = Modifier.weight(ROW_LABEL_WEIGHT)) {
+                Text(
+                    text = stringResource(R.string.person_label),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = holderName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            Text(
+                text =
+                    stringResource(
                         when (rowAction) {
                             IdentityRowAction.REQUEST_USB_CAN -> R.string.access_number_required
                             IdentityRowAction.ASK_NFC_READ -> R.string.read_identity_card
@@ -988,15 +1034,11 @@ private fun SingleIdentityRow(
                             else -> R.string.connect_id_card
                         },
                     ),
-            style = MaterialTheme.typography.bodyLarge,
-            color =
-                if (holderName != null) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            modifier = Modifier.weight(ROW_LABEL_WEIGHT),
-        )
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(ROW_LABEL_WEIGHT),
+            )
+        }
         if ((holderName != null || pinCache?.hasPin == true) && onForget != null) {
             IconButton(
                 onClick = onShowForgetConfirmation,
@@ -1835,13 +1877,13 @@ private fun ReaderCanEntry(onConnect: (CanSubmission) -> Unit) {
 
 private const val WEIGHT_FILL = 1F
 
-private val SCREEN_HORIZONTAL_PADDING = 24.dp
-private val SCREEN_VERTICAL_PADDING = 28.dp
-private val SCREEN_ITEM_SPACING = 28.dp
-private val CARD_PADDING = 20.dp
-private val CARD_ITEM_SPACING = 14.dp
-private val CARD_CORNER_RADIUS = 22.dp
-private val CARD_ELEVATION = 2.dp
+private val SCREEN_HORIZONTAL_PADDING = 16.dp
+private val SCREEN_VERTICAL_PADDING = 20.dp
+private val SCREEN_ITEM_SPACING = 24.dp
+private val CARD_PADDING = 16.dp
+private val CARD_ITEM_SPACING = 12.dp
+private val CARD_CORNER_RADIUS = 16.dp
+private val CARD_ELEVATION = 0.dp
 private val READER_STATUS_ITEM_SPACING = 12.dp
 private val READER_STATUS_INDICATOR_SIZE = 12.dp
 

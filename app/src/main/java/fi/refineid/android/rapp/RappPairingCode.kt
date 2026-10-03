@@ -1,13 +1,16 @@
 package fi.refineid.android.rapp
 
 import java.security.SecureRandom
+import java.text.Normalizer
 
-/** Generates, formats, and validates 6-digit numeric pairing codes for RAPP pairing. */
+/** Generates, formats, and validates 6-character Crockford Base32 pairing codes for RAPP v26.10.1. */
 internal object RappPairingCode {
     const val CODE_LENGTH = 6
-    const val GROUP_SIZE = 3
+    const val GROUP_SIZE = 2
     const val DEFAULT_LIFETIME_MS: Long = 180_000L
-    private const val ALPHABET = "0123456789"
+
+    /** Crockford Base32 alphabet (32 symbols, excluding I, L, O, U). */
+    const val ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
     fun generate(): String {
         val random = SecureRandom()
@@ -18,22 +21,60 @@ internal object RappPairingCode {
         return String(chars)
     }
 
+    /**
+     * Applies the Crockford Base32 canonicalization pipeline:
+     * 1. Unicode NFKC normalization
+     * 2. ASCII lowercase to uppercase
+     * 3. Strip whitespace and hyphens
+     * 4. Apply Crockford decode aliases (I, L -> 1; O -> 0; reject U)
+     * 5. Filter valid Crockford characters up to CODE_LENGTH
+     */
     fun normalize(input: String): String {
-        return input.filter { it in '0'..'9' }.take(CODE_LENGTH)
+        val nfkc = Normalizer.normalize(input, Normalizer.Form.NFKC)
+        val filtered = nfkc.uppercase().filter { !it.isWhitespace() && it != '-' }
+        val sb = StringBuilder()
+        for (c in filtered) {
+            when (c) {
+                'I', 'L' -> sb.append('1')
+
+                'O' -> sb.append('0')
+
+                'U' -> return ""
+
+                // U is explicitly rejected per RAPP v26.10.1 §3.1
+                in ALPHABET -> sb.append(c)
+
+                else -> return "" // Non-Crockford characters reject the code
+            }
+        }
+        return sb.take(CODE_LENGTH).toString()
     }
 
+    /** Formats a pairing code into two-character clusters: "XX XX XX" (e.g., "7K X4 M9"). */
     fun formatted(input: String): String {
-        val digits = normalize(input)
-        return if (digits.length >= GROUP_SIZE) {
-            val first = digits.substring(0, GROUP_SIZE)
-            val second = digits.substring(GROUP_SIZE)
-            if (second.isEmpty()) "$first " else "$first $second"
-        } else {
-            digits
+        val normalized = normalize(input)
+        return when {
+            normalized.length <= GROUP_SIZE -> {
+                normalized
+            }
+
+            normalized.length <= GROUP_SIZE * 2 -> {
+                val g1 = normalized.substring(0, GROUP_SIZE)
+                val g2 = normalized.substring(GROUP_SIZE)
+                "$g1 $g2"
+            }
+
+            else -> {
+                val g1 = normalized.substring(0, GROUP_SIZE)
+                val g2 = normalized.substring(GROUP_SIZE, GROUP_SIZE * 2)
+                val g3 = normalized.substring(GROUP_SIZE * 2)
+                "$g1 $g2 $g3"
+            }
         }
     }
 
     fun isValid(code: String): Boolean {
-        return normalize(code).length == CODE_LENGTH
+        val normalized = normalize(code)
+        return normalized.length == CODE_LENGTH && normalized.all { it in ALPHABET }
     }
 }

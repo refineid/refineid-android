@@ -45,22 +45,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         AppTrace.activityCreated()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        setRecentsScreenshotEnabled(false)
+        if (!BuildConfig.DEBUG) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            setRecentsScreenshotEnabled(false)
+        }
         window.setHideOverlayWindows(true)
         window.decorView.importantForAutofill =
             View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         window.decorView.importantForContentCapture =
             View.IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS
-
-        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(
-                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
-                REQUEST_CODE_POST_NOTIFICATIONS,
-            )
-        }
 
         readerController = (application as RefineIdApplication).readerController
         readerController.addStateListener(readerStateListener)
@@ -74,7 +67,6 @@ class MainActivity : ComponentActivity() {
                 scope = activityScope,
             )
         rappPairingModel = model
-        handlePairIntent(intent)
 
         setContent {
             ReFineIdTheme {
@@ -132,16 +124,6 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         AppTrace.activityReceivedIntent()
         readerController.refresh()
-        handlePairIntent(intent)
-    }
-
-    private fun handlePairIntent(intent: Intent?) {
-        val pairOffer =
-            intent?.getStringExtra("REFINEID_PAIR_OFFER")
-                ?: intent?.getStringExtra("pair_code")
-        if (!pairOffer.isNullOrBlank()) {
-            rappPairingModel?.connectWithCode(pairOffer)
-        }
     }
 
     override fun onDestroy() {
@@ -158,9 +140,5 @@ class MainActivity : ComponentActivity() {
         } catch (_: ActivityNotFoundException) {
             AppTrace.nfcSettingsUnavailable()
         }
-    }
-
-    private companion object {
-        private const val REQUEST_CODE_POST_NOTIFICATIONS = 101
     }
 }

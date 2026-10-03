@@ -41,7 +41,8 @@
     <string name="pin_locked">PIN lukittu</string>
     <string name="unavailable">Ei käytettävissä</string>
     <string name="pair_computer">Etäkäyttö</string>
-    <string name="section_identity">Henkilö</string>
+    <string name="section_identity">Identiteetti</string>
+    <string name="person_label">Henkilö</string>
     <string name="forget_identity_title">Unohdetaanko henkilöllisyys?</string>
     <string name="forget_identity">Unohda henkilöllisyys</string>
     <string name="card_untampered">Kortti on aito ja koskematon.</string>
@@ -51,12 +52,11 @@
     <string name="disconnect">Katkaise yhteys</string>
     <string name="pairing_failed">Yhdistäminen epäonnistui</string>
     <string name="peer_connected">%1$s yhdistetty.</string>
-    <string name="pairing_code">Pariliitoskoodi</string>
-    <string name="hold_card_to_phone">Pidä henkilökorttia puhelimen takana…</string>
     <string name="hold_card_against_back">Pidä henkilökorttia taustaa vasten.</string>
     <string name="connect_id_card">Yhdistä henkilökortti</string>
-    <string name="show_pairing_code">Näytä pariliitoskoodi</string>
-    <string name="enter_pairing_code">Syötä pariliitoskoodi</string>
+    <string name="enter_code_on_computer">Syötä tämä koodi tietokoneellesi</string>
+    <string name="regenerate_code">Luo uusi koodi</string>
+    <string name="pair_new_computer">Yhdistä uusi tietokone</string>
     <string name="card_pins">Tunnusluvut</string>
     <string name="change_pin1">Vaihda PIN 1</string>
     <string name="change_pin2">Vaihda PIN 2</string>
@@ -115,4 +115,6 @@
     <string name="pin2_section_title">Allekirjoitus-PIN (PIN 2)</string>
     <string name="paired_devices">Paritetut tietokoneet</string>
     <string name="connected_status">Yhdistetty</string>
+    <string name="card_remote_access">Kortin etäkäyttö</string>
+    <string name="no_paired_devices">Ei paritettuja tietokoneita</string>
 </resources>

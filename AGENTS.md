@@ -105,6 +105,7 @@
 - Never put a git worktree under `/tmp` or directly in `~/src/`; all worktrees
   must live under `~/src/wt/`.
 - Never poll background commands or set rapid check timers (e.g. 10s-30s). When running builds, tests, or async tasks, execute asynchronously and wait strictly for system completion notifications.
+- Whenever modifying Android application code or UI, proactively build and install the debug APK to any connected physical test device (`adb install -r app/build/outputs/apk/debug/app-debug.apk`) without waiting for explicit user instructions. When a device is attached over USB, also configure and maintain Wi-Fi debugging (`adb tcpip 5555 && adb connect <ip>:5555`) so deployment and verification continue smoothly if the cable is detached. Always verify installation success. If no device is attached or reachable, notify the user immediately.
 - When stuck, research with fellow AI available.
 
 ## Licensing

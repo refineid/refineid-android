@@ -6,7 +6,6 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import fi.refineid.android.BuildConfig
 import fi.refineid.android.RefineIdApplication
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,8 +23,6 @@ internal sealed interface PairingPhase {
         val code: String,
         val secondsRemaining: Int,
     ) : PairingPhase
-
-    data object CodeEntry : PairingPhase
 
     data class Connecting(
         val message: String,
@@ -59,14 +56,12 @@ internal class RappPairingModel(
 ) : AutoCloseable {
     private val catalog = RappPairCatalog(context)
     private var listener: StreamRelayListener? = null
-    private var browser: StreamRelayBrowser? = null
     private var pairingBridge: RappPairingBridge? = null
     private var timerJob: Job? = null
     private var handshakeDeadlineJob: Job? = null
     private var activeOfferingCode: String? = null
     private var secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
     private var proxyHandshakeStep = 0
-    private var requesterHandshakeStep = 0
     private var receivedPeerHello: uniffi.refineid_rapp.RappPeerHello? = null
     private val app = context.applicationContext as? RefineIdApplication
 
@@ -79,6 +74,12 @@ internal class RappPairingModel(
     var activeConnectedPeer by mutableStateOf<PairedPeer?>(null)
         private set
 
+    val settings = RappSettings(context)
+
+    private var _isRemoteAccessEnabled by mutableStateOf(settings.isCardRemoteAccessEnabled)
+    val isRemoteAccessEnabled: Boolean
+        get() = _isRemoteAccessEnabled
+
     init {
         val dispatcher = app?.rappProxyDispatcher
         if (dispatcher != null) {
@@ -90,206 +91,37 @@ internal class RappPairingModel(
         }
     }
 
+    fun setRemoteAccessEnabled(enabled: Boolean) {
+        settings.isCardRemoteAccessEnabled = enabled
+        _isRemoteAccessEnabled = enabled
+        if (enabled) {
+            val app = context.applicationContext as? RefineIdApplication
+            if (pairedDevices.isNotEmpty()) {
+                app?.startRappProxyListening()
+            } else if (phase is PairingPhase.Idle && activeConnectedPeer == null) {
+                createOffer()
+            }
+        } else {
+            reset()
+            val app = context.applicationContext as? RefineIdApplication
+            app?.rappProxyDispatcher?.disconnectClient()
+            app?.rappProxyDispatcher?.stopListening()
+        }
+    }
+
     fun disconnectActivePeer() {
         app?.rappProxyDispatcher?.disconnectClient()
     }
 
     fun createOffer() {
         reset()
+        if (!isRemoteAccessEnabled) {
+            settings.isCardRemoteAccessEnabled = true
+            _isRemoteAccessEnabled = true
+        }
         val code = RappPairingCode.generate()
         activeOfferingCode = code
         secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
-        val candidates =
-            listOf(
-                RappTransportCandidate(
-                    profile = "fi.refineid.stream.v1",
-                    candidateId = STREAM_CANDIDATE_ID,
-                    parametersCbor = byteArrayOf(EMPTY_CBOR_MAP_BYTE),
-                ),
-            )
-
-        try {
-            val startedAtMonotonicMs = RappClock.monotonicMs()
-            val bridge =
-                RappPairingBridge.createRequesterCodeOffer(
-                    pairingCode = code,
-                    profiles = DEFAULT_PAIRING_PROFILES,
-                    transports = candidates,
-                    offerTtlMs = RappPairingCode.DEFAULT_LIFETIME_MS.toULong(),
-                    startedAtMonotonicMs = startedAtMonotonicMs,
-                )
-            pairingBridge = bridge
-            val rendezvousName = StreamRendezvousName.MANUAL_PAIRING_SERVICE_NAME
-
-            phase = PairingPhase.Offering(code = code, secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS)
-            startCountdown()
-
-            requesterHandshakeStep = 0
-
-            val relayBrowser =
-                StreamRelayBrowser(context, scope, rendezvousName) { event ->
-                    handleRequesterBrowserEvent(event, bridge, code)
-                }
-            browser = relayBrowser
-            relayBrowser.start()
-        } catch (_: Exception) {
-            phase = PairingPhase.Failed("Failed to generate pairing offer")
-        }
-    }
-
-    private fun handleRequesterBrowserEvent(
-        event: StreamRelayEvent,
-        bridge: RappPairingBridge,
-        code: String,
-    ) {
-        when (event) {
-            is StreamRelayEvent.Connected -> {
-                phase = PairingPhase.Connecting("Peer connected! Starting security handshake...")
-                requesterHandshakeStep = 0
-                val random64 = ByteArray(CPACE_RANDOM_BYTES).apply { java.security.SecureRandom().nextBytes(this) }
-                try {
-                    val nowMonotonicMs = RappClock.monotonicMs()
-                    bridge.beginCpace(
-                        candidateId = STREAM_CANDIDATE_ID,
-                        pairingCode = code,
-                        randomBytes64 = random64,
-                        nowMonotonicMs = nowMonotonicMs,
-                    )
-                    browser?.send(rappStreamPairingPreamble())
-                    val frame = bridge.writeCpaceFrame(nowMonotonicMs)
-                    browser?.send(frame)
-                    requesterHandshakeStep = 0
-                } catch (_: Exception) {
-                    phase = PairingPhase.Failed("Handshake negotiation failed")
-                } finally {
-                    random64.fill(0)
-                }
-            }
-
-            is StreamRelayEvent.Frame -> {
-                try {
-                    val preamble = rappStreamPairingPreamble()
-                    if (event.data.contentEquals(preamble)) {
-                        return
-                    }
-
-                    val nowMonotonicMs = RappClock.monotonicMs()
-                    when (requesterHandshakeStep) {
-                        0 -> {
-                            // Responder sent CPace frame
-                            bridge.readCpaceFrame(event.data, nowMonotonicMs)
-                            val handshake1 = bridge.writeHandshakeFrame(nowMonotonicMs)
-                            browser?.send(handshake1)
-                            requesterHandshakeStep = 1
-                        }
-
-                        1 -> {
-                            // Responder sent Message 2
-                            bridge.readHandshakeFrame(event.data, nowMonotonicMs)
-                            val finalHandshake = bridge.writeHandshakeFrame(nowMonotonicMs)
-                            if (bridge.handshakeComplete(nowMonotonicMs)) {
-                                bridge.enterConfirmation(nowMonotonicMs)
-                                val hello =
-                                    bridge.sendHello(
-                                        displayName = localDeviceDisplayName(),
-                                        platform = "Android",
-                                    )
-                                browser?.send(finalHandshake)
-                                browser?.send(hello)
-                                requesterHandshakeStep = 2
-                            }
-                        }
-
-                        2 -> {
-                            // Responder sent Hello
-                            receivedPeerHello = bridge.receiveHello(event.data, RappClock.wallMs())
-                            val conf = bridge.sendConfirmation(DEFAULT_PAIRING_PROFILES)
-                            browser?.send(conf)
-                            requesterHandshakeStep = 3
-                        }
-
-                        3 -> {
-                            // Responder sent Confirmation
-                            bridge.receiveConfirmation(event.data, RappClock.wallMs())
-                            val record = bridge.finishPairing(RappClock.wallMs())
-                            val hello = receivedPeerHello
-                            val peer =
-                                PairedPeer(
-                                    pairIdHex = record.metadata().pairId.joinToString("") { "%02x".format(it) },
-                                    displayName = hello?.displayName?.takeIf { it.isNotBlank() } ?: "Computer",
-                                    platform = hello?.platform?.takeIf { it.isNotBlank() } ?: "Unknown",
-                                    createdAtMs = System.currentTimeMillis(),
-                                )
-                            val app = context.applicationContext as? RefineIdApplication
-                            val vault = app?.rappVault ?: AndroidRappVault(context)
-                            record.persistDeviceOnly(vault)
-
-                            val primedStore = app?.primedCanStore
-                            val certDer =
-                                primedStore?.readAuthCertificateDer()
-                                    ?: app?.nfcReaderController?.currentAuthenticationCertificateDer
-                                    ?: app?.rappProxyDispatcher?.cachedAuthCertDer
-                            if (certDer != null) {
-                                app?.rappProxyDispatcher?.storeReadAuthCertificate(certDer)
-                            }
-
-                            catalog.savePair(
-                                pairId = record.metadata().pairId,
-                                displayName = peer.displayName,
-                                platform = peer.platform,
-                                createdAtMs = peer.createdAtMs,
-                                holderName = null,
-                                certificateDerBase64 = null,
-                            )
-                            pairedDevices = catalog.listPairs()
-                            phase = PairingPhase.Paired(peer)
-
-                            val oldBrowser = browser
-                            browser = null
-                            scope.launch {
-                                kotlinx.coroutines.delay(LISTENER_CLOSE_DELAY_MS)
-                                oldBrowser?.close()
-                            }
-
-                            if (record.metadata().role == uniffi.refineid_rapp.RappEndpointRole.PROXY) {
-                                val rendezvousToken = record.metadata().rendezvousToken
-                                val sessionRendezvousName = StreamRendezvousName.name(sharingValue = rendezvousToken)
-                                app?.rappProxyDispatcher?.startListening(sessionRendezvousName, record, vault)
-                            } else {
-                                app?.remoteCardModel?.refresh()
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    phase = PairingPhase.Failed("Handshake error: ${e.javaClass.simpleName}")
-                }
-            }
-
-            is StreamRelayEvent.Disconnected -> {
-                if (phase is PairingPhase.Connecting) {
-                    phase = PairingPhase.Failed("Peer disconnected")
-                }
-            }
-
-            is StreamRelayEvent.Error -> {
-                phase = PairingPhase.Failed("Connection error")
-            }
-        }
-    }
-
-    fun startCodeEntry() {
-        reset()
-        phase = PairingPhase.CodeEntry
-    }
-
-    fun connectWithCode(rawCode: String) {
-        val code = RappPairingCode.normalize(rawCode)
-        if (!RappPairingCode.isValid(code)) return
-
-        reset()
-        activeOfferingCode = code
-        phase = PairingPhase.Connecting("Connecting...")
-        startCountdown()
         val candidates =
             listOf(
                 RappTransportCandidate(
@@ -322,8 +154,11 @@ internal class RappPairingModel(
                 }
             listener = relayListener
             relayListener.start(StreamRendezvousName.MANUAL_PAIRING_SERVICE_NAME)
+
+            phase = PairingPhase.Offering(code = code, secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS)
+            startCountdown()
         } catch (_: Throwable) {
-            phase = PairingPhase.Failed("Failed to initialize proxy pairing")
+            phase = PairingPhase.Failed("Failed to initialize remote pairing offer")
         }
     }
 
@@ -569,8 +404,6 @@ internal class RappPairingModel(
         secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
         listener?.close()
         listener = null
-        browser?.close()
-        browser = null
         try {
             pairingBridge?.cancelPairing()
         } catch (_: Exception) {
@@ -578,7 +411,6 @@ internal class RappPairingModel(
         pairingBridge = null
         receivedPeerHello = null
         proxyHandshakeStep = 0
-        requesterHandshakeStep = 0
         phase = PairingPhase.Idle
         pairedDevices = catalog.listPairs()
     }

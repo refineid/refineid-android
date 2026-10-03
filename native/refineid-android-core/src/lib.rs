@@ -5,6 +5,8 @@
 //! each DER read and reconstructed its public key; credential bytes never cross
 //! this border.
 
+#![allow(deprecated)]
+
 mod authentication_signer;
 mod card_access;
 mod card_certificate;
