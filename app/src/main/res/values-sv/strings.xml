@@ -116,4 +116,5 @@
     <string name="paired_devices">Kopplade datorer</string>
     <string name="connected_status">Ansluten</string>
     <string name="card_remote_access">Fjärråtkomst för kort</string>
+    <string name="no_paired_devices">Inga kopplade datorer</string>
 </resources>

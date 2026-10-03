@@ -120,4 +120,5 @@
     <string name="paired_devices">Paired computers</string>
     <string name="connected_status">Connected</string>
     <string name="card_remote_access">Card Remote Access</string>
+    <string name="no_paired_devices">No paired computers</string>
 </resources>

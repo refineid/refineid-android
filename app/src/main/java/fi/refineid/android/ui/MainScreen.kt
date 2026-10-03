@@ -657,126 +657,6 @@ internal fun MainScreen(
     }
 }
 
-@Suppress("FunctionName", "ktlint:standard:function-naming")
-@Composable
-private fun RemoteAccessRow(
-    model: RappPairingModel?,
-    onToggle: (Boolean) -> Unit,
-    onOpenPairing: () -> Unit,
-) {
-    val enabled = model?.isRemoteAccessEnabled ?: false
-    val activePeer = model?.activeConnectedPeer
-    val isConnected = activePeer != null
-    val phase = model?.phase
-
-    if (model != null) {
-        LaunchedEffect(enabled, model.pairedDevices.isEmpty(), phase, activePeer) {
-            if (enabled &&
-                model.pairedDevices.isEmpty() &&
-                phase is PairingPhase.Idle &&
-                activePeer == null
-            ) {
-                model.createOffer()
-            }
-        }
-    }
-
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenPairing)
-                    .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING)
-                    .testTag("RappPairingRow"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(ROW_ITEM_SPACING),
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_satellite_alt),
-                contentDescription = null,
-                tint =
-                    when {
-                        isConnected -> Color(0xFF34C759)
-                        enabled -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                modifier = Modifier.size(ROW_ICON_SIZE),
-            )
-            Text(
-                text = stringResource(R.string.pair_computer),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(ROW_LABEL_WEIGHT),
-                maxLines = 1,
-            )
-            if (isConnected) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF34C759).copy(alpha = 0.15f),
-                ) {
-                    Text(
-                        text = stringResource(R.string.connected_status),
-                        color = Color(0xFF34C759),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
-                }
-            }
-            Switch(
-                checked = enabled,
-                onCheckedChange = onToggle,
-                modifier = Modifier.testTag(UiAutomationIds.CARD_REMOTE_ACCESS_SWITCH),
-            )
-        }
-
-        if (enabled && model.pairedDevices.isEmpty() && activePeer == null) {
-            when (phase) {
-                is PairingPhase.Offering -> {
-                    HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
-                    Box(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 14.dp)
-                                .testTag("pairingCodeDisplay"),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = RappPairingCode.formatted(phase.code),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 2.sp,
-                            modifier = Modifier.testTag("pairingCode"),
-                        )
-                    }
-                }
-
-                is PairingPhase.Connecting -> {
-                    HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
-                    Box(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 14.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            strokeWidth = 2.5.dp,
-                        )
-                    }
-                }
-
-                else -> {}
-            }
-        }
-    }
-}
-
 /**
  * The reference home: terse grouped navigation — the Document rows
  * first, then the card, then the browser — every workflow on its own
@@ -813,12 +693,6 @@ private fun HomeScreen(
     onRequestUsbCan: (() -> Unit)? = null,
     rappPairingModel: RappPairingModel? = null,
 ) {
-    val context = LocalContext.current
-    val notificationPermissionLauncher =
-        rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestPermission(),
-        ) { _ -> }
-
     Scaffold(
         modifier =
             Modifier
@@ -876,21 +750,38 @@ private fun HomeScreen(
             if (!isActivationRequired) {
                 Section(stringResource(R.string.card)) {
                     NavigationGroup {
-                        RemoteAccessRow(
-                            model = rappPairingModel,
-                            onToggle = { isChecked ->
-                                if (isChecked) {
-                                    if (ContextCompat.checkSelfPermission(
-                                            context,
-                                            Manifest.permission.POST_NOTIFICATIONS,
-                                        ) != PackageManager.PERMISSION_GRANTED
-                                    ) {
-                                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        val isConnected = rappPairingModel?.activeConnectedPeer != null
+                        val isRemoteEnabled = rappPairingModel?.isRemoteAccessEnabled ?: false
+                        NavigationRow(
+                            icon = painterResource(R.drawable.ic_satellite_alt),
+                            label = stringResource(R.string.pair_computer),
+                            tag = "RappPairingRow",
+                            iconTint =
+                                when {
+                                    isConnected -> CONNECTED_STATUS_COLOR
+                                    isRemoteEnabled -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            badge =
+                                if (isConnected) {
+                                    {
+                                        Surface(
+                                            shape = RoundedCornerShape(STATUS_BADGE_CORNER_RADIUS),
+                                            color = CONNECTED_STATUS_COLOR.copy(alpha = CONNECTED_STATUS_BADGE_ALPHA),
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.connected_status),
+                                                color = CONNECTED_STATUS_COLOR,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            )
+                                        }
                                     }
-                                }
-                                rappPairingModel?.setRemoteAccessEnabled(isChecked)
-                            },
-                            onOpenPairing = onOpenPairing,
+                                } else {
+                                    null
+                                },
+                            onClick = onOpenPairing,
                         )
                         HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
                         NavigationRow(

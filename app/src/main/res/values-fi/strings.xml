@@ -116,4 +116,5 @@
     <string name="paired_devices">Paritetut tietokoneet</string>
     <string name="connected_status">Yhdistetty</string>
     <string name="card_remote_access">Kortin etäkäyttö</string>
+    <string name="no_paired_devices">Ei paritettuja tietokoneita</string>
 </resources>

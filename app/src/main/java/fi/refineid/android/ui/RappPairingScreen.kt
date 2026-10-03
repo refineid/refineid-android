@@ -5,32 +5,37 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -53,6 +58,7 @@ private val OFFERING_CODE_LETTER_SPACING = 2.sp
 @Composable
 internal fun RappPairingScreen(
     model: RappPairingModel,
+    modifier: Modifier = Modifier,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -61,28 +67,21 @@ internal fun RappPairingScreen(
     val notificationPermissionLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission(),
-        ) { _ ->
-        }
+        ) { _ -> }
 
-    LaunchedEffect(model.isRemoteAccessEnabled, model.pairedDevices.isEmpty()) {
-        if (model.isRemoteAccessEnabled &&
-            model.pairedDevices.isEmpty() &&
-            model.phase is PairingPhase.Idle &&
-            model.activeConnectedPeer == null
-        ) {
+    LaunchedEffect(model.isRemoteAccessEnabled, phase) {
+        if (model.isRemoteAccessEnabled && phase is PairingPhase.Idle && model.activeConnectedPeer == null) {
             model.createOffer()
         }
     }
 
     Column(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(SUBSCREEN_ITEM_SPACING),
     ) {
         CardRemoteAccessSwitchCard(
             enabled = model.isRemoteAccessEnabled,
+            isConnected = model.activeConnectedPeer != null,
             onCheckedChange = { isChecked ->
                 if (isChecked) {
                     if (ContextCompat.checkSelfPermission(
@@ -92,31 +91,35 @@ internal fun RappPairingScreen(
                     ) {
                         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
+                } else {
+                    model.reset()
                 }
                 model.setRemoteAccessEnabled(isChecked)
             },
         )
 
-        if (!model.isRemoteAccessEnabled) {
-            if (model.pairedDevices.isNotEmpty()) {
-                PairedDevicesList(
-                    peers = model.pairedDevices,
-                    activePeer = null,
-                    onDisconnect = {},
-                    onRemove = { idHex -> model.removePair(idHex) },
-                )
-            }
-        } else {
+        if (model.isRemoteAccessEnabled) {
             when (phase) {
+                is PairingPhase.Offering -> {
+                    OfferingPhaseView(
+                        code = phase.code,
+                        onRegenerateCode = { model.createOffer() },
+                    )
+                }
+
+                is PairingPhase.Connecting -> {
+                    ConnectingPhaseView(message = phase.message)
+                }
+
+                is PairingPhase.Paired -> {
+                    PairedPhaseView(peer = phase.peer, onBack = onBack)
+                }
+
+                is PairingPhase.Failed -> {
+                    FailedPhaseView(reason = phase.reason, onRetry = { model.reset() })
+                }
+
                 is PairingPhase.Idle -> {
-                    if (model.pairedDevices.isNotEmpty()) {
-                        PairedDevicesList(
-                            peers = model.pairedDevices,
-                            activePeer = model.activeConnectedPeer,
-                            onDisconnect = { model.disconnectActivePeer() },
-                            onRemove = { idHex -> model.removePair(idHex) },
-                        )
-                    }
                     Button(
                         onClick = { model.createOffer() },
                         modifier =
@@ -127,36 +130,37 @@ internal fun RappPairingScreen(
                         Text(stringResource(R.string.pair_new_computer))
                     }
                 }
+            }
+        }
 
-                is PairingPhase.Offering -> {
-                    OfferingPhaseView(
-                        code = phase.code,
-                        onRegenerateCode = { model.createOffer() },
-                        onCancel = {
-                            model.reset()
-                            onBack()
-                        },
-                    )
-                }
-
-                is PairingPhase.Connecting -> {
-                    ConnectingPhaseView(
-                        message = phase.message,
-                    )
-                }
-
-                is PairingPhase.Paired -> {
-                    PairedPhaseView(
-                        peer = phase.peer,
-                        onBack = onBack,
-                    )
-                }
-
-                is PairingPhase.Failed -> {
-                    FailedPhaseView(
-                        reason = phase.reason,
-                        onRetry = { model.reset() },
-                    )
+        Section(stringResource(R.string.paired_devices)) {
+            NavigationGroup {
+                if (model.pairedDevices.isEmpty()) {
+                    Box(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.no_paired_devices),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    model.pairedDevices.forEachIndexed { index, peer ->
+                        if (index > 0) {
+                            HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
+                        }
+                        val isConnected = model.activeConnectedPeer?.pairIdHex == peer.pairIdHex
+                        PairedPeerRow(
+                            peer = peer,
+                            isConnected = isConnected,
+                            onDisconnect = { model.disconnectActivePeer() },
+                            onRemove = { model.removePair(peer.pairIdHex) },
+                        )
+                    }
                 }
             }
         }
@@ -167,6 +171,7 @@ internal fun RappPairingScreen(
 @Composable
 private fun CardRemoteAccessSwitchCard(
     enabled: Boolean,
+    isConnected: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Card(
@@ -174,25 +179,40 @@ private fun CardRemoteAccessSwitchCard(
             Modifier
                 .fillMaxWidth()
                 .testTag(UiAutomationIds.CARD_REMOTE_ACCESS_CARD),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = GROUP_ELEVATION),
+        shape = RoundedCornerShape(GROUP_CORNER_RADIUS),
     ) {
         Row(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = stringResource(R.string.card_remote_access),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier =
-                    Modifier
-                        .weight(1f)
-                        .padding(end = 16.dp),
-            )
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(ROW_ITEM_SPACING),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_satellite_alt),
+                    contentDescription = null,
+                    tint =
+                        when {
+                            isConnected -> CONNECTED_STATUS_COLOR
+                            enabled -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    modifier = Modifier.size(ROW_ICON_SIZE),
+                )
+                Text(
+                    text = stringResource(R.string.card_remote_access),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
             Switch(
                 checked = enabled,
                 onCheckedChange = onCheckedChange,
@@ -210,84 +230,55 @@ private fun PairedPeerRow(
     onDisconnect: () -> Unit,
     onRemove: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = PAIRED_PEER_ROW_VERTICAL_PADDING),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ROW_ITEM_SPACING),
     ) {
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = peer.displayName,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = peer.platform,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (isConnected) {
+            Surface(
+                shape = RoundedCornerShape(STATUS_BADGE_CORNER_RADIUS),
+                color = CONNECTED_STATUS_COLOR.copy(alpha = CONNECTED_STATUS_BADGE_ALPHA),
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = peer.displayName,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        text = peer.platform,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                IconButton(onClick = onRemove) {
-                    Icon(
-                        imageVector = Icons.Outlined.Delete,
-                        contentDescription = stringResource(R.string.forget),
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                }
+                Text(
+                    text = stringResource(R.string.connected_status),
+                    color = CONNECTED_STATUS_COLOR,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
             }
-            if (isConnected) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = stringResource(R.string.connected_status),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    OutlinedButton(onClick = onDisconnect) {
-                        Text(stringResource(R.string.disconnect))
-                    }
-                }
+            IconButton(onClick = onDisconnect) {
+                Icon(
+                    imageVector = Icons.Outlined.Clear,
+                    contentDescription = stringResource(R.string.disconnect),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
-    }
-}
-
-@Suppress("FunctionName", "ktlint:standard:function-naming")
-@Composable
-private fun PairedDevicesList(
-    peers: List<PairedPeer>,
-    activePeer: PairedPeer?,
-    onDisconnect: () -> Unit,
-    onRemove: (String) -> Unit,
-) {
-    Text(
-        text = stringResource(R.string.paired_devices),
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.SemiBold,
-    )
-    for (peer in peers) {
-        val isConnected = activePeer?.pairIdHex == peer.pairIdHex
-        PairedPeerRow(
-            peer = peer,
-            isConnected = isConnected,
-            onDisconnect = onDisconnect,
-            onRemove = { onRemove(peer.pairIdHex) },
-        )
+        IconButton(onClick = onRemove) {
+            Icon(
+                imageVector = Icons.Outlined.Delete,
+                contentDescription = stringResource(R.string.forget),
+                tint = MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }
 
@@ -296,19 +287,23 @@ private fun PairedDevicesList(
 private fun OfferingPhaseView(
     code: String,
     onRegenerateCode: () -> Unit,
-    onCancel: () -> Unit,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag("pairingCodeDisplay"),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = GROUP_ELEVATION),
+        shape = RoundedCornerShape(GROUP_CORNER_RADIUS),
     ) {
         Column(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
+                    .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
                 text = RappPairingCode.formatted(code),
@@ -335,13 +330,6 @@ private fun OfferingPhaseView(
             ) {
                 Text(stringResource(R.string.regenerate_code))
             }
-            Button(
-                onClick = onCancel,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.cancel))
-            }
         }
     }
 }
@@ -351,7 +339,9 @@ private fun OfferingPhaseView(
 private fun ConnectingPhaseView(message: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = GROUP_ELEVATION),
+        shape = RoundedCornerShape(GROUP_CORNER_RADIUS),
     ) {
         Column(
             modifier =
@@ -382,41 +372,32 @@ private fun PairedPhaseView(
         onBack()
     }
 
-    Column(
+    Card(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = GROUP_ELEVATION),
+        shape = RoundedCornerShape(GROUP_CORNER_RADIUS),
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Check,
-                    contentDescription = stringResource(R.string.peer_connected, peer.displayName),
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(44.dp),
-                )
-                Text(
-                    text = stringResource(R.string.peer_connected, peer.displayName),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-        Button(
-            onClick = onBack,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.ready))
+            Icon(
+                imageVector = Icons.Outlined.Check,
+                contentDescription = stringResource(R.string.peer_connected, peer.displayName),
+                tint = CONNECTED_STATUS_COLOR,
+                modifier = Modifier.size(44.dp),
+            )
+            Text(
+                text = stringResource(R.string.peer_connected, peer.displayName),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }
@@ -429,7 +410,9 @@ private fun FailedPhaseView(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = GROUP_ELEVATION),
+        shape = RoundedCornerShape(GROUP_CORNER_RADIUS),
     ) {
         Column(
             modifier =
