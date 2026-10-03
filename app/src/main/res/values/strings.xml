@@ -58,7 +58,6 @@
     <string name="hold_card_against_back">Please hold your ID card against the back of the phone.</string>
     <string name="connect_id_card">Connect ID card</string>
     <string name="regenerate_code">Regenerate code</string>
-    <string name="pair_new_computer">Pair new computer</string>
     <string name="card_pins">PINs</string>
     <string name="change_pin1">Change PIN 1</string>
     <string name="change_pin2">Change PIN 2</string>

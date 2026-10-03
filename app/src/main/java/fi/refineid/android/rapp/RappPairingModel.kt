@@ -98,7 +98,8 @@ internal class RappPairingModel(
             val app = context.applicationContext as? RefineIdApplication
             if (pairedDevices.isNotEmpty()) {
                 app?.startRappProxyListening()
-            } else if (phase is PairingPhase.Idle && activeConnectedPeer == null) {
+            }
+            if (phase is PairingPhase.Idle && activeConnectedPeer == null) {
                 createOffer()
             }
         } else {

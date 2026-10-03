@@ -120,15 +120,6 @@ internal fun RappPairingScreen(
                 }
 
                 is PairingPhase.Idle -> {
-                    Button(
-                        onClick = { model.createOffer() },
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .testTag("pairNewComputerButton"),
-                    ) {
-                        Text(stringResource(R.string.pair_new_computer))
-                    }
                 }
             }
         }
