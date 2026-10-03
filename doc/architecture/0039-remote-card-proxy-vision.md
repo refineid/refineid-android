@@ -67,12 +67,20 @@ The **RefineID Remote Card Proxy** enables laptops and desktops (Linux, macOS) t
 
 ## 3. One-Time 6-Digit Pairing Ceremony
 
-### 3.1 Pairing Flow
+### 3.1 Pairing Flow & Discovery Hierarchy
+
+> **Normative Reference**: See [ADR 0041: RAPP Transport & Discovery Hierarchy](0041-rapp-transport-and-discovery-hierarchy.md) for the active 3-tier transport specification and security architecture.
 
 1. **Initiation**: User runs `refineid pair` (CLI) or clicks **"Pair New Mobile"** in the RefineID Desktop GUI.
-2. **Discovery**:
-   * Desktop begins advertising the RefineID service over **Bluetooth Low Energy (BLE)** and/or **local mDNS**.
-   * Desktop generates a cryptographically random 6-digit code:
+2. **Discovery & Sovereign Custodian Model**:
+   * Desktop displays the 6-digit pairing code and listens for announced mobile custodians (or scans via BLE / mDNS). Desktops **never** open listening ports.
+   * Android user taps **"Allow Remote Reader"** / **"Pair Computer"**.
+   * Mobile phone announces its availability following the 3-Tier Hierarchy:
+     1. **Tier 1 (Apple-native P2P)**: (Applicable between Apple devices).
+     2. **Tier 2 (Bluetooth Low Energy)**: BLE L2CAP CoC (`fi.refineid.rapp.ble.v1`) with RSSI proximity gating ($\ge -70\text{ dBm}$).
+     3. **Tier 3 (Local IP Stream)**: mDNS / DNS-SD (`_refineid-stream._tcp.`, RFC 6762/6763 via `NsdManager`).
+   * Desktop dials outbound directly to the announced phone.
+   * Desktop displays the cryptographically random 6-digit code:
      ```
      ========================================
        RefineID Device Pairing
@@ -80,8 +88,7 @@ The **RefineID Remote Card Proxy** enables laptops and desktops (Linux, macOS) t
      ========================================
      ```
 3. **Mobile Connection**:
-   * Mobile app discovers the nearby laptop name (e.g. *"Petri's Laptop"*).
-   * Mobile prompts: *"Enter the 6-digit pairing code shown on your laptop"*.
+   * Mobile app prompts: *"Enter the 6-digit pairing code shown on your computer"*.
 4. **Mutual Authentication (`Noise_XXpsk3`)**:
    * The 6-digit code is expanded into the 32-byte pre-shared key (`psk3`) via HKDF-SHA256.
    * Mobile and Desktop perform a 3-message `Noise_XXpsk3` handshake.
