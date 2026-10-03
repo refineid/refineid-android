@@ -134,11 +134,20 @@ class RappCpacePairingFlowTest {
                 nowMonotonicMs = RappClock.monotonicMs(),
             )
 
-            // 1. CPace frame exchange
-            val reqCpaceFrame = requester.writeCpaceFrame(RappClock.monotonicMs())
-            val proxyCpaceFrame = proxy.writeCpaceFrame(RappClock.monotonicMs())
-            proxy.readCpaceFrame(reqCpaceFrame, RappClock.monotonicMs())
-            requester.readCpaceFrame(proxyCpaceFrame, RappClock.monotonicMs())
+            // 1. CPace KC2 3-step mutual exchange
+            // Step 1: Requester -> Custodian/Proxy (YA, 32 bytes)
+            val reqStep1Frame = requester.writeCpaceFrame(RappClock.monotonicMs())
+            proxy.readCpaceFrame(reqStep1Frame, RappClock.monotonicMs())
+
+            // Step 2: Custodian/Proxy -> Requester (YB || TB, 64 bytes)
+            val proxyStep2Frame = proxy.writeCpaceFrame(RappClock.monotonicMs())
+            requester.readCpaceFrame(proxyStep2Frame, RappClock.monotonicMs())
+
+            // Step 3: Requester -> Custodian/Proxy (TA, 32 bytes)
+            // Writing step3 transitions Requester to Handshake
+            val reqStep3Frame = requester.writeCpaceFrame(RappClock.monotonicMs())
+            // Reading step3 transitions Proxy to Handshake
+            proxy.readCpaceFrame(reqStep3Frame, RappClock.monotonicMs())
 
             // 2. Noise handshake
             val h1 = requester.writeHandshakeFrame(RappClock.monotonicMs())
@@ -220,16 +229,17 @@ class RappCpacePairingFlowTest {
                 nowMonotonicMs = RappClock.monotonicMs(),
             )
 
-            // CPace frame exchange
-            val reqCpaceFrame = requester.writeCpaceFrame(RappClock.monotonicMs())
-            val proxyCpaceFrame = proxy.writeCpaceFrame(RappClock.monotonicMs())
-            proxy.readCpaceFrame(reqCpaceFrame, RappClock.monotonicMs())
-            requester.readCpaceFrame(proxyCpaceFrame, RappClock.monotonicMs())
+            // Step 1: Requester -> Proxy
+            val reqStep1Frame = requester.writeCpaceFrame(RappClock.monotonicMs())
+            proxy.readCpaceFrame(reqStep1Frame, RappClock.monotonicMs())
 
-            // Noise handshake must fail because CPace derived different symmetric keys
-            val h1 = requester.writeHandshakeFrame(RappClock.monotonicMs())
+            // Step 2: Proxy -> Requester
+            val proxyStep2Frame = proxy.writeCpaceFrame(RappClock.monotonicMs())
+
+            // CPace KC2 verification: Requester reading Step 2 must fail tag verification
+            // because different pairing codes produce different shared keys and tags
             assertThrows(RappBindingException::class.java) {
-                proxy.readHandshakeFrame(h1, RappClock.monotonicMs())
+                requester.readCpaceFrame(proxyStep2Frame, RappClock.monotonicMs())
             }
         } finally {
             randomReq.fill(0)
