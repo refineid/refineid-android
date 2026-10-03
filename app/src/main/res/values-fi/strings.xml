@@ -57,6 +57,9 @@
     <string name="connect_id_card">Yhdistä henkilökortti</string>
     <string name="show_pairing_code">Näytä pariliitoskoodi</string>
     <string name="enter_pairing_code">Syötä pariliitoskoodi</string>
+    <string name="enter_code_on_computer">Syötä tämä koodi tietokoneellesi</string>
+    <string name="regenerate_code">Luo uusi koodi</string>
+    <string name="pair_new_computer">Yhdistä uusi tietokone</string>
     <string name="card_pins">Tunnusluvut</string>
     <string name="change_pin1">Vaihda PIN 1</string>
     <string name="change_pin2">Vaihda PIN 2</string>

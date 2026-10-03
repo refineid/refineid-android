@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -52,8 +53,8 @@ import fi.refineid.android.rapp.RappPairingModel
 import kotlinx.coroutines.delay
 
 private const val PAIRED_AUTO_DISMISS_DELAY_MS = 1500L
-private val OFFERING_CODE_FONT_SIZE = 40.sp
-private val OFFERING_CODE_LETTER_SPACING = 4.sp
+private val OFFERING_CODE_FONT_SIZE = 36.sp
+private val OFFERING_CODE_LETTER_SPACING = 2.sp
 
 private fun applyCredentialsAndConnect(
     canInput: String,
@@ -83,7 +84,7 @@ private fun applyCredentialsAndConnect(
     }
 }
 
-@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Suppress("FunctionName", "ktlint:standard:function-naming", "UnusedParameter")
 @Composable
 internal fun RappPairingScreen(
     model: RappPairingModel,
@@ -95,8 +96,8 @@ internal fun RappPairingScreen(
 ) {
     val phase = model.phase
 
-    LaunchedEffect(!hasNfc) {
-        if (!hasNfc && model.phase is PairingPhase.Idle && model.activeConnectedPeer == null) {
+    LaunchedEffect(model.pairedDevices.isEmpty()) {
+        if (model.pairedDevices.isEmpty() && model.phase is PairingPhase.Idle && model.activeConnectedPeer == null) {
             model.createOffer()
         }
     }
@@ -109,7 +110,7 @@ internal fun RappPairingScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         when (phase) {
-            is PairingPhase.Idle, is PairingPhase.CodeEntry -> {
+            is PairingPhase.Idle -> {
                 if (model.pairedDevices.isNotEmpty()) {
                     PairedDevicesList(
                         peers = model.pairedDevices,
@@ -118,6 +119,27 @@ internal fun RappPairingScreen(
                         onRemove = { idHex -> model.removePair(idHex) },
                     )
                 }
+                Button(
+                    onClick = { model.createOffer() },
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .testTag("pairNewComputerButton"),
+                ) {
+                    Text(stringResource(R.string.pair_new_computer))
+                }
+                OutlinedButton(
+                    onClick = { model.startCodeEntry() },
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .testTag("enterPairingCodeButton"),
+                ) {
+                    Text(stringResource(R.string.enter_pairing_code))
+                }
+            }
+
+            is PairingPhase.CodeEntry -> {
                 val initialCan = remember { CanSessionStore.currentCan ?: "" }
                 CodeEntryCard(
                     onConnectWithCode = { code, can, pin1 ->
@@ -128,6 +150,7 @@ internal fun RappPairingScreen(
                         applyCredentialsAndConnect(can, pin1, pinCache, onConnectCard)
                         model.createOffer()
                     },
+                    onCancel = { model.reset() },
                     initialCan = initialCan,
                 )
             }
@@ -136,6 +159,7 @@ internal fun RappPairingScreen(
                 OfferingPhaseView(
                     code = phase.code,
                     holderName = holderName,
+                    onRegenerateCode = { model.createOffer() },
                     onEnterCode = { model.startCodeEntry() },
                     onCancel = {
                         model.reset()
@@ -262,6 +286,7 @@ private fun PairedDevicesList(
 private fun CodeEntryCard(
     onConnectWithCode: (String, String, String) -> Unit,
     onShowPairingCode: (String, String) -> Unit,
+    onCancel: () -> Unit,
     initialCan: String,
 ) {
     var codeInput by remember { mutableStateOf("") }
@@ -286,7 +311,11 @@ private fun CodeEntryCard(
                 value = codeInput,
                 onValueChange = { codeInput = RappPairingCode.normalize(it) },
                 label = { Text(stringResource(R.string.pairing_code)) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                keyboardOptions =
+                    KeyboardOptions(
+                        keyboardType = KeyboardType.Ascii,
+                        capitalization = KeyboardCapitalization.Characters,
+                    ),
                 singleLine = true,
                 textStyle =
                     MaterialTheme.typography.bodyLarge.copy(
@@ -355,6 +384,14 @@ private fun CodeEntryCard(
             ) {
                 Text(stringResource(R.string.show_pairing_code))
             }
+
+            Button(
+                onClick = onCancel,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.cancel))
+            }
         }
     }
 }
@@ -364,6 +401,7 @@ private fun CodeEntryCard(
 private fun OfferingPhaseView(
     code: String,
     holderName: String?,
+    onRegenerateCode: () -> Unit,
     onEnterCode: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -389,6 +427,12 @@ private fun OfferingPhaseView(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.testTag("offeringCodeText"),
             )
+            Text(
+                text = stringResource(R.string.enter_code_on_computer),
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (holderName != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -413,6 +457,15 @@ private fun OfferingPhaseView(
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            OutlinedButton(
+                onClick = onRegenerateCode,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("regenerateCodeButton"),
+            ) {
+                Text(stringResource(R.string.regenerate_code))
             }
             OutlinedButton(
                 onClick = onEnterCode,

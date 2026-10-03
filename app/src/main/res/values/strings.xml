@@ -61,6 +61,9 @@
     <string name="connect_id_card">Connect ID card</string>
     <string name="show_pairing_code">Show pairing code</string>
     <string name="enter_pairing_code">Enter pairing code</string>
+    <string name="enter_code_on_computer">Enter this code on your computer</string>
+    <string name="regenerate_code">Regenerate code</string>
+    <string name="pair_new_computer">Pair new computer</string>
     <string name="card_pins">PINs</string>
     <string name="change_pin1">Change PIN 1</string>
     <string name="change_pin2">Change PIN 2</string>

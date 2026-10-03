@@ -110,30 +110,32 @@ internal class RappPairingModel(
 
         try {
             val startedAtMonotonicMs = RappClock.monotonicMs()
-            val bridge =
-                RappPairingBridge.createRequesterCodeOffer(
+            val proxyBridge =
+                RappPairingBridge.fromProxyCodeOffer(
                     pairingCode = code,
                     profiles = DEFAULT_PAIRING_PROFILES,
                     transports = candidates,
                     offerTtlMs = RappPairingCode.DEFAULT_LIFETIME_MS.toULong(),
                     startedAtMonotonicMs = startedAtMonotonicMs,
                 )
-            pairingBridge = bridge
-            val rendezvousName = StreamRendezvousName.MANUAL_PAIRING_SERVICE_NAME
+            pairingBridge = proxyBridge
+            proxyHandshakeStep = 0
+
+            val relayListener =
+                StreamRelayListener(
+                    context = context,
+                    scope = scope,
+                    handshakeTimeoutMs = HANDSHAKE_DEADLINE_MS,
+                ) { event ->
+                    handleProxyListenerEvent(event, proxyBridge, code)
+                }
+            listener = relayListener
+            relayListener.start(StreamRendezvousName.MANUAL_PAIRING_SERVICE_NAME)
 
             phase = PairingPhase.Offering(code = code, secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS)
             startCountdown()
-
-            requesterHandshakeStep = 0
-
-            val relayBrowser =
-                StreamRelayBrowser(context, scope, rendezvousName) { event ->
-                    handleRequesterBrowserEvent(event, bridge, code)
-                }
-            browser = relayBrowser
-            relayBrowser.start()
-        } catch (_: Exception) {
-            phase = PairingPhase.Failed("Failed to generate pairing offer")
+        } catch (_: Throwable) {
+            phase = PairingPhase.Failed("Failed to initialize remote pairing offer")
         }
     }
 
