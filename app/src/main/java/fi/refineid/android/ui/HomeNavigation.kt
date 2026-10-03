@@ -209,15 +209,15 @@ internal fun SubScreen(
 }
 
 internal val SECTION_ITEM_SPACING = 8.dp
-internal val GROUP_DIVIDER_INSET = 60.dp
-internal val GROUP_CORNER_RADIUS = 22.dp
-internal val GROUP_ELEVATION = 2.dp
-internal val ROW_HORIZONTAL_PADDING = 20.dp
-internal val ROW_VERTICAL_PADDING = 18.dp
-internal val ROW_ITEM_SPACING = 14.dp
-internal val ROW_ICON_SIZE = 26.dp
+internal val GROUP_DIVIDER_INSET = 52.dp
+internal val GROUP_CORNER_RADIUS = 16.dp
+internal val GROUP_ELEVATION = 0.dp
+internal val ROW_HORIZONTAL_PADDING = 16.dp
+internal val ROW_VERTICAL_PADDING = 14.dp
+internal val ROW_ITEM_SPACING = 12.dp
+internal val ROW_ICON_SIZE = 24.dp
 internal const val ROW_LABEL_WEIGHT = 1f
-internal val SUBSCREEN_HORIZONTAL_PADDING = 20.dp
+internal val SUBSCREEN_HORIZONTAL_PADDING = 16.dp
 internal val SUBSCREEN_VERTICAL_PADDING = 8.dp
 internal val SUBSCREEN_ITEM_SPACING = 14.dp
 
@@ -243,6 +243,7 @@ internal fun SectionHeader(title: String) {
         text = title,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp),
     )
 }
 

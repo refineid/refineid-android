@@ -41,7 +41,8 @@
     <string name="pin_locked">PIN låst</string>
     <string name="unavailable">Inte tillgänglig</string>
     <string name="pair_computer">Fjärråtkomst</string>
-    <string name="section_identity">Person</string>
+    <string name="section_identity">Identitet</string>
+    <string name="person_label">Person</string>
     <string name="forget_identity_title">Glöm identitet?</string>
     <string name="forget_identity">Glöm identitet</string>
     <string name="card_untampered">Kortet är äkta och orört.</string>

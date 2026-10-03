@@ -2,7 +2,10 @@
 
 package fi.refineid.android.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,6 +44,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,6 +53,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -72,12 +77,15 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
+import androidx.core.content.ContextCompat
 import fi.refineid.android.BuildConfig
 import fi.refineid.android.R
 import fi.refineid.android.core.AuthenticationCardService
@@ -92,7 +100,9 @@ import fi.refineid.android.diagnostics.BuildDiagnostics
 import fi.refineid.android.diagnostics.DiagnosticsCollector
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappAuthorizationInbox
+import fi.refineid.android.rapp.RappPairingCode
 import fi.refineid.android.rapp.RappPairingModel
 import fi.refineid.android.settings.TimestampAuthorityRepository
 import fi.refineid.android.usb.CardPresence
@@ -429,6 +439,7 @@ internal fun MainScreen(
                     } else {
                         null
                     },
+                rappPairingModel = rappPairingModel,
             )
         }
 
@@ -646,6 +657,126 @@ internal fun MainScreen(
     }
 }
 
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Composable
+private fun RemoteAccessRow(
+    model: RappPairingModel?,
+    onToggle: (Boolean) -> Unit,
+    onOpenPairing: () -> Unit,
+) {
+    val enabled = model?.isRemoteAccessEnabled ?: false
+    val activePeer = model?.activeConnectedPeer
+    val isConnected = activePeer != null
+    val phase = model?.phase
+
+    if (model != null) {
+        LaunchedEffect(enabled, model.pairedDevices.isEmpty(), phase, activePeer) {
+            if (enabled &&
+                model.pairedDevices.isEmpty() &&
+                phase is PairingPhase.Idle &&
+                activePeer == null
+            ) {
+                model.createOffer()
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenPairing)
+                    .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING)
+                    .testTag("RappPairingRow"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(ROW_ITEM_SPACING),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_satellite_alt),
+                contentDescription = null,
+                tint =
+                    when {
+                        isConnected -> Color(0xFF34C759)
+                        enabled -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                modifier = Modifier.size(ROW_ICON_SIZE),
+            )
+            Text(
+                text = stringResource(R.string.pair_computer),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(ROW_LABEL_WEIGHT),
+                maxLines = 1,
+            )
+            if (isConnected) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF34C759).copy(alpha = 0.15f),
+                ) {
+                    Text(
+                        text = stringResource(R.string.connected_status),
+                        color = Color(0xFF34C759),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onToggle,
+                modifier = Modifier.testTag(UiAutomationIds.CARD_REMOTE_ACCESS_SWITCH),
+            )
+        }
+
+        if (enabled && model.pairedDevices.isEmpty() && activePeer == null) {
+            when (phase) {
+                is PairingPhase.Offering -> {
+                    HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
+                    Box(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 14.dp)
+                                .testTag("pairingCodeDisplay"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = RappPairingCode.formatted(phase.code),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 2.sp,
+                            modifier = Modifier.testTag("pairingCode"),
+                        )
+                    }
+                }
+
+                is PairingPhase.Connecting -> {
+                    HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
+                    Box(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 14.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.5.dp,
+                        )
+                    }
+                }
+
+                else -> {}
+            }
+        }
+    }
+}
+
 /**
  * The reference home: terse grouped navigation — the Document rows
  * first, then the card, then the browser — every workflow on its own
@@ -680,7 +811,14 @@ private fun HomeScreen(
     onOpenPairing: () -> Unit,
     onOpenCardManagement: () -> Unit,
     onRequestUsbCan: (() -> Unit)? = null,
+    rappPairingModel: RappPairingModel? = null,
 ) {
+    val context = LocalContext.current
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission(),
+        ) { _ -> }
+
     Scaffold(
         modifier =
             Modifier
@@ -738,30 +876,21 @@ private fun HomeScreen(
             if (!isActivationRequired) {
                 Section(stringResource(R.string.card)) {
                     NavigationGroup {
-                        BrowserHarness(
-                            cardService = browserCardService,
-                            pinCache = pinCache,
-                            nfcStatus = nfcStatus,
-                            nfcPrimed = nfcPrimed,
-                            enabled = browserAvailable,
-                            onNfcConnect = { can, pin1 -> onNfcConnect(can, pin1) },
-                            onWrongPin = onWrongPin,
-                            launcher = { onOpen ->
-                                NavigationRow(
-                                    icon = painterResource(R.drawable.ic_globe),
-                                    label = stringResource(R.string.browser),
-                                    tag = UiAutomationIds.BROWSER_ACTION,
-                                    enabled = browserAvailable,
-                                    onClick = onOpen,
-                                )
+                        RemoteAccessRow(
+                            model = rappPairingModel,
+                            onToggle = { isChecked ->
+                                if (isChecked) {
+                                    if (ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.POST_NOTIFICATIONS,
+                                        ) != PackageManager.PERMISSION_GRANTED
+                                    ) {
+                                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                }
+                                rappPairingModel?.setRemoteAccessEnabled(isChecked)
                             },
-                        )
-                        HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
-                        NavigationRow(
-                            icon = painterResource(R.drawable.ic_satellite_alt),
-                            label = stringResource(R.string.pair_computer),
-                            tag = "RappPairingRow",
-                            onClick = onOpenPairing,
+                            onOpenPairing = onOpenPairing,
                         )
                         HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
                         NavigationRow(
@@ -770,6 +899,29 @@ private fun HomeScreen(
                             tag = "manageCard",
                             onClick = onOpenCardManagement,
                         )
+                        if (BuildDiagnostics.MANUAL_AUTHENTICATION_ENABLED && browserAvailable &&
+                            browserCardService != null
+                        ) {
+                            HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
+                            BrowserHarness(
+                                cardService = browserCardService,
+                                pinCache = pinCache,
+                                nfcStatus = nfcStatus,
+                                nfcPrimed = nfcPrimed,
+                                enabled = true,
+                                onNfcConnect = { can, pin1 -> onNfcConnect(can, pin1) },
+                                onWrongPin = onWrongPin,
+                                launcher = { onOpen ->
+                                    NavigationRow(
+                                        icon = painterResource(R.drawable.ic_globe),
+                                        label = stringResource(R.string.browser),
+                                        tag = UiAutomationIds.BROWSER_ACTION,
+                                        enabled = true,
+                                        onClick = onOpen,
+                                    )
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -971,10 +1123,23 @@ private fun SingleIdentityRow(
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(ROW_ICON_SIZE),
         )
-        Text(
-            text =
-                holderName
-                    ?: stringResource(
+        if (holderName != null) {
+            Column(modifier = Modifier.weight(ROW_LABEL_WEIGHT)) {
+                Text(
+                    text = stringResource(R.string.person_label),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = holderName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            Text(
+                text =
+                    stringResource(
                         when (rowAction) {
                             IdentityRowAction.REQUEST_USB_CAN -> R.string.access_number_required
                             IdentityRowAction.ASK_NFC_READ -> R.string.read_identity_card
@@ -982,15 +1147,11 @@ private fun SingleIdentityRow(
                             else -> R.string.connect_id_card
                         },
                     ),
-            style = MaterialTheme.typography.bodyLarge,
-            color =
-                if (holderName != null) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            modifier = Modifier.weight(ROW_LABEL_WEIGHT),
-        )
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(ROW_LABEL_WEIGHT),
+            )
+        }
         if ((holderName != null || pinCache?.hasPin == true) && onForget != null) {
             IconButton(
                 onClick = onShowForgetConfirmation,
@@ -1829,13 +1990,13 @@ private fun ReaderCanEntry(onConnect: (CanSubmission) -> Unit) {
 
 private const val WEIGHT_FILL = 1F
 
-private val SCREEN_HORIZONTAL_PADDING = 24.dp
-private val SCREEN_VERTICAL_PADDING = 28.dp
-private val SCREEN_ITEM_SPACING = 28.dp
-private val CARD_PADDING = 20.dp
-private val CARD_ITEM_SPACING = 14.dp
-private val CARD_CORNER_RADIUS = 22.dp
-private val CARD_ELEVATION = 2.dp
+private val SCREEN_HORIZONTAL_PADDING = 16.dp
+private val SCREEN_VERTICAL_PADDING = 20.dp
+private val SCREEN_ITEM_SPACING = 24.dp
+private val CARD_PADDING = 16.dp
+private val CARD_ITEM_SPACING = 12.dp
+private val CARD_CORNER_RADIUS = 16.dp
+private val CARD_ELEVATION = 0.dp
 private val READER_STATUS_ITEM_SPACING = 12.dp
 private val READER_STATUS_INDICATOR_SIZE = 12.dp
 

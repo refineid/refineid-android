@@ -41,7 +41,8 @@
     <string name="pin_locked">PIN lukittu</string>
     <string name="unavailable">Ei käytettävissä</string>
     <string name="pair_computer">Etäkäyttö</string>
-    <string name="section_identity">Henkilö</string>
+    <string name="section_identity">Identiteetti</string>
+    <string name="person_label">Henkilö</string>
     <string name="forget_identity_title">Unohdetaanko henkilöllisyys?</string>
     <string name="forget_identity">Unohda henkilöllisyys</string>
     <string name="card_untampered">Kortti on aito ja koskematon.</string>

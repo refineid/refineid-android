@@ -44,8 +44,9 @@
     <string name="wrong_pin">Wrong PIN</string>
     <string name="pin_locked">PIN locked</string>
     <string name="unavailable">Unavailable</string>
-    <string name="pair_computer">Remote access</string>
-    <string name="section_identity">Person</string>
+    <string name="pair_computer">Remote Access</string>
+    <string name="section_identity">Identity</string>
+    <string name="person_label">Person</string>
     <string name="forget_identity_title">Forget identity?</string>
     <string name="forget_identity">Forget identity</string>
     <string name="card_untampered">Card is genuine and untampered.</string>
