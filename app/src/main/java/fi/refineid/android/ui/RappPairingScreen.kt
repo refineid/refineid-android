@@ -315,12 +315,6 @@ private fun OfferingPhaseView(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.testTag("offeringCodeText"),
             )
-            Text(
-                text = stringResource(R.string.enter_code_on_computer),
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             OutlinedButton(
                 onClick = onRegenerateCode,
                 modifier =
