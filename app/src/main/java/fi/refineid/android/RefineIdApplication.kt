@@ -164,10 +164,17 @@ class RefineIdApplication : Application() {
             )
         readerController.start()
         rappProxyDispatcher = createRappProxyDispatcher(primedStore)
-        val existingPairs = rappPairCatalog.listPairs()
-        if (BuildConfig.DEBUG) {
-            android.util.Log.i("APPLICATION", "existingPairs count=${existingPairs.size}")
+        startRappProxyListening()
+    }
+
+    internal fun startRappProxyListening() {
+        val settings =
+            fi.refineid.android.rapp
+                .RappSettings(this)
+        if (!settings.isCardRemoteAccessEnabled) {
+            return
         }
+        val existingPairs = rappPairCatalog.listPairs()
         if (existingPairs.isNotEmpty()) {
             val newestPair = existingPairs.maxByOrNull { it.createdAtMs } ?: existingPairs.first()
             val pairIdBytes =
@@ -182,14 +189,11 @@ class RefineIdApplication : Application() {
                     val rendezvousName =
                         fi.refineid.android.rapp.StreamRendezvousName
                             .name(sharingValue = token)
-                    android.util.Log.i("APPLICATION", "startListening on rendezvous $rendezvousName")
                     rappProxyDispatcher.startListening(rendezvousName, record, rappVault)
                 } else {
-                    android.util.Log.i("APPLICATION", "refreshing remote card model as requester")
                     remoteCardModel.refresh()
                 }
-            } catch (e: Exception) {
-                android.util.Log.e("APPLICATION", "loadFromVault failed", e)
+            } catch (_: Exception) {
             }
         }
     }

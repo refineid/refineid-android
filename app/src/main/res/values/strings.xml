@@ -118,4 +118,7 @@
     <string name="pin2_section_title">Signature PIN (PIN 2)</string>
     <string name="paired_devices">Paired computers</string>
     <string name="connected_status">Connected</string>
+    <string name="card_remote_access">Card Remote Access</string>
+    <string name="card_remote_access_description">Allow paired computers to use this phone as a smartcard reader over the local network.</string>
+    <string name="card_remote_access_disabled_hint">Remote access is turned off. Turn it on to pair a new computer or allow connections from paired computers.</string>
 </resources>

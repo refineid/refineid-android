@@ -74,6 +74,12 @@ internal class RappPairingModel(
     var activeConnectedPeer by mutableStateOf<PairedPeer?>(null)
         private set
 
+    val settings = RappSettings(context)
+
+    private var _isRemoteAccessEnabled by mutableStateOf(settings.isCardRemoteAccessEnabled)
+    val isRemoteAccessEnabled: Boolean
+        get() = _isRemoteAccessEnabled
+
     init {
         val dispatcher = app?.rappProxyDispatcher
         if (dispatcher != null) {
@@ -85,12 +91,34 @@ internal class RappPairingModel(
         }
     }
 
+    fun setRemoteAccessEnabled(enabled: Boolean) {
+        settings.isCardRemoteAccessEnabled = enabled
+        _isRemoteAccessEnabled = enabled
+        if (enabled) {
+            val app = context.applicationContext as? RefineIdApplication
+            if (pairedDevices.isNotEmpty()) {
+                app?.startRappProxyListening()
+            } else if (phase is PairingPhase.Idle && activeConnectedPeer == null) {
+                createOffer()
+            }
+        } else {
+            reset()
+            val app = context.applicationContext as? RefineIdApplication
+            app?.rappProxyDispatcher?.disconnectClient()
+            app?.rappProxyDispatcher?.stopListening()
+        }
+    }
+
     fun disconnectActivePeer() {
         app?.rappProxyDispatcher?.disconnectClient()
     }
 
     fun createOffer() {
         reset()
+        if (!isRemoteAccessEnabled) {
+            settings.isCardRemoteAccessEnabled = true
+            _isRemoteAccessEnabled = true
+        }
         val code = RappPairingCode.generate()
         activeOfferingCode = code
         secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS

@@ -1,5 +1,9 @@
 package fi.refineid.android.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,11 +23,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -31,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import fi.refineid.android.R
 import fi.refineid.android.rapp.PairedPeer
 import fi.refineid.android.rapp.PairingPhase
@@ -48,10 +55,21 @@ internal fun RappPairingScreen(
     model: RappPairingModel,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
     val phase = model.phase
 
-    LaunchedEffect(model.pairedDevices.isEmpty()) {
-        if (model.pairedDevices.isEmpty() && model.phase is PairingPhase.Idle && model.activeConnectedPeer == null) {
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission(),
+        ) { _ ->
+        }
+
+    LaunchedEffect(model.isRemoteAccessEnabled, model.pairedDevices.isEmpty()) {
+        if (model.isRemoteAccessEnabled &&
+            model.pairedDevices.isEmpty() &&
+            model.phase is PairingPhase.Idle &&
+            model.activeConnectedPeer == null
+        ) {
             model.createOffer()
         }
     }
@@ -63,58 +81,153 @@ internal fun RappPairingScreen(
                 .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        when (phase) {
-            is PairingPhase.Idle -> {
-                if (model.pairedDevices.isNotEmpty()) {
-                    PairedDevicesList(
-                        peers = model.pairedDevices,
-                        activePeer = model.activeConnectedPeer,
-                        onDisconnect = { model.disconnectActivePeer() },
-                        onRemove = { idHex -> model.removePair(idHex) },
+        CardRemoteAccessSwitchCard(
+            enabled = model.isRemoteAccessEnabled,
+            onCheckedChange = { isChecked ->
+                if (isChecked) {
+                    if (ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS,
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+                model.setRemoteAccessEnabled(isChecked)
+            },
+        )
+
+        if (!model.isRemoteAccessEnabled) {
+            CardRemoteAccessDisabledHint()
+            if (model.pairedDevices.isNotEmpty()) {
+                PairedDevicesList(
+                    peers = model.pairedDevices,
+                    activePeer = null,
+                    onDisconnect = {},
+                    onRemove = { idHex -> model.removePair(idHex) },
+                )
+            }
+        } else {
+            when (phase) {
+                is PairingPhase.Idle -> {
+                    if (model.pairedDevices.isNotEmpty()) {
+                        PairedDevicesList(
+                            peers = model.pairedDevices,
+                            activePeer = model.activeConnectedPeer,
+                            onDisconnect = { model.disconnectActivePeer() },
+                            onRemove = { idHex -> model.removePair(idHex) },
+                        )
+                    }
+                    Button(
+                        onClick = { model.createOffer() },
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .testTag("pairNewComputerButton"),
+                    ) {
+                        Text(stringResource(R.string.pair_new_computer))
+                    }
+                }
+
+                is PairingPhase.Offering -> {
+                    OfferingPhaseView(
+                        code = phase.code,
+                        onRegenerateCode = { model.createOffer() },
+                        onCancel = {
+                            model.reset()
+                            onBack()
+                        },
                     )
                 }
-                Button(
-                    onClick = { model.createOffer() },
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .testTag("pairNewComputerButton"),
-                ) {
-                    Text(stringResource(R.string.pair_new_computer))
+
+                is PairingPhase.Connecting -> {
+                    ConnectingPhaseView(
+                        message = phase.message,
+                    )
+                }
+
+                is PairingPhase.Paired -> {
+                    PairedPhaseView(
+                        peer = phase.peer,
+                        onBack = onBack,
+                    )
+                }
+
+                is PairingPhase.Failed -> {
+                    FailedPhaseView(
+                        reason = phase.reason,
+                        onRetry = { model.reset() },
+                    )
                 }
             }
-
-            is PairingPhase.Offering -> {
-                OfferingPhaseView(
-                    code = phase.code,
-                    onRegenerateCode = { model.createOffer() },
-                    onCancel = {
-                        model.reset()
-                        onBack()
-                    },
-                )
-            }
-
-            is PairingPhase.Connecting -> {
-                ConnectingPhaseView(
-                    message = phase.message,
-                )
-            }
-
-            is PairingPhase.Paired -> {
-                PairedPhaseView(
-                    peer = phase.peer,
-                    onBack = onBack,
-                )
-            }
-
-            is PairingPhase.Failed -> {
-                FailedPhaseView(
-                    reason = phase.reason,
-                    onRetry = { model.reset() },
-                )
-            }
         }
+    }
+}
+
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Composable
+private fun CardRemoteAccessSwitchCard(
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Card(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag(UiAutomationIds.CARD_REMOTE_ACCESS_CARD),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .padding(end = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.card_remote_access),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = stringResource(R.string.card_remote_access_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onCheckedChange,
+                modifier = Modifier.testTag(UiAutomationIds.CARD_REMOTE_ACCESS_SWITCH),
+            )
+        }
+    }
+}
+
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Composable
+private fun CardRemoteAccessDisabledHint() {
+    Card(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag(UiAutomationIds.CARD_REMOTE_ACCESS_DISABLED_CARD),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Text(
+            text = stringResource(R.string.card_remote_access_disabled_hint),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(16.dp),
+        )
     }
 }
 
