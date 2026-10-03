@@ -418,14 +418,11 @@ internal fun MainScreen(
                 onNfcConnect = onNfcConnect,
                 // A present wired card reads over its open session; the
                 // contactless path primes NFC for the next tap otherwise.
-                // The wired branch consumes no PIN, so the optional PIN1
-                // buffer is zeroized instead of being left for GC.
-                onReadCard = { can, pin1 ->
-                    if (snapshot.cardPresence == CardPresence.PRESENT && can != null) {
-                        pin1?.close()
+                onReadCard = { can ->
+                    if (snapshot.cardPresence == CardPresence.PRESENT) {
                         onReaderConnect(can, null)
                     } else {
-                        onNfcConnect(can, pin1)
+                        onNfcConnect(can, null)
                     }
                 },
                 timestampAuthorityRepository = timestampAuthorityRepository,
@@ -629,8 +626,8 @@ internal fun MainScreen(
                 pendingPhotoConsumer?.invoke(null)
                 pendingPhotoConsumer = null
             },
-            onConnect = { can, _ ->
-                val canDigits = can?.peekDigits()
+            onConnect = { can ->
+                val canDigits = can.peekDigits()
                 if (canDigits != null) {
                     fi.refineid.android.core.CanSessionStore
                         .remember(canDigits)
@@ -638,21 +635,17 @@ internal fun MainScreen(
                 val consumer = pendingPhotoConsumer
                 pendingPhotoConsumer = null
                 showsPhotoReadNfcDialog = false
-                if (can != null) {
-                    if (snapshot.cardPresence == CardPresence.PRESENT) {
-                        onReaderConnect(can) { bytes ->
-                            consumer?.invoke(bytes)
-                        }
-                    } else {
-                        onNfcConnect(can, null)
-                        if (consumer != null) {
-                            pendingPhotoConsumer = consumer
-                        }
+                if (snapshot.cardPresence == CardPresence.PRESENT) {
+                    onReaderConnect(can) { bytes ->
+                        consumer?.invoke(bytes)
+                    }
+                } else {
+                    onNfcConnect(can, null)
+                    if (consumer != null) {
+                        pendingPhotoConsumer = consumer
                     }
                 }
             },
-            canOnly = true,
-            isActivationRequired = isActivationRequired,
         )
     }
 }
@@ -684,7 +677,7 @@ private fun HomeScreen(
     nfcStatus: NfcReaderStatus?,
     nfcPrimed: Boolean,
     onNfcConnect: (CanSubmission?, Pin1Submission?) -> Unit,
-    onReadCard: (CanSubmission?, Pin1Submission?) -> Unit,
+    onReadCard: (CanSubmission) -> Unit,
     timestampAuthorityRepository: TimestampAuthorityRepository?,
     onOpenVerify: () -> Unit,
     onOpenSign: () -> Unit,
@@ -882,7 +875,7 @@ private fun IdentitySection(
     isActivationRequired: Boolean = false,
     onForget: (() -> Unit)?,
     onOpenPerson: () -> Unit,
-    onReadCard: (CanSubmission?, Pin1Submission?) -> Unit,
+    onReadCard: (CanSubmission) -> Unit,
     onOpenPairing: () -> Unit = {},
     pinCache: AuthenticationPinCache? = null,
     cards: List<CardIdentityItem> = emptyList(),
@@ -966,10 +959,9 @@ private fun IdentitySection(
     if (showsNfcReadDialog) {
         ReadCardNfcDialog(
             onDismiss = { showsNfcReadDialog = false },
-            onConnect = { can, pin1 ->
-                onReadCard(can, pin1)
+            onConnect = { can ->
+                onReadCard(can)
             },
-            isActivationRequired = isActivationRequired,
         )
     }
 }
@@ -1069,13 +1061,10 @@ private fun SingleIdentityRow(
 @Composable
 private fun ReadCardNfcDialog(
     onDismiss: () -> Unit,
-    onConnect: (CanSubmission?, Pin1Submission?) -> Unit,
-    canOnly: Boolean = false,
-    isActivationRequired: Boolean = false,
+    onConnect: (CanSubmission) -> Unit,
 ) {
     val initialCan = remember { fi.refineid.android.core.CanSessionStore.currentCan ?: "" }
     val canState = remember { TextFieldState(initialCan) }
-    val pinState = remember { TextFieldState() }
 
     var remainingCooldown by remember {
         mutableIntStateOf(
@@ -1101,13 +1090,7 @@ private fun ReadCardNfcDialog(
             fi.refineid.android.core.CanSessionStore
                 .remember(canState.text)
             val can = CanSubmission.from(canState.text)
-            val pin1 =
-                if (!canOnly && !isActivationRequired && Pin1Submission.isComplete(pinState.text)) {
-                    Pin1Submission.from(pinState.text)
-                } else {
-                    null
-                }
-            onConnect(can, pin1)
+            onConnect(can)
             onDismiss()
         }
         Unit
@@ -1141,7 +1124,7 @@ private fun ReadCardNfcDialog(
                         KeyboardOptions(
                             autoCorrectEnabled = false,
                             keyboardType = KeyboardType.NumberPassword,
-                            imeAction = if (canOnly || isActivationRequired) ImeAction.Done else ImeAction.Next,
+                            imeAction = ImeAction.Done,
                         ),
                     isError = isCanBlocked,
                     supportingText = {
@@ -1153,30 +1136,9 @@ private fun ReadCardNfcDialog(
                         }
                     },
                     onKeyboardAction = {
-                        if (canOnly || isActivationRequired) {
-                            submit()
-                        }
+                        submit()
                     },
                 )
-                if (!canOnly && !isActivationRequired) {
-                    SecureTextField(
-                        state = pinState,
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .testTag(UiAutomationIds.NFC_PIN1_FIELD),
-                        label = { Text(stringResource(R.string.pin1_optional)) },
-                        inputTransformation = Pin1InputTransformation,
-                        textObfuscationMode = TextObfuscationMode.Hidden,
-                        keyboardOptions =
-                            KeyboardOptions(
-                                autoCorrectEnabled = false,
-                                keyboardType = KeyboardType.NumberPassword,
-                                imeAction = ImeAction.Done,
-                            ),
-                        onKeyboardAction = { submit() },
-                    )
-                }
             }
         },
         confirmButton = {
