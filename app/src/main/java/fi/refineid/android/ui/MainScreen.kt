@@ -81,8 +81,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.core.content.ContextCompat
@@ -139,6 +141,7 @@ internal fun MainScreen(
     onOpenNfcSettings: () -> Unit = {},
     onNfcConnect: (CanSubmission?, Pin1Submission?) -> Unit = { _, _ -> },
     onForgetPrimedCard: () -> Unit = {},
+    onCancelAwaitingCard: () -> Unit = {},
     nfcCardService: AuthenticationCardService? = null,
     onSignBeginTap: (ByteArray?, () -> Unit, () -> Unit) -> Unit = { _, _, _ -> },
     onSignEndTap: () -> Unit = {},
@@ -256,6 +259,12 @@ internal fun MainScreen(
 
     rappInbox?.currentTapPrompt?.let { prompt ->
         RappCardTapDialog(prompt = prompt)
+    }
+
+    if (rappInbox?.currentTapPrompt == null && nfcSnapshot.awaitingCard) {
+        NfcCardTapDialog(
+            onCancel = onCancelAwaitingCard,
+        )
     }
 
     var validationUri by remember { mutableStateOf<Uri?>(null) }
@@ -927,7 +936,14 @@ private fun IdentitySection(
                     onForget = onForget,
                     onOpenPerson = onOpenPerson,
                     onOpenPairing = onOpenPairing,
-                    onShowNfcRead = { showsNfcReadDialog = true },
+                    onShowNfcRead = {
+                        val currentCan = CanSessionStore.currentCan
+                        if (currentCan != null) {
+                            onReadCard(CanSubmission.from(currentCan))
+                        } else {
+                            showsNfcReadDialog = true
+                        }
+                    },
                     onShowForgetConfirmation = { showsForgetConfirmation = true },
                     onRequestUsbCan = onRequestUsbCan,
                 )
@@ -1071,7 +1087,12 @@ private fun ReadCardNfcDialog(
     onDismiss: () -> Unit,
     onConnect: (CanSubmission) -> Unit,
 ) {
-    val initialCan = remember { fi.refineid.android.core.CanSessionStore.currentCan ?: "" }
+    val initialCan =
+        remember {
+            fi.refineid.android.core.CanSessionStore.currentCan
+                ?: fi.refineid.android.core.CanSessionStore.mostRecentRejectedCan
+                ?: ""
+        }
     val canState = remember { TextFieldState(initialCan) }
 
     var remainingCooldown by remember {
@@ -1091,13 +1112,15 @@ private fun ReadCardNfcDialog(
     }
 
     val isCanBlocked = remainingCooldown > 0
+    val rejectedCan = fi.refineid.android.core.CanSessionStore.mostRecentRejectedCan
+    val isRejectedCanCurrent = rejectedCan != null && canState.text.contentEquals(rejectedCan)
     val canReady = CanSubmission.isComplete(canState.text) && !isCanBlocked
 
     val submit = {
         if (canReady) {
-            fi.refineid.android.core.CanSessionStore
-                .remember(canState.text)
             val can = CanSubmission.from(canState.text)
+            fi.refineid.android.core.CanSessionStore
+                .remember(can)
             onConnect(can)
             onDismiss()
         }
@@ -1109,7 +1132,14 @@ private fun ReadCardNfcDialog(
         properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = {
             Text(
-                text = stringResource(R.string.read_identity_card),
+                text =
+                    stringResource(
+                        if (isRejectedCanCurrent) {
+                            R.string.wrong_can
+                        } else {
+                            R.string.read_identity_card
+                        },
+                    ),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -1134,7 +1164,7 @@ private fun ReadCardNfcDialog(
                             keyboardType = KeyboardType.NumberPassword,
                             imeAction = ImeAction.Done,
                         ),
-                    isError = isCanBlocked,
+                    isError = isCanBlocked || isRejectedCanCurrent,
                     supportingText = {
                         if (isCanBlocked) {
                             Text(
@@ -1153,6 +1183,7 @@ private fun ReadCardNfcDialog(
             Button(
                 onClick = submit,
                 enabled = canReady,
+                modifier = Modifier.testTag(UiAutomationIds.NFC_CONNECT_ACTION),
             ) {
                 Text(stringResource(R.string.read_identity_card))
             }
@@ -1163,6 +1194,59 @@ private fun ReadCardNfcDialog(
             }
         },
     )
+}
+
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Composable
+private fun NfcCardTapDialog(onCancel: () -> Unit) {
+    Dialog(
+        onDismissRequest = onCancel,
+        properties =
+            DialogProperties(
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false,
+                securePolicy = SecureFlagPolicy.SecureOn,
+            ),
+    ) {
+        Card(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .testTag(UiAutomationIds.NFC_CARD_TAP_DIALOG),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.hold_card_against_back),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                )
+
+                CircularProgressIndicator(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    strokeWidth = 3.dp,
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = Modifier.testTag(UiAutomationIds.NFC_CARD_TAP_CANCEL_ACTION),
+                    ) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")

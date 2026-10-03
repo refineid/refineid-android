@@ -215,7 +215,7 @@ internal fun RappCardTapDialog(prompt: fi.refineid.android.rapp.RappCardTapPromp
                     OutlinedButton(
                         onClick = { prompt.onCancel() },
                     ) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.cancel))
                     }
                 }
             }
