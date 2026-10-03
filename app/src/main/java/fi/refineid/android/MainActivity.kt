@@ -45,8 +45,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         AppTrace.activityCreated()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        setRecentsScreenshotEnabled(false)
+        if (!BuildConfig.DEBUG) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            setRecentsScreenshotEnabled(false)
+        }
         window.setHideOverlayWindows(true)
         window.decorView.importantForAutofill =
             View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS

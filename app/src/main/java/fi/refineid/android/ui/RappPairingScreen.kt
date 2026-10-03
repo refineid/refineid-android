@@ -188,6 +188,10 @@ private fun CardRemoteAccessSwitchCard(
                 text = stringResource(R.string.card_remote_access),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .padding(end = 16.dp),
             )
             Switch(
                 checked = enabled,
