@@ -899,29 +899,25 @@ private fun HomeScreen(
                             tag = "manageCard",
                             onClick = onOpenCardManagement,
                         )
-                        if (BuildDiagnostics.MANUAL_AUTHENTICATION_ENABLED && browserAvailable &&
-                            browserCardService != null
-                        ) {
-                            HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
-                            BrowserHarness(
-                                cardService = browserCardService,
-                                pinCache = pinCache,
-                                nfcStatus = nfcStatus,
-                                nfcPrimed = nfcPrimed,
-                                enabled = true,
-                                onNfcConnect = { can, pin1 -> onNfcConnect(can, pin1) },
-                                onWrongPin = onWrongPin,
-                                launcher = { onOpen ->
-                                    NavigationRow(
-                                        icon = painterResource(R.drawable.ic_globe),
-                                        label = stringResource(R.string.browser),
-                                        tag = UiAutomationIds.BROWSER_ACTION,
-                                        enabled = true,
-                                        onClick = onOpen,
-                                    )
-                                },
-                            )
-                        }
+                        HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
+                        BrowserHarness(
+                            cardService = browserCardService,
+                            pinCache = pinCache,
+                            nfcStatus = nfcStatus,
+                            nfcPrimed = nfcPrimed,
+                            enabled = browserAvailable,
+                            onNfcConnect = { can, pin1 -> onNfcConnect(can, pin1) },
+                            onWrongPin = onWrongPin,
+                            launcher = { onOpen ->
+                                NavigationRow(
+                                    icon = painterResource(R.drawable.ic_globe),
+                                    label = stringResource(R.string.browser),
+                                    tag = UiAutomationIds.BROWSER_ACTION,
+                                    enabled = browserAvailable,
+                                    onClick = onOpen,
+                                )
+                            },
+                        )
                     }
                 }
             }
