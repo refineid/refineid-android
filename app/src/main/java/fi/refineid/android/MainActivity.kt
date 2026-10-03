@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
                     onOpenNfcSettings = ::openNfcSettings,
                     onNfcConnect = nfcReaderController::connect,
                     onForgetPrimedCard = nfcReaderController::forgetPrimedCard,
+                    onCancelAwaitingCard = nfcReaderController::cancelAwaitingCard,
                     nfcCardService = nfcReaderController.authenticationCardService,
                     onSignBeginTap = nfcReaderController.tapToSign::begin,
                     onSignEndTap = nfcReaderController.tapToSign::end,

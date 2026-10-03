@@ -327,14 +327,13 @@ internal class NfcReaderController(
                 return
             }
         }
-        // Guard against the no-card case to give immediate UI feedback, but do
-        // not capture the handle: a reader-mode re-poll on the NFC callback
-        // thread can replace latestIsoDep before the executor runs, so let
-        // openSessionBytes read it at execution time instead.
-        if (latestIsoDep == null) {
+        val resting = latestIsoDep
+        if (resting == null || !resting.isConnected) {
+            latestIsoDep = null
             inMemoryCanBytes?.fill(0)
             pin1?.close()
-            refreshReaderMode()
+            probeGeneration += 1
+            refreshReaderMode(forceCycle = true, publishWaiting = false)
             // The holder asked to connect with no tag in the field:
             // prompt for the card instead of waiting silently.
             publish(
@@ -356,7 +355,7 @@ internal class NfcReaderController(
             probeExecutor.execute {
                 // primedCanStore.read() decrypts Android Keystore ciphertext;
                 // it must run off the main thread — resolved here on the executor.
-                val canBytes = inMemoryCanBytes ?: primedCanStore.read()
+                val canBytes = inMemoryCanBytes ?: CanSessionStore.canBytes() ?: primedCanStore.read()
                 if (canBytes == null) {
                     isOpeningSession.set(false)
                     pin1?.close()
@@ -364,7 +363,13 @@ internal class NfcReaderController(
                     return@execute
                 }
                 val mint = can != null || CanSessionStore.hasCan
-                openSessionBytes(canBytes, generation, mintOnSuccess = mint, pin1 = pin1)
+                openSessionBytes(
+                    canBytes = canBytes,
+                    generation = generation,
+                    mintOnSuccess = mint,
+                    pin1 = pin1,
+                    isoDepTarget = resting,
+                )
             }
         } catch (_: RejectedExecutionException) {
             isOpeningSession.set(false)
@@ -373,19 +378,34 @@ internal class NfcReaderController(
         }
     }
 
-    private fun refreshReaderMode() {
+    private fun refreshReaderMode(
+        forceCycle: Boolean = false,
+        publishWaiting: Boolean = true,
+    ) {
         checkMainThread()
         val activity = attachedActivity ?: return
         val nfcAdapter = adapter ?: return
         if (nfcAdapter.isEnabled) {
+            if (forceCycle) {
+                try {
+                    nfcAdapter.disableReaderMode(activity)
+                } catch (_: IllegalStateException) {
+                } catch (_: SecurityException) {
+                }
+            }
+            val extras =
+                Bundle().apply {
+                    putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, PRESENCE_CHECK_DELAY_MILLISECONDS)
+                }
             nfcAdapter.enableReaderMode(
                 activity,
                 readerCallback,
                 READER_MODE_FLAGS,
-                null,
+                extras,
             )
             AppTrace.nfcReaderModeChanged(isEnabled = true)
-            if (latestSnapshot.status != NfcReaderStatus.CARD_READY &&
+            if (publishWaiting &&
+                latestSnapshot.status != NfcReaderStatus.CARD_READY &&
                 latestSnapshot.status != NfcReaderStatus.ACTIVATION_REQUIRED
             ) {
                 probeGeneration += 1
@@ -525,14 +545,23 @@ internal class NfcReaderController(
             isoDep.connect()
             isoDep.timeout = TRANSCEIVE_TIMEOUT_MILLISECONDS
         } catch (_: IOException) {
+            if (latestIsoDep == isoDep) {
+                latestIsoDep = null
+            }
             AppTrace.nfcSessionOpenFailed()
             publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = wantsCard())
             return
         } catch (_: SecurityException) {
+            if (latestIsoDep == isoDep) {
+                latestIsoDep = null
+            }
             AppTrace.nfcSessionOpenFailed()
             publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = wantsCard())
             return
         } catch (_: IllegalStateException) {
+            if (latestIsoDep == isoDep) {
+                latestIsoDep = null
+            }
             AppTrace.nfcSessionOpenFailed()
             publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = wantsCard())
             return
@@ -552,6 +581,9 @@ internal class NfcReaderController(
             } catch (_: IllegalStateException) {
                 // Tag service unavailable.
             }
+            if (latestIsoDep == isoDep) {
+                latestIsoDep = null
+            }
             AppTrace.nfcSessionClosed()
         }
         // A primed card still needs PIN1 to unlock; the UI shows a
@@ -563,8 +595,8 @@ internal class NfcReaderController(
         try {
             if (!isoDep.isConnected) {
                 isoDep.connect()
-                isoDep.timeout = TRANSCEIVE_TIMEOUT_MILLISECONDS
             }
+            isoDep.timeout = TRANSCEIVE_TIMEOUT_MILLISECONDS
             true
         } catch (_: IOException) {
             false
@@ -678,13 +710,19 @@ internal class NfcReaderController(
         canBytes.fill(0)
         material.close()
         NativeContactlessSession.close()
-        try {
-            isoDep.close()
-        } catch (_: IOException) {
-        } catch (_: SecurityException) {
-        } catch (_: IllegalStateException) {
+        val keepAlive = status == NfcReaderStatus.WRONG_CAN && isoDep.isConnected
+        if (!keepAlive) {
+            try {
+                isoDep.close()
+            } catch (_: IOException) {
+            } catch (_: SecurityException) {
+            } catch (_: IllegalStateException) {
+            }
+            if (latestIsoDep == isoDep) {
+                latestIsoDep = null
+            }
+            AppTrace.nfcSessionClosed()
         }
-        AppTrace.nfcSessionClosed()
         publishAsync(generation, status, awaitingCard = status == NfcReaderStatus.WAITING_FOR_CARD)
     }
 
@@ -714,10 +752,13 @@ internal class NfcReaderController(
                 return
             }
             if (!ensureIsoDepConnected(isoDep)) {
+                if (latestIsoDep == isoDep) {
+                    latestIsoDep = null
+                }
                 canBytes.fill(0)
                 pin1?.close()
                 AppTrace.nfcSessionOpenFailed()
-                publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD)
+                publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = wantsCard())
                 return
             }
             val exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep))

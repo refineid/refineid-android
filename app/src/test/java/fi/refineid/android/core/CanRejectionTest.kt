@@ -113,4 +113,19 @@ class CanRejectionTest {
         assertNull(CanSessionStore.currentCan)
         assertTrue(CanSessionStore.isBlocked("987654", now = baseTime))
     }
+
+    @Test
+    fun explicitSubmissionUnblocksAndRemembersCan() {
+        val baseTime = 3_000_000L
+        CanSessionStore.remember("123456", now = baseTime)
+        CanSessionStore.recordRejected("123456", now = baseTime)
+        assertTrue(CanSessionStore.isBlocked("123456", now = baseTime))
+        assertFalse(CanSessionStore.hasCan)
+
+        val submission = CanSubmission.from("123456")
+        CanSessionStore.remember(submission)
+        assertFalse(CanSessionStore.isBlocked("123456", now = baseTime))
+        assertTrue(CanSessionStore.hasCan)
+        assertEquals("123456", CanSessionStore.currentCan)
+    }
 }

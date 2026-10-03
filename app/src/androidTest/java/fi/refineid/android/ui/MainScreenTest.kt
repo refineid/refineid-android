@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.AuthenticationSignFailure
@@ -270,6 +271,133 @@ internal class MainScreenTest {
         composeRule
             .onNodeWithTag(UiAutomationIds.IDENTITY_ROW)
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun awaitingCardShowsNfcCardTapDialogAndCancelInvokesCallback() {
+        var cancelInvoked = false
+        composeRule.setContent {
+            ReFineIdTheme {
+                MainScreen(
+                    snapshot = UsbReaderSnapshot(),
+                    onRequestPermission = {},
+                    nfcSnapshot =
+                        NfcReaderSnapshot(
+                            status = NfcReaderStatus.WAITING_FOR_CARD,
+                            awaitingCard = true,
+                        ),
+                    onCancelAwaitingCard = { cancelInvoked = true },
+                )
+            }
+        }
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.NFC_CARD_TAP_DIALOG)
+            .assertIsDisplayed()
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.NFC_CARD_TAP_CANCEL_ACTION)
+            .assertIsDisplayed()
+            .performClick()
+
+        assertEquals(true, cancelInvoked)
+    }
+
+    @Test
+    fun readCardWithoutRememberedCanShowsCanDialog() {
+        CanSessionStore.drop()
+        composeRule.setContent {
+            ReFineIdTheme {
+                MainScreen(
+                    snapshot = UsbReaderSnapshot(),
+                    onRequestPermission = {},
+                    hasNfc = true,
+                )
+            }
+        }
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.IDENTITY_ROW)
+            .performScrollTo()
+            .performClick()
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.NFC_CAN_FIELD)
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun readCardWithRememberedCanDirectlyConnectsWithoutCanDialog() {
+        CanSessionStore.drop()
+        CanSessionStore.remember("123456")
+        var connectedCan: String? = null
+        composeRule.setContent {
+            ReFineIdTheme {
+                MainScreen(
+                    snapshot = UsbReaderSnapshot(),
+                    onRequestPermission = {},
+                    hasNfc = true,
+                    onNfcConnect = { can, _ ->
+                        connectedCan = can?.peekDigits()
+                    },
+                )
+            }
+        }
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.IDENTITY_ROW)
+            .performScrollTo()
+            .performClick()
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.NFC_CAN_FIELD)
+            .assertDoesNotExist()
+        assertEquals("123456", connectedCan)
+        CanSessionStore.drop()
+    }
+
+    @Test
+    fun readCardAfterWrongCanShowsPrepopulatedCanDialogAndRetries() {
+        CanSessionStore.drop()
+        CanSessionStore.recordRejected("123456")
+        var connectedCan: String? = null
+        composeRule.setContent {
+            ReFineIdTheme {
+                MainScreen(
+                    snapshot = UsbReaderSnapshot(),
+                    onRequestPermission = {},
+                    hasNfc = true,
+                    nfcSnapshot =
+                        NfcReaderSnapshot(
+                            status = NfcReaderStatus.WRONG_CAN,
+                        ),
+                    onNfcConnect = { can, _ ->
+                        connectedCan = can?.peekDigits()
+                    },
+                )
+            }
+        }
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.IDENTITY_ROW)
+            .performScrollTo()
+            .performClick()
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.NFC_CAN_FIELD)
+            .assertIsDisplayed()
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.NFC_CAN_FIELD)
+            .performTextReplacement("654321")
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.NFC_CONNECT_ACTION)
+            .assertIsEnabled()
+            .performClick()
+
+        assertEquals("654321", connectedCan)
+        CanSessionStore.drop()
     }
 
     private fun show(

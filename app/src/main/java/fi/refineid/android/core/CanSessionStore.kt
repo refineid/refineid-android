@@ -52,11 +52,14 @@ internal object CanSessionStore {
         }
     }
 
-    fun remember(
-        submission: CanSubmission,
-        now: Long = System.currentTimeMillis(),
-    ) {
-        submission.peekDigits()?.let { remember(it, now) }
+    fun remember(submission: CanSubmission) {
+        submission.peekDigits()?.let { digits ->
+            val clean = digits.trim()
+            if (CanSubmission.isComplete(clean)) {
+                blockedCans.remove(clean)
+                rememberedCan = clean
+            }
+        }
     }
 
     fun canBytes(): ByteArray? {
