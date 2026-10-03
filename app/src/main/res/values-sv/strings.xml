@@ -115,6 +115,4 @@
     <string name="paired_devices">Kopplade datorer</string>
     <string name="connected_status">Ansluten</string>
     <string name="card_remote_access">Fjärråtkomst för kort</string>
-    <string name="card_remote_access_description">Tillåt parade datorer att använda denna telefon som kortläsare via det lokala nätverket.</string>
-    <string name="card_remote_access_disabled_hint">Fjärråtkomst för kort är avstängd. Slå på den för att koppla en ny dator eller tillåta anslutningar från parade datorer.</string>
 </resources>

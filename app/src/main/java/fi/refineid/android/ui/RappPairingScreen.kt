@@ -98,7 +98,6 @@ internal fun RappPairingScreen(
         )
 
         if (!model.isRemoteAccessEnabled) {
-            CardRemoteAccessDisabledHint()
             if (model.pairedDevices.isNotEmpty()) {
                 PairedDevicesList(
                     peers = model.pairedDevices,
@@ -185,49 +184,17 @@ private fun CardRemoteAccessSwitchCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(
-                modifier =
-                    Modifier
-                        .weight(1f)
-                        .padding(end = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.card_remote_access),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = stringResource(R.string.card_remote_access_description),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                text = stringResource(R.string.card_remote_access),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
             Switch(
                 checked = enabled,
                 onCheckedChange = onCheckedChange,
                 modifier = Modifier.testTag(UiAutomationIds.CARD_REMOTE_ACCESS_SWITCH),
             )
         }
-    }
-}
-
-@Suppress("FunctionName", "ktlint:standard:function-naming")
-@Composable
-private fun CardRemoteAccessDisabledHint() {
-    Card(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .testTag(UiAutomationIds.CARD_REMOTE_ACCESS_DISABLED_CARD),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Text(
-            text = stringResource(R.string.card_remote_access_disabled_hint),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(16.dp),
-        )
     }
 }
 

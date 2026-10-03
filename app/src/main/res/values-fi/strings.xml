@@ -115,6 +115,4 @@
     <string name="paired_devices">Paritetut tietokoneet</string>
     <string name="connected_status">Yhdistetty</string>
     <string name="card_remote_access">Kortin etäkäyttö</string>
-    <string name="card_remote_access_description">Salli pariliitettyjen tietokoneiden käyttää tätä puhelinta kortinlukijana lähiverkossa.</string>
-    <string name="card_remote_access_disabled_hint">Kortin etäkäyttö on pois päältä. Ota se käyttöön pariliittääksesi uuden tietokoneen tai salliaksesi yhteydet pariliitetyistä tietokoneista.</string>
 </resources>
