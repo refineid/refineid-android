@@ -274,10 +274,13 @@ internal data class PersonCardDetails(
                         null
                     }
 
-                val effectivePhoto = photoBytes ?: CardPhotoStore.getPhoto(cn)
+                val effectivePhoto =
+                    photoBytes
+                        ?: CardPhotoStore.getPhoto(formattedName)
+                        ?: CardPhotoStore.getPhoto(cn)
 
                 PersonCardDetails(
-                    holderName = cn,
+                    holderName = formattedName,
                     fullName = formattedName,
                     identifier = idToken,
                     dateOfBirth = null,
