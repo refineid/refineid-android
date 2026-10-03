@@ -74,7 +74,6 @@ class MainActivity : ComponentActivity() {
                 scope = activityScope,
             )
         rappPairingModel = model
-        handlePairIntent(intent)
 
         setContent {
             ReFineIdTheme {
@@ -132,16 +131,6 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         AppTrace.activityReceivedIntent()
         readerController.refresh()
-        handlePairIntent(intent)
-    }
-
-    private fun handlePairIntent(intent: Intent?) {
-        val pairOffer =
-            intent?.getStringExtra("REFINEID_PAIR_OFFER")
-                ?: intent?.getStringExtra("pair_code")
-        if (!pairOffer.isNullOrBlank()) {
-            rappPairingModel?.connectWithCode(pairOffer)
-        }
     }
 
     override fun onDestroy() {

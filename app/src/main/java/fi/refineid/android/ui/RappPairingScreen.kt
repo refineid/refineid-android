@@ -4,10 +4,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Clear
@@ -21,31 +19,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fi.refineid.android.R
-import fi.refineid.android.core.AuthenticationPinCache
-import fi.refineid.android.core.CanSessionStore
-import fi.refineid.android.core.CanSubmission
-import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.rapp.PairedPeer
 import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappPairingCode
@@ -56,42 +42,10 @@ private const val PAIRED_AUTO_DISMISS_DELAY_MS = 1500L
 private val OFFERING_CODE_FONT_SIZE = 36.sp
 private val OFFERING_CODE_LETTER_SPACING = 2.sp
 
-private fun applyCredentialsAndConnect(
-    canInput: String,
-    pin1Input: String,
-    pinCache: AuthenticationPinCache?,
-    onConnectCard: (CanSubmission?, Pin1Submission?) -> Unit,
-) {
-    if (canInput.isNotBlank()) {
-        CanSessionStore.remember(canInput)
-    }
-    val pin1Submission =
-        if (Pin1Submission.isComplete(pin1Input)) {
-            Pin1Submission.from(pin1Input)
-        } else if (pinCache?.hasPin == true) {
-            pinCache.take()
-        } else {
-            null
-        }
-    val canSubmission =
-        if (CanSubmission.isComplete(canInput)) {
-            CanSubmission.from(canInput)
-        } else {
-            null
-        }
-    if (canSubmission != null || pin1Submission != null) {
-        onConnectCard(canSubmission, pin1Submission)
-    }
-}
-
-@Suppress("FunctionName", "ktlint:standard:function-naming", "UnusedParameter")
+@Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 internal fun RappPairingScreen(
     model: RappPairingModel,
-    hasNfc: Boolean = true,
-    pinCache: AuthenticationPinCache? = null,
-    holderName: String? = null,
-    onConnectCard: (CanSubmission?, Pin1Submission?) -> Unit = { _, _ -> },
     onBack: () -> Unit,
 ) {
     val phase = model.phase
@@ -128,39 +82,12 @@ internal fun RappPairingScreen(
                 ) {
                     Text(stringResource(R.string.pair_new_computer))
                 }
-                OutlinedButton(
-                    onClick = { model.startCodeEntry() },
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .testTag("enterPairingCodeButton"),
-                ) {
-                    Text(stringResource(R.string.enter_pairing_code))
-                }
-            }
-
-            is PairingPhase.CodeEntry -> {
-                val initialCan = remember { CanSessionStore.currentCan ?: "" }
-                CodeEntryCard(
-                    onConnectWithCode = { code, can, pin1 ->
-                        applyCredentialsAndConnect(can, pin1, pinCache, onConnectCard)
-                        model.connectWithCode(code)
-                    },
-                    onShowPairingCode = { can, pin1 ->
-                        applyCredentialsAndConnect(can, pin1, pinCache, onConnectCard)
-                        model.createOffer()
-                    },
-                    onCancel = { model.reset() },
-                    initialCan = initialCan,
-                )
             }
 
             is PairingPhase.Offering -> {
                 OfferingPhaseView(
                     code = phase.code,
-                    holderName = holderName,
                     onRegenerateCode = { model.createOffer() },
-                    onEnterCode = { model.startCodeEntry() },
                     onCancel = {
                         model.reset()
                         onBack()
@@ -171,7 +98,6 @@ internal fun RappPairingScreen(
             is PairingPhase.Connecting -> {
                 ConnectingPhaseView(
                     message = phase.message,
-                    holderName = holderName,
                 )
             }
 
@@ -283,126 +209,9 @@ private fun PairedDevicesList(
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-private fun CodeEntryCard(
-    onConnectWithCode: (String, String, String) -> Unit,
-    onShowPairingCode: (String, String) -> Unit,
-    onCancel: () -> Unit,
-    initialCan: String,
-) {
-    var codeInput by remember { mutableStateOf("") }
-    var canInput by remember { mutableStateOf(initialCan) }
-    var pin1Input by remember { mutableStateOf("") }
-    val canValid = CanSubmission.isComplete(canInput)
-    val codeValid = RappPairingCode.isValid(codeInput)
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            OutlinedTextField(
-                value = codeInput,
-                onValueChange = { codeInput = RappPairingCode.normalize(it) },
-                label = { Text(stringResource(R.string.pairing_code)) },
-                keyboardOptions =
-                    KeyboardOptions(
-                        keyboardType = KeyboardType.Ascii,
-                        capitalization = KeyboardCapitalization.Characters,
-                    ),
-                singleLine = true,
-                textStyle =
-                    MaterialTheme.typography.bodyLarge.copy(
-                        textAlign = TextAlign.Center,
-                        fontFamily = FontFamily.Monospace,
-                    ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            OutlinedTextField(
-                value = canInput,
-                onValueChange = { canInput = it.filter { c -> c in '0'..'9' }.take(CanSubmission.CAN_DIGITS) },
-                label = { Text(stringResource(R.string.can)) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                textStyle =
-                    MaterialTheme.typography.bodyLarge.copy(
-                        textAlign = TextAlign.Center,
-                        fontFamily = FontFamily.Monospace,
-                    ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            OutlinedTextField(
-                value = pin1Input,
-                onValueChange = { input ->
-                    val digits = input.filter { it in '0'..'9' }
-                    if (Pin1Submission.acceptsEntry(digits)) {
-                        pin1Input = digits
-                    }
-                },
-                label = { Text(stringResource(R.string.pin1_optional)) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                visualTransformation = PasswordVisualTransformation(),
-                singleLine = true,
-                textStyle =
-                    MaterialTheme.typography.bodyLarge.copy(
-                        textAlign = TextAlign.Center,
-                        fontFamily = FontFamily.Monospace,
-                    ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            Button(
-                onClick = {
-                    val pin = pin1Input
-                    pin1Input = ""
-                    onConnectWithCode(codeInput, canInput, pin)
-                },
-                enabled = codeValid && canValid,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.pair_computer))
-            }
-
-            OutlinedButton(
-                onClick = {
-                    val pin = pin1Input
-                    pin1Input = ""
-                    onShowPairingCode(canInput, pin)
-                },
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .testTag("showPairingCodeButton"),
-            ) {
-                Text(stringResource(R.string.show_pairing_code))
-            }
-
-            Button(
-                onClick = onCancel,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.cancel))
-            }
-        }
-    }
-}
-
-@Suppress("FunctionName", "ktlint:standard:function-naming")
-@Composable
 private fun OfferingPhaseView(
     code: String,
-    holderName: String?,
     onRegenerateCode: () -> Unit,
-    onEnterCode: () -> Unit,
     onCancel: () -> Unit,
 ) {
     Card(
@@ -433,31 +242,6 @@ private fun OfferingPhaseView(
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (holderName != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Check,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Text(
-                        text = holderName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
-            } else {
-                Text(
-                    text = stringResource(R.string.hold_card_to_phone),
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             OutlinedButton(
                 onClick = onRegenerateCode,
                 modifier =
@@ -466,15 +250,6 @@ private fun OfferingPhaseView(
                         .testTag("regenerateCodeButton"),
             ) {
                 Text(stringResource(R.string.regenerate_code))
-            }
-            OutlinedButton(
-                onClick = onEnterCode,
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .testTag("enterPairingCodeButton"),
-            ) {
-                Text(stringResource(R.string.enter_pairing_code))
             }
             Button(
                 onClick = onCancel,
@@ -489,10 +264,7 @@ private fun OfferingPhaseView(
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-private fun ConnectingPhaseView(
-    message: String,
-    holderName: String?,
-) {
+private fun ConnectingPhaseView(message: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -511,21 +283,6 @@ private fun ConnectingPhaseView(
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
             )
-            if (holderName == null) {
-                Text(
-                    text = stringResource(R.string.hold_card_to_phone),
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                Text(
-                    text = holderName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                )
-            }
         }
     }
 }
