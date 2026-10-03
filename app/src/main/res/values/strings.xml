@@ -4,7 +4,6 @@
     <string name="section_document">Document</string>
     <string name="read_identity_card">Read card</string>
     <string name="no_card_in_reader">No card in reader</string>
-    <string name="pin1_optional">PIN 1 (optional)</string>
     <string name="usb_reader">USB reader</string>
     <string name="not_connected">Not connected</string>
     <string name="permission_required">Permission required</string>

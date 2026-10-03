@@ -3,7 +3,6 @@
     <string name="section_document">Dokument</string>
     <string name="read_identity_card">Läs kort</string>
     <string name="no_card_in_reader">Inget kort i läsaren</string>
-    <string name="pin1_optional">PIN 1 (valfritt)</string>
     <string name="usb_reader">USB-läsare</string>
     <string name="not_connected">Inte ansluten</string>
     <string name="permission_required">Behörighet krävs</string>
