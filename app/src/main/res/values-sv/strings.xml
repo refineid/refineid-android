@@ -54,7 +54,6 @@
     <string name="hold_card_against_back">Håll ID-kortet mot baksidan.</string>
     <string name="connect_id_card">Anslut identitetskort</string>
     <string name="regenerate_code">Skapa ny kod</string>
-    <string name="pair_new_computer">Koppla ny dator</string>
     <string name="card_pins">PIN-koder</string>
     <string name="change_pin1">Ändra PIN 1</string>
     <string name="change_pin2">Ändra PIN 2</string>

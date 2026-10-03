@@ -428,7 +428,15 @@ internal fun MainScreen(
                 timestampAuthorityRepository = timestampAuthorityRepository,
                 onOpenVerify = { verifyPicker.launch(arrayOf("*/*")) },
                 onOpenSign = { destination = MainDestination.SIGN },
-                onOpenPairing = { destination = MainDestination.PAIRING },
+                onOpenPairing = {
+                    if (rappPairingModel?.isRemoteAccessEnabled == true &&
+                        rappPairingModel.phase is fi.refineid.android.rapp.PairingPhase.Idle &&
+                        rappPairingModel.activeConnectedPeer == null
+                    ) {
+                        rappPairingModel.createOffer()
+                    }
+                    destination = MainDestination.PAIRING
+                },
                 onOpenCardManagement = { destination = MainDestination.CARD_MANAGEMENT },
                 onRequestUsbCan =
                     if (usbCardAwaitsCan) {
