@@ -6,7 +6,9 @@ import fi.refineid.android.core.AuthenticationReadiness
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.Pin1VerificationOutcome
 import fi.refineid.android.core.Pin1VerificationResult
+import fi.refineid.android.core.runPin1Verification
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.usb.CardPresence
@@ -68,14 +70,35 @@ internal class LocalAuthenticationPreparationBackend(
         return true
     }
 
-    override suspend fun verify(pin1: Pin1Submission): Pin1VerificationResult {
-        val service = selected
-        if (service == null || stamp != currentStamp()) {
-            pin1.close()
-            return Pin1VerificationResult.CARD_UNAVAILABLE
-        }
-        val result = withContext(Dispatchers.IO) { service.verifyAuthenticationPin(pin1) }
-        return if (result == Pin1VerificationResult.VERIFIED && stamp != currentStamp()) {
+    /**
+     * Verifies on the exact session [connect] proved ready. Cancellation
+     * bumps that session's generation, so queued work is refused rather
+     * than waiting for, or prompting for, another card.
+     */
+    override suspend fun verify(
+        pin1: Pin1Submission,
+        outcome: Pin1VerificationOutcome,
+    ): Pin1VerificationResult {
+        val expected = stamp
+        val result =
+            runPin1Verification(Dispatchers.IO, pin1, outcome) { submission ->
+                when {
+                    expected == null || expected != currentStamp() -> {
+                        submission.close()
+                        Pin1VerificationResult.CARD_UNAVAILABLE
+                    }
+
+                    expected.wired -> {
+                        app.readerController.verifyAuthenticationPin(submission, expected.session)
+                    }
+
+                    else -> {
+                        app.nfcReaderController.authenticationCardService
+                            .verifyAuthenticationPin(submission, expected.session)
+                    }
+                }
+            }
+        return if (result == Pin1VerificationResult.VERIFIED && expected != currentStamp()) {
             Pin1VerificationResult.CARD_UNAVAILABLE
         } else {
             result

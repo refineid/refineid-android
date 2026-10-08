@@ -1,13 +1,23 @@
 package fi.refineid.android.core
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
 
 internal class AuthenticationPreparationTest {
     @Test
@@ -60,7 +70,7 @@ internal class AuthenticationPreparationTest {
             preparation.state.first { it is AuthenticationPreparationState.Failed }
             assertFalse(opened)
             assertFalse(backend.retained)
-            assertTrue(backend.invalidated)
+            assertEquals(1, backend.invalidations.get())
             assertEquals(1, backend.verifications)
             assertTrue(cache.isRejected(syntheticPin()))
         }
@@ -77,7 +87,7 @@ internal class AuthenticationPreparationTest {
             preparation.state.first { it is AuthenticationPreparationState.Failed }
             assertFalse(opened)
             assertFalse(backend.retained)
-            assertTrue(backend.invalidated)
+            assertEquals(1, backend.invalidations.get())
             assertEquals(1, backend.verifications)
             syntheticPin().use { assertFalse(cache.isRejected(it)) }
         }
@@ -115,21 +125,87 @@ internal class AuthenticationPreparationTest {
     @Test
     fun cancellationDuringVerificationStillInvalidatesRejectedCredential() =
         runBlocking {
-            val backend = Backend().apply { verificationWait = CompletableDeferred() }
+            val answer = CompletableFuture<Pin1VerificationResult>()
+            val backend = Backend().apply { cardAnswer = answer }
             val cache = AuthenticationPinCache()
             val preparation = AuthenticationPreparation(this, backend, cache)
             var opened = false
             preparation.start { opened = true }
             preparation.submit(null, syntheticPin())
-            preparation.state.first { it == AuthenticationPreparationState.Verifying }
-            yield()
+            backend.awaitCardCommand()
             preparation.cancel()
-            checkNotNull(backend.verificationWait).complete(Pin1VerificationResult.WRONG_PIN)
+            answer.complete(Pin1VerificationResult.WRONG_PIN)
+            backend.awaitVerifyReturned()
             yield()
-            assertTrue(backend.invalidated)
+            assertEquals(1, backend.invalidations.get())
             assertFalse(opened)
             assertFalse(backend.retained)
+            assertEquals(AuthenticationPreparationState.Idle, preparation.state.value)
             syntheticPin().use { assertTrue(cache.isRejected(it)) }
+        }
+
+    @Test
+    fun cancellationDuringVerificationStillInvalidatesLockedCardOnly() =
+        runBlocking {
+            val answer = CompletableFuture<Pin1VerificationResult>()
+            val backend = Backend().apply { cardAnswer = answer }
+            val cache = AuthenticationPinCache()
+            val preparation = AuthenticationPreparation(this, backend, cache)
+            preparation.start {}
+            preparation.submit(null, syntheticPin())
+            backend.awaitCardCommand()
+            preparation.cancel()
+            answer.complete(Pin1VerificationResult.PIN_LOCKED)
+            backend.awaitVerifyReturned()
+            yield()
+            assertEquals(1, backend.invalidations.get())
+            syntheticPin().use { assertFalse(cache.isRejected(it)) }
+        }
+
+    @Test
+    fun acceptanceArrivingAfterCancellationIsNotRetained() =
+        runBlocking {
+            val answer = CompletableFuture<Pin1VerificationResult>()
+            val backend = Backend().apply { cardAnswer = answer }
+            val cache = AuthenticationPinCache()
+            val preparation = AuthenticationPreparation(this, backend, cache)
+            var opened = false
+            preparation.start { opened = true }
+            preparation.submit(null, syntheticPin())
+            backend.awaitCardCommand()
+            preparation.cancel()
+            answer.complete(Pin1VerificationResult.VERIFIED)
+            backend.awaitVerifyReturned()
+            yield()
+            assertFalse(opened)
+            assertFalse(backend.retained)
+            assertFalse(cache.hasPin)
+            assertEquals(0, backend.invalidations.get())
+        }
+
+    @Test
+    fun cancellationBeforeCardCommandSendsNoCredential() =
+        runBlocking {
+            val worker = Executors.newSingleThreadExecutor()
+            val gate = CountDownLatch(1)
+            worker.execute { gate.await() }
+            val backend = Backend().apply { verifyContext = worker.asCoroutineDispatcher() }
+            val cache = AuthenticationPinCache()
+            val preparation = AuthenticationPreparation(this, backend, cache)
+            val candidate = syntheticPin()
+            preparation.start {}
+            preparation.submit(null, candidate)
+            preparation.state.first { it == AuthenticationPreparationState.Verifying }
+            preparation.cancel()
+            gate.countDown()
+            backend.awaitVerifyReturned()
+            worker.shutdown()
+            yield()
+            assertEquals(0, backend.verifications)
+            assertEquals(0, backend.invalidations.get())
+            assertFalse(backend.retained)
+            assertTrue(runCatching { candidate.copyBytes() }.isFailure)
+            syntheticPin().use { assertFalse(cache.isRejected(it)) }
         }
 
     @Test
@@ -160,13 +236,20 @@ internal class AuthenticationPreparationTest {
     private class Backend : AuthenticationPreparationBackend {
         var ready = AuthenticationReadiness(false, true, true)
         var result = Pin1VerificationResult.VERIFIED
+        var verifyContext: CoroutineContext = Dispatchers.IO
+
+        /** When set, the card command blocks like native VERIFY until answered. */
+        var cardAnswer: CompletableFuture<Pin1VerificationResult>? = null
+
+        @Volatile
         var verifications = 0
         var connections = 0
         var retained = false
-        var invalidated = false
+        val invalidations = AtomicInteger()
         var cancelled = false
         var wait: CompletableDeferred<Boolean>? = null
-        var verificationWait: CompletableDeferred<Pin1VerificationResult>? = null
+        private val cardCommand = CompletableFuture<Unit>()
+        private val verifyReturned = CompletableDeferred<Unit>()
         private var owned: ByteArray? = null
 
         override fun readiness(): AuthenticationReadiness = ready
@@ -176,11 +259,20 @@ internal class AuthenticationPreparationTest {
             return wait?.await() ?: true
         }
 
-        override suspend fun verify(pin1: Pin1Submission): Pin1VerificationResult {
-            verifications++
-            pin1.close()
-            return verificationWait?.await() ?: result
-        }
+        override suspend fun verify(
+            pin1: Pin1Submission,
+            outcome: Pin1VerificationOutcome,
+        ): Pin1VerificationResult =
+            try {
+                runPin1Verification(verifyContext, pin1, outcome) { submission ->
+                    submission.close()
+                    verifications++
+                    cardCommand.complete(Unit)
+                    cardAnswer?.get(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS) ?: result
+                }
+            } finally {
+                verifyReturned.complete(Unit)
+            }
 
         override suspend fun retainVerified(pin: ByteArray): Boolean {
             owned = pin
@@ -190,11 +282,19 @@ internal class AuthenticationPreparationTest {
         }
 
         override fun invalidate() {
-            invalidated = true
+            invalidations.incrementAndGet()
         }
 
         override fun cancel() {
             cancelled = true
+        }
+
+        suspend fun awaitCardCommand() {
+            withContext(Dispatchers.IO) { cardCommand.get(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS) }
+        }
+
+        suspend fun awaitVerifyReturned() {
+            withTimeout(TimeUnit.SECONDS.toMillis(TEST_TIMEOUT_SECONDS)) { verifyReturned.await() }
         }
 
         fun ownedCopyCleared(): Boolean = owned?.all { it == CLEARED_BYTE } == true
@@ -202,6 +302,7 @@ internal class AuthenticationPreparationTest {
 
     private companion object {
         const val CLEARED_BYTE: Byte = 0
+        const val TEST_TIMEOUT_SECONDS = 5L
 
         fun syntheticPin(): Pin1Submission =
             Pin1Submission.from(CharArray(PIN1_MINIMUM_LENGTH) { '0' }.concatToString())

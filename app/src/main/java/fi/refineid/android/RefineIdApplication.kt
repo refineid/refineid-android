@@ -36,6 +36,9 @@ class RefineIdApplication : Application() {
         java.util.concurrent.atomic
             .AtomicInteger()
     internal val authenticationCustodyLock = Any()
+
+    /** Published by whichever thread observed the rejection; readers join it on Main. */
+    @Volatile
     internal var authenticationInvalidation: kotlinx.coroutines.Job? = null
         private set
     private val authenticationScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())

@@ -25,6 +25,7 @@ import fi.refineid.android.core.NativeCore
 import fi.refineid.android.core.NativeVerification
 import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.Pin1VerificationResult
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.keychain.nextProviderGeneration
 import fi.refineid.android.usb.ccid.CcidSessionOpenResult
@@ -706,12 +707,16 @@ internal class UsbReaderController(
         }
     }
 
-    override fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult =
+    override fun verifyAuthenticationPin(
+        pin1: Pin1Submission,
+        expectedGeneration: Int?,
+    ): Pin1VerificationResult =
         fi.refineid.android.core.verifyQueuedPin1(
             pin1,
             ioExecutor,
             { isCardReady },
             { probeGeneration },
+            expectedGeneration ?: probeGeneration,
         ) { submission -> activeSession?.verifyAuthenticationPin(submission) }
 
     /** Blocks a browser crypto worker while one card operation runs on the USB owner thread. */
@@ -1085,18 +1090,7 @@ internal class UsbReaderController(
         if (!isStarted || selectedDevice == null) {
             return false
         }
-        val isPollableStatus =
-            when (snapshot.status) {
-                ReaderConnectionStatus.READY,
-                ReaderConnectionStatus.ACCESS_NUMBER_REQUIRED,
-                ReaderConnectionStatus.ACTIVATION_REQUIRED,
-                ReaderConnectionStatus.CARD_ERROR,
-                ReaderConnectionStatus.TRANSPORT_ERROR,
-                -> true
-
-                else -> false
-            }
-        if (!isPollableStatus) {
+        if (!snapshot.status.isPollable()) {
             return false
         }
         return snapshot.cardPresence != CardPresence.PRESENT ||
@@ -1115,6 +1109,19 @@ private fun checkMainThread() {
         "USB reader listeners must be changed on the main thread"
     }
 }
+
+/** Statuses with a selected reader whose card presence can change underneath. */
+private fun ReaderConnectionStatus.isPollable(): Boolean =
+    when (this) {
+        ReaderConnectionStatus.READY,
+        ReaderConnectionStatus.ACCESS_NUMBER_REQUIRED,
+        ReaderConnectionStatus.ACTIVATION_REQUIRED,
+        ReaderConnectionStatus.CARD_ERROR,
+        ReaderConnectionStatus.TRANSPORT_ERROR,
+        -> true
+
+        else -> false
+    }
 
 private fun UsbDevice.toDescriptor(): UsbDeviceDescriptor =
     UsbDeviceDescriptor(

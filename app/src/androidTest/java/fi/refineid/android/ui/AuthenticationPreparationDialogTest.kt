@@ -20,6 +20,7 @@ import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.Pin1VerificationOutcome
 import fi.refineid.android.core.Pin1VerificationResult
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
@@ -143,7 +144,10 @@ internal class AuthenticationPreparationDialogTest {
 
         override suspend fun connect(can: CanSubmission?): Boolean = error("no card operation expected")
 
-        override suspend fun verify(pin1: Pin1Submission): Pin1VerificationResult = error("no card operation expected")
+        override suspend fun verify(
+            pin1: Pin1Submission,
+            outcome: Pin1VerificationOutcome,
+        ): Pin1VerificationResult = error("no card operation expected")
 
         override suspend fun retainVerified(pin: ByteArray): Boolean = error("no card operation expected")
 

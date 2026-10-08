@@ -59,9 +59,12 @@ internal class NfcAuthenticationCardService(
         }
     }
 
-    override fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult {
+    override fun verifyAuthenticationPin(
+        pin1: Pin1Submission,
+        expectedGeneration: Int?,
+    ): fi.refineid.android.core.Pin1VerificationResult {
         if (Looper.myLooper() == Looper.getMainLooper() ||
-            (!isReady() && !kotlinx.coroutines.runBlocking { awaitReady() })
+            (expectedGeneration == null && !isReady() && !kotlinx.coroutines.runBlocking { awaitReady() })
         ) {
             pin1.close()
             return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
@@ -71,6 +74,7 @@ internal class NfcAuthenticationCardService(
             probeExecutor,
             { isReady() },
             { currentGeneration() },
+            expectedGeneration ?: currentGeneration(),
         ) { submission ->
             val generation = currentGeneration()
             val result = activeSession()?.verifyAuthenticationPin(submission)

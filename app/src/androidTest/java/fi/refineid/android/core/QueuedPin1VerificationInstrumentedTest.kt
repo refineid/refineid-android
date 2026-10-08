@@ -40,6 +40,7 @@ internal class QueuedPin1VerificationInstrumentedTest {
                             captured.countDown()
                             current
                         },
+                        expectedGeneration = 0,
                         verify = {
                             verified = true
                             Pin1VerificationResult.VERIFIED
@@ -54,6 +55,37 @@ internal class QueuedPin1VerificationInstrumentedTest {
             assertTrue(runCatching { candidate.copyBytes() }.isFailure)
         } finally {
             release.countDown()
+            candidate.close()
+            caller.shutdownNow()
+            owner.shutdownNow()
+        }
+    }
+
+    @Test
+    fun staleSessionGenerationIsRefusedBeforeQueueing() {
+        val owner = Executors.newSingleThreadExecutor()
+        val caller = Executors.newSingleThreadExecutor()
+        val candidate = Pin1Submission.fromOwnedBytes(ByteArray(PIN1_MINIMUM_LENGTH) { DIGIT_ZERO_BYTE })
+        var verified = false
+        try {
+            val result =
+                caller.submit<Pin1VerificationResult> {
+                    verifyQueuedPin1(
+                        candidate,
+                        owner,
+                        isReady = { true },
+                        currentGeneration = { 1 },
+                        expectedGeneration = 0,
+                        verify = {
+                            verified = true
+                            Pin1VerificationResult.VERIFIED
+                        },
+                    )
+                }
+            assertEquals(Pin1VerificationResult.CARD_UNAVAILABLE, result.get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            assertFalse(verified)
+            assertTrue(runCatching { candidate.copyBytes() }.isFailure)
+        } finally {
             candidate.close()
             caller.shutdownNow()
             owner.shutdownNow()

@@ -3,13 +3,11 @@ package fi.refineid.android.core
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
 
@@ -24,7 +22,11 @@ internal interface AuthenticationPreparationBackend {
 
     suspend fun connect(can: CanSubmission?): Boolean
 
-    suspend fun verify(pin1: Pin1Submission): Pin1VerificationResult
+    /** Takes ownership of [pin1] and [outcome]; see [runPin1Verification]. */
+    suspend fun verify(
+        pin1: Pin1Submission,
+        outcome: Pin1VerificationOutcome,
+    ): Pin1VerificationResult
 
     suspend fun retainVerified(pin: ByteArray): Boolean
 
@@ -130,41 +132,15 @@ internal class AuthenticationPreparation(
                             return@withTimeout
                         }
                         mutableState.value = AuthenticationPreparationState.Verifying
-                        val result =
-                            withContext(NonCancellable) {
-                                val verified = backend.verify(candidate)
-                                if (verified == Pin1VerificationResult.WRONG_PIN ||
-                                    verified == Pin1VerificationResult.PIN_LOCKED
-                                ) {
-                                    if (verified == Pin1VerificationResult.WRONG_PIN) {
-                                        pinCache.recordRejected(checkNotNull(copy))
-                                        copy = null
-                                    }
-                                    backend.invalidate()
-                                }
-                                verified
-                            }
+                        val outcome = Pin1VerificationOutcome(candidate.copyBytes(), pinCache, backend::invalidate)
+                        val result = backend.verify(candidate, outcome)
                         coroutineContext.ensureActive()
-                        when (result) {
-                            Pin1VerificationResult.VERIFIED -> {
-                                val owned = checkNotNull(copy)
-                                if (backend.retainVerified(
-                                        owned,
-                                    )
-                                ) {
-                                    complete()
-                                } else {
-                                    fail(Pin1VerificationResult.CARD_UNAVAILABLE)
-                                }
-                            }
-
-                            Pin1VerificationResult.WRONG_PIN, Pin1VerificationResult.PIN_LOCKED -> {
-                                fail(result)
-                            }
-
-                            else -> {
-                                fail(result)
-                            }
+                        if (result != Pin1VerificationResult.VERIFIED) {
+                            fail(result)
+                        } else if (backend.retainVerified(checkNotNull(copy))) {
+                            complete()
+                        } else {
+                            fail(Pin1VerificationResult.CARD_UNAVAILABLE)
                         }
                     }
                 } catch (error: CancellationException) {

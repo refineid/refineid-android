@@ -52,6 +52,19 @@ superseded verification results. Storage clearing completes before a new
 preparation can retain credentials; stale successful operations cannot restore a
 cleared PIN cache.
 
+Verification runs only on the exact card session that preparation proved ready.
+It never waits for, or prompts for, another card. Cancellation before the
+credential command starts sends no PIN. A VERIFY already on the card runs to
+completion. Its rejection is recorded and tears down custody on the thread that
+observed it, even when the holder has cancelled meanwhile. The rejection path
+owns its own copy of the candidate. An acceptance that arrives after
+cancellation is discarded and never retained.
+
+When an NFC verification finds its held secure channel gone, it releases that
+channel's native keys before reconnecting and running PACE again. A reconnect
+that fails, or ends on an activation-required card, leaves no native session
+behind.
+
 The app trusts card continuity within a prepared session. It does not introduce
 periodic certificate or card fingerprint checks. Credential rejection tears down
 the cached state on the first reported failure.
@@ -60,7 +73,9 @@ the cached state on the first reported failure.
 
 Rust tests exercise standalone VERIFY, rejection even with an already validated
 session, and retry-policy refusal. JVM tests cover preparation, ownership,
-cancellation, negative caching, stale cache retention, and malformed JNI replies.
+cancellation before and during an in-flight VERIFY, negative caching, stale cache
+retention, and malformed JNI replies. The NFC reconnect path and native key release
+have no JVM test, because they need a live tag handle.
 Android instrumentation exercises the UI and shipped JNI library using synthetic
 card replies. These checks do not prove NFC field stability, physical USB-reader
 behaviour, or successful authentication at Suomi.fi. Those require a holder-entered

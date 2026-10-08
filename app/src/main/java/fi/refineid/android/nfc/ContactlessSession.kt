@@ -121,6 +121,8 @@ internal class ContactlessSession(
             return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
         }
         if (!heldSession || !isoDep.isConnected) {
+            // A held channel whose field dropped is dead; its keys go before reconnecting.
+            if (heldSession) NativeContactlessSession.close()
             heldSession = false
             if (!reconnect()) {
                 pin1.close()
@@ -139,13 +141,17 @@ internal class ContactlessSession(
                 }
 
                 is fi.refineid.android.core.NativeContactlessOpenResult.ActivationRequired -> {
+                    // The native open retains this channel; nothing here will use it.
                     opened.certificate.close()
+                    NativeContactlessSession.close()
                     pin1.close()
                     closeIsoDep()
                     return fi.refineid.android.core.Pin1VerificationResult.SAFETY_REFUSED
                 }
 
                 is fi.refineid.android.core.NativeContactlessOpenResult.Failure -> {
+                    // A bridge fault can follow a native open that kept its channel.
+                    NativeContactlessSession.close()
                     pin1.close()
                     closeIsoDep()
                     return fi.refineid.android.core.Pin1VerificationResult.TRANSPORT_ERROR
