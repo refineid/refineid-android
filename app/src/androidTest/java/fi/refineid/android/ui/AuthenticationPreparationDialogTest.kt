@@ -16,6 +16,7 @@ import fi.refineid.android.core.AuthenticationPreparationBackend
 import fi.refineid.android.core.AuthenticationReadiness
 import fi.refineid.android.core.AuthenticationSignResult
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
+import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.Pin1Submission
@@ -29,6 +30,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,6 +40,12 @@ import org.junit.runner.RunWith
 internal class AuthenticationPreparationDialogTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Before
+    @After
+    fun clearTransientAccessNumber() {
+        CanSessionStore.drop()
+    }
 
     @Test
     fun browserWithoutIdentityStartsPreparationWithBothMissingFields() {
