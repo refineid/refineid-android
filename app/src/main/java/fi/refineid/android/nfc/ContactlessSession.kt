@@ -114,6 +114,19 @@ internal class ContactlessSession(
         }
     }
 
+    fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult {
+        checkOwnerThread()
+        if (isClosed || !heldSession || !isoDep.isConnected) {
+            pin1.close()
+            return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
+        }
+        return fi.refineid.android.core.NativePin1Verification.verify(
+            pin1 = pin1,
+            exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
+            heldSession = true,
+        )
+    }
+
     fun authenticateAndSignInput(
         algorithm: AuthenticationSigningAlgorithm,
         inputMode: AuthenticationSigningInputMode,

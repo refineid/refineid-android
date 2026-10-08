@@ -130,6 +130,19 @@ internal class NfcReaderController(
             isReady = { latestSnapshot.status == NfcReaderStatus.CARD_READY },
             currentGeneration = { probeGeneration },
             activeSession = { activeSession },
+            cachedCertificate = {
+                val der = currentAuthenticationCertificateDer ?: primedCanStore.readAuthCertificateDer()
+                der?.let {
+                    fi.refineid.android.core
+                        .primedAuthenticationCertificate(it)
+                }
+            },
+            awaitReady = {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (!isCardReady) connect(null, null)
+                    awaitCardReady()
+                }
+            },
             onCardLost = { generation ->
                 val sessionWasActive = activeSession != null
                 closeActiveSession()
@@ -249,6 +262,8 @@ internal class NfcReaderController(
         stateListeners -= listener
     }
 
+    internal val authenticationSessionGeneration: Int get() = probeGeneration
+
     val snapshot: NfcReaderSnapshot
         get() = latestSnapshot
 
@@ -316,9 +331,9 @@ internal class NfcReaderController(
         checkMainThread()
         can?.let { CanSessionStore.remember(it) }
         val generation = probeGeneration
+        val candidateCan = can?.peekDigits()
         val inMemoryCanBytes = can?.transfer() ?: CanSessionStore.canBytes()
         if (isCardReady && activeSession != null) {
-            val candidateCan = can?.peekDigits()
             val currentCan = CanSessionStore.currentCan
             if (candidateCan == null || candidateCan == currentCan) {
                 pin1?.close()
@@ -910,20 +925,22 @@ internal class NfcReaderController(
     }
 
     /** Forget the primed card so the next tap requires the access number again. */
-    fun forgetPrimedCard() {
+    fun forgetPrimedCard(clearStoredCredentials: Boolean = true) {
         checkMainThread()
         AppTrace.nfcPrimedForgotten()
         CanSessionStore.drop()
         rememberedHolderName = null
         rememberedDetails = null
+        primedCardStored = false
+        probeGeneration += 1
         try {
             probeExecutor.execute {
-                CanSessionStore.drop()
-                primedCanStore.clear()
-                primedCardStored = false
-                pinCache.clear()
+                if (clearStoredCredentials) {
+                    CanSessionStore.drop()
+                    primedCanStore.clear()
+                    pinCache.clear()
+                }
                 closeActiveSession()
-                probeGeneration += 1
                 mainHandler.post { publish(NfcReaderSnapshot(status = NfcReaderStatus.WAITING_FOR_CARD)) }
             }
         } catch (_: RejectedExecutionException) {
@@ -949,6 +966,13 @@ internal class NfcReaderController(
      * Dismiss the present-card prompt without forgetting anything: the
      * reader keeps listening and the stored access number stays.
      */
+    fun cancelAuthenticationPreparation() {
+        checkMainThread()
+        probeGeneration += 1
+        cancelAwaitingCard()
+        probeExecutor.execute(::closeActiveSession)
+    }
+
     fun cancelAwaitingCard() {
         checkMainThread()
         if (latestSnapshot.awaitingCard) {

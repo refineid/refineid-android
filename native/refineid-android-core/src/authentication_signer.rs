@@ -178,6 +178,37 @@ where
     Ok(AuthenticationSignature { algorithm, bytes })
 }
 
+/// Verify one owned PIN1 without creating a signature (FINEID S1 section 3.5).
+pub(crate) fn verify_authentication_pin<T: CardTransport>(
+    transport: &mut T,
+    pin_bytes: Vec<u8>,
+) -> Result<(), AuthenticationSignFailure> {
+    let pin = Pin1::reconstruct(UnvalidatedSecret::from_owned_bytes(pin_bytes))
+        .map_err(|_| AuthenticationSignFailure::InvalidPin)?;
+    let preflight = probe_pin1_preflight(transport).map_err(map_preflight_failure)?;
+    if !preflight.consumer_authentication_permitted {
+        return Err(if preflight.state == Pin1State::Locked {
+            AuthenticationSignFailure::PinLocked
+        } else {
+            AuthenticationSignFailure::SafetyRefused
+        });
+    }
+    // A status-only success cannot prove newly supplied digits. Always present
+    // this candidate once, even when the card reports an authenticated session.
+    match transport
+        .verify_pin1_with_scheme(preflight.scheme, pin)
+        .map_err(|error| map_preflight_failure(map_auth_error(error)))?
+    {
+        VerifyOutcome::Ok => Ok(()),
+        VerifyOutcome::WrongPin { retries_left } if retries_left.is_exhausted() => {
+            Err(AuthenticationSignFailure::PinLocked)
+        }
+        VerifyOutcome::WrongPin { .. } => Err(AuthenticationSignFailure::WrongPin),
+        VerifyOutcome::Locked => Err(AuthenticationSignFailure::PinLocked),
+        VerifyOutcome::Other(_) => Err(AuthenticationSignFailure::VerificationRejected),
+    }
+}
+
 fn prepare_signing_input(
     algorithm: AuthenticationSigningAlgorithm,
     input: AuthenticationSigningInput<'_>,
@@ -330,7 +361,7 @@ mod tests {
 
     use super::{
         AuthenticationSignFailure, AuthenticationSigningAlgorithm, AuthenticationSigningInput,
-        authenticate_and_sign,
+        authenticate_and_sign, verify_authentication_pin,
     };
 
     const SAFE_RETRIES: u8 = 3;
@@ -428,6 +459,40 @@ mod tests {
             ],
             StatusWord::Success,
         )
+    }
+
+    #[test]
+    fn standalone_verification_issues_no_signing_commands() {
+        let safe = response(status(SAFE_RETRIES), Vec::new());
+        let mut transport = ScriptedTransport::new(vec![safe], StatusWord::Success);
+        assert_eq!(
+            verify_authentication_pin(&mut transport, SYNTHETIC_PIN.to_vec()),
+            Ok(())
+        );
+        assert_eq!(transport.credential_calls, PUBLIC_VERIFY_CALLS);
+        assert_eq!(transport.public_calls, PUBLIC_VERIFY_CALLS);
+    }
+
+    #[test]
+    fn standalone_verification_proves_a_candidate_even_on_a_verified_session() {
+        let verified = response(StatusWord::Success, Vec::new());
+        let mut transport = ScriptedTransport::new(vec![verified], status(LOW_RETRIES));
+        assert_eq!(
+            verify_authentication_pin(&mut transport, SYNTHETIC_PIN.to_vec()),
+            Err(AuthenticationSignFailure::WrongPin),
+        );
+        assert_eq!(transport.credential_calls, PUBLIC_VERIFY_CALLS);
+    }
+
+    #[test]
+    fn standalone_verification_refuses_low_retry_state_without_presenting_digits() {
+        let low = response(status(LOW_RETRIES), Vec::new());
+        let mut transport = ScriptedTransport::new(vec![low], StatusWord::Success);
+        assert_eq!(
+            verify_authentication_pin(&mut transport, SYNTHETIC_PIN.to_vec()),
+            Err(AuthenticationSignFailure::SafetyRefused),
+        );
+        assert_eq!(transport.credential_calls, 0);
     }
 
     #[test]

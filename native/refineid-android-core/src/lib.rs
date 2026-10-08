@@ -20,7 +20,7 @@ mod qualified_signer;
 
 use authentication_signer::{
     AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
-    AuthenticationSigningInput, authenticate_and_sign,
+    AuthenticationSigningInput, authenticate_and_sign, verify_authentication_pin,
 };
 use card_access::{CardAccessProbeFailure, CardAccessSummary, probe_card_access};
 use card_certificate::{
@@ -34,10 +34,11 @@ use contactless::{
     contactless_authenticate_and_sign_on_session, contactless_close, contactless_connect,
     contactless_open, contactless_probe_pin2, contactless_qualified_sign,
     contactless_read_face_photo, contactless_read_face_photo_on_session,
-    contactless_read_qualified_certificate,
+    contactless_read_qualified_certificate, contactless_verify_pin1_on_session,
+    sign_selection_failure,
 };
 use jni::objects::{JByteArray, JClass, JObject};
-use jni::sys::jint;
+use jni::sys::{jboolean, jint};
 use jni::{Env, NativeMethod};
 use jni_card_exchange::JniBlockExchange;
 use pin1_status::{Pin1Preflight, Pin1PreflightFailure, Pin1State, probe_pin1_preflight};
@@ -194,6 +195,16 @@ const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeQualifiedCore",
     static extern fn read_qualified_certificate_native(
         exchange_level: jint,
+        callback: JObject,
+    ) -> [jbyte],
+};
+
+const _: NativeMethod = jni::native_method! {
+    java_type = "fi.refineid.android.core.NativePin1Verification",
+    static extern fn verify_pin1_native(
+        exchange_level: jint,
+        held_session: jboolean,
+        pin: [jbyte],
         callback: JObject,
     ) -> [jbyte],
 };
@@ -1698,6 +1709,47 @@ fn contactless_activate_card_native<'local>(
     let java_reply = env.byte_array_from_slice(&reply);
     reply.fill(0);
     java_reply
+}
+
+fn verify_pin1_native<'local>(
+    env: &mut Env<'local>,
+    _class: JClass<'local>,
+    exchange_level: jint,
+    held_session: jboolean,
+    pin: JByteArray<'local>,
+    callback: JObject<'local>,
+) -> Result<JByteArray<'local>, jni::errors::Error> {
+    let mut pin_bytes = take_secret_bytes(env, &pin)?;
+    let Some(level) = exchange_level_from_jint(exchange_level) else {
+        pin_bytes.fill(0);
+        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
+    };
+    let (result, bridge_failed) = {
+        let exchange = JniBlockExchange::new(env, callback);
+        let mut transport = AndroidCardTransport::new(exchange, level);
+        let (result, exchange) = if held_session {
+            contactless_verify_pin1_on_session(transport, pin_bytes)
+        } else {
+            let result = match transport.select_pkcs15_application() {
+                Ok(()) => verify_authentication_pin(&mut transport, pin_bytes),
+                Err(error) => {
+                    pin_bytes.fill(0);
+                    Err(sign_selection_failure(error))
+                }
+            };
+            (result, transport.into_exchange())
+        };
+        (result, exchange.bridge_failed())
+    };
+    let reply = if bridge_failed {
+        vec![AUTHENTICATION_SIGNATURE_BRIDGE_ERROR]
+    } else {
+        match result {
+            Ok(()) => vec![AUTHENTICATION_SIGNATURE_SUCCEEDED],
+            Err(error) => encode_authentication_signature_reply(Err(error)),
+        }
+    };
+    env.byte_array_from_slice(&reply)
 }
 
 fn authenticate_and_sign_native<'local>(

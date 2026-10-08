@@ -127,6 +127,8 @@ private enum class MainDestination {
 @Composable
 internal fun MainScreen(
     snapshot: UsbReaderSnapshot,
+    authenticationPreparation: fi.refineid.android.core.AuthenticationPreparation? = null,
+    onAuthenticationRejected: (() -> Unit)? = null,
     onRequestPermission: () -> Unit,
     onSelectUsbDevice: (Int) -> Unit = {},
     onReaderConnect: (CanSubmission, ((ByteArray?) -> Unit)?) -> Unit = { _, _ -> },
@@ -152,6 +154,18 @@ internal fun MainScreen(
     onPin1Changed: () -> Unit = {},
     onReadPhoto: (((ByteArray?) -> Unit) -> Unit)? = null,
 ) {
+    val preparationState = authenticationPreparation?.state?.collectAsState()?.value
+    val preparationActive =
+        preparationState != null &&
+            preparationState != fi.refineid.android.core.AuthenticationPreparationState.Idle &&
+            preparationState != fi.refineid.android.core.AuthenticationPreparationState.Ready
+    if (authenticationPreparation != null && preparationState != null) {
+        AuthenticationPreparationDialog(authenticationPreparation, preparationState)
+    }
+    DisposableEffect(authenticationPreparation) {
+        onDispose { authenticationPreparation?.cancel() }
+    }
+
     var showsPhotoReadNfcDialog by remember { mutableStateOf(false) }
     var pendingPhotoConsumer by remember { mutableStateOf<((ByteArray?) -> Unit)?>(null) }
 
@@ -193,7 +207,7 @@ internal fun MainScreen(
             )
 
     val showsUsbCanDialog =
-        !userDismissedUsbCanDialog &&
+        !preparationActive && !userDismissedUsbCanDialog &&
             snapshot.cardPresence == CardPresence.PRESENT &&
             (usbCardAwaitsCan || (isSubmittingUsbCan && snapshot.status == ReaderConnectionStatus.CHECKING))
 
@@ -261,7 +275,7 @@ internal fun MainScreen(
         RappCardTapDialog(prompt = prompt)
     }
 
-    if (rappInbox?.currentTapPrompt == null && nfcSnapshot.awaitingCard) {
+    if (!preparationActive && rappInbox?.currentTapPrompt == null && nfcSnapshot.awaitingCard) {
         NfcCardTapDialog(
             onCancel = onCancelAwaitingCard,
         )
@@ -389,7 +403,11 @@ internal fun MainScreen(
     }
 
     val browserAvailable =
-        (usbCardReady || effectiveHolderName != null) && !isActivationRequired
+        (
+            snapshot.cardPresence == CardPresence.PRESENT || effectiveHolderName != null ||
+                (hasNfc && nfcSnapshot.status != NfcReaderStatus.TURNED_OFF)
+        ) &&
+            !isActivationRequired
 
     when (destination) {
         MainDestination.HOME -> {
@@ -405,16 +423,20 @@ internal fun MainScreen(
                 cards = cardItems,
                 onOpenPersonForCard = onOpenPersonForCard,
                 onForgetIdentity = forgetIdentity,
-                onWrongPin = performFullIdentityReset,
+                onWrongPin = onAuthenticationRejected ?: performFullIdentityReset,
                 onOpenPerson = { destination = MainDestination.PERSON },
                 onOpenDiagnostics = { destination = MainDestination.DIAGNOSTICS },
                 browserCardService =
                     if (usbCardReady) {
                         browserCardService
-                    } else if (hasNfc && (nfcSnapshot.isPrimed || nfcSnapshot.cardDetails != null)) {
+                    } else if (hasNfc) {
                         nfcCardService ?: browserCardService
                     } else {
                         remoteCardModel?.authenticationCardService ?: nfcCardService ?: browserCardService
+                    },
+                onPrepareAuthentication =
+                    authenticationPreparation?.let { preparation ->
+                        { action -> preparation.start(action) }
                     },
                 pinCache = pinCache,
                 nfcStatus =
@@ -438,13 +460,18 @@ internal fun MainScreen(
                 onOpenVerify = { verifyPicker.launch(arrayOf("*/*")) },
                 onOpenSign = { destination = MainDestination.SIGN },
                 onOpenPairing = {
-                    if (rappPairingModel?.isRemoteAccessEnabled == true &&
-                        rappPairingModel.phase is fi.refineid.android.rapp.PairingPhase.Idle &&
-                        rappPairingModel.activeConnectedPeer == null
-                    ) {
-                        rappPairingModel.createOffer()
-                    }
                     destination = MainDestination.PAIRING
+                    rappPairingModel?.let { model ->
+                        val offer = {
+                            model.setRemoteAccessEnabled(true)
+                            if (model.phase is fi.refineid.android.rapp.PairingPhase.Idle &&
+                                model.activeConnectedPeer == null
+                            ) {
+                                model.createOffer()
+                            }
+                        }
+                        authenticationPreparation?.start(offer) ?: offer()
+                    }
                 },
                 onOpenCardManagement = { destination = MainDestination.CARD_MANAGEMENT },
                 onRequestUsbCan =
@@ -522,6 +549,11 @@ internal fun MainScreen(
                 rappPairingModel?.let { model ->
                     RappPairingScreen(
                         model = model,
+                        authenticationReady = pinCache?.hasPin == true && (usbCardReady || nfcSnapshot.isPrimed),
+                        onEnableRemoteAccess = {
+                            val enable = { model.setRemoteAccessEnabled(true) }
+                            authenticationPreparation?.start(enable) ?: enable()
+                        },
                         onBack = {
                             model.reset()
                             destination = MainDestination.HOME
@@ -677,6 +709,7 @@ internal fun MainScreen(
 private fun HomeScreen(
     signingAvailable: Boolean,
     browserAvailable: Boolean = false,
+    onPrepareAuthentication: ((() -> Unit) -> Unit)? = null,
     holderName: String?,
     hasNfc: Boolean = true,
     usbReaderPresent: Boolean,
@@ -770,7 +803,7 @@ private fun HomeScreen(
                                 when {
                                     isConnected -> CONNECTED_STATUS_COLOR
                                     isRemoteEnabled -> MaterialTheme.colorScheme.primary
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    else -> MaterialTheme.colorScheme.primary
                                 },
                             badge =
                                 if (isConnected) {
@@ -807,6 +840,7 @@ private fun HomeScreen(
                             nfcStatus = nfcStatus,
                             nfcPrimed = nfcPrimed,
                             enabled = browserAvailable,
+                            onPrepareAuthentication = onPrepareAuthentication,
                             onNfcConnect = { can, pin1 -> onNfcConnect(can, pin1) },
                             onWrongPin = onWrongPin,
                             launcher = { onOpen ->

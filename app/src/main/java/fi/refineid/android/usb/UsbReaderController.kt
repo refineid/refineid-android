@@ -269,6 +269,8 @@ internal class UsbReaderController(
         stateListeners -= listener
     }
 
+    internal val authenticationSessionGeneration: Int get() = probeGeneration
+
     val snapshot: UsbReaderSnapshot
         get() = latestSnapshot
 
@@ -339,6 +341,21 @@ internal class UsbReaderController(
         }
         preferredDeviceId = deviceId
         refresh()
+    }
+
+    fun invalidateAuthenticationSession() {
+        checkMainThread()
+        probeGeneration += 1
+        mainHandler.removeCallbacks(cardPresencePollRunnable)
+        closeActiveSessionAsync()
+        publish(
+            latestSnapshot.copy(
+                status = ReaderConnectionStatus.CARD_ERROR,
+                holderName = null,
+                cardDetails = null,
+                authenticationStatus = AuthenticationStatus.IDLE,
+            ),
+        )
     }
 
     fun refresh() {
@@ -685,6 +702,14 @@ internal class UsbReaderController(
             onResult(null)
         }
     }
+
+    override fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult =
+        fi.refineid.android.core.verifyQueuedPin1(
+            pin1,
+            ioExecutor,
+            { isCardReady },
+            { probeGeneration },
+        ) { submission -> activeSession?.verifyAuthenticationPin(submission) }
 
     /** Blocks a browser crypto worker while one card operation runs on the USB owner thread. */
     override fun signAuthenticationMessage(

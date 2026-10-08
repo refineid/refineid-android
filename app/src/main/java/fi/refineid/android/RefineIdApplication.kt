@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 
 class RefineIdApplication : Application() {
@@ -30,6 +31,52 @@ class RefineIdApplication : Application() {
     internal lateinit var caCertificateStore: CaCertificateStore
         private set
     internal val authenticationPinCache = AuthenticationPinCache()
+    internal val authenticationGeneration =
+        java.util.concurrent.atomic
+            .AtomicInteger()
+    internal val authenticationCustodyLock = Any()
+    internal var authenticationInvalidation: kotlinx.coroutines.Job? = null
+        private set
+    private val authenticationScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+
+    internal fun retainAuthenticationPin(
+        pin: ByteArray,
+        expectedGeneration: Long,
+    ): Boolean {
+        try {
+            synchronized(authenticationCustodyLock) {
+                if (authenticationPinCache.generation != expectedGeneration) return false
+                if (primedCanStore.isPrimed()) primedCanStore.writePin1(pin.copyOf())
+                return authenticationPinCache.recordVerified(pin.copyOf(), expectedGeneration)
+            }
+        } finally {
+            pin.fill(0)
+        }
+    }
+
+    internal fun invalidateAuthentication() {
+        synchronized(authenticationCustodyLock) {
+            authenticationGeneration.incrementAndGet()
+            authenticationPinCache.clear()
+        }
+        fi.refineid.android.core.CanSessionStore
+            .drop()
+        authenticationInvalidation =
+            authenticationScope.launch {
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    nfcReaderController.forgetPrimedCard(clearStoredCredentials = false)
+                    readerController.invalidateAuthenticationSession()
+                    rappProxyDispatcher.disconnectClient()
+                }
+                synchronized(authenticationCustodyLock) {
+                    authenticationPinCache.clear()
+                    primedCanStore.clear()
+                    fi.refineid.android.core.CardPhotoStore
+                        .clear()
+                }
+            }
+    }
+
     internal lateinit var pinPromptBroker: ExternalKeyPinPromptBroker
         private set
     internal lateinit var externalKeyProviderRuntime: ExternalKeyProviderRuntime
@@ -215,6 +262,8 @@ class RefineIdApplication : Application() {
             inbox = rappAuthorizationInbox,
             pinCache = authenticationPinCache,
             primedCanStore = primedStore,
+            onAuthenticationRejected = ::invalidateAuthentication,
+            onAuthenticationVerified = ::retainAuthenticationPin,
             activeAuthCertDer = { nfcReaderController.currentAuthenticationCertificateDer },
             authCardService = {
                 if (readerController.isCardReady) {

@@ -27,20 +27,18 @@ internal class NfcAuthenticationCardService(
     private val currentGeneration: () -> Int,
     private val activeSession: () -> ContactlessSession?,
     private val onCardLost: (Int) -> Unit,
+    private val cachedCertificate: () -> NativeAuthenticationCertificate? = { null },
+    private val awaitReady: suspend () -> Boolean = { false },
 ) : AuthenticationCardService {
     /** Copies the public leaf while preserving session thread confinement. */
     override fun requestAuthenticationCertificate(onResult: (NativeAuthenticationCertificate?) -> Unit) {
-        if (!isReady()) {
-            onResult(null)
-            return
-        }
         val generation = currentGeneration()
         try {
             probeExecutor.execute {
                 val certificate =
                     if (generation == currentGeneration()) {
                         try {
-                            activeSession()?.copyAuthenticationCertificate()
+                            activeSession()?.copyAuthenticationCertificate() ?: cachedCertificate()
                         } catch (_: IllegalStateException) {
                             null
                         }
@@ -60,6 +58,14 @@ internal class NfcAuthenticationCardService(
             onResult(null)
         }
     }
+
+    override fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult =
+        fi.refineid.android.core.verifyQueuedPin1(
+            pin1,
+            probeExecutor,
+            { isReady() },
+            { currentGeneration() },
+        ) { submission -> activeSession()?.verifyAuthenticationPin(submission) }
 
     /** Blocks a browser crypto worker while one card operation runs on the NFC owner thread. */
     override fun signAuthenticationMessage(
@@ -92,7 +98,11 @@ internal class NfcAuthenticationCardService(
         pin1: Pin1Submission,
         input: ByteArray,
     ): AuthenticationSignResult {
-        if (Looper.myLooper() == Looper.getMainLooper() || !isReady()) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            pin1.close()
+            return AuthenticationSignResult.Failure(AuthenticationSignFailure.CARD_UNAVAILABLE)
+        }
+        if (!isReady() && !kotlinx.coroutines.runBlocking { awaitReady() }) {
             pin1.close()
             return AuthenticationSignResult.Failure(AuthenticationSignFailure.CARD_UNAVAILABLE)
         }

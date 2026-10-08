@@ -18,7 +18,7 @@ use refineid_pkcs15::{CertSlot, Pkcs15Error, Pkcs15Ops};
 
 use crate::authentication_signer::{
     AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
-    AuthenticationSigningInput, authenticate_and_sign,
+    AuthenticationSigningInput, authenticate_and_sign, verify_authentication_pin,
 };
 use crate::card_certificate::{
     CardCertificate, CardKeyProfile, CertificateDer, CertificateReadFailure,
@@ -418,6 +418,32 @@ pub(crate) fn contactless_authenticate_and_sign_on_session<Exchange: SingleBlock
     (result, transport.into_exchange())
 }
 
+/// Verify PIN1 on the retained secure channel and preserve its advanced state.
+pub(crate) fn contactless_verify_pin1_on_session<Exchange: SingleBlockExchange>(
+    transport: AndroidCardTransport<Exchange>,
+    mut pin_bytes: Vec<u8>,
+) -> (Result<(), AuthenticationSignFailure>, Exchange) {
+    let Some(session) = take_held_session() else {
+        pin_bytes.fill(0);
+        return (
+            Err(AuthenticationSignFailure::CardUnavailable),
+            transport.into_exchange(),
+        );
+    };
+    let mut secure = SmTransport::new(transport, session);
+    if let Err(error) = secure.select_pkcs15_application() {
+        pin_bytes.fill(0);
+        return (
+            Err(sign_selection_failure(error)),
+            secure.into_inner().into_exchange(),
+        );
+    }
+    let result = verify_authentication_pin(&mut secure, pin_bytes);
+    let (transport, session) = secure.into_parts();
+    store_held_session(session);
+    (result, transport.into_exchange())
+}
+
 /// Serve the qualified-certificate read across the PACE secure channel.
 /// Secure messaging is itself a card transport, so the reviewed
 /// EF.4332 read runs unchanged above it, exactly as on the wired path.
@@ -789,7 +815,7 @@ fn sign_channel_failure(failure: SecureChannelFailure) -> AuthenticationSignFail
     }
 }
 
-fn sign_selection_failure<E>(error: Pkcs15Error<E>) -> AuthenticationSignFailure {
+pub(crate) fn sign_selection_failure<E>(error: Pkcs15Error<E>) -> AuthenticationSignFailure {
     match error {
         Pkcs15Error::Outcome(TransportOutcome::NoCard | TransportOutcome::ReaderRemoved) => {
             AuthenticationSignFailure::CardUnavailable

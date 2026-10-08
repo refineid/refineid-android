@@ -68,10 +68,20 @@ class MainActivity : ComponentActivity() {
             )
         rappPairingModel = model
 
+        val app = application as RefineIdApplication
+        val preparation =
+            fi.refineid.android.core.AuthenticationPreparation(
+                scope = activityScope,
+                backend = LocalAuthenticationPreparationBackend(app),
+                pinCache = app.authenticationPinCache,
+            )
+
         setContent {
             ReFineIdTheme {
                 MainScreen(
                     snapshot = readerSnapshot,
+                    authenticationPreparation = preparation,
+                    onAuthenticationRejected = app::invalidateAuthentication,
                     onRequestPermission = readerController::requestPermission,
                     onSelectUsbDevice = readerController::selectDevice,
                     onReaderConnect = readerController::connect,

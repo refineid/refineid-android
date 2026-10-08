@@ -83,6 +83,7 @@ internal fun BrowserHarness(
     nfcStatus: NfcReaderStatus? = null,
     nfcPrimed: Boolean = false,
     enabled: Boolean = true,
+    onPrepareAuthentication: ((() -> Unit) -> Unit)? = null,
     onNfcConnect: (CanSubmission?, Pin1Submission) -> Unit = { _, _ -> },
     onWrongPin: (() -> Unit)? = null,
     launcher: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
@@ -94,7 +95,12 @@ internal fun BrowserHarness(
     val open = {
         if (enabled) {
             AppTrace.browserOpened()
-            isOpen = true
+            val showBrowser = { isOpen = true }
+            if (cardService.requiresLocalPin) {
+                onPrepareAuthentication?.invoke(showBrowser) ?: showBrowser()
+            } else {
+                showBrowser()
+            }
         }
     }
     if (launcher != null) {
@@ -117,6 +123,7 @@ internal fun BrowserHarness(
             pinCache = pinCache,
             nfcStatus = nfcStatus,
             nfcPrimed = nfcPrimed,
+            onPrepareAuthentication = onPrepareAuthentication,
             onNfcConnect = onNfcConnect,
             onWrongPin = onWrongPin,
             onClose = {
@@ -138,6 +145,7 @@ private fun BrowserDialog(
     nfcStatus: NfcReaderStatus?,
     nfcPrimed: Boolean,
     onNfcConnect: (CanSubmission?, Pin1Submission) -> Unit,
+    onPrepareAuthentication: ((() -> Unit) -> Unit)? = null,
     onWrongPin: (() -> Unit)? = null,
     onClose: () -> Unit,
 ) {
@@ -215,8 +223,12 @@ private fun BrowserDialog(
                         } else {
                             { request ->
                                 if (isActive.get()) {
-                                    unlockRequest = request
-                                    unlockWaiting = false
+                                    if (onPrepareAuthentication != null) {
+                                        onPrepareAuthentication { request.retry() }
+                                    } else {
+                                        unlockRequest = request
+                                        unlockWaiting = false
+                                    }
                                 } else {
                                     request.giveUp()
                                 }
