@@ -142,7 +142,7 @@ internal class BrowserPinCoordinator(
                 val result =
                     if (cardService.requiresLocalPin && pinCache?.isVerified(pin1) != true) {
                         val checked = Pin1Submission.fromOwnedBytes(pinCopy.copyOf())
-                        val failure = cardService.verifyAuthenticationPin(checked).authenticationFailure()
+                        val failure = cardService.verifyAuthenticationPin(checked).result.authenticationFailure()
                         if (failure == null) {
                             cardService.signAuthenticationMessage(algorithm, pin1, message)
                         } else {

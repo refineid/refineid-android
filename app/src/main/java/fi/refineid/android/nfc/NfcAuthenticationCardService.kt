@@ -62,12 +62,14 @@ internal class NfcAuthenticationCardService(
     override fun verifyAuthenticationPin(
         pin1: Pin1Submission,
         expectedGeneration: Int?,
-    ): fi.refineid.android.core.Pin1VerificationResult {
+    ): fi.refineid.android.core.Pin1Verification {
         if (Looper.myLooper() == Looper.getMainLooper() ||
             (expectedGeneration == null && !isReady() && !kotlinx.coroutines.runBlocking { awaitReady() })
         ) {
             pin1.close()
-            return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
+            return fi.refineid.android.core.Pin1Verification(
+                fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE,
+            )
         }
         val generation = expectedGeneration ?: currentGeneration()
         val isCurrent = { generation == currentGeneration() && isReady() }
@@ -78,7 +80,8 @@ internal class NfcAuthenticationCardService(
             { currentGeneration() },
             generation,
         ) { submission ->
-            val result = activeSession()?.verifyAuthenticationPin(submission, isCurrent)
+            val verification = activeSession()?.verifyAuthenticationPin(submission, isCurrent)
+            val result = verification?.result
             val isLost =
                 result == null || result == fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE ||
                     result == fi.refineid.android.core.Pin1VerificationResult.TRANSPORT_ERROR ||
@@ -87,7 +90,7 @@ internal class NfcAuthenticationCardService(
             if (isLost && generation == currentGeneration()) {
                 onCardLost(generation)
             }
-            result
+            verification
         }
     }
 

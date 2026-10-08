@@ -2311,11 +2311,14 @@ fn encode_authentication_signature_reply(
             reply.append(&mut signature.bytes);
             reply
         }
+        Err(AuthenticationSignFailure::WrongPin { retries_left }) => {
+            vec![AUTHENTICATION_SIGNATURE_WRONG_PIN, retries_left]
+        }
         Err(failure) => vec![match failure {
             AuthenticationSignFailure::InvalidPin => AUTHENTICATION_SIGNATURE_INVALID_PIN,
             AuthenticationSignFailure::SafetyRefused => AUTHENTICATION_SIGNATURE_SAFETY_REFUSED,
             AuthenticationSignFailure::PinLocked => AUTHENTICATION_SIGNATURE_PIN_LOCKED,
-            AuthenticationSignFailure::WrongPin => AUTHENTICATION_SIGNATURE_WRONG_PIN,
+            AuthenticationSignFailure::WrongPin { .. } => AUTHENTICATION_SIGNATURE_WRONG_PIN,
             AuthenticationSignFailure::VerificationRejected => {
                 AUTHENTICATION_SIGNATURE_VERIFICATION_REJECTED
             }
@@ -2343,11 +2346,14 @@ fn encode_qualified_signature_reply(
             reply.append(&mut signature.bytes);
             reply
         }
+        Err(QualifiedSignFailure::WrongPin { retries_left }) => {
+            vec![QUALIFIED_SIGNATURE_WRONG_PIN, retries_left]
+        }
         Err(failure) => vec![match failure {
             QualifiedSignFailure::InvalidPin => QUALIFIED_SIGNATURE_INVALID_PIN,
             QualifiedSignFailure::SafetyRefused => QUALIFIED_SIGNATURE_SAFETY_REFUSED,
             QualifiedSignFailure::PinLocked => QUALIFIED_SIGNATURE_PIN_LOCKED,
-            QualifiedSignFailure::WrongPin => QUALIFIED_SIGNATURE_WRONG_PIN,
+            QualifiedSignFailure::WrongPin { .. } => QUALIFIED_SIGNATURE_WRONG_PIN,
             QualifiedSignFailure::VerificationRejected => QUALIFIED_SIGNATURE_VERIFICATION_REJECTED,
             QualifiedSignFailure::CertificateRejected => QUALIFIED_SIGNATURE_CERTIFICATE_REJECTED,
             QualifiedSignFailure::InvalidCertificate => QUALIFIED_SIGNATURE_INVALID_CERTIFICATE,
@@ -2381,8 +2387,8 @@ mod tests {
         AUTHENTICATION_PREHASHED_RSA_PSS_SHA384, AUTHENTICATION_PREHASHED_RSA_PSS_SHA512,
         AUTHENTICATION_SIGNATURE_CARD_UNAVAILABLE, AUTHENTICATION_SIGNATURE_PACE_REJECTED,
         AUTHENTICATION_SIGNATURE_REPLY_HEADER_LENGTH, AUTHENTICATION_SIGNATURE_SUCCEEDED,
-        CARD_ACCESS_BRIDGE_ERROR, CARD_ACCESS_CARD_UNAVAILABLE, CARD_ACCESS_INVALID,
-        CARD_ACCESS_REJECTED, CARD_ACCESS_REPLY_LENGTH, CARD_ACCESS_SUCCEEDED,
+        AUTHENTICATION_SIGNATURE_WRONG_PIN, CARD_ACCESS_BRIDGE_ERROR, CARD_ACCESS_CARD_UNAVAILABLE,
+        CARD_ACCESS_INVALID, CARD_ACCESS_REJECTED, CARD_ACCESS_REPLY_LENGTH, CARD_ACCESS_SUCCEEDED,
         CARD_ACCESS_TRANSPORT_ERROR, CARD_OPERATION_CARD_UNAVAILABLE, CARD_OPERATION_REJECTED,
         CARD_OPERATION_SUCCEEDED, CARD_OPERATION_TRANSPORT_ERROR, CERTIFICATE_ACTIVATION_REQUIRED,
         CERTIFICATE_CARD_UNAVAILABLE, CERTIFICATE_INVALID, CERTIFICATE_PACE_REJECTED,
@@ -2397,11 +2403,12 @@ mod tests {
         QUALIFIED_ALGORITHM_RSA_PKCS1_SHA384, QUALIFIED_PREHASHED_ECDSA_P384_SHA384,
         QUALIFIED_PREHASHED_RSA_PKCS1_SHA384, QUALIFIED_SIGNATURE_CARD_UNAVAILABLE,
         QUALIFIED_SIGNATURE_REPLY_HEADER_LENGTH, QUALIFIED_SIGNATURE_SUCCEEDED,
-        authentication_algorithm_from_jint, authentication_request_from_jint,
-        encode_authentication_signature_reply, encode_card_access_reply, encode_certificate_reply,
-        encode_contactless_open_reply, encode_pin1_preflight_reply, encode_pin2_preflight_reply,
-        encode_qualified_signature_reply, exchange_level_from_jint, map_pkcs15_selection_result,
-        qualified_algorithm_from_jint, qualified_request_from_jint, validate_atr_bytes,
+        QUALIFIED_SIGNATURE_WRONG_PIN, authentication_algorithm_from_jint,
+        authentication_request_from_jint, encode_authentication_signature_reply,
+        encode_card_access_reply, encode_certificate_reply, encode_contactless_open_reply,
+        encode_pin1_preflight_reply, encode_pin2_preflight_reply, encode_qualified_signature_reply,
+        exchange_level_from_jint, map_pkcs15_selection_result, qualified_algorithm_from_jint,
+        qualified_request_from_jint, validate_atr_bytes,
     };
     use crate::authentication_signer::{
         AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
@@ -2954,6 +2961,23 @@ mod tests {
         assert_eq!(
             encode_qualified_signature_reply(Err(QualifiedSignFailure::CardUnavailable)),
             vec![QUALIFIED_SIGNATURE_CARD_UNAVAILABLE]
+        );
+    }
+
+    #[test]
+    fn a_wrong_pin_reply_carries_the_remaining_attempts() {
+        const SYNTHETIC_RETRIES_LEFT: u8 = 2;
+        assert_eq!(
+            encode_authentication_signature_reply(Err(AuthenticationSignFailure::WrongPin {
+                retries_left: SYNTHETIC_RETRIES_LEFT,
+            })),
+            vec![AUTHENTICATION_SIGNATURE_WRONG_PIN, SYNTHETIC_RETRIES_LEFT]
+        );
+        assert_eq!(
+            encode_qualified_signature_reply(Err(QualifiedSignFailure::WrongPin {
+                retries_left: SYNTHETIC_RETRIES_LEFT,
+            })),
+            vec![QUALIFIED_SIGNATURE_WRONG_PIN, SYNTHETIC_RETRIES_LEFT]
         );
     }
 }

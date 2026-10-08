@@ -10,7 +10,7 @@ internal class HeldPin1ChannelTest {
     fun liveChannelVerifiesWithoutHandshake() {
         val channel = Channel(held = true, connected = true)
         val candidate = syntheticPin()
-        assertEquals(Pin1VerificationResult.VERIFIED, verifyPin1OnHeldChannel(channel, candidate) { true })
+        assertEquals(Pin1VerificationResult.VERIFIED, verifyPin1OnHeldChannel(channel, candidate) { true }.result)
         assertEquals(listOf(VERIFY), channel.steps)
         assertClosed(candidate)
     }
@@ -18,7 +18,7 @@ internal class HeldPin1ChannelTest {
     @Test
     fun deadHeldChannelReleasesKeysBeforeReopening() {
         val channel = Channel(held = true, connected = false)
-        assertEquals(Pin1VerificationResult.VERIFIED, verifyPin1OnHeldChannel(channel, syntheticPin()) { true })
+        assertEquals(Pin1VerificationResult.VERIFIED, verifyPin1OnHeldChannel(channel, syntheticPin()) { true }.result)
         assertEquals(listOf(RELEASE, REOPEN, VERIFY), channel.steps)
         assertEquals(1, channel.releasedLiveKeys)
     }
@@ -28,7 +28,7 @@ internal class HeldPin1ChannelTest {
         var generation = 0
         val channel = Channel(held = false, connected = false) { generation++ }
         val candidate = syntheticPin()
-        val result = verifyPin1OnHeldChannel(channel, candidate) { generation == 0 }
+        val result = verifyPin1OnHeldChannel(channel, candidate) { generation == 0 }.result
         assertEquals(Pin1VerificationResult.CARD_UNAVAILABLE, result)
         assertEquals(listOf(RELEASE, REOPEN, RELEASE, CLOSE_FIELD), channel.steps)
         assertFalse(channel.held)
@@ -42,7 +42,7 @@ internal class HeldPin1ChannelTest {
         val candidate = syntheticPin()
         assertEquals(
             Pin1VerificationResult.CARD_UNAVAILABLE,
-            verifyPin1OnHeldChannel(channel, candidate) { false },
+            verifyPin1OnHeldChannel(channel, candidate) { false }.result,
         )
         assertTrue(channel.steps.isEmpty())
         assertTrue(channel.held)
@@ -55,7 +55,7 @@ internal class HeldPin1ChannelTest {
         val candidate = syntheticPin()
         assertEquals(
             Pin1VerificationResult.SAFETY_REFUSED,
-            verifyPin1OnHeldChannel(channel, candidate) { true },
+            verifyPin1OnHeldChannel(channel, candidate) { true }.result,
         )
         assertEquals(listOf(RELEASE, REOPEN), channel.steps)
         assertClosed(candidate)
@@ -93,11 +93,11 @@ internal class HeldPin1ChannelTest {
             connected = false
         }
 
-        override fun verify(pin1: Pin1Submission): Pin1VerificationResult {
+        override fun verify(pin1: Pin1Submission): Pin1Verification {
             steps += VERIFY
             check(held && connected) { "VERIFY needs a live held channel" }
             pin1.close()
-            return Pin1VerificationResult.VERIFIED
+            return Pin1Verification(Pin1VerificationResult.VERIFIED)
         }
     }
 

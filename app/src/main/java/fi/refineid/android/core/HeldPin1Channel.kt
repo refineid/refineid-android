@@ -19,7 +19,7 @@ internal interface HeldPin1Channel {
     fun closeField()
 
     /** Sends the one credential-bearing VERIFY on the held channel, consuming [pin1]. */
-    fun verify(pin1: Pin1Submission): Pin1VerificationResult
+    fun verify(pin1: Pin1Submission): Pin1Verification
 }
 
 /**
@@ -32,14 +32,14 @@ internal fun verifyPin1OnHeldChannel(
     channel: HeldPin1Channel,
     pin1: Pin1Submission,
     isCurrent: () -> Boolean,
-): Pin1VerificationResult {
+): Pin1Verification {
     var reopened = false
     if (!channel.isLive) {
         // A held channel whose field dropped is dead; its keys go before reconnecting.
         channel.releaseHeld()
         channel.reopen()?.let { failure ->
             pin1.close()
-            return failure
+            return Pin1Verification(failure)
         }
         reopened = true
     }
@@ -49,7 +49,7 @@ internal fun verifyPin1OnHeldChannel(
             channel.releaseHeld()
             channel.closeField()
         }
-        return Pin1VerificationResult.CARD_UNAVAILABLE
+        return Pin1Verification(Pin1VerificationResult.CARD_UNAVAILABLE)
     }
     return channel.verify(pin1)
 }

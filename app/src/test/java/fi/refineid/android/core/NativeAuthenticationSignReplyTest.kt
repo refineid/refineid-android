@@ -129,6 +129,43 @@ class NativeAuthenticationSignReplyTest {
     }
 
     @Test
+    fun decodesAWrongPinWithTheCardsRemainingCount() {
+        val reply =
+            byteArrayOf(
+                NativeAuthenticationSignWire.WRONG_PIN_TAG.toByte(),
+                SYNTHETIC_RETRIES_LEFT.toByte(),
+            )
+
+        val result = NativeAuthenticationSignReply.decode(reply)
+
+        assertEquals(
+            NativeAuthenticationSignResult.Failure(NativeAuthenticationSignFailure.WRONG_PIN, SYNTHETIC_RETRIES_LEFT),
+            result,
+        )
+        assertTrue(reply.all { it == 0.toByte() })
+    }
+
+    @Test
+    fun refusesAWrongPinWithoutAPositiveCount() {
+        val replies =
+            listOf(
+                byteArrayOf(NativeAuthenticationSignWire.WRONG_PIN_TAG.toByte()),
+                byteArrayOf(NativeAuthenticationSignWire.WRONG_PIN_TAG.toByte(), 0),
+                byteArrayOf(
+                    NativeAuthenticationSignWire.WRONG_PIN_TAG.toByte(),
+                    (NativeAuthenticationSignWire.MAXIMUM_RETRIES + 1).toByte(),
+                ),
+            )
+        for (reply in replies) {
+            val result = NativeAuthenticationSignReply.decode(reply)
+            assertEquals(
+                NativeAuthenticationSignResult.Failure(NativeAuthenticationSignFailure.BRIDGE_ERROR),
+                result,
+            )
+        }
+    }
+
+    @Test
     fun mapsEveryCoarseFailure() {
         val expected =
             listOf(
@@ -138,7 +175,6 @@ class NativeAuthenticationSignReplyTest {
                 NativeAuthenticationSignFailure.INVALID_PIN,
                 NativeAuthenticationSignFailure.SAFETY_REFUSED,
                 NativeAuthenticationSignFailure.PIN_LOCKED,
-                NativeAuthenticationSignFailure.WRONG_PIN,
                 NativeAuthenticationSignFailure.VERIFICATION_REJECTED,
                 NativeAuthenticationSignFailure.SIGNING_REJECTED,
                 NativeAuthenticationSignFailure.PACE_REJECTED,
@@ -151,7 +187,6 @@ class NativeAuthenticationSignReplyTest {
                 NativeAuthenticationSignWire.INVALID_PIN_TAG,
                 NativeAuthenticationSignWire.SAFETY_REFUSED_TAG,
                 NativeAuthenticationSignWire.PIN_LOCKED_TAG,
-                NativeAuthenticationSignWire.WRONG_PIN_TAG,
                 NativeAuthenticationSignWire.VERIFICATION_REJECTED_TAG,
                 NativeAuthenticationSignWire.SIGNING_REJECTED_TAG,
                 NativeAuthenticationSignWire.PACE_REJECTED_TAG,
@@ -242,6 +277,7 @@ class NativeAuthenticationSignReplyTest {
         const val NON_DIGIT_PIN_TEXT = "123a"
         const val TOO_LONG_PIN_TEXT = "1234567890123"
         const val SYNTHETIC_SIGNATURE_BYTE: Byte = 0x5A
+        const val SYNTHETIC_RETRIES_LEFT = 2
         const val SINGLE_EXCESS_BYTE_COUNT = 1
         const val SINGLE_MISSING_BYTE_COUNT = 1
     }

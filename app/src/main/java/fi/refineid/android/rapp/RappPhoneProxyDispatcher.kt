@@ -534,7 +534,7 @@ internal class RappPhoneProxyDispatcher(
                             onApproved = { pin1Submission ->
                                 if (pinCache?.isRejected(pin1Submission) == true) {
                                     pin1Submission.close()
-                                    respondCredentialRejected(opId, bridge)
+                                    respondKnownRejectedPin(opId, bridge)
                                 } else {
                                     pendingPin1.remove(opIdHex)?.close()
                                     pendingPin1[opIdHex] = pin1Submission
@@ -807,15 +807,42 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
-    private fun respondCredentialRejected(
+    /**
+     * Reports a credential the card refused (RAPP v26.10.1 section 10.2). A
+     * wrong PIN with attempts left keeps the pairing; a blocked counter, or a
+     * refusal whose count is unknown, revokes it.
+     */
+    private fun respondRejectedCredential(
         opId: ByteArray,
+        remainingRetries: Int?,
         bridge: RappOperationBridge,
     ) {
         try {
-            val resp = bridge.credentialRejected(opId, RappClock.monotonicMs())
+            val resp =
+                when (val action = RappCredentialRejection.of(remainingRetries)) {
+                    is RappCredentialRejection.AttemptsRemain -> {
+                        bridge.invalidCredential(opId, action.remainingRetries)
+                    }
+
+                    RappCredentialRejection.Blocked -> {
+                        bridge.credentialRejected(opId, RappClock.monotonicMs())
+                    }
+                }
             handleBridgeAction(resp, bridge)
         } catch (_: Exception) {
         }
+    }
+
+    /**
+     * Refuses a PIN this phone already saw the card reject. No card command
+     * runs and no attempt is spent, so the session and pairing stay; the
+     * requester learns the holder's submission was not usable.
+     */
+    private fun respondKnownRejectedPin(
+        opId: ByteArray,
+        bridge: RappOperationBridge,
+    ) {
+        respondBridgeDeny(opId, bridge)
     }
 
     private fun respondBridgeCertificate(
@@ -987,7 +1014,7 @@ internal class RappPhoneProxyDispatcher(
                     // Check if candidate PIN was already rejected
                     if (pinCache?.isRejected(pin1Submission) == true) {
                         AppTrace.rappOperationDenied(opIdHex, "known_rejected_pin")
-                        respondCredentialRejected(opId, bridge)
+                        respondKnownRejectedPin(opId, bridge)
                         return@launch
                     }
 
@@ -1017,13 +1044,14 @@ internal class RappPhoneProxyDispatcher(
 
                     if (pinCache?.isVerified(pin1Submission) != true) {
                         val candidate = Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes())
-                        val failure = service.verifyAuthenticationPin(candidate).authenticationFailure()
+                        val verification = service.verifyAuthenticationPin(candidate)
+                        val failure = verification.result.authenticationFailure()
                         if (failure != null) {
                             handleBrowserAuthFailure(
                                 opId,
                                 opIdHex,
                                 pin1Submission,
-                                AuthenticationSignResult.Failure(failure),
+                                AuthenticationSignResult.Failure(failure, verification.remainingRetries),
                                 bridge,
                             )
                             return@launch
@@ -1200,7 +1228,7 @@ internal class RappPhoneProxyDispatcher(
                 pinCache?.recordRejected(pin1Submission.copyBytes())
             }
             primedCanStore?.forgetPin1()
-            respondCredentialRejected(opId, bridge)
+            respondRejectedCredential(opId, result.remainingRetries, bridge)
             onAuthenticationRejected()
         } else {
             respondCardRemoved(opId, bridge)
@@ -1422,10 +1450,14 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
     ) {
         AppTrace.rappOperationFailed("document_sign", opIdHex, result.kind.name)
-        if (result.kind == QualifiedSignFailure.WRONG_PIN) {
-            respondCredentialRejected(opId, bridge)
-        } else {
-            respondCardRemoved(opId, bridge)
+        when (result.kind) {
+            QualifiedSignFailure.WRONG_PIN, QualifiedSignFailure.PIN_LOCKED -> {
+                respondRejectedCredential(opId, result.remainingRetries, bridge)
+            }
+
+            else -> {
+                respondCardRemoved(opId, bridge)
+            }
         }
     }
 

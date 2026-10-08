@@ -50,6 +50,11 @@ internal object NativeAuthenticationSignWire {
     const val TAG_OFFSET = 0
     const val ALGORITHM_OFFSET = 1
     const val FAILURE_REPLY_LENGTH = 1
+    const val WRONG_PIN_REPLY_LENGTH = 2
+    const val RETRIES_OFFSET = 1
+
+    /** The card's retry counter is the low nibble of SW 63Cx. */
+    const val MAXIMUM_RETRIES = 0x0F
     const val SIGNATURE_REPLY_HEADER_LENGTH = 2
 }
 
@@ -321,8 +326,10 @@ internal sealed interface NativeAuthenticationSignResult {
         override fun toString(): String = "Success(" + signature + ")"
     }
 
+    /** [remainingRetries] is the card's count after a wrong PIN, and null otherwise. */
     data class Failure(
         val kind: NativeAuthenticationSignFailure,
+        val remainingRetries: Int? = null,
     ) : NativeAuthenticationSignResult
 }
 
@@ -347,8 +354,10 @@ internal sealed interface AuthenticationSignResult {
         override fun toString(): String = "Success(" + signature + ")"
     }
 
+    /** [remainingRetries] is the card's count after a wrong PIN, and null otherwise. */
     data class Failure(
         val kind: AuthenticationSignFailure,
+        val remainingRetries: Int? = null,
     ) : AuthenticationSignResult
 }
 
@@ -385,7 +394,7 @@ internal object NativeAuthenticationSignReply {
                 }
 
                 NativeAuthenticationSignWire.WRONG_PIN_TAG -> {
-                    decodeFailure(reply, NativeAuthenticationSignFailure.WRONG_PIN)
+                    decodeWrongPin(reply)
                 }
 
                 NativeAuthenticationSignWire.VERIFICATION_REJECTED_TAG -> {
@@ -438,6 +447,19 @@ internal object NativeAuthenticationSignReply {
                     ),
             ),
         )
+    }
+
+    /** A wrong PIN carries the card's remaining count, which is never zero. */
+    private fun decodeWrongPin(reply: ByteArray): NativeAuthenticationSignResult {
+        if (reply.size != NativeAuthenticationSignWire.WRONG_PIN_REPLY_LENGTH) {
+            return bridgeFailure()
+        }
+        val retries = reply[NativeAuthenticationSignWire.RETRIES_OFFSET].toUnsignedInt()
+        return if (retries in 1..NativeAuthenticationSignWire.MAXIMUM_RETRIES) {
+            NativeAuthenticationSignResult.Failure(NativeAuthenticationSignFailure.WRONG_PIN, retries)
+        } else {
+            bridgeFailure()
+        }
     }
 
     private fun decodeFailure(

@@ -710,7 +710,7 @@ internal class UsbReaderController(
     override fun verifyAuthenticationPin(
         pin1: Pin1Submission,
         expectedGeneration: Int?,
-    ): Pin1VerificationResult =
+    ): fi.refineid.android.core.Pin1Verification =
         fi.refineid.android.core.verifyQueuedPin1(
             pin1,
             ioExecutor,

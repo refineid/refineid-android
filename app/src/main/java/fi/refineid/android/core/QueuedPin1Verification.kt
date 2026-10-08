@@ -17,24 +17,24 @@ internal fun verifyQueuedPin1(
     isReady: () -> Boolean,
     currentGeneration: () -> Int,
     expectedGeneration: Int,
-    verify: (Pin1Submission) -> Pin1VerificationResult?,
-): Pin1VerificationResult {
+    verify: (Pin1Submission) -> Pin1Verification?,
+): Pin1Verification {
     if (Looper.myLooper() == Looper.getMainLooper() || !isReady() || expectedGeneration != currentGeneration()) {
         pin1.close()
-        return Pin1VerificationResult.CARD_UNAVAILABLE
+        return Pin1Verification(Pin1VerificationResult.CARD_UNAVAILABLE)
     }
-    val completion = CompletableFuture<Pin1VerificationResult>()
+    val completion = CompletableFuture<Pin1Verification>()
     try {
         executor.execute {
             val result =
                 try {
                     if (expectedGeneration == currentGeneration() && isReady()) {
-                        verify(pin1) ?: Pin1VerificationResult.CARD_UNAVAILABLE
+                        verify(pin1) ?: Pin1Verification(Pin1VerificationResult.CARD_UNAVAILABLE)
                     } else {
-                        Pin1VerificationResult.CARD_UNAVAILABLE
+                        Pin1Verification(Pin1VerificationResult.CARD_UNAVAILABLE)
                     }
                 } catch (_: RuntimeException) {
-                    Pin1VerificationResult.BRIDGE_ERROR
+                    Pin1Verification(Pin1VerificationResult.BRIDGE_ERROR)
                 } finally {
                     pin1.close()
                 }
@@ -42,7 +42,7 @@ internal fun verifyQueuedPin1(
         }
     } catch (_: RejectedExecutionException) {
         pin1.close()
-        return Pin1VerificationResult.CARD_UNAVAILABLE
+        return Pin1Verification(Pin1VerificationResult.CARD_UNAVAILABLE)
     }
     return completion.awaitPreservingInterrupt()
 }

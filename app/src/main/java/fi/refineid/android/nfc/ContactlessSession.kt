@@ -120,11 +120,13 @@ internal class ContactlessSession(
     fun verifyAuthenticationPin(
         pin1: Pin1Submission,
         isCurrent: () -> Boolean,
-    ): fi.refineid.android.core.Pin1VerificationResult {
+    ): fi.refineid.android.core.Pin1Verification {
         checkOwnerThread()
         if (isClosed) {
             pin1.close()
-            return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
+            return fi.refineid.android.core.Pin1Verification(
+                fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE,
+            )
         }
         return verifyPin1OnHeldChannel(pin1Channel, pin1, isCurrent)
     }
@@ -169,7 +171,7 @@ internal class ContactlessSession(
 
             override fun closeField() = closeIsoDep()
 
-            override fun verify(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult =
+            override fun verify(pin1: Pin1Submission): fi.refineid.android.core.Pin1Verification =
                 fi.refineid.android.core.NativePin1Verification.verify(
                     pin1 = pin1,
                     exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
@@ -287,7 +289,10 @@ internal class ContactlessSession(
             }
 
             is NativeAuthenticationSignResult.Failure -> {
-                AuthenticationSignResult.Failure(nativeResult.kind.toContactlessFailure())
+                AuthenticationSignResult.Failure(
+                    nativeResult.kind.toContactlessFailure(),
+                    nativeResult.remainingRetries,
+                )
             }
         }
 
@@ -421,7 +426,10 @@ internal class ContactlessSession(
             }
 
             is NativeQualifiedSignResult.Failure -> {
-                QualifiedSignResult.Failure(nativeResult.kind.toContactlessQualifiedFailure())
+                QualifiedSignResult.Failure(
+                    nativeResult.kind.toContactlessQualifiedFailure(),
+                    nativeResult.remainingRetries,
+                )
             }
         }
     }
