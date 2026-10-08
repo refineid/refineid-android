@@ -364,7 +364,8 @@ internal class RappPhoneProxyDispatcher(
         action: uniffi.refineid_rapp.RappBridgeAction,
         bridge: RappOperationBridge,
     ) {
-        action.frame?.let { frame ->
+        // A status report travels with the result it re-delivers, in order.
+        for (frame in listOfNotNull(action.frame) + action.additionalFrames) {
             try {
                 activeListener?.send(frame)
             } catch (_: Exception) {
@@ -410,7 +411,7 @@ internal class RappPhoneProxyDispatcher(
                 return true
             }
 
-            RappBridgeActionKind.CANCELLED, RappBridgeActionKind.TERMINAL -> {
+            RappBridgeActionKind.TERMINAL -> {
                 if (opIdHex != null) {
                     dismissInbox(opIdHex)
                     pendingPin1.remove(opIdHex)?.close()
