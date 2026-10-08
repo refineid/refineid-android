@@ -45,8 +45,10 @@ The diagnostic path:
 6. lets Chromium select one of the exact supported JCA names:
    `SHA256withRSA`, `SHA384withRSA`, `SHA512withRSA`, their three `/PSS`
    counterparts, `SHA256withECDSA`, or `SHA384withECDSA`;
-7. prompts for one holder-entered PIN1 submission only when Chromium actually
-   requests a signature; and
+7. reuses locally accepted PIN1 when Chromium requests a signature; the app
+   prepares credentials before opening Browser as described in
+   [authentication preparation](0042-authentication-preparation.md), with a
+   secure signature-time prompt retained as a fallback; and
 8. serializes card use, bounds and zeroizes the message, and consumes the PIN
    and signer exactly once.
 

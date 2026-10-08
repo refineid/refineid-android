@@ -5,6 +5,19 @@ internal interface AuthenticationCardService {
     val requiresLocalPin: Boolean
         get() = true
 
+    /**
+     * Consumes PIN1; the default refuses services without local verification.
+     * Naming [expectedGeneration] verifies only on that ready card session and
+     * never waits or prompts for another card.
+     */
+    fun verifyAuthenticationPin(
+        pin1: Pin1Submission,
+        expectedGeneration: Int? = null,
+    ): Pin1VerificationResult {
+        pin1.close()
+        return Pin1VerificationResult.CARD_UNAVAILABLE
+    }
+
     fun requestAuthenticationCertificate(onResult: (NativeAuthenticationCertificate?) -> Unit)
 
     fun signAuthenticationMessage(

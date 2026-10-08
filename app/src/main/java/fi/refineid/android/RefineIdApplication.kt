@@ -13,11 +13,13 @@ import fi.refineid.android.nfc.NfcReaderController
 import fi.refineid.android.prime.PrimedCanStore
 import fi.refineid.android.settings.TimestampAuthorityStore
 import fi.refineid.android.trust.CaCertificateStore
+import fi.refineid.android.usb.CardPresence
 import fi.refineid.android.usb.UsbReaderController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 
 class RefineIdApplication : Application() {
@@ -30,6 +32,55 @@ class RefineIdApplication : Application() {
     internal lateinit var caCertificateStore: CaCertificateStore
         private set
     internal val authenticationPinCache = AuthenticationPinCache()
+    internal val authenticationGeneration =
+        java.util.concurrent.atomic
+            .AtomicInteger()
+    internal val authenticationCustodyLock = Any()
+
+    /** Published by whichever thread observed the rejection; readers join it on Main. */
+    @Volatile
+    internal var authenticationInvalidation: kotlinx.coroutines.Job? = null
+        private set
+    private val authenticationScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+
+    internal fun retainAuthenticationPin(
+        pin: ByteArray,
+        expectedGeneration: Long,
+    ): Boolean {
+        try {
+            synchronized(authenticationCustodyLock) {
+                if (authenticationPinCache.generation != expectedGeneration) return false
+                if (primedCanStore.isPrimed()) primedCanStore.writePin1(pin.copyOf())
+                return authenticationPinCache.recordVerified(pin.copyOf(), expectedGeneration)
+            }
+        } finally {
+            pin.fill(0)
+        }
+    }
+
+    internal fun invalidateAuthentication() {
+        synchronized(authenticationCustodyLock) {
+            authenticationGeneration.incrementAndGet()
+            authenticationPinCache.clear()
+        }
+        fi.refineid.android.core.CanSessionStore
+            .drop()
+        authenticationInvalidation =
+            authenticationScope.launch {
+                val nfcCleared = kotlinx.coroutines.CompletableDeferred<Unit>()
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    nfcReaderController.forgetPrimedCard { nfcCleared.complete(Unit) }
+                    readerController.invalidateAuthenticationSession()
+                    rappProxyDispatcher.disconnectClient()
+                }
+                nfcCleared.await()
+                synchronized(authenticationCustodyLock) {
+                    fi.refineid.android.core.CardPhotoStore
+                        .clear()
+                }
+            }
+    }
+
     internal lateinit var pinPromptBroker: ExternalKeyPinPromptBroker
         private set
     internal lateinit var externalKeyProviderRuntime: ExternalKeyProviderRuntime
@@ -215,26 +266,40 @@ class RefineIdApplication : Application() {
             inbox = rappAuthorizationInbox,
             pinCache = authenticationPinCache,
             primedCanStore = primedStore,
-            activeAuthCertDer = { nfcReaderController.currentAuthenticationCertificateDer },
+            onAuthenticationRejected = ::invalidateAuthentication,
+            onAuthenticationVerified = ::retainAuthenticationPin,
+            activeAuthCertDer = {
+                if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
+                    null
+                } else {
+                    nfcReaderController.currentAuthenticationCertificateDer
+                }
+            },
             authCardService = {
-                if (readerController.isCardReady) {
+                if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
                     readerController
                 } else {
                     nfcReaderController.authenticationCardService
                 }
             },
             qualifiedCardService = {
-                if (readerController.isCardReady) {
+                if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
                     readerController.qualifiedCardService
                 } else {
                     nfcReaderController.qualifiedCardService
                 }
             },
             isCardReady = {
-                readerController.isCardReady || nfcReaderController.isCardReady
+                if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
+                    readerController.isCardReady
+                } else {
+                    nfcReaderController.isCardReady
+                }
             },
             awaitCardReady = {
-                if (readerController.isCardReady || nfcReaderController.isCardReady) {
+                if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
+                    readerController.awaitCardReady()
+                } else if (nfcReaderController.isCardReady) {
                     true
                 } else {
                     coroutineScope {
@@ -247,7 +312,11 @@ class RefineIdApplication : Application() {
                             }
                             nfcWait.onAwait { ready ->
                                 usbWait.cancel()
-                                ready
+                                if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
+                                    readerController.awaitCardReady()
+                                } else {
+                                    ready
+                                }
                             }
                         }
                     }

@@ -20,6 +20,7 @@ import fi.refineid.android.core.QualifiedCardService
 import fi.refineid.android.core.QualifiedSignFailure
 import fi.refineid.android.core.QualifiedSignResult
 import fi.refineid.android.core.QualifiedSigningAlgorithm
+import fi.refineid.android.core.authenticationFailure
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.prime.PrimedCanStore
 import kotlinx.coroutines.CompletableDeferred
@@ -58,6 +59,8 @@ internal class RappPhoneProxyDispatcher(
     private val qualifiedCardService: () -> QualifiedCardService?,
     private val isCardReady: () -> Boolean = { false },
     private val awaitCardReady: suspend () -> Boolean = { false },
+    private val onAuthenticationRejected: () -> Unit = {},
+    private val onAuthenticationVerified: ((ByteArray, Long) -> Boolean)? = null,
     private val activeAuthCertDer: () -> ByteArray? = { null },
 ) : AutoCloseable {
     private var activeListener: StreamRelayListener? = null
@@ -970,6 +973,7 @@ internal class RappPhoneProxyDispatcher(
                         respondCardRemoved(opId, bridge)
                         return@launch
                     }
+                    val cacheGeneration = pinCache?.generation
                     val startedNs = System.nanoTime()
                     val opIdHex = opId.joinToString("") { "%02x".format(it) }
                     val algorithm = resolveSignAlgorithm(desc)
@@ -1010,6 +1014,20 @@ internal class RappPhoneProxyDispatcher(
                         return@launch
                     }
 
+                    if (pinCache?.isVerified(pin1Submission) != true) {
+                        val candidate = Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes())
+                        val failure = service.verifyAuthenticationPin(candidate).authenticationFailure()
+                        if (failure != null) {
+                            handleBrowserAuthFailure(
+                                opId,
+                                opIdHex,
+                                pin1Submission,
+                                AuthenticationSignResult.Failure(failure),
+                                bridge,
+                            )
+                            return@launch
+                        }
+                    }
                     val authResult =
                         performBrowserAuthWithRetry(
                             opId = opId,
@@ -1027,6 +1045,7 @@ internal class RappPhoneProxyDispatcher(
                                 opId = opId,
                                 opIdHex = opIdHex,
                                 startedNs = startedNs,
+                                cacheGeneration = cacheGeneration,
                                 pin1Submission = pin1Submission,
                                 service = service,
                                 result = result,
@@ -1110,14 +1129,22 @@ internal class RappPhoneProxyDispatcher(
         opId: ByteArray,
         opIdHex: String,
         startedNs: Long,
+        cacheGeneration: Long?,
         pin1Submission: Pin1Submission,
         service: AuthenticationCardService,
         result: AuthenticationSignResult.Success,
         bridge: RappOperationBridge,
     ) {
         try {
-            pinCache?.recordVerified(pin1Submission.copyBytes())
-            if (primedCanStore?.isPrimed() == true) {
+            if (onAuthenticationVerified != null && cacheGeneration != null) {
+                if (!onAuthenticationVerified.invoke(pin1Submission.copyBytes(), cacheGeneration)) {
+                    result.signature.close()
+                    respondCardRemoved(opId, bridge)
+                    return
+                }
+            } else if (pinCache?.recordVerified(pin1Submission.copyBytes(), cacheGeneration) == true &&
+                primedCanStore?.isPrimed() == true
+            ) {
                 primedCanStore.writePin1(pin1Submission.copyBytes())
             }
         } catch (_: IllegalStateException) {
@@ -1167,10 +1194,13 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
     ) {
         AppTrace.rappOperationFailed("browser_auth", opIdHex, result.kind.name)
-        if (result.kind == AuthenticationSignFailure.WRONG_PIN) {
-            pinCache?.recordRejected(pin1Submission.copyBytes())
+        if (result.kind == AuthenticationSignFailure.WRONG_PIN || result.kind == AuthenticationSignFailure.PIN_LOCKED) {
+            if (result.kind == AuthenticationSignFailure.WRONG_PIN) {
+                pinCache?.recordRejected(pin1Submission.copyBytes())
+            }
             primedCanStore?.forgetPin1()
             respondCredentialRejected(opId, bridge)
+            onAuthenticationRejected()
         } else {
             respondCardRemoved(opId, bridge)
         }

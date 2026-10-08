@@ -83,6 +83,7 @@ internal fun BrowserHarness(
     nfcStatus: NfcReaderStatus? = null,
     nfcPrimed: Boolean = false,
     enabled: Boolean = true,
+    onPrepareAuthentication: ((() -> Unit, () -> Unit) -> Unit)? = null,
     onNfcConnect: (CanSubmission?, Pin1Submission) -> Unit = { _, _ -> },
     onWrongPin: (() -> Unit)? = null,
     launcher: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
@@ -94,7 +95,12 @@ internal fun BrowserHarness(
     val open = {
         if (enabled) {
             AppTrace.browserOpened()
-            isOpen = true
+            val showBrowser = { isOpen = true }
+            if (cardService.requiresLocalPin) {
+                onPrepareAuthentication?.invoke(showBrowser, {}) ?: showBrowser()
+            } else {
+                showBrowser()
+            }
         }
     }
     if (launcher != null) {
@@ -117,6 +123,7 @@ internal fun BrowserHarness(
             pinCache = pinCache,
             nfcStatus = nfcStatus,
             nfcPrimed = nfcPrimed,
+            onPrepareAuthentication = onPrepareAuthentication,
             onNfcConnect = onNfcConnect,
             onWrongPin = onWrongPin,
             onClose = {
@@ -138,6 +145,7 @@ private fun BrowserDialog(
     nfcStatus: NfcReaderStatus?,
     nfcPrimed: Boolean,
     onNfcConnect: (CanSubmission?, Pin1Submission) -> Unit,
+    onPrepareAuthentication: ((() -> Unit, () -> Unit) -> Unit)? = null,
     onWrongPin: (() -> Unit)? = null,
     onClose: () -> Unit,
 ) {
@@ -215,8 +223,12 @@ private fun BrowserDialog(
                         } else {
                             { request ->
                                 if (isActive.get()) {
-                                    unlockRequest = request
-                                    unlockWaiting = false
+                                    if (onPrepareAuthentication != null) {
+                                        onPrepareAuthentication({ request.retry() }, { request.giveUp() })
+                                    } else {
+                                        unlockRequest = request
+                                        unlockWaiting = false
+                                    }
                                 } else {
                                     request.giveUp()
                                 }
@@ -287,7 +299,7 @@ private fun BrowserDialogContent(
         // over its bottom edge, the way the reference platform's
         // browser keeps its bar over the content.
         Box(modifier = Modifier.fillMaxSize()) {
-            var urlText by remember { mutableStateOf("https://card.refineid.fi") }
+            var urlText by remember { mutableStateOf("") }
             var liveWebView by remember { mutableStateOf<WebView?>(null) }
             val navigate = {
                 val destination = normalizeHttpsUrl(urlText)
@@ -298,13 +310,6 @@ private fun BrowserDialogContent(
                     AppTrace.browserNavigationBlocked()
                 }
                 Unit
-            }
-
-            LaunchedEffect(liveWebView) {
-                val current = liveWebView
-                if (current != null && urlText.isNotBlank()) {
-                    normalizeHttpsUrl(urlText)?.let { current.loadUrl(it) }
-                }
             }
 
             BrowserWebView(

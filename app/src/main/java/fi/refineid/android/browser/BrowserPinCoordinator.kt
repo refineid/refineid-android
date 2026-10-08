@@ -7,6 +7,7 @@ import fi.refineid.android.core.AuthenticationSignResult
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.NativeAuthenticationSignature
 import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.authenticationFailure
 import java.security.SignatureException
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
@@ -133,39 +134,52 @@ internal class BrowserPinCoordinator(
         pin1: Pin1Submission,
     ): NativeAuthenticationSignature {
         // Copy for the cache decision before the card call consumes the PIN.
+        val cacheGeneration = pinCache?.generation
         val pinCopy = pin1.copyBytes()
         publishStatus(BrowserSignatureStatus.SIGNING)
-        return when (
-            val result =
-                cardService.signAuthenticationMessage(
-                    algorithm = algorithm,
-                    pin1 = pin1,
-                    message = message,
-                )
-        ) {
-            is AuthenticationSignResult.Success -> {
-                retainOutcome(pinCopy, PinOutcome.VERIFIED)
-                publishStatus(BrowserSignatureStatus.SUCCEEDED)
-                result.signature
-            }
-
-            is AuthenticationSignResult.Failure -> {
-                if (result.kind == AuthenticationSignFailure.WRONG_PIN ||
-                    result.kind == AuthenticationSignFailure.PIN_LOCKED
-                ) {
-                    pinCache?.clear()
-                }
-                retainOutcome(
-                    pinCopy,
-                    if (result.kind == AuthenticationSignFailure.WRONG_PIN) {
-                        PinOutcome.REJECTED
+        try {
+            return when (
+                val result =
+                    if (cardService.requiresLocalPin && pinCache?.isVerified(pin1) != true) {
+                        val checked = Pin1Submission.fromOwnedBytes(pinCopy.copyOf())
+                        val failure = cardService.verifyAuthenticationPin(checked).authenticationFailure()
+                        if (failure == null) {
+                            cardService.signAuthenticationMessage(algorithm, pin1, message)
+                        } else {
+                            pin1.close()
+                            AuthenticationSignResult.Failure(failure)
+                        }
                     } else {
-                        PinOutcome.DISCARD
-                    },
-                )
-                publishStatus(result.kind.toBrowserStatus())
-                throw SignatureException("card authentication signature failed")
+                        cardService.signAuthenticationMessage(algorithm, pin1, message)
+                    }
+            ) {
+                is AuthenticationSignResult.Success -> {
+                    retainOutcome(pinCopy, PinOutcome.VERIFIED, cacheGeneration)
+                    publishStatus(BrowserSignatureStatus.SUCCEEDED)
+                    result.signature
+                }
+
+                is AuthenticationSignResult.Failure -> {
+                    if (result.kind == AuthenticationSignFailure.WRONG_PIN ||
+                        result.kind == AuthenticationSignFailure.PIN_LOCKED
+                    ) {
+                        pinCache?.clear()
+                    }
+                    retainOutcome(
+                        pinCopy,
+                        if (result.kind == AuthenticationSignFailure.WRONG_PIN) {
+                            PinOutcome.REJECTED
+                        } else {
+                            PinOutcome.DISCARD
+                        },
+                    )
+                    publishStatus(result.kind.toBrowserStatus())
+                    throw SignatureException("card authentication signature failed")
+                }
             }
+        } finally {
+            pinCopy.fill(0)
+            pin1.close()
         }
     }
 
@@ -174,6 +188,7 @@ internal class BrowserPinCoordinator(
     private fun retainOutcome(
         pinCopy: ByteArray?,
         outcome: PinOutcome,
+        expectedGeneration: Long? = null,
     ) {
         if (pinCopy == null) {
             return
@@ -184,7 +199,7 @@ internal class BrowserPinCoordinator(
             return
         }
         when (outcome) {
-            PinOutcome.VERIFIED -> cache.recordVerified(pinCopy)
+            PinOutcome.VERIFIED -> cache.recordVerified(pinCopy.copyOf(), expectedGeneration)
             PinOutcome.REJECTED -> cache.recordRejected(pinCopy)
             PinOutcome.DISCARD -> pinCopy.fill(0)
         }

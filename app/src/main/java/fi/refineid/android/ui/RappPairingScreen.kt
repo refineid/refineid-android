@@ -59,6 +59,8 @@ private val OFFERING_CODE_LETTER_SPACING = 2.sp
 internal fun RappPairingScreen(
     model: RappPairingModel,
     modifier: Modifier = Modifier,
+    authenticationReady: Boolean = true,
+    onEnableRemoteAccess: () -> Unit = { model.setRemoteAccessEnabled(true) },
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -69,8 +71,10 @@ internal fun RappPairingScreen(
             contract = ActivityResultContracts.RequestPermission(),
         ) { _ -> }
 
-    LaunchedEffect(model.isRemoteAccessEnabled, phase) {
-        if (model.isRemoteAccessEnabled && phase is PairingPhase.Idle && model.activeConnectedPeer == null) {
+    LaunchedEffect(model.isRemoteAccessEnabled, phase, authenticationReady) {
+        if (authenticationReady && model.isRemoteAccessEnabled && phase is PairingPhase.Idle &&
+            model.activeConnectedPeer == null
+        ) {
             model.createOffer()
         }
     }
@@ -94,7 +98,7 @@ internal fun RappPairingScreen(
                 } else {
                     model.reset()
                 }
-                model.setRemoteAccessEnabled(isChecked)
+                if (isChecked) onEnableRemoteAccess() else model.setRemoteAccessEnabled(false)
             },
         )
 

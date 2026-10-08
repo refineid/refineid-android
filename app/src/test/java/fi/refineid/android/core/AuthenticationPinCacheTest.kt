@@ -117,6 +117,21 @@ class AuthenticationPinCacheTest {
         submission.close()
     }
 
+    @Test
+    fun readinessExpiresAndStaleSuccessCannotRestoreClearedCache() {
+        var now = 0L
+        val cache = AuthenticationPinCache(lifetimeMillis = WINDOW, clock = { now })
+        cache.recordVerified(pinBytes())
+        now = WINDOW
+        assertFalse(cache.hasPin)
+        val generation = cache.generation
+        cache.clear()
+        val stale = pinBytes()
+        assertFalse(cache.recordVerified(stale, generation))
+        assertTrue(stale.all { it == 0.toByte() })
+        assertFalse(cache.hasPin)
+    }
+
     private fun pinBytes(): ByteArray = PIN_BYTES.copyOf()
 
     private companion object {

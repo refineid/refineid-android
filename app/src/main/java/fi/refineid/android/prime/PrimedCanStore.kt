@@ -147,6 +147,9 @@ internal class PrimedCanStore(
     }
 
     @Synchronized
+    fun hasAuthCertificate(): Boolean = preferences.contains(ENTRY_AUTH_CERT)
+
+    @Synchronized
     fun readAuthCertificateDer(): ByteArray? {
         val b64 = preferences.getString(ENTRY_AUTH_CERT, null) ?: return null
         return decodeBase64(b64)

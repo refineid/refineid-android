@@ -27,20 +27,18 @@ internal class NfcAuthenticationCardService(
     private val currentGeneration: () -> Int,
     private val activeSession: () -> ContactlessSession?,
     private val onCardLost: (Int) -> Unit,
+    private val cachedCertificate: () -> NativeAuthenticationCertificate? = { null },
+    private val awaitReady: suspend () -> Boolean = { false },
 ) : AuthenticationCardService {
     /** Copies the public leaf while preserving session thread confinement. */
     override fun requestAuthenticationCertificate(onResult: (NativeAuthenticationCertificate?) -> Unit) {
-        if (!isReady()) {
-            onResult(null)
-            return
-        }
         val generation = currentGeneration()
         try {
             probeExecutor.execute {
                 val certificate =
                     if (generation == currentGeneration()) {
                         try {
-                            activeSession()?.copyAuthenticationCertificate()
+                            activeSession()?.copyAuthenticationCertificate() ?: cachedCertificate()
                         } catch (_: IllegalStateException) {
                             null
                         }
@@ -58,6 +56,38 @@ internal class NfcAuthenticationCardService(
             }
         } catch (_: RejectedExecutionException) {
             onResult(null)
+        }
+    }
+
+    override fun verifyAuthenticationPin(
+        pin1: Pin1Submission,
+        expectedGeneration: Int?,
+    ): fi.refineid.android.core.Pin1VerificationResult {
+        if (Looper.myLooper() == Looper.getMainLooper() ||
+            (expectedGeneration == null && !isReady() && !kotlinx.coroutines.runBlocking { awaitReady() })
+        ) {
+            pin1.close()
+            return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
+        }
+        val generation = expectedGeneration ?: currentGeneration()
+        val isCurrent = { generation == currentGeneration() && isReady() }
+        return fi.refineid.android.core.verifyQueuedPin1(
+            pin1,
+            probeExecutor,
+            { isReady() },
+            { currentGeneration() },
+            generation,
+        ) { submission ->
+            val result = activeSession()?.verifyAuthenticationPin(submission, isCurrent)
+            val isLost =
+                result == null || result == fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE ||
+                    result == fi.refineid.android.core.Pin1VerificationResult.TRANSPORT_ERROR ||
+                    result == fi.refineid.android.core.Pin1VerificationResult.BRIDGE_ERROR
+            // Superseded work leaves the session to whoever superseded it.
+            if (isLost && generation == currentGeneration()) {
+                onCardLost(generation)
+            }
+            result
         }
     }
 
@@ -92,7 +122,11 @@ internal class NfcAuthenticationCardService(
         pin1: Pin1Submission,
         input: ByteArray,
     ): AuthenticationSignResult {
-        if (Looper.myLooper() == Looper.getMainLooper() || !isReady()) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            pin1.close()
+            return AuthenticationSignResult.Failure(AuthenticationSignFailure.CARD_UNAVAILABLE)
+        }
+        if (!isReady() && !kotlinx.coroutines.runBlocking { awaitReady() }) {
             pin1.close()
             return AuthenticationSignResult.Failure(AuthenticationSignFailure.CARD_UNAVAILABLE)
         }

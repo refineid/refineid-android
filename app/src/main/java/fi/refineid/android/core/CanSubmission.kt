@@ -23,6 +23,11 @@ internal class CanSubmission private constructor(
             ownedBytes?.let { String(it, Charsets.US_ASCII) }
         }
 
+    fun copy(): CanSubmission =
+        synchronized(this) {
+            CanSubmission(checkNotNull(ownedBytes) { "CAN submission is no longer available" }.copyOf())
+        }
+
     override fun close() {
         synchronized(this) {
             ownedBytes?.fill(0)

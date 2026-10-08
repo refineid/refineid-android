@@ -395,6 +395,20 @@ internal class CcidUsbSession(
         return sessionMaterial.copyAuthenticationCertificate()
     }
 
+    fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult {
+        checkOwnerThread()
+        if (isClosed) {
+            pin1.close()
+            return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
+        }
+        return fi.refineid.android.core.NativePin1Verification.verify(
+            pin1 = pin1,
+            exchange = nativeExchange,
+            exchangeLevel = exchangeLevel,
+            heldSession = contactlessSessionActive,
+        )
+    }
+
     fun authenticateAndSign(
         algorithm: AuthenticationSigningAlgorithm,
         pin1: Pin1Submission,
