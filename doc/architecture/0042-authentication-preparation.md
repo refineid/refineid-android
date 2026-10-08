@@ -63,7 +63,11 @@ cancellation is discarded and never retained.
 When an NFC verification finds its held secure channel gone, it releases that
 channel's native keys before reconnecting and running PACE again. A reconnect
 that fails, or ends on an activation-required card, leaves no native session
-behind.
+behind. The session generation and readiness are checked again after any
+handshake, immediately before the credential command. Work superseded during
+PACE never presents the PIN, and the channel opened for it is released. A failed
+signature on the held channel also releases that channel's native keys before
+the field drops.
 
 The app trusts card continuity within a prepared session. It does not introduce
 periodic certificate or card fingerprint checks. Credential rejection tears down
@@ -74,8 +78,10 @@ the cached state on the first reported failure.
 Rust tests exercise standalone VERIFY, rejection even with an already validated
 session, and retry-policy refusal. JVM tests cover preparation, ownership,
 cancellation before and during an in-flight VERIFY, negative caching, stale cache
-retention, and malformed JNI replies. The NFC reconnect path and native key release
-have no JVM test, because they need a live tag handle.
+retention, and malformed JNI replies. JVM tests drive the shipped NFC verification
+sequence over a synthetic channel: dead-channel release, failed reopen, and work
+superseded during the handshake. The native calls and tag handle behind that
+channel have no JVM test, because they need a live tag.
 Android instrumentation exercises the UI and shipped JNI library using synthetic
 card replies. These checks do not prove NFC field stability, physical USB-reader
 behaviour, or successful authentication at Suomi.fi. Those require a holder-entered

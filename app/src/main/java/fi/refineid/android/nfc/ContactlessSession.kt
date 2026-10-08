@@ -13,6 +13,7 @@ import fi.refineid.android.core.CardManagementFailure
 import fi.refineid.android.core.CardManagementResult
 import fi.refineid.android.core.CardManagementScheme
 import fi.refineid.android.core.CredentialHealth
+import fi.refineid.android.core.HeldPin1Channel
 import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.NativeAuthenticationSignFailure
@@ -35,6 +36,7 @@ import fi.refineid.android.core.QualifiedSignResult
 import fi.refineid.android.core.QualifiedSignatureVerifier
 import fi.refineid.android.core.QualifiedSigningAlgorithm
 import fi.refineid.android.core.QualifiedSigningInputMode
+import fi.refineid.android.core.verifyPin1OnHeldChannel
 import fi.refineid.android.diagnostics.AppTrace
 import java.io.IOException
 
@@ -80,10 +82,7 @@ internal class ContactlessSession(
         }
         // The field cycled, so the card dropped its half of the secure
         // channel; the next operation must re-run PACE on the fresh handle.
-        if (heldSession) {
-            NativeContactlessSession.close()
-            heldSession = false
-        }
+        releaseHeldSession()
         isoDep = freshIsoDep
     }
 
@@ -114,55 +113,76 @@ internal class ContactlessSession(
         }
     }
 
-    fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult {
+    /**
+     * Verifies PIN1 on the held secure channel, reopening it when the field
+     * dropped. [isCurrent] gates the credential command after any handshake.
+     */
+    fun verifyAuthenticationPin(
+        pin1: Pin1Submission,
+        isCurrent: () -> Boolean,
+    ): fi.refineid.android.core.Pin1VerificationResult {
         checkOwnerThread()
         if (isClosed) {
             pin1.close()
             return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
         }
-        if (!heldSession || !isoDep.isConnected) {
-            // A held channel whose field dropped is dead; its keys go before reconnecting.
-            if (heldSession) NativeContactlessSession.close()
-            heldSession = false
-            if (!reconnect()) {
-                pin1.close()
-                return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
-            }
-            when (
-                val opened =
-                    NativeContactlessSession.connect(
-                        can.copyOf(),
-                        NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
-                    )
-            ) {
-                is fi.refineid.android.core.NativeContactlessOpenResult.Success -> {
-                    opened.certificate.close()
-                    heldSession = true
-                }
+        return verifyPin1OnHeldChannel(pin1Channel, pin1, isCurrent)
+    }
 
-                is fi.refineid.android.core.NativeContactlessOpenResult.ActivationRequired -> {
-                    // The native open retains this channel; nothing here will use it.
-                    opened.certificate.close()
-                    NativeContactlessSession.close()
-                    pin1.close()
-                    closeIsoDep()
-                    return fi.refineid.android.core.Pin1VerificationResult.SAFETY_REFUSED
-                }
+    private val pin1Channel =
+        object : HeldPin1Channel {
+            override val isLive: Boolean get() = heldSession && isoDep.isConnected
 
-                is fi.refineid.android.core.NativeContactlessOpenResult.Failure -> {
-                    // A bridge fault can follow a native open that kept its channel.
-                    NativeContactlessSession.close()
-                    pin1.close()
-                    closeIsoDep()
-                    return fi.refineid.android.core.Pin1VerificationResult.TRANSPORT_ERROR
+            override fun releaseHeld() = releaseHeldSession()
+
+            override fun reopen(): fi.refineid.android.core.Pin1VerificationResult? {
+                if (!reconnect()) return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
+                return when (
+                    val opened =
+                        NativeContactlessSession.connect(
+                            can.copyOf(),
+                            NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
+                        )
+                ) {
+                    is fi.refineid.android.core.NativeContactlessOpenResult.Success -> {
+                        opened.certificate.close()
+                        heldSession = true
+                        null
+                    }
+
+                    is fi.refineid.android.core.NativeContactlessOpenResult.ActivationRequired -> {
+                        // The native open retains this channel; nothing here will use it.
+                        opened.certificate.close()
+                        NativeContactlessSession.close()
+                        closeIsoDep()
+                        fi.refineid.android.core.Pin1VerificationResult.SAFETY_REFUSED
+                    }
+
+                    is fi.refineid.android.core.NativeContactlessOpenResult.Failure -> {
+                        // A bridge fault can follow a native open that kept its channel.
+                        NativeContactlessSession.close()
+                        closeIsoDep()
+                        fi.refineid.android.core.Pin1VerificationResult.TRANSPORT_ERROR
+                    }
                 }
             }
+
+            override fun closeField() = closeIsoDep()
+
+            override fun verify(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult =
+                fi.refineid.android.core.NativePin1Verification.verify(
+                    pin1 = pin1,
+                    exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
+                    heldSession = true,
+                )
         }
-        return fi.refineid.android.core.NativePin1Verification.verify(
-            pin1 = pin1,
-            exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
-            heldSession = true,
-        )
+
+    /** Clears the held channel's native keys; the shared native slot holds them until then. */
+    private fun releaseHeldSession() {
+        if (heldSession) {
+            NativeContactlessSession.close()
+            heldSession = false
+        }
     }
 
     fun authenticateAndSignInput(
@@ -196,7 +216,8 @@ internal class ContactlessSession(
                         exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
                     )
                 if (result is NativeAuthenticationSignResult.Failure) {
-                    heldSession = false
+                    // The native sign keeps the advanced channel even when it fails.
+                    releaseHeldSession()
                     closeIsoDep()
                 }
                 result
@@ -575,10 +596,7 @@ internal class ContactlessSession(
         isClosed = true
         can.fill(0)
         material.close()
-        if (heldSession) {
-            NativeContactlessSession.close()
-            heldSession = false
-        }
+        releaseHeldSession()
         try {
             isoDep.close()
         } catch (_: IOException) {

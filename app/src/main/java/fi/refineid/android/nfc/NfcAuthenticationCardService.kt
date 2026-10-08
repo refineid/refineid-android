@@ -69,19 +69,22 @@ internal class NfcAuthenticationCardService(
             pin1.close()
             return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
         }
+        val generation = expectedGeneration ?: currentGeneration()
+        val isCurrent = { generation == currentGeneration() && isReady() }
         return fi.refineid.android.core.verifyQueuedPin1(
             pin1,
             probeExecutor,
             { isReady() },
             { currentGeneration() },
-            expectedGeneration ?: currentGeneration(),
+            generation,
         ) { submission ->
-            val generation = currentGeneration()
-            val result = activeSession()?.verifyAuthenticationPin(submission)
-            if (result == null || result == fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE ||
-                result == fi.refineid.android.core.Pin1VerificationResult.TRANSPORT_ERROR ||
-                result == fi.refineid.android.core.Pin1VerificationResult.BRIDGE_ERROR
-            ) {
+            val result = activeSession()?.verifyAuthenticationPin(submission, isCurrent)
+            val isLost =
+                result == null || result == fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE ||
+                    result == fi.refineid.android.core.Pin1VerificationResult.TRANSPORT_ERROR ||
+                    result == fi.refineid.android.core.Pin1VerificationResult.BRIDGE_ERROR
+            // Superseded work leaves the session to whoever superseded it.
+            if (isLost && generation == currentGeneration()) {
                 onCardLost(generation)
             }
             result
