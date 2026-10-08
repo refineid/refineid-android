@@ -172,10 +172,11 @@ internal class RappRequesterClient(
                                         }
                                         return@StreamRelayBrowser
                                     } else if (action.kind == RappBridgeActionKind.SEND_FRAME) {
-                                        action.frame?.let { f -> browser?.send(f) }
+                                        for (f in listOfNotNull(action.frame) + action.additionalFrames) {
+                                            browser?.send(f)
+                                        }
                                     } else if (action.kind == RappBridgeActionKind.TERMINAL ||
-                                        action.kind == RappBridgeActionKind.SESSION_CLOSED ||
-                                        action.kind == RappBridgeActionKind.CANCELLED
+                                        action.kind == RappBridgeActionKind.SESSION_CLOSED
                                     ) {
                                         android.util.Log.w("REQUESTER_CLIENT", "Operation ended with ${action.kind}")
                                         deferred.complete(null)

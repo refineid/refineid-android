@@ -895,6 +895,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_deny(
     ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_invalid_credential(
+    ): Int
     external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_poll_liveness(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_prerequisites_complete(
@@ -916,6 +918,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_from_proxy_code_offer(
     ): Int
     external fun uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_from_scanned_offer(
+    ): Int
+    external fun uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_from_scanned_offer_with_secret(
     ): Int
     external fun uniffi_refineid_rapp_checksum_constructor_rappsessionbridge_begin_proxy(
     ): Int
@@ -984,6 +988,8 @@ internal object UniffiLib {
     external fun uniffi_refineid_rapp_fn_constructor_rapppairingbridge_from_proxy_code_offer(`pairingCode`: RustBuffer.ByValue,`profiles`: RustBuffer.ByValue,`transports`: RustBuffer.ByValue,`offerTtlMs`: Long,`startedAtMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     external fun uniffi_refineid_rapp_fn_constructor_rapppairingbridge_from_scanned_offer(`uri`: RustBuffer.ByValue,`startedAtMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_refineid_rapp_fn_constructor_rapppairingbridge_from_scanned_offer_with_secret(`uri`: RustBuffer.ByValue,`pairingSecret`: RustBuffer.ByValue,`startedAtMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_begin(`ptr`: Long,`candidateId`: RustBuffer.ByValue,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -1097,15 +1103,17 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_complete_certificate(`ptr`: Long,`operationId`: RustBuffer.ByValue,`der`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_complete_identity(`ptr`: Long,`operationId`: RustBuffer.ByValue,`displayName`: RustBuffer.ByValue,`personId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_complete_identity(`ptr`: Long,`operationId`: RustBuffer.ByValue,`holderName`: RustBuffer.ByValue,`cardId`: RustBuffer.ByValue,`issuanceDate`: RustBuffer.ByValue,`expirationDate`: RustBuffer.ByValue,`certificates`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_complete_inspection(`ptr`: Long,`operationId`: RustBuffer.ByValue,`pin1Factory`: Byte,`pin2Factory`: Byte,`pin1Attempts`: RustBuffer.ByValue,`pin2Attempts`: RustBuffer.ByValue,`pukAttempts`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_complete_inspection(`ptr`: Long,`operationId`: RustBuffer.ByValue,`answerToReset`: RustBuffer.ByValue,`pin1Factory`: Byte,`pin2Factory`: Byte,`pin1Attempts`: RustBuffer.ByValue,`pin2Attempts`: RustBuffer.ByValue,`pukAttempts`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_complete_signature(`ptr`: Long,`operationId`: RustBuffer.ByValue,`signature`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_credential_rejected(`ptr`: Long,`operationId`: RustBuffer.ByValue,`rejectedAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_deny(`ptr`: Long,`operationId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_invalid_credential(`ptr`: Long,`operationId`: RustBuffer.ByValue,`remainingRetries`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_poll_liveness(`ptr`: Long,`nowMs`: Long,`challenge`: RustBuffer.ByValue,`jitterMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1369,7 +1377,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationvault_persist_proxy() and 0xFFFF) != 1251) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationvault_persist_proxy_result() and 0xFFFF) != 58045) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationvault_persist_proxy_result() and 0xFFFF) != 28004) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationvault_retain_proxy_uncertain() and 0xFFFF) != 45358) {
@@ -1414,19 +1422,22 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_certificate() and 0xFFFF) != 2527) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_identity() and 0xFFFF) != 7297) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_identity() and 0xFFFF) != 48347) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_inspection() and 0xFFFF) != 28740) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_inspection() and 0xFFFF) != 20130) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_signature() and 0xFFFF) != 20102) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_credential_rejected() and 0xFFFF) != 41465) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_credential_rejected() and 0xFFFF) != 27222) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_deny() and 0xFFFF) != 32796) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_invalid_credential() and 0xFFFF) != 18232) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_poll_liveness() and 0xFFFF) != 65389) {
@@ -1460,6 +1471,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_from_scanned_offer() and 0xFFFF) != 57209) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_from_scanned_offer_with_secret() and 0xFFFF) != 1501) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_constructor_rappsessionbridge_begin_proxy() and 0xFFFF) != 46788) {
@@ -2034,20 +2048,27 @@ public interface RappOperationBridgeInterface {
     fun `completeCertificate`(`operationId`: kotlin.ByteArray, `der`: kotlin.ByteArray): RappBridgeAction
     
     /**
-     * Complete an identity read with the cardholder name and identifier.
+     * Complete an identity read (RAPP v26.10.1 section 9.1).
+     *
+     * Both dates are `YYYY-MM-DD`; at least one DER certificate travels.
      *
      * # Errors
-     * [`RappBindingError`] on invalid input or the wrong protocol phase.
+     * [`RappBindingError`] on a field outside its section 9.1 bounds or the
+     * wrong protocol phase.
      */
-    fun `completeIdentity`(`operationId`: kotlin.ByteArray, `displayName`: kotlin.String, `personId`: kotlin.String): RappBridgeAction
+    fun `completeIdentity`(`operationId`: kotlin.ByteArray, `holderName`: kotlin.String, `cardId`: kotlin.String, `issuanceDate`: kotlin.String, `expirationDate`: kotlin.String, `certificates`: List<kotlin.ByteArray>): RappBridgeAction
     
     /**
-     * Complete a card inspection with factory and retry state.
+     * Complete a card inspection with the card's answer to reset and its
+     * factory and retry state.
+     *
+     * The answer to reset is the card's own, or its historical bytes; it is
+     * empty when the platform exposes neither.
      *
      * # Errors
      * [`RappBindingError`] on invalid input or the wrong protocol phase.
      */
-    fun `completeInspection`(`operationId`: kotlin.ByteArray, `pin1Factory`: kotlin.Boolean, `pin2Factory`: kotlin.Boolean, `pin1Attempts`: kotlin.UByte?, `pin2Attempts`: kotlin.UByte?, `pukAttempts`: kotlin.UByte?): RappBridgeAction
+    fun `completeInspection`(`operationId`: kotlin.ByteArray, `answerToReset`: kotlin.ByteArray, `pin1Factory`: kotlin.Boolean, `pin2Factory`: kotlin.Boolean, `pin1Attempts`: kotlin.UByte?, `pin2Attempts`: kotlin.UByte?, `pukAttempts`: kotlin.UByte?): RappBridgeAction
     
     /**
      * Complete a signing operation with the signature bytes.
@@ -2058,7 +2079,7 @@ public interface RappOperationBridgeInterface {
     fun `completeSignature`(`operationId`: kotlin.ByteArray, `signature`: kotlin.ByteArray): RappBridgeAction
     
     /**
-     * Record a CAN, PIN 1, or PIN 2 rejection: emit the bounded result,
+     * Record a blocked credential (section 10.2): emit the bounded result,
      * revoke the pairing, and close the session.
      *
      * # Errors
@@ -2074,6 +2095,16 @@ public interface RappOperationBridgeInterface {
      * [`RappBindingError`] on invalid input or the wrong protocol phase.
      */
     fun `deny`(`operationId`: kotlin.ByteArray): RappBridgeAction
+    
+    /**
+     * Record an incorrect CAN, PIN 1, or PIN 2 with attempts remaining
+     * (section 10.2): emit `invalid_credential` with the remaining count.
+     * The pairing and the session stay.
+     *
+     * # Errors
+     * [`RappBindingError`] on invalid input or the wrong protocol phase.
+     */
+    fun `invalidCredential`(`operationId`: kotlin.ByteArray, `remainingRetries`: kotlin.UByte): RappBridgeAction
     
     /**
      * Advance authenticated liveness using platform monotonic time, CSPRNG
@@ -2498,12 +2529,15 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
 
     
     /**
-     * Complete an identity read with the cardholder name and identifier.
+     * Complete an identity read (RAPP v26.10.1 section 9.1).
+     *
+     * Both dates are `YYYY-MM-DD`; at least one DER certificate travels.
      *
      * # Errors
-     * [`RappBindingError`] on invalid input or the wrong protocol phase.
+     * [`RappBindingError`] on a field outside its section 9.1 bounds or the
+     * wrong protocol phase.
      */
-    @Throws(RappBindingException::class)override fun `completeIdentity`(`operationId`: kotlin.ByteArray, `displayName`: kotlin.String, `personId`: kotlin.String): RappBridgeAction {
+    @Throws(RappBindingException::class)override fun `completeIdentity`(`operationId`: kotlin.ByteArray, `holderName`: kotlin.String, `cardId`: kotlin.String, `issuanceDate`: kotlin.String, `expirationDate`: kotlin.String, `certificates`: List<kotlin.ByteArray>): RappBridgeAction {
             return FfiConverterTypeRappBridgeAction.lift(
     callWithHandle {
     uniffiRustCallWithError(RappBindingException) { _status ->
@@ -2511,8 +2545,11 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
         it,
         
         FfiConverterByteArray.lower(`operationId`),
-        FfiConverterString.lower(`displayName`),
-        FfiConverterString.lower(`personId`),_status)
+        FfiConverterString.lower(`holderName`),
+        FfiConverterString.lower(`cardId`),
+        FfiConverterString.lower(`issuanceDate`),
+        FfiConverterString.lower(`expirationDate`),
+        FfiConverterSequenceByteArray.lower(`certificates`),_status)
 }
     }
     )
@@ -2521,12 +2558,16 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
 
     
     /**
-     * Complete a card inspection with factory and retry state.
+     * Complete a card inspection with the card's answer to reset and its
+     * factory and retry state.
+     *
+     * The answer to reset is the card's own, or its historical bytes; it is
+     * empty when the platform exposes neither.
      *
      * # Errors
      * [`RappBindingError`] on invalid input or the wrong protocol phase.
      */
-    @Throws(RappBindingException::class)override fun `completeInspection`(`operationId`: kotlin.ByteArray, `pin1Factory`: kotlin.Boolean, `pin2Factory`: kotlin.Boolean, `pin1Attempts`: kotlin.UByte?, `pin2Attempts`: kotlin.UByte?, `pukAttempts`: kotlin.UByte?): RappBridgeAction {
+    @Throws(RappBindingException::class)override fun `completeInspection`(`operationId`: kotlin.ByteArray, `answerToReset`: kotlin.ByteArray, `pin1Factory`: kotlin.Boolean, `pin2Factory`: kotlin.Boolean, `pin1Attempts`: kotlin.UByte?, `pin2Attempts`: kotlin.UByte?, `pukAttempts`: kotlin.UByte?): RappBridgeAction {
             return FfiConverterTypeRappBridgeAction.lift(
     callWithHandle {
     uniffiRustCallWithError(RappBindingException) { _status ->
@@ -2534,6 +2575,7 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
         it,
         
         FfiConverterByteArray.lower(`operationId`),
+        FfiConverterByteArray.lower(`answerToReset`),
         FfiConverterBoolean.lower(`pin1Factory`),
         FfiConverterBoolean.lower(`pin2Factory`),
         FfiConverterOptionalUByte.lower(`pin1Attempts`),
@@ -2569,7 +2611,7 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
 
     
     /**
-     * Record a CAN, PIN 1, or PIN 2 rejection: emit the bounded result,
+     * Record a blocked credential (section 10.2): emit the bounded result,
      * revoke the pairing, and close the session.
      *
      * # Errors
@@ -2606,6 +2648,30 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
         it,
         
         FfiConverterByteArray.lower(`operationId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Record an incorrect CAN, PIN 1, or PIN 2 with attempts remaining
+     * (section 10.2): emit `invalid_credential` with the remaining count.
+     * The pairing and the session stay.
+     *
+     * # Errors
+     * [`RappBindingError`] on invalid input or the wrong protocol phase.
+     */
+    @Throws(RappBindingException::class)override fun `invalidCredential`(`operationId`: kotlin.ByteArray, `remainingRetries`: kotlin.UByte): RappBridgeAction {
+            return FfiConverterTypeRappBridgeAction.lift(
+    callWithHandle {
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rappoperationbridge_invalid_credential(
+        it,
+        
+        FfiConverterByteArray.lower(`operationId`),
+        FfiConverterUByte.lower(`remainingRetries`),_status)
 }
     }
     )
@@ -2963,8 +3029,10 @@ public interface RappOperationVault {
     fun `persistProxy`(`pairId`: kotlin.ByteArray, `operationId`: kotlin.ByteArray, `record`: kotlin.ByteArray)
     
     /**
-     * Atomically persist proxy `result_pending` and its complete result before
-     * releasing the result frame.
+     * Atomically persist a proxy record and the complete result that reports
+     * it before releasing the result frame: a completed result pending
+     * acknowledgment, or a failure kept to answer identical
+     * retransmissions.
      *
      * # Errors
      * [`RappVaultError`] when the atomic storage transaction fails.
@@ -3173,8 +3241,10 @@ open class RappOperationVaultImpl: Disposable, AutoCloseable, RappOperationVault
 
     
     /**
-     * Atomically persist proxy `result_pending` and its complete result before
-     * releasing the result frame.
+     * Atomically persist a proxy record and the complete result that reports
+     * it before releasing the result frame: a completed result pending
+     * acknowledgment, or a failure kept to answer identical
+     * retransmissions.
      *
      * # Errors
      * [`RappVaultError`] when the atomic storage transaction fails.
@@ -5200,6 +5270,28 @@ open class RappPairingBridge: Disposable, AutoCloseable, RappPairingBridgeInterf
     
 
         
+    /**
+     * Decode a scanned one-use QR offer and attach a pre-shared bearer secret.
+     *
+     * # Errors
+     * [`RappBindingError::InvalidInput`] on a URI that fails structural or
+     * policy validation, or if the pairing secret length is invalid.
+     */
+    @Throws(RappBindingException::class) fun `fromScannedOfferWithSecret`(`uri`: kotlin.String, `pairingSecret`: kotlin.ByteArray, `startedAtMonotonicMs`: kotlin.ULong): RappPairingBridge {
+            return FfiConverterTypeRappPairingBridge.lift(
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_constructor_rapppairingbridge_from_scanned_offer_with_secret(
+    
+        
+        FfiConverterString.lower(`uri`),
+        FfiConverterByteArray.lower(`pairingSecret`),
+        FfiConverterULong.lower(`startedAtMonotonicMs`),_status)
+}
+    )
+    }
+    
+
+        
     }
     
 }
@@ -5803,6 +5895,12 @@ data class RappBridgeAction (
     var `frame`: kotlin.ByteArray?
     , 
     /**
+     * Further opaque frames to deliver after `frame`, in order, such as the
+     * result a status report re-delivers.
+     */
+    var `additionalFrames`: List<kotlin.ByteArray>
+    , 
+    /**
      * Journaled terminal state name.
      */
     var `terminalState`: kotlin.String?
@@ -5811,6 +5909,11 @@ data class RappBridgeAction (
      * Stable terminal reason.
      */
     var `terminalReason`: RappTerminalReason?
+    , 
+    /**
+     * Remaining credential attempts an invalid-credential result reports.
+     */
+    var `remainingRetries`: kotlin.UByte?
     , 
     /**
      * Advisory progress event.
@@ -5846,8 +5949,10 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalByteArray.read(buf),
             FfiConverterOptionalTypeRappOperationDescriptor.read(buf),
             FfiConverterOptionalByteArray.read(buf),
+            FfiConverterSequenceByteArray.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalTypeRappTerminalReason.read(buf),
+            FfiConverterOptionalUByte.read(buf),
             FfiConverterOptionalTypeRappProgressEvent.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalULong.read(buf),
@@ -5859,8 +5964,10 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalByteArray.allocationSize(value.`operationId`) +
             FfiConverterOptionalTypeRappOperationDescriptor.allocationSize(value.`operation`) +
             FfiConverterOptionalByteArray.allocationSize(value.`frame`) +
+            FfiConverterSequenceByteArray.allocationSize(value.`additionalFrames`) +
             FfiConverterOptionalString.allocationSize(value.`terminalState`) +
             FfiConverterOptionalTypeRappTerminalReason.allocationSize(value.`terminalReason`) +
+            FfiConverterOptionalUByte.allocationSize(value.`remainingRetries`) +
             FfiConverterOptionalTypeRappProgressEvent.allocationSize(value.`progressEvent`) +
             FfiConverterBoolean.allocationSize(value.`closeSessionAfterSend`) +
             FfiConverterOptionalULong.allocationSize(value.`nextPollAtMs`)
@@ -5871,8 +5978,10 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalByteArray.write(value.`operationId`, buf)
             FfiConverterOptionalTypeRappOperationDescriptor.write(value.`operation`, buf)
             FfiConverterOptionalByteArray.write(value.`frame`, buf)
+            FfiConverterSequenceByteArray.write(value.`additionalFrames`, buf)
             FfiConverterOptionalString.write(value.`terminalState`, buf)
             FfiConverterOptionalTypeRappTerminalReason.write(value.`terminalReason`, buf)
+            FfiConverterOptionalUByte.write(value.`remainingRetries`, buf)
             FfiConverterOptionalTypeRappProgressEvent.write(value.`progressEvent`, buf)
             FfiConverterBoolean.write(value.`closeSessionAfterSend`, buf)
             FfiConverterOptionalULong.write(value.`nextPollAtMs`, buf)
@@ -6089,6 +6198,12 @@ data class RappOperationResult (
     var `kind`: RappResultKind
     , 
     /**
+     * The card's answer to reset, or its historical bytes; empty when the
+     * custodian's platform exposes neither.
+     */
+    var `answerToReset`: kotlin.ByteArray
+    , 
+    /**
      * Whether PIN 1 is still in factory state.
      */
     var `pin1Factory`: kotlin.Boolean?
@@ -6114,14 +6229,29 @@ data class RappOperationResult (
     var `pukAttempts`: kotlin.UByte?
     , 
     /**
-     * Cardholder display name.
+     * Cardholder name (section 9.1 `card_holder_name`).
      */
-    var `displayName`: kotlin.String?
+    var `holderName`: kotlin.String?
     , 
     /**
-     * Cardholder person identifier.
+     * Card identifier (section 9.1 `card_id`).
      */
-    var `personId`: kotlin.String?
+    var `cardId`: kotlin.String?
+    , 
+    /**
+     * Issuance date, `YYYY-MM-DD`.
+     */
+    var `issuanceDate`: kotlin.String?
+    , 
+    /**
+     * Expiration date, `YYYY-MM-DD`.
+     */
+    var `expirationDate`: kotlin.String?
+    , 
+    /**
+     * DER-encoded certificates of an identity read.
+     */
+    var `certificates`: List<kotlin.ByteArray>
     , 
     /**
      * Certificate or signature bytes.
@@ -6144,6 +6274,7 @@ public object FfiConverterTypeRappOperationResult: FfiConverterRustBuffer<RappOp
     override fun read(buf: ByteBuffer): RappOperationResult {
         return RappOperationResult(
             FfiConverterTypeRappResultKind.read(buf),
+            FfiConverterByteArray.read(buf),
             FfiConverterOptionalBoolean.read(buf),
             FfiConverterOptionalBoolean.read(buf),
             FfiConverterOptionalUByte.read(buf),
@@ -6151,31 +6282,42 @@ public object FfiConverterTypeRappOperationResult: FfiConverterRustBuffer<RappOp
             FfiConverterOptionalUByte.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceByteArray.read(buf),
             FfiConverterByteArray.read(buf),
         )
     }
 
     override fun allocationSize(value: RappOperationResult) = (
             FfiConverterTypeRappResultKind.allocationSize(value.`kind`) +
+            FfiConverterByteArray.allocationSize(value.`answerToReset`) +
             FfiConverterOptionalBoolean.allocationSize(value.`pin1Factory`) +
             FfiConverterOptionalBoolean.allocationSize(value.`pin2Factory`) +
             FfiConverterOptionalUByte.allocationSize(value.`pin1Attempts`) +
             FfiConverterOptionalUByte.allocationSize(value.`pin2Attempts`) +
             FfiConverterOptionalUByte.allocationSize(value.`pukAttempts`) +
-            FfiConverterOptionalString.allocationSize(value.`displayName`) +
-            FfiConverterOptionalString.allocationSize(value.`personId`) +
+            FfiConverterOptionalString.allocationSize(value.`holderName`) +
+            FfiConverterOptionalString.allocationSize(value.`cardId`) +
+            FfiConverterOptionalString.allocationSize(value.`issuanceDate`) +
+            FfiConverterOptionalString.allocationSize(value.`expirationDate`) +
+            FfiConverterSequenceByteArray.allocationSize(value.`certificates`) +
             FfiConverterByteArray.allocationSize(value.`bytes`)
     )
 
     override fun write(value: RappOperationResult, buf: ByteBuffer) {
             FfiConverterTypeRappResultKind.write(value.`kind`, buf)
+            FfiConverterByteArray.write(value.`answerToReset`, buf)
             FfiConverterOptionalBoolean.write(value.`pin1Factory`, buf)
             FfiConverterOptionalBoolean.write(value.`pin2Factory`, buf)
             FfiConverterOptionalUByte.write(value.`pin1Attempts`, buf)
             FfiConverterOptionalUByte.write(value.`pin2Attempts`, buf)
             FfiConverterOptionalUByte.write(value.`pukAttempts`, buf)
-            FfiConverterOptionalString.write(value.`displayName`, buf)
-            FfiConverterOptionalString.write(value.`personId`, buf)
+            FfiConverterOptionalString.write(value.`holderName`, buf)
+            FfiConverterOptionalString.write(value.`cardId`, buf)
+            FfiConverterOptionalString.write(value.`issuanceDate`, buf)
+            FfiConverterOptionalString.write(value.`expirationDate`, buf)
+            FfiConverterSequenceByteArray.write(value.`certificates`, buf)
             FfiConverterByteArray.write(value.`bytes`, buf)
     }
 }
@@ -6421,8 +6563,9 @@ data class RappStoredProxyJournal (
     var `record`: kotlin.ByteArray
     , 
     /**
-     * Encrypted-at-rest retained result, when acknowledgment is pending or
-     * delivery became uncertain.
+     * Encrypted-at-rest retained result: a completed one while
+     * acknowledgment is pending or delivery became uncertain, or a failure
+     * that answers identical retransmissions.
      */
     var `retainedResult`: kotlin.ByteArray?
     
@@ -6724,14 +6867,6 @@ enum class RappBridgeActionKind {
      */
     TERMINAL,
     /**
-     * Operation was safely cancelled.
-     */
-    CANCELLED,
-    /**
-     * Post-commit cancel recorded; the operation continues.
-     */
-    ADVISORY_CANCELLATION,
-    /**
      * Peer acknowledged the completed result.
      */
     RESULT_ACKNOWLEDGED,
@@ -6740,7 +6875,7 @@ enum class RappBridgeActionKind {
      */
     PROGRESS,
     /**
-     * Peer already serves a live session for this pairing.
+     * The peer could not admit the operation, such as while another runs.
      */
     PEER_BUSY,
     /**
@@ -6748,7 +6883,7 @@ enum class RappBridgeActionKind {
      */
     PEER_UNKNOWN_OPERATION,
     /**
-     * Duplicate commit matching the committed hash was discarded.
+     * An identical retransmission joined the operation already under way.
      */
     IGNORED_DUPLICATE,
     /**
@@ -7133,11 +7268,12 @@ enum class RappTerminalReason {
      */
     REQUEST_INVALID_OR_UNSUPPORTED,
     /**
-     * Fewer than three attempts remained on the decrementable counter.
+     * The custodian declined to proceed with the card, as its retry floor or
+     * its storage requires.
      */
     RETRY_POLICY_REFUSED,
     /**
-     * Card rejected the CAN, PIN 1, or PIN 2.
+     * The card blocked the credential; the pairing is revoked.
      */
     CREDENTIAL_REJECTED,
     /**
@@ -7147,7 +7283,12 @@ enum class RappTerminalReason {
     /**
      * Card completion cannot be proven; retry forbidden.
      */
-    CARD_COMPLETION_AMBIGUOUS;
+    CARD_COMPLETION_AMBIGUOUS,
+    /**
+     * The card refused the credential and attempts remain; the pairing
+     * stays.
+     */
+    INVALID_CREDENTIAL;
 
     
 
