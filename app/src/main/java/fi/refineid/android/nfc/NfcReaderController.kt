@@ -982,6 +982,12 @@ internal class NfcReaderController(
         probeGeneration += 1
         cancelAwaitingCard()
         probeExecutor.execute(::closeActiveSession)
+        publish(
+            NfcReaderSnapshot(
+                status = NfcReaderStatus.WAITING_FOR_CARD,
+                isPrimed = latestSnapshot.isPrimed,
+            ),
+        )
     }
 
     fun cancelAwaitingCard() {

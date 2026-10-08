@@ -59,13 +59,30 @@ internal class NfcAuthenticationCardService(
         }
     }
 
-    override fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult =
-        fi.refineid.android.core.verifyQueuedPin1(
+    override fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult {
+        if (Looper.myLooper() == Looper.getMainLooper() ||
+            (!isReady() && !kotlinx.coroutines.runBlocking { awaitReady() })
+        ) {
+            pin1.close()
+            return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
+        }
+        return fi.refineid.android.core.verifyQueuedPin1(
             pin1,
             probeExecutor,
             { isReady() },
             { currentGeneration() },
-        ) { submission -> activeSession()?.verifyAuthenticationPin(submission) }
+        ) { submission ->
+            val generation = currentGeneration()
+            val result = activeSession()?.verifyAuthenticationPin(submission)
+            if (result == null || result == fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE ||
+                result == fi.refineid.android.core.Pin1VerificationResult.TRANSPORT_ERROR ||
+                result == fi.refineid.android.core.Pin1VerificationResult.BRIDGE_ERROR
+            ) {
+                onCardLost(generation)
+            }
+            result
+        }
+    }
 
     /** Blocks a browser crypto worker while one card operation runs on the NFC owner thread. */
     override fun signAuthenticationMessage(

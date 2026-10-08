@@ -37,6 +37,20 @@ class CanSubmissionTest {
     }
 
     @Test
+    fun workerCopySurvivesCancellationOfOriginalSubmission() {
+        val submission = CanSubmission.from(SYNTHETIC_CAN)
+        val workerCopy = submission.copy()
+        submission.close()
+        val bytes = workerCopy.transfer()
+        try {
+            assertArrayEquals(SYNTHETIC_CAN.map { it.code.toByte() }.toByteArray(), bytes)
+        } finally {
+            bytes.fill(0)
+            workerCopy.close()
+        }
+    }
+
+    @Test
     fun closingWithoutTransferZeroizesAndInvalidates() {
         val submission = CanSubmission.from(SYNTHETIC_CAN)
 

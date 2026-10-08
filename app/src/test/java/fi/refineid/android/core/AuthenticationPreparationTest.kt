@@ -101,6 +101,50 @@ internal class AuthenticationPreparationTest {
         }
 
     @Test
+    fun cancellingCompletedPreparationPreservesCardSession() =
+        runBlocking {
+            val backend = Backend()
+            val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
+            preparation.start {}
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it == AuthenticationPreparationState.Ready }
+            preparation.cancel()
+            assertFalse(backend.cancelled)
+        }
+
+    @Test
+    fun cancellationDuringVerificationStillInvalidatesRejectedCredential() =
+        runBlocking {
+            val backend = Backend().apply { verificationWait = CompletableDeferred() }
+            val cache = AuthenticationPinCache()
+            val preparation = AuthenticationPreparation(this, backend, cache)
+            var opened = false
+            preparation.start { opened = true }
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it == AuthenticationPreparationState.Verifying }
+            yield()
+            preparation.cancel()
+            checkNotNull(backend.verificationWait).complete(Pin1VerificationResult.WRONG_PIN)
+            yield()
+            assertTrue(backend.invalidated)
+            assertFalse(opened)
+            assertFalse(backend.retained)
+            syntheticPin().use { assertTrue(cache.isRejected(it)) }
+        }
+
+    @Test
+    fun replacingOrCancellingPreparationCompletesAbandonedRequest() =
+        runBlocking {
+            val preparation = AuthenticationPreparation(this, Backend(), AuthenticationPinCache())
+            var abandoned = 0
+            preparation.start({}, { abandoned++ })
+            preparation.start({}, { abandoned++ })
+            assertEquals(1, abandoned)
+            preparation.cancel()
+            assertEquals(2, abandoned)
+        }
+
+    @Test
     fun duplicateSubmissionsDoNotStartAnotherCardOperation() =
         runBlocking {
             val backend = Backend().apply { wait = CompletableDeferred() }
@@ -120,7 +164,9 @@ internal class AuthenticationPreparationTest {
         var connections = 0
         var retained = false
         var invalidated = false
+        var cancelled = false
         var wait: CompletableDeferred<Boolean>? = null
+        var verificationWait: CompletableDeferred<Pin1VerificationResult>? = null
         private var owned: ByteArray? = null
 
         override fun readiness(): AuthenticationReadiness = ready
@@ -133,7 +179,7 @@ internal class AuthenticationPreparationTest {
         override suspend fun verify(pin1: Pin1Submission): Pin1VerificationResult {
             verifications++
             pin1.close()
-            return result
+            return verificationWait?.await() ?: result
         }
 
         override suspend fun retainVerified(pin: ByteArray): Boolean {
@@ -145,6 +191,10 @@ internal class AuthenticationPreparationTest {
 
         override fun invalidate() {
             invalidated = true
+        }
+
+        override fun cancel() {
+            cancelled = true
         }
 
         fun ownedCopyCleared(): Boolean = owned?.all { it == CLEARED_BYTE } == true

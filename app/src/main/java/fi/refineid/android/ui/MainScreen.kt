@@ -436,7 +436,7 @@ internal fun MainScreen(
                     },
                 onPrepareAuthentication =
                     authenticationPreparation?.let { preparation ->
-                        { action -> preparation.start(action) }
+                        { action, cancelled -> preparation.start(action, cancelled) }
                     },
                 pinCache = pinCache,
                 nfcStatus =
@@ -459,9 +459,10 @@ internal fun MainScreen(
                 timestampAuthorityRepository = timestampAuthorityRepository,
                 onOpenVerify = { verifyPicker.launch(arrayOf("*/*")) },
                 onOpenSign = { destination = MainDestination.SIGN },
-                onOpenPairing = {
+                onOpenPairing = { destination = MainDestination.PAIRING },
+                onOpenRemoteAccess = {
                     destination = MainDestination.PAIRING
-                    rappPairingModel?.let { model ->
+                    rappPairingModel?.takeIf { hasNfc || snapshot.cardPresence == CardPresence.PRESENT }?.let { model ->
                         val offer = {
                             model.setRemoteAccessEnabled(true)
                             if (model.phase is fi.refineid.android.rapp.PairingPhase.Idle &&
@@ -709,7 +710,7 @@ internal fun MainScreen(
 private fun HomeScreen(
     signingAvailable: Boolean,
     browserAvailable: Boolean = false,
-    onPrepareAuthentication: ((() -> Unit) -> Unit)? = null,
+    onPrepareAuthentication: ((() -> Unit, () -> Unit) -> Unit)? = null,
     holderName: String?,
     hasNfc: Boolean = true,
     usbReaderPresent: Boolean,
@@ -732,6 +733,7 @@ private fun HomeScreen(
     onOpenVerify: () -> Unit,
     onOpenSign: () -> Unit,
     onOpenPairing: () -> Unit,
+    onOpenRemoteAccess: () -> Unit,
     onOpenCardManagement: () -> Unit,
     onRequestUsbCan: (() -> Unit)? = null,
     rappPairingModel: RappPairingModel? = null,
@@ -824,7 +826,7 @@ private fun HomeScreen(
                                 } else {
                                     null
                                 },
-                            onClick = onOpenPairing,
+                            onClick = onOpenRemoteAccess,
                         )
                         HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
                         NavigationRow(

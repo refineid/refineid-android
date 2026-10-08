@@ -3,11 +3,13 @@ package fi.refineid.android.core
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
 
@@ -60,10 +62,23 @@ internal class AuthenticationPreparation(
     val state: StateFlow<AuthenticationPreparationState> = mutableState.asStateFlow()
     private var job: Job? = null
     private var continuation: (() -> Unit)? = null
+    private var cancellation: (() -> Unit)? = null
 
     fun start(onReady: () -> Unit) {
-        if (job?.isActive == true) return
+        start(onReady, {})
+    }
+
+    fun start(
+        onReady: () -> Unit,
+        onCancelled: () -> Unit,
+    ) {
+        if (job?.isActive == true) {
+            onCancelled()
+            return
+        }
+        cancellation?.invoke()
         continuation = onReady
+        cancellation = onCancelled
         val ready = backend.readiness()
         when {
             !ready.available -> {
@@ -115,7 +130,20 @@ internal class AuthenticationPreparation(
                             return@withTimeout
                         }
                         mutableState.value = AuthenticationPreparationState.Verifying
-                        val result = backend.verify(candidate)
+                        val result =
+                            withContext(NonCancellable) {
+                                val verified = backend.verify(candidate)
+                                if (verified == Pin1VerificationResult.WRONG_PIN ||
+                                    verified == Pin1VerificationResult.PIN_LOCKED
+                                ) {
+                                    if (verified == Pin1VerificationResult.WRONG_PIN) {
+                                        pinCache.recordRejected(checkNotNull(copy))
+                                        copy = null
+                                    }
+                                    backend.invalidate()
+                                }
+                                verified
+                            }
                         coroutineContext.ensureActive()
                         when (result) {
                             Pin1VerificationResult.VERIFIED -> {
@@ -131,11 +159,6 @@ internal class AuthenticationPreparation(
                             }
 
                             Pin1VerificationResult.WRONG_PIN, Pin1VerificationResult.PIN_LOCKED -> {
-                                if (result == Pin1VerificationResult.WRONG_PIN) {
-                                    pinCache.recordRejected(checkNotNull(copy))
-                                    copy = null
-                                }
-                                backend.invalidate()
                                 fail(result)
                             }
 
@@ -162,14 +185,22 @@ internal class AuthenticationPreparation(
 
     fun retry() {
         val action = continuation ?: return
-        start(action)
+        val cancelled = cancellation ?: {}
+        cancellation = null
+        start(action, cancelled)
     }
 
     fun cancel() {
+        val preparing =
+            mutableState.value == AuthenticationPreparationState.WaitingForCard ||
+                mutableState.value == AuthenticationPreparationState.Verifying
         job?.cancel()
-        backend.cancel()
+        if (preparing) backend.cancel()
         job = null
         continuation = null
+        val cancelled = cancellation
+        cancellation = null
+        cancelled?.invoke()
         mutableState.value = AuthenticationPreparationState.Idle
     }
 
@@ -177,6 +208,7 @@ internal class AuthenticationPreparation(
         mutableState.value = AuthenticationPreparationState.Ready
         val action = continuation
         continuation = null
+        cancellation = null
         action?.invoke()
     }
 

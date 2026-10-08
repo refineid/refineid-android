@@ -52,9 +52,10 @@ internal class LocalAuthenticationPreparationBackend(
         app.authenticationInvalidation?.join()
         val generation = app.authenticationGeneration.get()
         val wired = app.readerController.snapshot.cardPresence == CardPresence.PRESENT
+        selected = if (wired) app.readerController else app.nfcReaderController.authenticationCardService
         if (wired) {
             if (!app.readerController.isCardReady) {
-                if (can != null) app.readerController.connect(can, null) else app.readerController.refresh()
+                if (can != null) app.readerController.connect(can.copy(), null) else app.readerController.refresh()
             }
         } else {
             app.nfcReaderController.connect(can, null)

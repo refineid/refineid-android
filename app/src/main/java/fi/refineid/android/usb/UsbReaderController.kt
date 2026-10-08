@@ -346,14 +346,17 @@ internal class UsbReaderController(
     fun invalidateAuthenticationSession() {
         checkMainThread()
         probeGeneration += 1
+        val generation = probeGeneration
         mainHandler.removeCallbacks(cardPresencePollRunnable)
-        closeActiveSessionAsync()
+        ioExecutor.execute {
+            closeActiveSession()
+            mainHandler.post {
+                if (isStarted && generation == probeGeneration) publish(latestSnapshot)
+            }
+        }
         publish(
-            latestSnapshot.copy(
-                status = ReaderConnectionStatus.CARD_ERROR,
-                holderName = null,
-                cardDetails = null,
-                authenticationStatus = AuthenticationStatus.IDLE,
+            latestSnapshot.withoutAuthentication(
+                if (selectedDevice == null) latestSnapshot.status else ReaderConnectionStatus.CARD_ERROR,
             ),
         )
     }
@@ -1190,3 +1193,12 @@ private fun NativeCertificateReadFailure.toContactlessConnectStatus(): ReaderCon
             ReaderConnectionStatus.ACTIVATION_REQUIRED
         }
     }
+
+private fun UsbReaderSnapshot.withoutAuthentication(status: ReaderConnectionStatus): UsbReaderSnapshot =
+    copy(
+        status = status,
+        holderName = null,
+        cardDetails = null,
+        availableReaders = emptyList(),
+        authenticationStatus = AuthenticationStatus.IDLE,
+    )

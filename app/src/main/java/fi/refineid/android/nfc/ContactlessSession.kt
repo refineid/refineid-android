@@ -116,9 +116,41 @@ internal class ContactlessSession(
 
     fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult {
         checkOwnerThread()
-        if (isClosed || !heldSession || !isoDep.isConnected) {
+        if (isClosed) {
             pin1.close()
             return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
+        }
+        if (!heldSession || !isoDep.isConnected) {
+            heldSession = false
+            if (!reconnect()) {
+                pin1.close()
+                return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
+            }
+            when (
+                val opened =
+                    NativeContactlessSession.connect(
+                        can.copyOf(),
+                        NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
+                    )
+            ) {
+                is fi.refineid.android.core.NativeContactlessOpenResult.Success -> {
+                    opened.certificate.close()
+                    heldSession = true
+                }
+
+                is fi.refineid.android.core.NativeContactlessOpenResult.ActivationRequired -> {
+                    opened.certificate.close()
+                    pin1.close()
+                    closeIsoDep()
+                    return fi.refineid.android.core.Pin1VerificationResult.SAFETY_REFUSED
+                }
+
+                is fi.refineid.android.core.NativeContactlessOpenResult.Failure -> {
+                    pin1.close()
+                    closeIsoDep()
+                    return fi.refineid.android.core.Pin1VerificationResult.TRANSPORT_ERROR
+                }
+            }
         }
         return fi.refineid.android.core.NativePin1Verification.verify(
             pin1 = pin1,
