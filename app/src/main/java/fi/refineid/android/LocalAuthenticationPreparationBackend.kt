@@ -29,19 +29,20 @@ internal class LocalAuthenticationPreparationBackend(
         val usb = app.readerController.snapshot
         val wired = usb.cardPresence == CardPresence.PRESENT
         val nfc = app.nfcReaderController.snapshot
+        val primed = nfc.isPrimed && app.authenticationInvalidation?.isActive != true
         return AuthenticationReadiness(
             hasCertificate =
                 if (wired) {
                     app.readerController.isCardReady
                 } else {
-                    nfc.isPrimed && app.primedCanStore.hasAuthCertificate()
+                    primed && app.primedCanStore.hasAuthCertificate()
                 },
             needsCan =
                 if (wired) {
                     usb.status == ReaderConnectionStatus.ACCESS_NUMBER_REQUIRED ||
                         usb.status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER
                 } else {
-                    nfc.status == NfcReaderStatus.WRONG_CAN || (!CanSessionStore.hasCan && !nfc.isPrimed)
+                    nfc.status == NfcReaderStatus.WRONG_CAN || (!CanSessionStore.hasCan && !primed)
                 },
             available = wired || (app.nfcReaderController.hasNfc && nfc.status != NfcReaderStatus.TURNED_OFF),
         )
@@ -99,7 +100,17 @@ internal class LocalAuthenticationPreparationBackend(
 
     override fun invalidate() = app.invalidateAuthentication()
 
-    override fun cancel() = app.nfcReaderController.cancelAuthenticationPreparation()
+    override fun cancel() {
+        val wasWired = selected === app.readerController
+        val wasNfc = selected != null && !wasWired
+        selected = null
+        stamp = null
+        if (wasWired) {
+            app.readerController.invalidateAuthenticationSession()
+        } else if (wasNfc || app.readerController.snapshot.cardPresence != CardPresence.PRESENT) {
+            app.nfcReaderController.cancelAuthenticationPreparation()
+        }
+    }
 
     private suspend fun awaitPreferredCard(): Boolean =
         withTimeoutOrNull(CARD_WAIT_TIMEOUT_MS) {

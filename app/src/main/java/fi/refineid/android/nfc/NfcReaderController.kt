@@ -86,6 +86,9 @@ internal class NfcReaderController(
     @Volatile
     private var probeGeneration = 0
 
+    @Volatile
+    private var isForgetting = false
+
     /** Last ISO-DEP tag left resting in the field; worker-thread I/O only. */
     @Volatile
     private var latestIsoDep: IsoDep? = null
@@ -329,12 +332,12 @@ internal class NfcReaderController(
         pin1: Pin1Submission? = null,
     ) {
         checkMainThread()
+        val currentCan = CanSessionStore.currentCan
         can?.let { CanSessionStore.remember(it) }
         val generation = probeGeneration
         val candidateCan = can?.peekDigits()
         val inMemoryCanBytes = can?.transfer() ?: CanSessionStore.canBytes()
         if (isCardReady && activeSession != null) {
-            val currentCan = CanSessionStore.currentCan
             if (candidateCan == null || candidateCan == currentCan) {
                 pin1?.close()
                 can?.close()
@@ -441,6 +444,7 @@ internal class NfcReaderController(
 
     /** Reader-mode callback; arrives on an NFC system thread. */
     private fun onTagDiscovered(tag: Tag) {
+        if (isForgetting) return
         val generation = probeGeneration
         val isoDep = IsoDep.get(tag)
         AppTrace.nfcTagDiscovered(isIsoDep = isoDep != null)
@@ -925,26 +929,33 @@ internal class NfcReaderController(
     }
 
     /** Forget the primed card so the next tap requires the access number again. */
-    fun forgetPrimedCard(clearStoredCredentials: Boolean = true) {
+    fun forgetPrimedCard(onCleared: () -> Unit = {}) {
         checkMainThread()
         AppTrace.nfcPrimedForgotten()
         CanSessionStore.drop()
         rememberedHolderName = null
         rememberedDetails = null
         primedCardStored = false
+        isForgetting = true
         probeGeneration += 1
         try {
             probeExecutor.execute {
-                if (clearStoredCredentials) {
-                    CanSessionStore.drop()
-                    primedCanStore.clear()
-                    pinCache.clear()
-                }
+                CanSessionStore.drop()
+                primedCanStore.clear()
+                pinCache.clear()
+                primedCardStored = false
+                rememberedHolderName = null
+                rememberedDetails = null
                 closeActiveSession()
-                mainHandler.post { publish(NfcReaderSnapshot(status = NfcReaderStatus.WAITING_FOR_CARD)) }
+                mainHandler.post {
+                    isForgetting = false
+                    publish(NfcReaderSnapshot(status = NfcReaderStatus.WAITING_FOR_CARD))
+                }
+                onCleared()
             }
         } catch (_: RejectedExecutionException) {
-            // The executor only stops when the process is terminating.
+            isForgetting = false
+            onCleared()
         }
     }
 

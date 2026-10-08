@@ -427,7 +427,7 @@ internal fun MainScreen(
                 onOpenPerson = { destination = MainDestination.PERSON },
                 onOpenDiagnostics = { destination = MainDestination.DIAGNOSTICS },
                 browserCardService =
-                    if (usbCardReady) {
+                    if (snapshot.cardPresence == CardPresence.PRESENT) {
                         browserCardService
                     } else if (hasNfc) {
                         nfcCardService ?: browserCardService

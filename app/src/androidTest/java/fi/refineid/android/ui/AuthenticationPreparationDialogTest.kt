@@ -22,6 +22,8 @@ import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationResult
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.usb.CardPresence
+import fi.refineid.android.usb.ReaderConnectionStatus
 import fi.refineid.android.usb.UsbReaderSnapshot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +59,35 @@ internal class AuthenticationPreparationDialogTest {
             composeRule.onNodeWithTag("AuthenticationPreparationCan").assertIsDisplayed()
             composeRule.onNodeWithTag("AuthenticationPreparationPin1").assertIsDisplayed()
             composeRule.onNodeWithTag("AuthenticationPreparationSubmit").assertIsNotEnabled()
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun presentUsbCardCanStartBrowserPreparationWithoutNfc() {
+        val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        val preparation = AuthenticationPreparation(scope, Backend(), AuthenticationPinCache())
+        try {
+            composeRule.setContent {
+                ReFineIdTheme {
+                    MainScreen(
+                        snapshot =
+                            UsbReaderSnapshot(
+                                status = ReaderConnectionStatus.ACCESS_NUMBER_REQUIRED,
+                                cardPresence = CardPresence.PRESENT,
+                            ),
+                        authenticationPreparation = preparation,
+                        onRequestPermission = {},
+                        hasNfc = false,
+                        browserCardService = InertCardService,
+                    )
+                }
+            }
+            composeRule.onNodeWithTag(UiAutomationIds.READER_CANCEL_ACTION).performClick()
+            composeRule.onNodeWithTag(UiAutomationIds.BROWSER_ACTION).performScrollTo().performClick()
+            composeRule.onNodeWithTag("AuthenticationPreparationCan").assertIsDisplayed()
+            composeRule.onNodeWithTag("AuthenticationPreparationPin1").assertIsDisplayed()
         } finally {
             scope.cancel()
         }
