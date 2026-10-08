@@ -35,7 +35,7 @@ jobs:
         with:
           repository: RefineID/refineid-core
           # Keep aligned with the refineid-core package versions in native/**/Cargo.lock.
-          ref: bd2182886ca8f796e2a2ac46db3a20d0f4b77198
+          ref: 6c07c982daf117134e30a6c6fa8f204661e7cbcd
           path: refineid-core
 
       - name: Set up JDK
