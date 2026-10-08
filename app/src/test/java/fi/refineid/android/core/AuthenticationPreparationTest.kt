@@ -66,6 +66,23 @@ internal class AuthenticationPreparationTest {
         }
 
     @Test
+    fun lockedCardInvalidatesWithoutRejectingUntestedCandidate() =
+        runBlocking {
+            val backend = Backend().apply { result = Pin1VerificationResult.PIN_LOCKED }
+            val cache = AuthenticationPinCache()
+            val preparation = AuthenticationPreparation(this, backend, cache)
+            var opened = false
+            preparation.start { opened = true }
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it is AuthenticationPreparationState.Failed }
+            assertFalse(opened)
+            assertFalse(backend.retained)
+            assertTrue(backend.invalidated)
+            assertEquals(1, backend.verifications)
+            syntheticPin().use { assertFalse(cache.isRejected(it)) }
+        }
+
+    @Test
     fun cancellingCardWaitClearsSubmittedPinAndSuppressesContinuation() =
         runBlocking {
             val backend = Backend().apply { wait = CompletableDeferred() }

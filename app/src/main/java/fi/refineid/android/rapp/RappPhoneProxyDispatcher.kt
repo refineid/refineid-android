@@ -1195,7 +1195,9 @@ internal class RappPhoneProxyDispatcher(
     ) {
         AppTrace.rappOperationFailed("browser_auth", opIdHex, result.kind.name)
         if (result.kind == AuthenticationSignFailure.WRONG_PIN || result.kind == AuthenticationSignFailure.PIN_LOCKED) {
-            pinCache?.recordRejected(pin1Submission.copyBytes())
+            if (result.kind == AuthenticationSignFailure.WRONG_PIN) {
+                pinCache?.recordRejected(pin1Submission.copyBytes())
+            }
             primedCanStore?.forgetPin1()
             respondCredentialRejected(opId, bridge)
             onAuthenticationRejected()

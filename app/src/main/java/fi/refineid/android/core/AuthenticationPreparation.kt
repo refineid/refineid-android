@@ -131,8 +131,10 @@ internal class AuthenticationPreparation(
                             }
 
                             Pin1VerificationResult.WRONG_PIN, Pin1VerificationResult.PIN_LOCKED -> {
-                                pinCache.recordRejected(checkNotNull(copy))
-                                copy = null
+                                if (result == Pin1VerificationResult.WRONG_PIN) {
+                                    pinCache.recordRejected(checkNotNull(copy))
+                                    copy = null
+                                }
                                 backend.invalidate()
                                 fail(result)
                             }

@@ -299,7 +299,7 @@ private fun BrowserDialogContent(
         // over its bottom edge, the way the reference platform's
         // browser keeps its bar over the content.
         Box(modifier = Modifier.fillMaxSize()) {
-            var urlText by remember { mutableStateOf("https://card.refineid.fi") }
+            var urlText by remember { mutableStateOf("") }
             var liveWebView by remember { mutableStateOf<WebView?>(null) }
             val navigate = {
                 val destination = normalizeHttpsUrl(urlText)
@@ -310,13 +310,6 @@ private fun BrowserDialogContent(
                     AppTrace.browserNavigationBlocked()
                 }
                 Unit
-            }
-
-            LaunchedEffect(liveWebView) {
-                val current = liveWebView
-                if (current != null && urlText.isNotBlank()) {
-                    normalizeHttpsUrl(urlText)?.let { current.loadUrl(it) }
-                }
             }
 
             BrowserWebView(
