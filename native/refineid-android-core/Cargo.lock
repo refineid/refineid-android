@@ -153,9 +153,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+checksum = "03bb0e1cc970d482d121d9a1744999169b69a07470b3d644a7894e53fcaf4574"
 dependencies = [
  "cmov",
 ]
@@ -374,18 +374,18 @@ dependencies = [
 
 [[package]]
 name = "refineid-apdu"
-version = "26.10.3"
+version = "26.10.8"
 dependencies = [
  "zeroize",
 ]
 
 [[package]]
 name = "refineid-atr"
-version = "26.10.3"
+version = "26.10.8"
 
 [[package]]
 name = "refineid-auth"
-version = "26.10.3"
+version = "26.10.8"
 dependencies = [
  "hmac",
  "refineid-apdu",
@@ -395,11 +395,11 @@ dependencies = [
 
 [[package]]
 name = "refineid-ber"
-version = "26.10.3"
+version = "26.10.8"
 
 [[package]]
 name = "refineid-cms"
-version = "26.10.3"
+version = "26.10.8"
 dependencies = [
  "const-oid",
  "crypto-bigint",
@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "refineid-digest"
-version = "26.10.3"
+version = "26.10.8"
 dependencies = [
  "sha1",
  "sha2",
@@ -421,7 +421,7 @@ dependencies = [
 
 [[package]]
 name = "refineid-emrtd"
-version = "26.10.3"
+version = "26.10.8"
 dependencies = [
  "refineid-apdu",
  "refineid-ber",
@@ -430,7 +430,7 @@ dependencies = [
 
 [[package]]
 name = "refineid-pace"
-version = "26.10.3"
+version = "26.10.8"
 dependencies = [
  "aes",
  "cbc",
@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "refineid-pkcs15"
-version = "26.10.3"
+version = "26.10.8"
 dependencies = [
  "refineid-apdu",
  "refineid-ber",
@@ -455,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "refineid-sign"
-version = "26.10.3"
+version = "26.10.8"
 dependencies = [
  "refineid-apdu",
  "zeroize",
@@ -463,7 +463,7 @@ dependencies = [
 
 [[package]]
 name = "refineid-x509"
-version = "26.10.3"
+version = "26.10.8"
 dependencies = [
  "refineid-ber",
 ]
@@ -571,9 +571,9 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "spki"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d9efca8738c78ee9484207732f728b1ef517bbb1833d6fc0879ca898a522f6f"
+checksum = "7ef958a98b9d5da290cfc78946e9f3e61e1e62a18db0d92cac0b83cc161491a9"
 dependencies = [
  "base64ct",
  "der",
@@ -686,9 +686,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.9.0"
+version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
 dependencies = [
  "zeroize_derive",
 ]
