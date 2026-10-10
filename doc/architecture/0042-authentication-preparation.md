@@ -46,6 +46,10 @@ that card's presence: removing the card or disconnecting the reader forgets it,
 and the card's next use asks for PIN1 again, over the reader or over NFC. A
 primed contactless identity keeps the PIN1 its holder chose to store with it.
 
+Removing a card from the reader is the holder saying they are done with it.
+A contactless card has no such act: lifting it off the phone is part of every
+tap, so NFC keeps the stored PIN1 rather than asking for it on each request.
+
 ## Failure and lifecycle
 
 A wrong or locked PIN stops the operation without retry. The app clears accepted
