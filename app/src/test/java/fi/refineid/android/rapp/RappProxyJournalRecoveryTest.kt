@@ -15,11 +15,9 @@ import uniffi.refineid_rapp.RappOperationBridge
 import uniffi.refineid_rapp.RappOperationVault
 import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappPairVault
-import uniffi.refineid_rapp.RappPairingBridge
 import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
 import uniffi.refineid_rapp.RappStoredProxyJournal
-import uniffi.refineid_rapp.RappTransportCandidate
 import java.io.File
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
@@ -114,11 +112,7 @@ class RappProxyJournalRecoveryTest {
 
     private fun pair(): Pair<RappPairRecord, RappPairRecord> {
         val code = RappPairingCode.generate()
-        val candidates =
-            listOf(RappTransportCandidate(STREAM_PROFILE, STREAM_CANDIDATE_ID, byteArrayOf(EMPTY_CBOR_MAP)))
-        val ttl = RappPairingCode.DEFAULT_LIFETIME_MS.toULong()
-        val requester = RappPairingBridge.createRequesterCodeOffer(code, PROFILES, candidates, ttl, NOW)
-        val custodian = RappPairingBridge.fromProxyCodeOffer(code, PROFILES, candidates, ttl, NOW)
+        val (custodian, requester) = RappTestOffers.custodianAndRequester(PROFILES, NOW)
         requester.beginCpace(STREAM_CANDIDATE_ID, code, random(CPACE_RANDOM_BYTES), NOW)
         custodian.beginCpace(STREAM_CANDIDATE_ID, code, random(CPACE_RANDOM_BYTES), NOW)
         custodian.readCpaceFrame(requester.writeCpaceFrame(NOW), NOW)
@@ -129,11 +123,11 @@ class RappProxyJournalRecoveryTest {
         custodian.readHandshakeFrame(requester.writeHandshakeFrame(NOW), NOW)
         requester.enterConfirmation(NOW)
         custodian.enterConfirmation(NOW)
-        custodian.receiveHello(requester.sendHello("Workstation", "Windows"), WALL)
-        requester.receiveHello(custodian.sendHello("Phone", "Android"), WALL)
-        requester.receiveConfirmation(custodian.sendConfirmation(PROFILES), WALL)
-        custodian.receiveConfirmation(requester.sendConfirmation(PROFILES), WALL)
-        return requester.finishPairing(WALL) to custodian.finishPairing(WALL)
+        custodian.receiveHello(requester.sendHello("Workstation", "Windows", NOW), NOW)
+        requester.receiveHello(custodian.sendHello("Phone", "Android", NOW), NOW)
+        requester.receiveConfirmation(custodian.sendConfirmation(PROFILES, NOW), NOW)
+        custodian.receiveConfirmation(requester.sendConfirmation(PROFILES, NOW), NOW)
+        return requester.finishPairing(WALL, NOW) to custodian.finishPairing(WALL, NOW)
     }
 
     private fun session(
@@ -142,8 +136,8 @@ class RappProxyJournalRecoveryTest {
         custodianPair: RappPairRecord,
         custodianVault: TestVault,
     ): Pair<RappOperationBridge, RappOperationBridge> {
-        val requester = RappSessionBridge.beginRequester(requesterPair, requesterVault)
-        val custodian = RappSessionBridge.beginProxy(custodianPair, custodianVault)
+        val requester = RappSessionBridge.beginRequester(requesterPair, requesterVault, RappTestOffers.STREAM_PROFILE)
+        val custodian = RappSessionBridge.beginProxy(custodianPair, custodianVault, RappTestOffers.STREAM_PROFILE)
         custodian.readHandshakeFrame(requester.writeHandshakeFrame())
         val handshakeTwo = custodian.writeHandshakeFrame()
         custodian.enterAuthentication()
@@ -204,9 +198,7 @@ class RappProxyJournalRecoveryTest {
     }
 
     private companion object {
-        const val STREAM_PROFILE = "fi.refineid.stream.v1"
         const val STREAM_CANDIDATE_ID = "stream-1"
-        const val EMPTY_CBOR_MAP: Byte = 0xa0.toByte()
         const val CPACE_RANDOM_BYTES = 64
         const val SESSION_NONCE_BYTES = 32
         const val OPERATION_ID_BYTES = 16

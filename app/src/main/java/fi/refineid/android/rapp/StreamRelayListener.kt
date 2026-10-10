@@ -69,7 +69,14 @@ internal class StreamRelayListener(
     val port: Int?
         get() = serverSocket?.localPort
 
-    fun start(displayName: String) {
+    /**
+     * Starts listening and advertises under [instanceName] with the given TXT
+     * attributes.
+     */
+    fun start(
+        instanceName: String,
+        attributes: Map<String, String>,
+    ) {
         if (isClosed.get()) return
         try {
             multicastLock?.acquire()
@@ -86,9 +93,10 @@ internal class StreamRelayListener(
 
             val serviceInfo =
                 NsdServiceInfo().apply {
-                    serviceName = displayName
+                    serviceName = instanceName
                     serviceType = SERVICE_TYPE
                     port = server.localPort
+                    attributes.forEach { (key, value) -> setAttribute(key, value) }
                 }
 
             val regListener =
@@ -218,6 +226,9 @@ internal class StreamRelayListener(
         try {
             while (scope.isActive && !isClosed.get() && !socket.isClosed) {
                 val length = input.readUnsignedShort()
+                if (length == 0) {
+                    throw IOException("empty stream frame")
+                }
                 val buffer = ByteArray(length)
                 input.readFully(buffer)
                 if (BuildConfig.DEBUG) {

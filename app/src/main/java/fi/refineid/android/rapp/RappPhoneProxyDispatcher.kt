@@ -42,6 +42,7 @@ import uniffi.refineid_rapp.RappOperationKind
 import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
+import uniffi.refineid_rapp.rappStreamProfileName
 import uniffi.refineid_rapp.rappStreamSessionPreamble
 import java.security.SecureRandom
 
@@ -122,7 +123,7 @@ internal class RappPhoneProxyDispatcher(
                 handleRelayEvent(event)
             }
         activeListener = listener
-        listener.start(rendezvousName)
+        listener.start(rendezvousName, emptyMap())
     }
 
     fun stopListening() {
@@ -223,7 +224,12 @@ internal class RappPhoneProxyDispatcher(
                 val token = pair.metadata().rendezvousToken
                 val preamble = rappStreamSessionPreamble(token)
                 if (event.data.contentEquals(preamble)) {
-                    sessionBridge = RappSessionBridge.beginProxy(pair = pair, vault = vlt)
+                    sessionBridge =
+                        RappSessionBridge.beginProxy(
+                            pair = pair,
+                            vault = vlt,
+                            transportProfile = rappStreamProfileName(),
+                        )
                     return
                 }
             } catch (_: Exception) {
@@ -231,7 +237,12 @@ internal class RappPhoneProxyDispatcher(
 
             // Not preamble or preamble was skipped: treat as Noise Message 1
             try {
-                val sess = RappSessionBridge.beginProxy(pair = pair, vault = vlt)
+                val sess =
+                    RappSessionBridge.beginProxy(
+                        pair = pair,
+                        vault = vlt,
+                        transportProfile = rappStreamProfileName(),
+                    )
                 sessionBridge = sess
                 sess.readHandshakeFrame(event.data)
                 val reply = sess.writeHandshakeFrame()

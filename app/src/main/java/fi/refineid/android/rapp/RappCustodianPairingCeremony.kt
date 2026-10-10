@@ -8,7 +8,7 @@ import uniffi.refineid_rapp.RappPeerHello
 
 /**
  * The custodian's side of one pairing ceremony over one connected candidate,
- * in the order RAPP v26.10.1 section 6.1.3 fixes:
+ * after the offer bootstrap, in the order RAPP v26.10.9 section 6.1.3 fixes:
  *
  * 1. read the requester's Y_A, answer with Y_B and T_B;
  * 2. read T_A, which consumes the offer and starts Noise_XXpsk3;
@@ -59,9 +59,12 @@ internal class RappCustodianPairingCeremony(
 
     private var peer: RappPeerHello? = null
 
-    /** Whether the ceremony has passed the CPace confirmation, so a lost peer fails it. */
+    /**
+     * Whether T_A verified and consumed the offer, so a lost peer fails the
+     * ceremony instead of returning the candidate to the offer.
+     */
     val isPastOfferPhase: Boolean
-        get() = step != Step.AWAITING_STEP_ONE
+        get() = step != Step.AWAITING_STEP_ONE && step != Step.AWAITING_STEP_THREE
 
     /**
      * Consumes one frame from the requester.
@@ -102,19 +105,19 @@ internal class RappCustodianPairingCeremony(
             }
 
             Step.AWAITING_HELLO -> {
-                val hello = bridge.receiveHello(frame, wallMs())
+                val hello = bridge.receiveHello(frame, now)
                 peer = hello
                 val requested = hello.requestedProfiles.orEmpty()
                 val granted = offeredProfiles.filter { it in requested }
-                val ownHello = bridge.sendHello(displayName = displayName, platform = platform)
-                val grant = bridge.sendConfirmation(granted)
+                val ownHello = bridge.sendHello(displayName = displayName, platform = platform, nowMonotonicMs = now)
+                val grant = bridge.sendConfirmation(granted, now)
                 step = Step.AWAITING_CONFIRMATION
                 Outcome.Send(listOf(ownHello, grant))
             }
 
             Step.AWAITING_CONFIRMATION -> {
-                bridge.receiveConfirmation(frame, wallMs())
-                val record = bridge.finishPairing(wallMs())
+                bridge.receiveConfirmation(frame, now)
+                val record = bridge.finishPairing(wallMs(), now)
                 step = Step.COMPLETED
                 Outcome.Paired(record, checkNotNull(peer))
             }

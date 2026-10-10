@@ -12,9 +12,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import uniffi.refineid_rapp.RappBindingException
+import uniffi.refineid_rapp.RappPairingBackoff
 import uniffi.refineid_rapp.RappPairingBridge
-import uniffi.refineid_rapp.RappTransportCandidate
+import uniffi.refineid_rapp.RappPreAuthenticationLimiter
 import uniffi.refineid_rapp.rappStreamPairingPreamble
+import uniffi.refineid_rapp.rappStreamProfileName
 
 internal sealed interface PairingPhase {
     data object Idle : PairingPhase
@@ -43,8 +46,8 @@ private const val MILLISECONDS_PER_SECOND = 1_000L
 private const val DEFAULT_PAIRING_COUNTDOWN_SECONDS =
     (RappPairingCode.DEFAULT_LIFETIME_MS / MILLISECONDS_PER_SECOND).toInt()
 private const val CPACE_RANDOM_BYTES = 64
+private const val OFFER_ID_BYTES = 32
 private const val STREAM_CANDIDATE_ID = "stream-1"
-private const val EMPTY_CBOR_MAP_BYTE = 0xa0.toByte()
 private val DEFAULT_PAIRING_PROFILES =
     listOf(
         "fi.refineid.card-status.v1",
@@ -64,6 +67,8 @@ internal class RappPairingModel(
     private var activeOfferingCode: String? = null
     private var secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
     private var ceremony: RappCustodianPairingCeremony? = null
+    private var awaitingPreamble = false
+    private val preAuthenticationLimiter = RappPreAuthenticationLimiter()
     private val app = context.applicationContext as? RefineIdApplication
 
     var phase by mutableStateOf<PairingPhase>(PairingPhase.Idle)
@@ -121,26 +126,24 @@ internal class RappPairingModel(
             settings.isCardRemoteAccessEnabled = true
             _isRemoteAccessEnabled = true
         }
+        val startedAtMonotonicMs = RappClock.monotonicMs()
+        val backoffMs = pairingBackoff.msUntilNextOffer(startedAtMonotonicMs)
+        if (backoffMs > 0UL) {
+            val seconds = (backoffMs.toLong() + MILLISECONDS_PER_SECOND - 1) / MILLISECONDS_PER_SECOND
+            phase = PairingPhase.Failed("Too many attempts. Try again in $seconds s")
+            return
+        }
         val code = RappPairingCode.generate()
         activeOfferingCode = code
         secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
-        val candidates =
-            listOf(
-                RappTransportCandidate(
-                    profile = "fi.refineid.stream.v1",
-                    candidateId = STREAM_CANDIDATE_ID,
-                    parametersCbor = byteArrayOf(EMPTY_CBOR_MAP_BYTE),
-                ),
-            )
+        val offerId = ByteArray(OFFER_ID_BYTES).also { java.security.SecureRandom().nextBytes(it) }
 
         try {
-            val startedAtMonotonicMs = RappClock.monotonicMs()
             val proxyBridge =
-                RappPairingBridge.fromProxyCodeOffer(
-                    pairingCode = code,
+                RappPairingBridge.createCustodianOffer(
+                    offerId = offerId,
                     profiles = DEFAULT_PAIRING_PROFILES,
-                    transports = candidates,
-                    offerTtlMs = RappPairingCode.DEFAULT_LIFETIME_MS.toULong(),
+                    transportProfiles = listOf(rappStreamProfileName()),
                     startedAtMonotonicMs = startedAtMonotonicMs,
                 )
             pairingBridge = proxyBridge
@@ -155,12 +158,17 @@ internal class RappPairingModel(
                     handleProxyListenerEvent(event, proxyBridge, code)
                 }
             listener = relayListener
-            relayListener.start(StreamRendezvousName.MANUAL_PAIRING_SERVICE_NAME)
+            relayListener.start(
+                StreamRendezvousName.ephemeralName(),
+                StreamRendezvousName.attributes(StreamRendezvousName.MODE_PAIRING),
+            )
 
             phase = PairingPhase.Offering(code = code, secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS)
             startCountdown()
         } catch (_: Throwable) {
             phase = PairingPhase.Failed("Failed to initialize remote pairing offer")
+        } finally {
+            offerId.fill(0)
         }
     }
 
@@ -171,15 +179,15 @@ internal class RappPairingModel(
     ) {
         when (event) {
             is StreamRelayEvent.Connected -> {
-                handleProxyConnected(bridge, code)
+                handleProxyConnected()
             }
 
             is StreamRelayEvent.Frame -> {
-                handleProxyFrame(event)
+                handleProxyFrame(event, bridge, code)
             }
 
             is StreamRelayEvent.Disconnected -> {
-                handleProxyDisconnected()
+                handleProxyDisconnected(bridge)
             }
 
             is StreamRelayEvent.Error -> {
@@ -190,56 +198,110 @@ internal class RappPairingModel(
         }
     }
 
-    private fun handleProxyConnected(
+    /**
+     * A new connection must be admitted by the pre-authentication limiter
+     * (RAPP v26.10.9 section 3.3) and then open with the pairing preamble.
+     */
+    private fun handleProxyConnected() {
+        ceremony = null
+        if (!preAuthenticationLimiter.admit(RappClock.monotonicMs())) {
+            awaitingPreamble = false
+            listener?.disconnectClient()
+            return
+        }
+        awaitingPreamble = true
+        phase = PairingPhase.Connecting("Connected! Starting security handshake...")
+        startHandshakeDeadline()
+    }
+
+    /**
+     * Serves the offer bootstrap (section 4.2) and starts CPace after the
+     * requester's pairing preamble; any other first frame closes the
+     * connection without touching the offer.
+     */
+    private fun beginCandidate(
+        preamble: ByteArray,
         bridge: RappPairingBridge,
         code: String,
     ) {
-        phase = PairingPhase.Connecting("Connected! Starting security handshake...")
-        ceremony = null
-        startHandshakeDeadline()
+        awaitingPreamble = false
+        if (!preamble.contentEquals(rappStreamPairingPreamble())) {
+            listener?.disconnectClient()
+            return
+        }
+        val now = RappClock.monotonicMs()
+        listener?.send(bridge.bootstrapBytes(now))
         val random64 = ByteArray(CPACE_RANDOM_BYTES).apply { java.security.SecureRandom().nextBytes(this) }
         try {
             bridge.beginCpace(
                 candidateId = STREAM_CANDIDATE_ID,
                 pairingCode = code,
                 randomBytes64 = random64,
-                nowMonotonicMs = RappClock.monotonicMs(),
+                nowMonotonicMs = now,
             )
-            ceremony =
-                RappCustodianPairingCeremony(
-                    bridge = bridge,
-                    offeredProfiles = DEFAULT_PAIRING_PROFILES,
-                    displayName = localDeviceDisplayName(),
-                    platform = "Android",
-                    monotonicMs = RappClock::monotonicMs,
-                    wallMs = RappClock::wallMs,
-                )
-        } catch (_: Exception) {
-            phase = PairingPhase.Failed("Failed to initialize security handshake")
         } finally {
             random64.fill(0)
         }
+        ceremony =
+            RappCustodianPairingCeremony(
+                bridge = bridge,
+                offeredProfiles = DEFAULT_PAIRING_PROFILES,
+                displayName = localDeviceDisplayName(),
+                platform = "Android",
+                monotonicMs = RappClock::monotonicMs,
+                wallMs = RappClock::wallMs,
+            )
     }
 
-    private fun handleProxyDisconnected() {
+    private fun handleProxyDisconnected(bridge: RappPairingBridge) {
         handshakeDeadlineJob?.cancel()
         handshakeDeadlineJob = null
+        awaitingPreamble = false
         if (phase is PairingPhase.Connecting) {
-            if (ceremony?.isPastOfferPhase == true) {
-                phase = PairingPhase.Failed("Peer disconnected")
-            } else {
-                restoreOfferingOrWaiting()
-            }
+            candidateEnded(bridge)
         }
     }
 
-    private fun handleProxyFrame(event: StreamRelayEvent.Frame) {
+    /**
+     * Spends the connection's attempt. Before T_A the offer stays for another
+     * connection while attempts and lifetime remain; after T_A, or once the
+     * third attempt failed, the ceremony is over.
+     */
+    private fun candidateEnded(bridge: RappPairingBridge) {
+        val pastOffer = ceremony?.isPastOfferPhase == true
+        ceremony = null
+        if (pastOffer) {
+            phase = PairingPhase.Failed("Peer disconnected")
+            return
+        }
+        val now = RappClock.monotonicMs()
+        val offerKept =
+            try {
+                bridge.candidateFailed(now)
+            } catch (_: RappBindingException.AttemptsExhausted) {
+                false
+            } catch (_: Exception) {
+                false
+            }
+        if (offerKept) {
+            restoreOfferingOrWaiting()
+        } else {
+            pairingBackoff.recordLockout(now)
+            phase = PairingPhase.Failed("Too many attempts")
+            reset(keepPhase = true)
+        }
+    }
+
+    private fun handleProxyFrame(
+        event: StreamRelayEvent.Frame,
+        bridge: RappPairingBridge,
+        code: String,
+    ) {
         try {
-            val preamble = rappStreamPairingPreamble()
-            if (event.data.contentEquals(preamble)) {
+            if (awaitingPreamble) {
+                beginCandidate(event.data, bridge, code)
                 return
             }
-
             val active = ceremony ?: return
             when (val outcome = active.receive(event.data)) {
                 is RappCustodianPairingCeremony.Outcome.Send -> {
@@ -254,7 +316,12 @@ internal class RappPairingModel(
         } catch (e: Throwable) {
             handshakeDeadlineJob?.cancel()
             handshakeDeadlineJob = null
-            phase = PairingPhase.Failed("Pairing error: ${e.javaClass.simpleName}")
+            if (ceremony?.isPastOfferPhase == true) {
+                ceremony = null
+                phase = PairingPhase.Failed("Pairing error: ${e.javaClass.simpleName}")
+            } else {
+                listener?.disconnectClient()
+            }
         }
     }
 
@@ -295,6 +362,7 @@ internal class RappPairingModel(
             certificateDerBase64 = null,
         )
         pairedDevices = catalog.listPairs()
+        pairingBackoff.recordSuccess()
         phase = PairingPhase.Paired(peer)
 
         val oldListener = listener
@@ -316,7 +384,6 @@ internal class RappPairingModel(
                 delay(HANDSHAKE_DEADLINE_MS)
                 if (phase is PairingPhase.Connecting) {
                     listener?.disconnectClient()
-                    restoreOfferingOrWaiting()
                 }
             }
     }
@@ -369,6 +436,10 @@ internal class RappPairingModel(
     }
 
     fun reset() {
+        reset(keepPhase = false)
+    }
+
+    private fun reset(keepPhase: Boolean) {
         handshakeDeadlineJob?.cancel()
         handshakeDeadlineJob = null
         timerJob?.cancel()
@@ -383,7 +454,10 @@ internal class RappPairingModel(
         }
         pairingBridge = null
         ceremony = null
-        phase = PairingPhase.Idle
+        awaitingPreamble = false
+        if (!keepPhase) {
+            phase = PairingPhase.Idle
+        }
         pairedDevices = catalog.listPairs()
     }
 
@@ -408,6 +482,9 @@ internal class RappPairingModel(
     }
 
     companion object {
+        /** Post-lockout backoff shared by every offer this process creates. */
+        private val pairingBackoff = RappPairingBackoff()
+
         internal fun decodeHexOrNull(hex: String): ByteArray? {
             if (hex.isEmpty() || hex.length % 2 != 0) return null
             val result = ByteArray(hex.length / 2)
