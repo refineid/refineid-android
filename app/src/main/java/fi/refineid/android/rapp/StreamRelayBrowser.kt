@@ -30,6 +30,7 @@ internal class StreamRelayBrowser(
     private val context: Context,
     private val scope: CoroutineScope,
     private val targetMode: String,
+    private val accepts: (Map<String, ByteArray?>) -> Boolean = { true },
     private val onEvent: (StreamRelayEvent) -> Unit,
 ) : AutoCloseable {
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
@@ -148,6 +149,10 @@ internal class StreamRelayBrowser(
         }
     }
 
+    /** Whether a resolved record advertises the target mode and passes [accepts]. */
+    private fun isWanted(attributes: Map<String, ByteArray?>): Boolean =
+        StreamRendezvousName.matches(attributes, targetMode) && accepts(attributes)
+
     private fun resolveAndConnect(serviceInfo: NsdServiceInfo) {
         if (isConnected.get() || isClosed.get()) return
         if (!isResolving.compareAndSet(false, true)) return
@@ -177,7 +182,7 @@ internal class StreamRelayBrowser(
                             }
                             val host = resolved.hostAddresses.firstOrNull()?.hostAddress ?: resolved.host?.hostAddress
                             val port = resolved.port
-                            if (!StreamRendezvousName.matches(resolved.attributes, targetMode)) {
+                            if (!isWanted(resolved.attributes)) {
                                 isResolving.set(false)
                                 activeServiceCallback = null
                                 try {
@@ -259,7 +264,7 @@ internal class StreamRelayBrowser(
                         }
                         if (host != null &&
                             port > 0 &&
-                            StreamRendezvousName.matches(resolved.attributes, targetMode) &&
+                            isWanted(resolved.attributes) &&
                             isConnected.compareAndSet(false, true)
                         ) {
                             stopDiscovery()

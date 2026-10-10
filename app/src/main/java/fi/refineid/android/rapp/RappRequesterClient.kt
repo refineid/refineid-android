@@ -115,7 +115,17 @@ internal class RappRequesterClient(
             }
 
             browser =
-                StreamRelayBrowser(context, scope, StreamRendezvousName.MODE_SESSION) { event ->
+                StreamRelayBrowser(
+                    context,
+                    scope,
+                    StreamRendezvousName.MODE_SESSION,
+                    accepts = { attributes ->
+                        // Never dial a phone whose hints name only other
+                        // pairings (discovery hierarchy section 4.3).
+                        StreamRendezvousName.hintMatch(attributes, token, StreamRendezvousName.nowUnixSeconds()) !=
+                            StreamRendezvousName.HintMatch.OTHER
+                    },
+                ) { event ->
                     when (event) {
                         is StreamRelayEvent.Connected -> {
                             try {

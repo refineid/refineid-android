@@ -35,6 +35,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.refineid_rapp.RappBridgeActionKind
+import uniffi.refineid_rapp.RappEndpointRole
 import uniffi.refineid_rapp.RappLivenessConfiguration
 import uniffi.refineid_rapp.RappOperationBridge
 import uniffi.refineid_rapp.RappOperationDescriptor
@@ -129,13 +130,35 @@ internal class RappPhoneProxyDispatcher(
                 handleRelayEvent(event)
             }
         activeListener = listener
-        listener.start(
-            StreamRendezvousName.ephemeralName(),
-            StreamRendezvousName.attributes(StreamRendezvousName.MODE_SESSION),
-        )
+        listener.start(StreamRendezvousName.ephemeralName(), sessionAttributes(vault))
+        hintRefreshJob?.cancel()
+        hintRefreshJob =
+            scope.launch {
+                while (isActive && activeListener === listener) {
+                    delay(StreamRendezvousName.millisUntilNextWindow(System.currentTimeMillis()))
+                    if (activeListener === listener) {
+                        listener.updateAttributes(sessionAttributes(vault))
+                    }
+                }
+            }
+    }
+
+    /**
+     * Session-mode TXT attributes carrying the current rotating hints of
+     * the stored custodian pairings (discovery hierarchy section 4.3).
+     */
+    private fun sessionAttributes(vault: AndroidRappVault): Map<String, String> {
+        val tokens =
+            storedPairs(vault).mapNotNull { record ->
+                val metadata = record.metadata()
+                metadata.rendezvousToken.takeIf { metadata.role == RappEndpointRole.PROXY }
+            }
+        return StreamRendezvousName.sessionAttributes(tokens, StreamRendezvousName.nowUnixSeconds())
     }
 
     fun stopListening() {
+        hintRefreshJob?.cancel()
+        hintRefreshJob = null
         activeListener?.close()
         activeListener = null
         operationBridge?.close()
@@ -328,6 +351,7 @@ internal class RappPhoneProxyDispatcher(
     private val pendingPin2 = java.util.concurrent.ConcurrentHashMap<String, Pin2Submission>()
     private var activeOperationJob: Job? = null
     private var livenessJob: Job? = null
+    private var hintRefreshJob: Job? = null
 
     private fun clearPendingPins() {
         pendingPin1.values.forEach { it.close() }
