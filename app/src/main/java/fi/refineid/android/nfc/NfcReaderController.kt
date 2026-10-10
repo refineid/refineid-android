@@ -305,21 +305,27 @@ internal class NfcReaderController(
                 }
             val startedAt = SystemClock.elapsedRealtime()
             var lastChangeAt = startedAt
+            var wasWaitingOnHolder = false
             while (true) {
                 if (current.status == NfcReaderStatus.CARD_READY) {
                     return true
                 }
                 openRestingCard(current.status)
+                val waitingOnHolder =
+                    NfcCardWait.waitsOnHolder(
+                        status = current.status,
+                        accessNumberKnown = accessNumberKnown(),
+                        readerInFront = attachedActivity != null,
+                    )
+                if (wasWaitingOnHolder && !waitingOnHolder) {
+                    lastChangeAt = SystemClock.elapsedRealtime()
+                }
+                wasWaitingOnHolder = waitingOnHolder
                 val deadline =
                     NfcCardWait.deadline(
                         startedAt = startedAt,
                         lastChangeAt = lastChangeAt,
-                        waitingOnHolder =
-                            NfcCardWait.waitsOnHolder(
-                                status = current.status,
-                                accessNumberKnown = accessNumberKnown(),
-                                readerInFront = attachedActivity != null,
-                            ),
+                        waitingOnHolder = waitingOnHolder,
                     )
                 val remaining = deadline - SystemClock.elapsedRealtime()
                 if (remaining <= 0) {

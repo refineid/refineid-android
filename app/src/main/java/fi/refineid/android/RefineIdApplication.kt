@@ -337,11 +337,14 @@ class RefineIdApplication : Application() {
                             true
                         } else {
                             val nfcReady = nfcWait.await()
-                            usbWait.cancel()
-                            if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
-                                readerController.awaitCardReady()
+                            if (nfcReady) {
+                                usbWait.cancel()
+                                true
+                            } else if (usbFirst) {
+                                readerController.snapshot.cardPresence == CardPresence.PRESENT &&
+                                    readerController.awaitCardReady()
                             } else {
-                                nfcReady
+                                usbWait.await()
                             }
                         }
                     }

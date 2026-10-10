@@ -28,6 +28,7 @@ import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -219,15 +220,19 @@ internal fun RappCardTapDialog(
 ) {
     var wasReading by remember(prompt.requestId) { mutableStateOf(false) }
     val reading = nfcStatus == NfcReaderStatus.CHECKING || nfcStatus == NfcReaderStatus.CONNECTING
-    if (reading) wasReading = true
-    val needsAccessNumber = !usbReaderPresent && NfcCardWait.needsAccessNumber(nfcStatus, accessNumberKnown)
+    LaunchedEffect(prompt.requestId, reading) {
+        if (reading) wasReading = true
+    }
+    val cardOnPhone = reading || nfcStatus in CARD_ON_PHONE
+    val needsAccessNumber =
+        (!usbReaderPresent || cardOnPhone) && NfcCardWait.needsAccessNumber(nfcStatus, accessNumberKnown)
     val message =
         when {
-            usbReaderPresent -> R.string.insert_card_into_reader
             reading -> R.string.card_reading_hold_still
             nfcStatus == NfcReaderStatus.WRONG_CAN -> R.string.wrong_can
-            wasReading && nfcStatus == NfcReaderStatus.WAITING_FOR_CARD -> R.string.card_contact_lost
             nfcStatus == NfcReaderStatus.CARD_RECOGNIZED && needsAccessNumber -> R.string.card_found_enter_can
+            wasReading && nfcStatus == NfcReaderStatus.WAITING_FOR_CARD -> R.string.card_contact_lost
+            usbReaderPresent -> R.string.insert_card_into_reader
             else -> R.string.hold_card_against_back
         }
     val accessNumber = remember(prompt.requestId) { TextFieldState(CanSessionStore.currentCan ?: "") }
@@ -307,3 +312,6 @@ internal fun RappCardTapDialog(
         }
     }
 }
+
+/** Reader states that mean a card is on the phone rather than in the USB reader. */
+private val CARD_ON_PHONE = setOf(NfcReaderStatus.CARD_RECOGNIZED, NfcReaderStatus.WRONG_CAN)
