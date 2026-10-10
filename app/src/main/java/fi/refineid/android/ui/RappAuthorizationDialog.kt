@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -42,6 +43,7 @@ import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin2Submission
 import fi.refineid.android.rapp.RappAuthAction
 import fi.refineid.android.rapp.RappAuthRequest
+import fi.refineid.android.rapp.rappRequestText
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
@@ -85,7 +87,7 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                 )
 
                 Text(
-                    text = requestDescription(request),
+                    text = rappRequestText(LocalResources.current, request),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -170,25 +172,6 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
     }
 }
 
-/** What the request asks of the holder. */
-private fun requestDescription(request: RappAuthRequest): String =
-    when (request) {
-        is RappAuthRequest.BrowserAuth -> {
-            "${request.requester} needs your identity card.\n" +
-                "Enter PIN 1 and hold the card to the phone."
-        }
-
-        is RappAuthRequest.DocumentSign -> {
-            if (request.documentNames.size > 1) {
-                "${request.requester} is requesting ${request.documentNames.size} document signatures.\n" +
-                    "Enter PIN 2 once and hold your ID card to the phone to sign them all."
-            } else {
-                "${request.requester} is requesting a document signature.\n" +
-                    "Enter PIN 2 and hold your ID card to the phone to sign."
-            }
-        }
-    }
-
 /** The documents an approval signs, in signing order. */
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
@@ -214,7 +197,10 @@ private fun RappDocumentNames(names: List<String>) {
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-internal fun RappCardTapDialog(prompt: fi.refineid.android.rapp.RappCardTapPrompt) {
+internal fun RappCardTapDialog(
+    prompt: fi.refineid.android.rapp.RappCardTapPrompt,
+    usbReaderPresent: Boolean,
+) {
     Dialog(
         onDismissRequest = { prompt.onCancel() },
         properties =
@@ -235,7 +221,10 @@ internal fun RappCardTapDialog(prompt: fi.refineid.android.rapp.RappCardTapPromp
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(
-                    text = stringResource(R.string.hold_card_against_back),
+                    text =
+                        stringResource(
+                            if (usbReaderPresent) R.string.insert_card_into_reader else R.string.hold_card_against_back,
+                        ),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,

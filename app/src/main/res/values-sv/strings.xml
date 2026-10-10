@@ -13,6 +13,7 @@
     <string name="allow">Tillåt</string>
     <string name="retry">Försök igen</string>
     <string name="card" tools:ignore="DuplicateStrings">Kort</string>
+    <string name="on">På</string>
     <string name="off">Av</string>
     <string name="turn_on">Slå på</string>
     <string name="card_recognized">Kortet igenkänt</string>
@@ -111,7 +112,18 @@
     <string name="pin1_section_title">Grund-PIN (PIN 1)</string>
     <string name="pin2_section_title">Underskrifts-PIN (PIN 2)</string>
     <string name="paired_devices">Kopplade datorer</string>
-    <string name="connected_status">Ansluten</string>
     <string name="card_remote_access">Fjärråtkomst för kort</string>
     <string name="no_paired_devices">Inga kopplade datorer</string>
+    <string name="remote_requests_channel">Förfrågningar</string>
+    <string name="remote_authentication_request">%1$s begär inloggning med ditt ID-kort.</string>
+    <string name="remote_signature_request">%1$s begär en underskrift.</string>
+    <string name="remote_card_needed">%1$s behöver ditt ID-kort.</string>
+    <string name="insert_card_into_reader">Sätt in ID-kortet i läsaren.</string>
+    <string name="remote_in_use">Används</string>
+    <string name="allow_notifications">Tillåt aviseringar</string>
+    <string name="allow_full_screen_requests">Tillåt förfrågningar i helskärm</string>
+    <plurals name="remote_signature_request_many">
+        <item quantity="one">%1$s begär %2$d underskrift.</item>
+        <item quantity="other">%1$s begär %2$d underskrifter.</item>
+    </plurals>
 </resources>

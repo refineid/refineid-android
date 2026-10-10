@@ -1,7 +1,12 @@
 package fi.refineid.android.ui
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -25,11 +31,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -42,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import fi.refineid.android.R
 import fi.refineid.android.rapp.PairedPeer
@@ -66,10 +76,19 @@ internal fun RappPairingScreen(
     val context = LocalContext.current
     val phase = model.phase
 
+    var notificationsAllowed by remember { mutableStateOf(rappNotificationsAllowed(context)) }
+    var fullScreenAllowed by remember { mutableStateOf(rappFullScreenAllowed(context)) }
     val notificationPermissionLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission(),
-        ) { _ -> }
+        ) { _ -> notificationsAllowed = rappNotificationsAllowed(context) }
+    val settingsLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult(),
+        ) { _ ->
+            notificationsAllowed = rappNotificationsAllowed(context)
+            fullScreenAllowed = rappFullScreenAllowed(context)
+        }
 
     LaunchedEffect(model.isRemoteAccessEnabled, phase, authenticationReady) {
         if (authenticationReady && model.isRemoteAccessEnabled && phase is PairingPhase.Idle &&
@@ -85,7 +104,6 @@ internal fun RappPairingScreen(
     ) {
         CardRemoteAccessSwitchCard(
             enabled = model.isRemoteAccessEnabled,
-            isConnected = model.activeConnectedPeer != null,
             onCheckedChange = { isChecked ->
                 if (isChecked) {
                     if (ContextCompat.checkSelfPermission(
@@ -101,6 +119,38 @@ internal fun RappPairingScreen(
                 if (isChecked) onEnableRemoteAccess() else model.setRemoteAccessEnabled(false)
             },
         )
+
+        if (model.isRemoteAccessEnabled && (!notificationsAllowed || !fullScreenAllowed)) {
+            NavigationGroup {
+                if (!notificationsAllowed) {
+                    NavigationRow(
+                        icon = Icons.Outlined.Notifications,
+                        label = stringResource(R.string.allow_notifications),
+                        tag = UiAutomationIds.ALLOW_NOTIFICATIONS_ROW,
+                        onClick = {
+                            settingsLauncher.launch(
+                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName),
+                            )
+                        },
+                    )
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    NavigationRow(
+                        icon = Icons.Outlined.Notifications,
+                        label = stringResource(R.string.allow_full_screen_requests),
+                        tag = UiAutomationIds.ALLOW_FULL_SCREEN_ROW,
+                        onClick = {
+                            settingsLauncher.launch(
+                                Intent(
+                                    Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                                    Uri.fromParts("package", context.packageName, null),
+                                ),
+                            )
+                        },
+                    )
+                }
+            }
+        }
 
         if (model.isRemoteAccessEnabled) {
             when (phase) {
@@ -148,10 +198,10 @@ internal fun RappPairingScreen(
                         if (index > 0) {
                             HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
                         }
-                        val isConnected = model.activeConnectedPeer?.pairIdHex == peer.pairIdHex
+                        val inUse = rememberSteadyFlag(model.activeConnectedPeer?.pairIdHex == peer.pairIdHex)
                         PairedPeerRow(
                             peer = peer,
-                            isConnected = isConnected,
+                            inUse = inUse,
                             onDisconnect = { model.disconnectActivePeer() },
                             onRemove = { model.removePair(peer.pairIdHex) },
                         )
@@ -166,7 +216,6 @@ internal fun RappPairingScreen(
 @Composable
 private fun CardRemoteAccessSwitchCard(
     enabled: Boolean,
-    isConnected: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Card(
@@ -195,10 +244,10 @@ private fun CardRemoteAccessSwitchCard(
                     painter = painterResource(R.drawable.ic_satellite_alt),
                     contentDescription = null,
                     tint =
-                        when {
-                            isConnected -> CONNECTED_STATUS_COLOR
-                            enabled -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        if (enabled) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     modifier = Modifier.size(ROW_ICON_SIZE),
                 )
@@ -221,7 +270,7 @@ private fun CardRemoteAccessSwitchCard(
 @Composable
 private fun PairedPeerRow(
     peer: PairedPeer,
-    isConnected: Boolean,
+    inUse: Boolean,
     onDisconnect: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -241,24 +290,12 @@ private fun PairedPeerRow(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = peer.platform,
+                text = if (inUse) stringResource(R.string.remote_in_use) else peer.platform,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (inUse) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (isConnected) {
-            Surface(
-                shape = RoundedCornerShape(STATUS_BADGE_CORNER_RADIUS),
-                color = CONNECTED_STATUS_COLOR.copy(alpha = CONNECTED_STATUS_BADGE_ALPHA),
-            ) {
-                Text(
-                    text = stringResource(R.string.connected_status),
-                    color = CONNECTED_STATUS_COLOR,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
+        if (inUse) {
             IconButton(onClick = onDisconnect) {
                 Icon(
                     imageVector = Icons.Outlined.Clear,
@@ -378,7 +415,7 @@ private fun PairedPhaseView(
             Icon(
                 imageVector = Icons.Outlined.Check,
                 contentDescription = stringResource(R.string.peer_connected, peer.displayName),
-                tint = CONNECTED_STATUS_COLOR,
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(44.dp),
             )
             Text(
@@ -433,3 +470,27 @@ private fun FailedPhaseView(
         }
     }
 }
+
+/**
+ * A session flag that rises only after [active] has held for
+ * [STEADY_RISE_MS] and falls [STEADY_FALL_MS] after it ends, so the
+ * per-operation connections a requester opens do not blink the row.
+ */
+@Composable
+private fun rememberSteadyFlag(active: Boolean): Boolean {
+    var steady by remember { mutableStateOf(false) }
+    LaunchedEffect(active) {
+        delay(if (active) STEADY_RISE_MS else STEADY_FALL_MS)
+        steady = active
+    }
+    return steady
+}
+
+private const val STEADY_RISE_MS = 750L
+private const val STEADY_FALL_MS = 2_000L
+
+private fun rappNotificationsAllowed(context: Context): Boolean =
+    NotificationManagerCompat.from(context).areNotificationsEnabled()
+
+private fun rappFullScreenAllowed(context: Context): Boolean =
+    NotificationManagerCompat.from(context).canUseFullScreenIntent()

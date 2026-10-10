@@ -82,6 +82,8 @@ internal object UiAutomationIds {
     const val SHARE_PHOTO_ACTION = "sharePhotoAction"
     const val CARD_REMOTE_ACCESS_CARD = "cardRemoteAccessCard"
     const val CARD_REMOTE_ACCESS_SWITCH = "cardRemoteAccessSwitch"
+    const val ALLOW_NOTIFICATIONS_ROW = "allowNotificationsRow"
+    const val ALLOW_FULL_SCREEN_ROW = "allowFullScreenRow"
 
     fun timestampAddressField(index: Int): String = TIMESTAMP_ADDRESS_FIELD_PREFIX + index
 

@@ -267,12 +267,26 @@ internal fun MainScreen(
     val signingAvailable =
         (usbCardReady || nfcSigningAvailable || remoteSigningAvailable) && !isActivationRequired
 
+    val permissionContext = LocalContext.current
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
+    val remoteAccessServing =
+        rappPairingModel?.let { it.isRemoteAccessEnabled && it.pairedDevices.isNotEmpty() } ?: false
+    LaunchedEffect(remoteAccessServing) {
+        if (remoteAccessServing &&
+            ContextCompat.checkSelfPermission(permissionContext, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     rappInbox?.currentRequest?.let { req ->
         RappAuthorizationDialog(request = req)
     }
 
     rappInbox?.currentTapPrompt?.let { prompt ->
-        RappCardTapDialog(prompt = prompt)
+        RappCardTapDialog(prompt = prompt, usbReaderPresent = usbReaderPresent)
     }
 
     if (!preparationActive && rappInbox?.currentTapPrompt == null && nfcSnapshot.awaitingCard) {
@@ -795,37 +809,19 @@ private fun HomeScreen(
             if (!isActivationRequired) {
                 Section(stringResource(R.string.card)) {
                     NavigationGroup {
-                        val isConnected = rappPairingModel?.activeConnectedPeer != null
                         val isRemoteEnabled = rappPairingModel?.isRemoteAccessEnabled ?: false
                         NavigationRow(
                             icon = painterResource(R.drawable.ic_satellite_alt),
                             label = stringResource(R.string.pair_computer),
                             tag = "RappPairingRow",
                             iconTint =
-                                when {
-                                    isConnected -> CONNECTED_STATUS_COLOR
-                                    isRemoteEnabled -> MaterialTheme.colorScheme.primary
-                                    else -> MaterialTheme.colorScheme.primary
-                                },
-                            badge =
-                                if (isConnected) {
-                                    {
-                                        Surface(
-                                            shape = RoundedCornerShape(STATUS_BADGE_CORNER_RADIUS),
-                                            color = CONNECTED_STATUS_COLOR.copy(alpha = CONNECTED_STATUS_BADGE_ALPHA),
-                                        ) {
-                                            Text(
-                                                text = stringResource(R.string.connected_status),
-                                                color = CONNECTED_STATUS_COLOR,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                            )
-                                        }
-                                    }
+                                if (isRemoteEnabled) {
+                                    MaterialTheme.colorScheme.primary
                                 } else {
-                                    null
+                                    MaterialTheme.colorScheme.onSurfaceVariant
                                 },
+                            stateDescription =
+                                stringResource(if (isRemoteEnabled) R.string.on else R.string.off),
                             onClick = onOpenRemoteAccess,
                         )
                         HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
