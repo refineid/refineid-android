@@ -7,7 +7,9 @@ import java.text.Normalizer
 internal object RappPairingCode {
     const val CODE_LENGTH = 6
     const val GROUP_SIZE = 2
-    const val DEFAULT_LIFETIME_MS: Long = 180_000L
+
+    /** Offer lifetime both peers bind into the offer hash (RAPP v26.10.1 section 3.3). */
+    const val DEFAULT_LIFETIME_MS: Long = 60_000L
 
     /** Crockford Base32 alphabet (32 symbols, excluding I, L, O, U). */
     const val ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"

@@ -39,7 +39,9 @@ internal sealed interface PairingPhase {
 
 private const val LISTENER_CLOSE_DELAY_MS = 2000L
 private const val HANDSHAKE_DEADLINE_MS = 10_000L
-private const val DEFAULT_PAIRING_COUNTDOWN_SECONDS = 180
+private const val MILLISECONDS_PER_SECOND = 1_000L
+private const val DEFAULT_PAIRING_COUNTDOWN_SECONDS =
+    (RappPairingCode.DEFAULT_LIFETIME_MS / MILLISECONDS_PER_SECOND).toInt()
 private const val CPACE_RANDOM_BYTES = 64
 private const val STREAM_CANDIDATE_ID = "stream-1"
 private const val EMPTY_CBOR_MAP_BYTE = 0xa0.toByte()
@@ -61,8 +63,7 @@ internal class RappPairingModel(
     private var handshakeDeadlineJob: Job? = null
     private var activeOfferingCode: String? = null
     private var secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
-    private var proxyHandshakeStep = 0
-    private var receivedPeerHello: uniffi.refineid_rapp.RappPeerHello? = null
+    private var ceremony: RappCustodianPairingCeremony? = null
     private val app = context.applicationContext as? RefineIdApplication
 
     var phase by mutableStateOf<PairingPhase>(PairingPhase.Idle)
@@ -143,7 +144,7 @@ internal class RappPairingModel(
                     startedAtMonotonicMs = startedAtMonotonicMs,
                 )
             pairingBridge = proxyBridge
-            proxyHandshakeStep = 0
+            ceremony = null
 
             val relayListener =
                 StreamRelayListener(
@@ -174,7 +175,7 @@ internal class RappPairingModel(
             }
 
             is StreamRelayEvent.Frame -> {
-                handleProxyFrame(event, bridge)
+                handleProxyFrame(event)
             }
 
             is StreamRelayEvent.Disconnected -> {
@@ -194,7 +195,7 @@ internal class RappPairingModel(
         code: String,
     ) {
         phase = PairingPhase.Connecting("Connected! Starting security handshake...")
-        proxyHandshakeStep = 0
+        ceremony = null
         startHandshakeDeadline()
         val random64 = ByteArray(CPACE_RANDOM_BYTES).apply { java.security.SecureRandom().nextBytes(this) }
         try {
@@ -204,6 +205,15 @@ internal class RappPairingModel(
                 randomBytes64 = random64,
                 nowMonotonicMs = RappClock.monotonicMs(),
             )
+            ceremony =
+                RappCustodianPairingCeremony(
+                    bridge = bridge,
+                    offeredProfiles = DEFAULT_PAIRING_PROFILES,
+                    displayName = localDeviceDisplayName(),
+                    platform = "Android",
+                    monotonicMs = RappClock::monotonicMs,
+                    wallMs = RappClock::wallMs,
+                )
         } catch (_: Exception) {
             phase = PairingPhase.Failed("Failed to initialize security handshake")
         } finally {
@@ -215,7 +225,7 @@ internal class RappPairingModel(
         handshakeDeadlineJob?.cancel()
         handshakeDeadlineJob = null
         if (phase is PairingPhase.Connecting) {
-            if (proxyHandshakeStep > 0) {
+            if (ceremony?.isPastOfferPhase == true) {
                 phase = PairingPhase.Failed("Peer disconnected")
             } else {
                 restoreOfferingOrWaiting()
@@ -223,56 +233,22 @@ internal class RappPairingModel(
         }
     }
 
-    private fun handleProxyFrame(
-        event: StreamRelayEvent.Frame,
-        bridge: RappPairingBridge,
-    ) {
+    private fun handleProxyFrame(event: StreamRelayEvent.Frame) {
         try {
             val preamble = rappStreamPairingPreamble()
             if (event.data.contentEquals(preamble)) {
                 return
             }
 
-            val nowMonotonicMs = RappClock.monotonicMs()
-            when (proxyHandshakeStep) {
-                0 -> {
-                    val response = bridge.writeCpaceFrame(nowMonotonicMs)
-                    bridge.readCpaceFrame(event.data, nowMonotonicMs)
-                    listener?.send(response)
-                    proxyHandshakeStep = 1
+            val active = ceremony ?: return
+            when (val outcome = active.receive(event.data)) {
+                is RappCustodianPairingCeremony.Outcome.Send -> {
+                    outcome.frames.forEach { frame -> listener?.send(frame) }
                     startHandshakeDeadline()
                 }
 
-                1 -> {
-                    bridge.readHandshakeFrame(event.data, nowMonotonicMs)
-                    val response = bridge.writeHandshakeFrame(nowMonotonicMs)
-                    listener?.send(response)
-                    proxyHandshakeStep = 2
-                    startHandshakeDeadline()
-                }
-
-                2 -> {
-                    bridge.readHandshakeFrame(event.data, nowMonotonicMs)
-                    if (bridge.handshakeComplete(nowMonotonicMs)) {
-                        bridge.enterConfirmation(nowMonotonicMs)
-                        val hello =
-                            bridge.sendHello(displayName = localDeviceDisplayName(), platform = "Android")
-                        listener?.send(hello)
-                        proxyHandshakeStep = 3
-                        startHandshakeDeadline()
-                    }
-                }
-
-                3 -> {
-                    receivedPeerHello = bridge.receiveHello(event.data, RappClock.wallMs())
-                    val confirmation = bridge.sendConfirmation(DEFAULT_PAIRING_PROFILES)
-                    listener?.send(confirmation)
-                    proxyHandshakeStep = 4
-                    startHandshakeDeadline()
-                }
-
-                4 -> {
-                    finalizeProxyPairing(event.data, bridge)
+                is RappCustodianPairingCeremony.Outcome.Paired -> {
+                    finalizeProxyPairing(outcome.record, outcome.peer)
                 }
             }
         } catch (e: Throwable) {
@@ -283,21 +259,17 @@ internal class RappPairingModel(
     }
 
     private fun finalizeProxyPairing(
-        confirmationData: ByteArray,
-        bridge: RappPairingBridge,
+        record: uniffi.refineid_rapp.RappPairRecord,
+        hello: uniffi.refineid_rapp.RappPeerHello,
     ) {
-        bridge.receiveConfirmation(confirmationData, RappClock.wallMs())
         handshakeDeadlineJob?.cancel()
         handshakeDeadlineJob = null
         listener?.clearSocketTimeout()
-        val nowMs = RappClock.wallMs()
-        val record = bridge.finishPairing(nowMs)
-        val hello = receivedPeerHello
         val peer =
             PairedPeer(
                 pairIdHex = record.metadata().pairId.joinToString("") { "%02x".format(it) },
-                displayName = hello?.displayName?.takeIf { it.isNotBlank() } ?: "Computer",
-                platform = hello?.platform?.takeIf { it.isNotBlank() } ?: "Unknown",
+                displayName = hello.displayName.takeIf { it.isNotBlank() } ?: "Computer",
+                platform = hello.platform.takeIf { it.isNotBlank() } ?: "Unknown",
                 createdAtMs = System.currentTimeMillis(),
             )
 
@@ -356,7 +328,7 @@ internal class RappPairingModel(
         } else {
             phase = PairingPhase.Connecting("Waiting for peer...")
         }
-        proxyHandshakeStep = 0
+        ceremony = null
     }
 
     private fun startCountdown() {
@@ -410,8 +382,7 @@ internal class RappPairingModel(
         } catch (_: Exception) {
         }
         pairingBridge = null
-        receivedPeerHello = null
-        proxyHandshakeStep = 0
+        ceremony = null
         phase = PairingPhase.Idle
         pairedDevices = catalog.listPairs()
     }

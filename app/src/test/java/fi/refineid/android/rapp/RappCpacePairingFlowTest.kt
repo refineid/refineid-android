@@ -7,13 +7,11 @@ package fi.refineid.android.rapp
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappPairingBridge
 import uniffi.refineid_rapp.RappTransportCandidate
-import java.io.File
 import java.security.SecureRandom
 
 class RappCpacePairingFlowTest {
@@ -22,51 +20,6 @@ class RappCpacePairingFlowTest {
         private const val STREAM_PROFILE = "fi.refineid.stream.v1"
         private val EMPTY_CBOR_MAP = byteArrayOf(0xa0.toByte())
         private const val CPACE_RANDOM_BYTES = 64
-        private var libraryFound: Boolean = false
-
-        init {
-            val libNames = listOf("librefineid_rapp.dylib", "librefineid_rapp.so", "refineid_rapp.dll")
-            val candidate = findNativeLibrary(libNames)
-            if (candidate != null) {
-                libraryFound = true
-                val parentDir = candidate.parentFile?.canonicalPath ?: candidate.parent ?: ""
-                val existing = System.getProperty("jna.library.path")
-                System.setProperty(
-                    "jna.library.path",
-                    if (existing != null) "$existing:$parentDir" else parentDir,
-                )
-                System.setProperty(
-                    "uniffi.component.refineid_rapp.libraryOverride",
-                    candidate.canonicalPath,
-                )
-            }
-        }
-
-        private fun findNativeLibrary(names: List<String>): File? {
-            val jnaPath = System.getProperty("jna.library.path")
-            if (!jnaPath.isNullOrBlank()) {
-                val jnaDirs = jnaPath.split(File.pathSeparator).map { File(it) }
-                for (dir in jnaDirs) {
-                    for (name in names) {
-                        val file = File(dir, name)
-                        if (file.exists()) return file
-                    }
-                }
-            }
-
-            var dir: File? = File(".").canonicalFile
-            while (dir != null) {
-                val found =
-                    names
-                        .map { File(dir, "native/refineid-rapp-android/target/debug/$it") }
-                        .firstOrNull { it.exists() }
-                if (found != null) {
-                    return found
-                }
-                dir = dir.parentFile
-            }
-            return null
-        }
     }
 
     private val profiles =
@@ -87,12 +40,7 @@ class RappCpacePairingFlowTest {
 
     @Before
     fun setUp() {
-        val isCi = System.getenv("CI") == "true" || System.getenv("GITHUB_ACTIONS") == "true"
-        if (isCi) {
-            assertTrue("RAPP native host library must be built and available on CI", libraryFound)
-        } else {
-            assumeTrue("RAPP native library available", libraryFound)
-        }
+        RappNativeTestLibrary.require()
     }
 
     @Test
