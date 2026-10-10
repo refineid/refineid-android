@@ -7,10 +7,14 @@ import uniffi.refineid_rapp.RappOperationVault
 import uniffi.refineid_rapp.RappPairVault
 import uniffi.refineid_rapp.RappStoredProxyJournal
 import uniffi.refineid_rapp.RappVaultException
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Thread-safe durable storage for RAPP pairs and operation journals on Android.
+ * Thread-safe durable storage for RAPP pairs and the custodian operation
+ * journal on Android. The journal is sealed under a Keystore key in the
+ * no-backup files directory, so it survives restarts but never leaves the
+ * device.
  */
 internal class AndroidRappVault(
     context: Context,
@@ -21,7 +25,11 @@ internal class AndroidRappVault(
 
     private val pairRecords = ConcurrentHashMap<String, ByteArray>()
     private val revokedPairs = ConcurrentHashMap<String, ULong>()
-    private val proxyJournals = ConcurrentHashMap<String, MutableMap<String, RappStoredProxyJournal>>()
+    private val proxyJournal =
+        RappProxyJournalStore(
+            root = File(context.noBackupFilesDir, PROXY_JOURNAL_DIRECTORY),
+            sealer = AesGcmJournalSealer(RappJournalKeystoreKey::get),
+        )
 
     init {
         for ((key, value) in pairPrefs.all) {
@@ -72,6 +80,8 @@ internal class AndroidRappVault(
         revokedPairs[idHex] = revokedAtMs
         pairPrefs.edit { remove(idHex) }
         revokedPrefs.edit { putLong(idHex, revokedAtMs.toLong()) }
+        // Tombstones live exactly as long as their pairing (section 8.2.5).
+        proxyJournal.purge(pairId)
     }
 
     override fun isRevoked(pairId: ByteArray): Boolean {
@@ -96,50 +106,30 @@ internal class AndroidRappVault(
         pairId: ByteArray,
         operationId: ByteArray,
         record: ByteArray,
-    ) {
-        val pId = hex(pairId)
-        val opId = hex(operationId)
-        val journals = proxyJournals.computeIfAbsent(pId) { ConcurrentHashMap() }
-        journals[opId] = RappStoredProxyJournal(record.copyOf(), null)
-    }
+    ) = proxyJournal.persist(pairId, operationId, record)
 
     override fun persistProxyResult(
         pairId: ByteArray,
         operationId: ByteArray,
         record: ByteArray,
         result: ByteArray,
-    ) {
-        val pId = hex(pairId)
-        val opId = hex(operationId)
-        val journals = proxyJournals.computeIfAbsent(pId) { ConcurrentHashMap() }
-        journals[opId] = RappStoredProxyJournal(record.copyOf(), result.copyOf())
-    }
+    ) = proxyJournal.persistWithResult(pairId, operationId, record, result)
 
     override fun retainProxyUncertain(
         pairId: ByteArray,
         operationId: ByteArray,
         record: ByteArray,
-    ) {
-        val pId = hex(pairId)
-        val opId = hex(operationId)
-        val journals = proxyJournals[pId] ?: return
-        val current = journals[opId] ?: return
-        journals[opId] = RappStoredProxyJournal(record.copyOf(), current.retainedResult)
-    }
+    ) = proxyJournal.retainUncertain(pairId, operationId, record)
 
     override fun acknowledgeProxyResult(
         pairId: ByteArray,
         operationId: ByteArray,
         record: ByteArray,
-    ) {
-        val pId = hex(pairId)
-        val opId = hex(operationId)
-        val journals = proxyJournals[pId] ?: return
-        journals[opId] = RappStoredProxyJournal(record.copyOf(), null)
-    }
+    ) = proxyJournal.acknowledge(pairId, operationId, record)
 
-    override fun loadProxy(pairId: ByteArray): List<RappStoredProxyJournal> {
-        val pId = hex(pairId)
-        return proxyJournals[pId]?.values?.toList() ?: emptyList()
+    override fun loadProxy(pairId: ByteArray): List<RappStoredProxyJournal> = proxyJournal.load(pairId)
+
+    private companion object {
+        const val PROXY_JOURNAL_DIRECTORY = "rapp-proxy-journal"
     }
 }
