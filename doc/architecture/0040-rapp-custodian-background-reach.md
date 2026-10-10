@@ -23,8 +23,14 @@ The protocol does not create any of them:
 - On Android 13 and newer, notifications need the runtime `POST_NOTIFICATIONS`
   permission. Without it, posted notifications are silently discarded.
 - Google Play allows full-screen intents only for apps whose core function is
-  calling or alarms. RefineID follows Google Play policy, so it does not
-  declare `USE_FULL_SCREEN_INTENT`.
+  calling or alarms. On Android 14 and newer the permission is revoked by
+  default for every other app, and declaring it needs a Play Console
+  declaration. RefineID follows Google Play policy, so it does not declare
+  `USE_FULL_SCREEN_INTENT`.
+- Android reads NFC only for the app in front. A remote request that needs
+  the card over NFC cannot proceed until the holder opens RefineID.
+- A heads-up notification stays on screen for a few seconds and then folds
+  into the notification shade.
 
 A USB card reader does not change any of this. The phone never needs the card
 held against it unless the card is on the contactless interface.
@@ -45,7 +51,10 @@ held against it unless the card is on the contactless interface.
 - **Requests.** A request that arrives with no RefineID activity resumed posts
   a high-importance notification. Its text names the requester and the action
   (login, one signature, or a batch count), never the card interface. Tapping
-  it opens the consent dialog for that request. The consent activity does not
+  it opens the consent dialog for that request. The notification is ongoing
+  while the request is pending, so it stays at the top of the shade after the
+  heads-up folds away. While the request waits on the card it counts down to
+  the moment the phone stops waiting. The consent activity does not
   show over the keyguard: on a locked phone the holder unlocks first, because
   PIN 1 may be cached and an approval must come from the device owner.
 - **Permissions.** RefineID asks for `POST_NOTIFICATIONS` when Remote Access
@@ -55,6 +64,9 @@ held against it unless the card is on the contactless interface.
 - **Card wait.** The card prompt during a remote operation follows the
   available reader. With a USB reader attached it asks the holder to insert the
   card. Otherwise it asks the holder to hold the card against the phone.
+  While RefineID is not in front, the wait is on the holder opening it, so
+  only the wait's overall limit applies, not its idle allowance. The limit
+  stays below the requester's wait for an answer.
 
 ## Verification
 

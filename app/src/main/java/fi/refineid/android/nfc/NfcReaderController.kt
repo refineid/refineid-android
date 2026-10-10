@@ -314,7 +314,12 @@ internal class NfcReaderController(
                     NfcCardWait.deadline(
                         startedAt = startedAt,
                         lastChangeAt = lastChangeAt,
-                        waitingOnHolder = NfcCardWait.needsAccessNumber(current.status, accessNumberKnown()),
+                        waitingOnHolder =
+                            NfcCardWait.waitsOnHolder(
+                                status = current.status,
+                                accessNumberKnown = accessNumberKnown(),
+                                readerInFront = attachedActivity != null,
+                            ),
                     )
                 val remaining = deadline - SystemClock.elapsedRealtime()
                 if (remaining <= 0) {

@@ -8,7 +8,9 @@ package fi.refineid.android.nfc
  * A wait ends after [IDLE_MILLISECONDS] without any change in the reader's
  * state, and never later than [LIMIT_MILLISECONDS] after it began. NFC
  * access always needs the card access number; while none is known the wait
- * is on the holder typing it, so only the limit applies then.
+ * is on the holder typing it, so only the limit applies then. The same holds
+ * while RefineID is not in front: Android reads NFC only for the foreground
+ * app, so the wait is on the holder opening it.
  */
 internal object NfcCardWait {
     const val IDLE_MILLISECONDS = 30_000L
@@ -28,6 +30,13 @@ internal object NfcCardWait {
             NfcReaderStatus.CHECKING,
             NfcReaderStatus.CARD_RECOGNIZED,
         )
+
+    /** Whether the wait is on the holder rather than on the reader. */
+    fun waitsOnHolder(
+        status: NfcReaderStatus,
+        accessNumberKnown: Boolean,
+        readerInFront: Boolean,
+    ): Boolean = !readerInFront || needsAccessNumber(status, accessNumberKnown)
 
     /** The instant a wait begun at [startedAt] gives up. */
     fun deadline(

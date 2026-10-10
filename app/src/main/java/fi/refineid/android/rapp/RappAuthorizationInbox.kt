@@ -73,7 +73,7 @@ internal class RappAuthorizationInbox(
             currentRequest?.let {
                 notificationManager.postAuthorizationNotification(it.requestId, requestText(it))
             } ?: currentTapPrompt?.let {
-                notificationManager.postAuthorizationNotification(it.requestId, tapPromptText(it))
+                notificationManager.postAuthorizationNotification(it.requestId, tapPromptText(it), waitsOnCard = true)
             }
         }
     }
@@ -152,7 +152,7 @@ internal class RappAuthorizationInbox(
             )
         if (!isForeground) {
             currentTapPrompt?.let {
-                notificationManager.postAuthorizationNotification(requestId, tapPromptText(it))
+                notificationManager.postAuthorizationNotification(requestId, tapPromptText(it), waitsOnCard = true)
             }
         }
     }

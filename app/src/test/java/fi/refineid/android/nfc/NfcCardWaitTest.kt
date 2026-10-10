@@ -35,6 +35,28 @@ class NfcCardWaitTest {
     }
 
     @Test
+    fun aBackgroundedReaderWaitsOnTheHolder() {
+        assertTrue(
+            NfcCardWait.waitsOnHolder(
+                status = NfcReaderStatus.NOT_AVAILABLE,
+                accessNumberKnown = true,
+                readerInFront = false,
+            ),
+        )
+    }
+
+    @Test
+    fun aReaderInFrontWithAKnownAccessNumberWaitsOnTheCard() {
+        assertFalse(
+            NfcCardWait.waitsOnHolder(
+                status = NfcReaderStatus.WAITING_FOR_CARD,
+                accessNumberKnown = true,
+                readerInFront = true,
+            ),
+        )
+    }
+
+    @Test
     fun typingTheAccessNumberRunsToTheLimit() {
         assertEquals(
             STARTED + NfcCardWait.LIMIT_MILLISECONDS,

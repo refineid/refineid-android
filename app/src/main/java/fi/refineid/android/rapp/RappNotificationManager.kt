@@ -6,18 +6,21 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import fi.refineid.android.MainActivity
 import fi.refineid.android.R
+import fi.refineid.android.nfc.NfcCardWait
 
 /**
  * Posts the notification that carries a paired computer's request to the
  * holder while RefineID has no foreground activity.
  *
  * The channel is high importance, so the request appears as a heads-up
- * notification; tapping it opens the consent dialog.
+ * notification; tapping it opens the consent dialog. The notification stays
+ * pinned while the request is pending; a request waiting on the card counts
+ * down to the moment the phone stops waiting for it.
  */
 @SuppressLint("MissingPermission")
 internal class RappNotificationManager(
@@ -29,6 +32,10 @@ internal class RappNotificationManager(
         const val ACTION_AUTHORIZE = "fi.refineid.android.ACTION_RAPP_AUTHORIZE"
         const val EXTRA_REQUEST_ID = "rapp_request_id"
     }
+
+    private var pendingRequestId: String? = null
+    private var pendingDeadlineWallClock = 0L
+    private var pendingDeadlineElapsed = 0L
 
     init {
         createNotificationChannel()
@@ -49,6 +56,7 @@ internal class RappNotificationManager(
     fun postAuthorizationNotification(
         requestId: String,
         body: String,
+        waitsOnCard: Boolean = false,
     ) {
         val intent =
             Intent(context, MainActivity::class.java).apply {
@@ -70,6 +78,12 @@ internal class RappNotificationManager(
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
 
+        if (waitsOnCard && pendingRequestId != requestId) {
+            pendingRequestId = requestId
+            pendingDeadlineWallClock = System.currentTimeMillis() + NfcCardWait.LIMIT_MILLISECONDS
+            pendingDeadlineElapsed = SystemClock.elapsedRealtime() + NfcCardWait.LIMIT_MILLISECONDS
+        }
+
         val title = context.getString(R.string.app_name)
         val builder =
             NotificationCompat
@@ -81,8 +95,18 @@ internal class RappNotificationManager(
                     NotificationCompat.BigTextStyle().bigText(body),
                 ).setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
-                .setAutoCancel(true)
+                .setOngoing(true)
+                .setAutoCancel(false)
                 .setContentIntent(pendingIntent)
+        if (waitsOnCard && pendingRequestId == requestId) {
+            val remaining = (pendingDeadlineElapsed - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+            builder
+                .setShowWhen(true)
+                .setWhen(pendingDeadlineWallClock)
+                .setUsesChronometer(true)
+                .setChronometerCountDown(true)
+                .setTimeoutAfter(remaining)
+        }
         val notificationManager = NotificationManagerCompat.from(context)
 
         try {
