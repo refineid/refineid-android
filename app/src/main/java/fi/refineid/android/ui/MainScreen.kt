@@ -289,7 +289,13 @@ internal fun MainScreen(
     }
 
     rappInbox?.currentTapPrompt?.let { prompt ->
-        RappCardTapDialog(prompt = prompt, usbReaderPresent = usbReaderPresent)
+        RappCardTapDialog(
+            prompt = prompt,
+            usbReaderPresent = usbReaderPresent,
+            nfcStatus = nfcSnapshot.status,
+            accessNumberKnown = nfcSnapshot.isPrimed || CanSessionStore.hasCan,
+            onSubmitAccessNumber = { can -> onNfcConnect(can, null) },
+        )
     }
 
     if (!preparationActive && rappInbox?.currentTapPrompt == null && nfcSnapshot.awaitingCard) {

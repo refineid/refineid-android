@@ -403,6 +403,8 @@ internal object AppTrace {
 
     fun nfcPrimedForgotten() = Unit
 
+    fun nfcAccessNumberMissing() = Unit
+
     fun nfcAwaitCardReady(
         isCardReady: Boolean,
         status: String,

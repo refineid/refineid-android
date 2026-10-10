@@ -123,6 +123,9 @@
     <string name="remote_signature_request">%1$s requests a signature.</string>
     <string name="remote_card_needed">%1$s needs your ID card.</string>
     <string name="insert_card_into_reader">Insert your ID card into the reader.</string>
+    <string name="card_reading_hold_still">Reading the card. Keep it still.</string>
+    <string name="card_contact_lost">Lost the card. Hold it against the phone again.</string>
+    <string name="card_found_enter_can" tools:ignore="Typos">Card found. Enter its CAN.</string>
     <string name="remote_in_use">In use</string>
     <string name="allow_notifications">Allow notifications</string>
     <plurals name="remote_signature_request_many">

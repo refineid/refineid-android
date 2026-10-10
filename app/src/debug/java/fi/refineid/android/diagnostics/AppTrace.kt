@@ -873,6 +873,10 @@ internal object AppTrace {
         debug("nfc:primed-forgotten")
     }
 
+    fun nfcAccessNumberMissing() {
+        debug("nfc:access-number-missing")
+    }
+
     fun nfcAwaitCardReady(
         isCardReady: Boolean,
         status: String,

@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.TextObfuscationMode
+import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -21,8 +24,11 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,7 +36,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -39,8 +49,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import fi.refineid.android.R
+import fi.refineid.android.core.CanSessionStore
+import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin2Submission
+import fi.refineid.android.nfc.NfcCardWait
+import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.rapp.RappAuthAction
 import fi.refineid.android.rapp.RappAuthRequest
 import fi.refineid.android.rapp.rappRequestText
@@ -200,7 +214,31 @@ private fun RappDocumentNames(names: List<String>) {
 internal fun RappCardTapDialog(
     prompt: fi.refineid.android.rapp.RappCardTapPrompt,
     usbReaderPresent: Boolean,
+    nfcStatus: NfcReaderStatus = NfcReaderStatus.WAITING_FOR_CARD,
+    accessNumberKnown: Boolean = true,
+    onSubmitAccessNumber: (CanSubmission) -> Unit = { it.close() },
 ) {
+    var wasReading by remember(prompt.requestId) { mutableStateOf(false) }
+    val reading = nfcStatus == NfcReaderStatus.CHECKING || nfcStatus == NfcReaderStatus.CONNECTING
+    LaunchedEffect(prompt.requestId, reading) {
+        if (reading) wasReading = true
+    }
+    val cardOnPhone = reading || nfcStatus in CARD_ON_PHONE
+    val needsAccessNumber =
+        (!usbReaderPresent || cardOnPhone) && NfcCardWait.needsAccessNumber(nfcStatus, accessNumberKnown)
+    val message =
+        when {
+            reading -> R.string.card_reading_hold_still
+            nfcStatus == NfcReaderStatus.WRONG_CAN -> R.string.wrong_can
+            nfcStatus == NfcReaderStatus.CARD_RECOGNIZED && needsAccessNumber -> R.string.card_found_enter_can
+            wasReading && nfcStatus == NfcReaderStatus.WAITING_FOR_CARD -> R.string.card_contact_lost
+            usbReaderPresent -> R.string.insert_card_into_reader
+            else -> R.string.hold_card_against_back
+        }
+    val accessNumber = remember(prompt.requestId) { TextFieldState(CanSessionStore.currentCan ?: "") }
+    DisposableEffect(accessNumber) {
+        onDispose { accessNumber.clearText() }
+    }
     Dialog(
         onDismissRequest = { prompt.onCancel() },
         properties =
@@ -221,31 +259,59 @@ internal fun RappCardTapDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(
-                    text =
-                        stringResource(
-                            if (usbReaderPresent) R.string.insert_card_into_reader else R.string.hold_card_against_back,
-                        ),
+                    text = stringResource(message),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier =
+                        Modifier
+                            .testTag("RappCardTapMessage")
+                            .semantics { liveRegion = LiveRegionMode.Polite },
                 )
 
-                androidx.compose.material3.CircularProgressIndicator(
-                    modifier = Modifier.padding(vertical = 8.dp),
-                    strokeWidth = 3.dp,
-                )
+                if (needsAccessNumber) {
+                    SecureTextField(
+                        state = accessNumber,
+                        label = { Text(stringResource(R.string.can)) },
+                        inputTransformation = CanInputTransformation,
+                        textObfuscationMode = TextObfuscationMode.Visible,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        modifier = Modifier.fillMaxWidth().testTag("RappCardTapCan"),
+                    )
+                } else {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        strokeWidth = 3.dp,
+                    )
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 ) {
                     OutlinedButton(
                         onClick = { prompt.onCancel() },
                     ) {
                         Text(stringResource(R.string.cancel))
                     }
+                    if (needsAccessNumber) {
+                        Button(
+                            enabled = CanSubmission.isComplete(accessNumber.text),
+                            modifier = Modifier.testTag("RappCardTapCanSubmit"),
+                            onClick = {
+                                val submitted = CanSubmission.from(accessNumber.text)
+                                accessNumber.clearText()
+                                onSubmitAccessNumber(submitted)
+                            },
+                        ) {
+                            Text(stringResource(R.string.unlock))
+                        }
+                    }
                 }
             }
         }
     }
 }
+
+/** Reader states that mean a card is on the phone rather than in the USB reader. */
+private val CARD_ON_PHONE = setOf(NfcReaderStatus.CARD_RECOGNIZED, NfcReaderStatus.WRONG_CAN)
