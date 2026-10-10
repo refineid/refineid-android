@@ -68,6 +68,42 @@ class NativeQualifiedSignReplyTest {
     }
 
     @Test
+    fun decodesAWrongPinWithTheCardsRemainingCount() {
+        val reply =
+            byteArrayOf(
+                NativeQualifiedSignWire.WRONG_PIN_TAG.toByte(),
+                SYNTHETIC_RETRIES_LEFT.toByte(),
+            )
+
+        val result = NativeQualifiedSignReply.decode(reply)
+
+        assertEquals(
+            NativeQualifiedSignResult.Failure(NativeQualifiedSignFailure.WRONG_PIN, SYNTHETIC_RETRIES_LEFT),
+            result,
+        )
+        assertTrue(reply.all { it == ZERO_BYTE })
+    }
+
+    @Test
+    fun refusesAWrongPinWithoutAPositiveCount() {
+        val replies =
+            listOf(
+                byteArrayOf(NativeQualifiedSignWire.WRONG_PIN_TAG.toByte()),
+                byteArrayOf(NativeQualifiedSignWire.WRONG_PIN_TAG.toByte(), ZERO_BYTE),
+                byteArrayOf(
+                    NativeQualifiedSignWire.WRONG_PIN_TAG.toByte(),
+                    (NativeQualifiedSignWire.MAXIMUM_RETRIES + 1).toByte(),
+                ),
+            )
+        for (reply in replies) {
+            assertEquals(
+                NativeQualifiedSignResult.Failure(NativeQualifiedSignFailure.BRIDGE_ERROR),
+                NativeQualifiedSignReply.decode(reply),
+            )
+        }
+    }
+
+    @Test
     fun mapsEveryCoarseFailure() {
         val cases =
             listOf(
@@ -83,8 +119,6 @@ class NativeQualifiedSignReplyTest {
                     NativeQualifiedSignFailure.SAFETY_REFUSED,
                 NativeQualifiedSignWire.PIN_LOCKED_TAG to
                     NativeQualifiedSignFailure.PIN_LOCKED,
-                NativeQualifiedSignWire.WRONG_PIN_TAG to
-                    NativeQualifiedSignFailure.WRONG_PIN,
                 NativeQualifiedSignWire.VERIFICATION_REJECTED_TAG to
                     NativeQualifiedSignFailure.VERIFICATION_REJECTED,
                 NativeQualifiedSignWire.CERTIFICATE_REJECTED_TAG to
@@ -178,6 +212,7 @@ class NativeQualifiedSignReplyTest {
         const val NON_DIGIT_PIN2_TEXT = "12345a"
         const val OVERLENGTH_PIN2_TEXT = "0123456789012"
         const val SYNTHETIC_SIGNATURE_BYTE: Byte = 0x5A
+        const val SYNTHETIC_RETRIES_LEFT = 2
         const val SINGLE_EXCESS_BYTE_COUNT = 1
         const val ZERO_BYTE: Byte = 0
     }

@@ -34,6 +34,11 @@ internal object NativeQualifiedSignWire {
     const val TAG_OFFSET = 0
     const val ALGORITHM_OFFSET = 1
     const val FAILURE_REPLY_LENGTH = 1
+    const val WRONG_PIN_REPLY_LENGTH = 2
+    const val RETRIES_OFFSET = 1
+
+    /** The card's retry counter is the low nibble of SW 63Cx. */
+    const val MAXIMUM_RETRIES = 0x0F
     const val SIGNATURE_REPLY_HEADER_LENGTH = 2
 }
 
@@ -220,8 +225,10 @@ internal sealed interface NativeQualifiedSignResult {
         override fun toString(): String = "Success(" + signature + ")"
     }
 
+    /** [remainingRetries] is the card's count after a wrong PIN, and null otherwise. */
     data class Failure(
         val kind: NativeQualifiedSignFailure,
+        val remainingRetries: Int? = null,
     ) : NativeQualifiedSignResult
 }
 
@@ -249,8 +256,10 @@ internal sealed interface QualifiedSignResult {
         override fun toString(): String = "Success(" + signature + ")"
     }
 
+    /** [remainingRetries] is the card's count after a wrong PIN, and null otherwise. */
     data class Failure(
         val kind: QualifiedSignFailure,
+        val remainingRetries: Int? = null,
     ) : QualifiedSignResult
 }
 
@@ -287,7 +296,7 @@ internal object NativeQualifiedSignReply {
                 }
 
                 NativeQualifiedSignWire.WRONG_PIN_TAG -> {
-                    decodeFailure(reply, NativeQualifiedSignFailure.WRONG_PIN)
+                    decodeWrongPin(reply)
                 }
 
                 NativeQualifiedSignWire.VERIFICATION_REJECTED_TAG -> {
@@ -351,6 +360,19 @@ internal object NativeQualifiedSignReply {
                     ),
             ),
         )
+    }
+
+    /** A wrong PIN carries the card's remaining count, which is never zero. */
+    private fun decodeWrongPin(reply: ByteArray): NativeQualifiedSignResult {
+        if (reply.size != NativeQualifiedSignWire.WRONG_PIN_REPLY_LENGTH) {
+            return bridgeFailure()
+        }
+        val retries = reply[NativeQualifiedSignWire.RETRIES_OFFSET].toUnsignedInt()
+        return if (retries in 1..NativeQualifiedSignWire.MAXIMUM_RETRIES) {
+            NativeQualifiedSignResult.Failure(NativeQualifiedSignFailure.WRONG_PIN, retries)
+        } else {
+            bridgeFailure()
+        }
     }
 
     private fun decodeFailure(

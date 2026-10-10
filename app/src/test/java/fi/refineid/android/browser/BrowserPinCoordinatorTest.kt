@@ -169,9 +169,10 @@ class BrowserPinCoordinatorTest {
         override fun verifyAuthenticationPin(
             pin1: Pin1Submission,
             expectedGeneration: Int?,
-        ): fi.refineid.android.core.Pin1VerificationResult {
+        ): fi.refineid.android.core.Pin1Verification {
             pin1.close()
-            return fi.refineid.android.core.Pin1VerificationResult.VERIFIED
+            return fi.refineid.android.core
+                .Pin1Verification(fi.refineid.android.core.Pin1VerificationResult.VERIFIED)
         }
 
         override fun requestAuthenticationCertificate(onResult: (NativeAuthenticationCertificate?) -> Unit) {

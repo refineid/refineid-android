@@ -13,9 +13,9 @@ internal interface AuthenticationCardService {
     fun verifyAuthenticationPin(
         pin1: Pin1Submission,
         expectedGeneration: Int? = null,
-    ): Pin1VerificationResult {
+    ): Pin1Verification {
         pin1.close()
-        return Pin1VerificationResult.CARD_UNAVAILABLE
+        return Pin1Verification(Pin1VerificationResult.CARD_UNAVAILABLE)
     }
 
     fun requestAuthenticationCertificate(onResult: (NativeAuthenticationCertificate?) -> Unit)

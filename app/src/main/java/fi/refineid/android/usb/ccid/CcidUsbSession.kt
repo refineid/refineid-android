@@ -395,11 +395,13 @@ internal class CcidUsbSession(
         return sessionMaterial.copyAuthenticationCertificate()
     }
 
-    fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1VerificationResult {
+    fun verifyAuthenticationPin(pin1: Pin1Submission): fi.refineid.android.core.Pin1Verification {
         checkOwnerThread()
         if (isClosed) {
             pin1.close()
-            return fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE
+            return fi.refineid.android.core.Pin1Verification(
+                fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE,
+            )
         }
         return fi.refineid.android.core.NativePin1Verification.verify(
             pin1 = pin1,
@@ -522,7 +524,7 @@ internal class CcidUsbSession(
             }
 
             is NativeAuthenticationSignResult.Failure -> {
-                AuthenticationSignResult.Failure(result.kind.toAuthenticationFailure())
+                AuthenticationSignResult.Failure(result.kind.toAuthenticationFailure(), result.remainingRetries)
             }
         }
     }
@@ -614,7 +616,10 @@ internal class CcidUsbSession(
                 }
 
                 is NativeQualifiedSignResult.Failure -> {
-                    QualifiedSignResult.Failure(nativeResult.kind.toQualifiedFailure())
+                    QualifiedSignResult.Failure(
+                        nativeResult.kind.toQualifiedFailure(),
+                        nativeResult.remainingRetries,
+                    )
                 }
             }
         if (!nativeResult.allowsQualifiedContextRestore()) {

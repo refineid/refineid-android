@@ -13,6 +13,12 @@ internal enum class Pin1VerificationResult {
     BRIDGE_ERROR,
 }
 
+/** One PIN1 verification answer; [remainingRetries] is the card's count after a wrong PIN. */
+internal data class Pin1Verification(
+    val result: Pin1VerificationResult,
+    val remainingRetries: Int? = null,
+)
+
 /** Standalone credential verification. A success proves the submitted digits. */
 internal object NativePin1Verification {
     fun verify(
@@ -20,43 +26,56 @@ internal object NativePin1Verification {
         exchange: NativeBlockExchange,
         exchangeLevel: NativeCardExchangeLevel = NativeCardExchangeLevel.APDU,
         heldSession: Boolean = false,
-    ): Pin1VerificationResult =
+    ): Pin1Verification =
         try {
             pin1.consume { bytes ->
                 if (!NativeCore.isLoaded) {
-                    Pin1VerificationResult.BRIDGE_ERROR
+                    Pin1Verification(Pin1VerificationResult.BRIDGE_ERROR)
                 } else {
                     decode(verifyPin1Native(exchangeLevel.wireValue, heldSession, bytes, exchange))
                 }
             }
         } catch (_: LinkageError) {
-            Pin1VerificationResult.BRIDGE_ERROR
+            Pin1Verification(Pin1VerificationResult.BRIDGE_ERROR)
         } catch (_: RuntimeException) {
-            Pin1VerificationResult.BRIDGE_ERROR
+            Pin1Verification(Pin1VerificationResult.BRIDGE_ERROR)
         } finally {
             pin1.close()
         }
 
-    fun decode(reply: ByteArray): Pin1VerificationResult =
+    fun decode(reply: ByteArray): Pin1Verification =
         try {
-            if (reply.size != REPLY_SIZE) {
-                Pin1VerificationResult.BRIDGE_ERROR
-            } else {
-                when (reply.single().toInt()) {
-                    VERIFIED -> Pin1VerificationResult.VERIFIED
-                    CARD_UNAVAILABLE -> Pin1VerificationResult.CARD_UNAVAILABLE
-                    TRANSPORT_ERROR -> Pin1VerificationResult.TRANSPORT_ERROR
-                    INVALID_PIN -> Pin1VerificationResult.INVALID_PIN
-                    SAFETY_REFUSED -> Pin1VerificationResult.SAFETY_REFUSED
-                    PIN_LOCKED -> Pin1VerificationResult.PIN_LOCKED
-                    WRONG_PIN -> Pin1VerificationResult.WRONG_PIN
-                    VERIFICATION_REJECTED -> Pin1VerificationResult.VERIFICATION_REJECTED
-                    PACE_REJECTED -> Pin1VerificationResult.PACE_REJECTED
-                    else -> Pin1VerificationResult.BRIDGE_ERROR
-                }
+            when (reply.size) {
+                REPLY_SIZE -> Pin1Verification(decodeTag(reply.single().toInt()))
+                WRONG_PIN_REPLY_SIZE -> decodeWrongPin(reply)
+                else -> Pin1Verification(Pin1VerificationResult.BRIDGE_ERROR)
             }
         } finally {
             reply.fill(0)
+        }
+
+    /** A wrong PIN carries the card's remaining count, which is never zero. */
+    private fun decodeWrongPin(reply: ByteArray): Pin1Verification {
+        val retries = reply[RETRIES_OFFSET].toInt() and BYTE_MASK
+        return if (reply[TAG_OFFSET].toInt() == WRONG_PIN && retries in 1..MAXIMUM_RETRIES) {
+            Pin1Verification(Pin1VerificationResult.WRONG_PIN, retries)
+        } else {
+            Pin1Verification(Pin1VerificationResult.BRIDGE_ERROR)
+        }
+    }
+
+    /** A one-byte reply; a wrong PIN without its count is not a reviewed reply shape. */
+    private fun decodeTag(tag: Int): Pin1VerificationResult =
+        when (tag) {
+            VERIFIED -> Pin1VerificationResult.VERIFIED
+            CARD_UNAVAILABLE -> Pin1VerificationResult.CARD_UNAVAILABLE
+            TRANSPORT_ERROR -> Pin1VerificationResult.TRANSPORT_ERROR
+            INVALID_PIN -> Pin1VerificationResult.INVALID_PIN
+            SAFETY_REFUSED -> Pin1VerificationResult.SAFETY_REFUSED
+            PIN_LOCKED -> Pin1VerificationResult.PIN_LOCKED
+            VERIFICATION_REJECTED -> Pin1VerificationResult.VERIFICATION_REJECTED
+            PACE_REJECTED -> Pin1VerificationResult.PACE_REJECTED
+            else -> Pin1VerificationResult.BRIDGE_ERROR
         }
 
     @JvmStatic
@@ -68,6 +87,13 @@ internal object NativePin1Verification {
     ): ByteArray
 
     private const val REPLY_SIZE = 1
+    private const val WRONG_PIN_REPLY_SIZE = 2
+    private const val TAG_OFFSET = 0
+    private const val RETRIES_OFFSET = 1
+    private const val BYTE_MASK = 0xFF
+
+    /** The card's retry counter is the low nibble of SW 63Cx. */
+    private const val MAXIMUM_RETRIES = 0x0F
     private const val VERIFIED = 1
     private const val CARD_UNAVAILABLE = 2
     private const val TRANSPORT_ERROR = 3

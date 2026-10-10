@@ -89,12 +89,13 @@ internal class LocalAuthenticationPreparationBackend(
                     }
 
                     expected.wired -> {
-                        app.readerController.verifyAuthenticationPin(submission, expected.session)
+                        app.readerController.verifyAuthenticationPin(submission, expected.session).result
                     }
 
                     else -> {
                         app.nfcReaderController.authenticationCardService
                             .verifyAuthenticationPin(submission, expected.session)
+                            .result
                     }
                 }
             }

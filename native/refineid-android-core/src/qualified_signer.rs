@@ -96,7 +96,10 @@ pub(crate) enum QualifiedSignFailure {
     /// PIN2 is blocked, invalidated, or became exhausted on this attempt.
     PinLocked,
     /// The card rejected the submitted PIN2 without exhausting it.
-    WrongPin,
+    WrongPin {
+        /// Attempts the card reports remaining, at least one.
+        retries_left: u8,
+    },
     /// VERIFY returned a status outside the reviewed outcome vocabulary.
     VerificationRejected,
     /// EF.4332 could not be selected or read.
@@ -189,7 +192,11 @@ where
         VerifyOutcome::WrongPin { retries_left } if retries_left.is_exhausted() => {
             return Err(QualifiedSignFailure::PinLocked);
         }
-        VerifyOutcome::WrongPin { .. } => return Err(QualifiedSignFailure::WrongPin),
+        VerifyOutcome::WrongPin { retries_left } => {
+            return Err(QualifiedSignFailure::WrongPin {
+                retries_left: retries_left.get(),
+            });
+        }
         VerifyOutcome::Locked => return Err(QualifiedSignFailure::PinLocked),
         VerifyOutcome::Other(_) => return Err(QualifiedSignFailure::VerificationRejected),
     }
@@ -545,7 +552,12 @@ mod tests {
             SYNTHETIC_CERTIFICATE,
         );
 
-        assert!(matches!(result, Err(QualifiedSignFailure::WrongPin)));
+        assert!(matches!(
+            result,
+            Err(QualifiedSignFailure::WrongPin {
+                retries_left: LOW_RETRIES
+            })
+        ));
         assert_eq!(transport.credential_calls, 1);
         assert_eq!(transport.public_calls, PUBLIC_PREFLIGHT_CALLS);
     }

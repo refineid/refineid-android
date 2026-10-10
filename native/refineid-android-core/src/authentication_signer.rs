@@ -103,7 +103,10 @@ pub(crate) enum AuthenticationSignFailure {
     /// PIN1 is blocked or became exhausted on this attempt.
     PinLocked,
     /// The card rejected the submitted PIN1 without exhausting it.
-    WrongPin,
+    WrongPin {
+        /// Attempts the card reports remaining, at least one.
+        retries_left: u8,
+    },
     /// VERIFY returned a status outside the reviewed outcome vocabulary.
     VerificationRejected,
     /// The card rejected or malformed the signing chain.
@@ -167,7 +170,11 @@ where
         VerifyOutcome::WrongPin { retries_left } if retries_left.is_exhausted() => {
             return Err(AuthenticationSignFailure::PinLocked);
         }
-        VerifyOutcome::WrongPin { .. } => return Err(AuthenticationSignFailure::WrongPin),
+        VerifyOutcome::WrongPin { retries_left } => {
+            return Err(AuthenticationSignFailure::WrongPin {
+                retries_left: retries_left.get(),
+            });
+        }
         VerifyOutcome::Locked => return Err(AuthenticationSignFailure::PinLocked),
         VerifyOutcome::Other(_) => {
             return Err(AuthenticationSignFailure::VerificationRejected);
@@ -203,7 +210,9 @@ pub(crate) fn verify_authentication_pin<T: CardTransport>(
         VerifyOutcome::WrongPin { retries_left } if retries_left.is_exhausted() => {
             Err(AuthenticationSignFailure::PinLocked)
         }
-        VerifyOutcome::WrongPin { .. } => Err(AuthenticationSignFailure::WrongPin),
+        VerifyOutcome::WrongPin { retries_left } => Err(AuthenticationSignFailure::WrongPin {
+            retries_left: retries_left.get(),
+        }),
         VerifyOutcome::Locked => Err(AuthenticationSignFailure::PinLocked),
         VerifyOutcome::Other(_) => Err(AuthenticationSignFailure::VerificationRejected),
     }
@@ -479,7 +488,9 @@ mod tests {
         let mut transport = ScriptedTransport::new(vec![verified], status(LOW_RETRIES));
         assert_eq!(
             verify_authentication_pin(&mut transport, SYNTHETIC_PIN.to_vec()),
-            Err(AuthenticationSignFailure::WrongPin),
+            Err(AuthenticationSignFailure::WrongPin {
+                retries_left: LOW_RETRIES
+            }),
         );
         assert_eq!(transport.credential_calls, PUBLIC_VERIFY_CALLS);
     }
@@ -561,7 +572,12 @@ mod tests {
             AuthenticationSigningInput::Message(SYNTHETIC_MESSAGE),
         );
 
-        assert!(matches!(result, Err(AuthenticationSignFailure::WrongPin)));
+        assert!(matches!(
+            result,
+            Err(AuthenticationSignFailure::WrongPin {
+                retries_left: LOW_RETRIES
+            })
+        ));
         assert_eq!(transport.public_calls, PUBLIC_VERIFY_CALLS);
         assert_eq!(transport.credential_calls, 1);
     }
