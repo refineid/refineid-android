@@ -54,6 +54,7 @@ import androidx.core.content.ContextCompat
 import fi.refineid.android.R
 import fi.refineid.android.rapp.PairedPeer
 import fi.refineid.android.rapp.PairingPhase
+import fi.refineid.android.rapp.RappCustodianService
 import fi.refineid.android.rapp.RappPairingCode
 import fi.refineid.android.rapp.RappPairingModel
 import kotlinx.coroutines.delay
@@ -75,14 +76,18 @@ internal fun RappPairingScreen(
     val phase = model.phase
 
     var notificationsAllowed by remember { mutableStateOf(rappNotificationsAllowed(context)) }
+    val refreshNotifications = {
+        notificationsAllowed = rappNotificationsAllowed(context)
+        if (notificationsAllowed) RappCustodianService.refreshNotification(context)
+    }
     val notificationPermissionLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission(),
-        ) { _ -> notificationsAllowed = rappNotificationsAllowed(context) }
+        ) { _ -> refreshNotifications() }
     val settingsLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult(),
-        ) { _ -> notificationsAllowed = rappNotificationsAllowed(context) }
+        ) { _ -> refreshNotifications() }
 
     LaunchedEffect(model.isRemoteAccessEnabled, phase, authenticationReady) {
         if (authenticationReady && model.isRemoteAccessEnabled && phase is PairingPhase.Idle &&

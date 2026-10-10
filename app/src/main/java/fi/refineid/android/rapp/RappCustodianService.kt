@@ -73,6 +73,19 @@ internal class RappCustodianService : Service() {
             }
         }
 
+        /**
+         * Posts the ongoing notification again, for when notification
+         * permission arrives after the service started without it.
+         */
+        fun refreshNotification(context: Context) {
+            if (!running) return
+            try {
+                context.startForegroundService(Intent(context, RappCustodianService::class.java))
+            } catch (_: ForegroundServiceStartNotAllowedException) {
+                // The next foreground start posts it.
+            }
+        }
+
         fun stop(context: Context) {
             if (!running) return
             running = false

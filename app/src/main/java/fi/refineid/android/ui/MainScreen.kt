@@ -104,6 +104,7 @@ import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappAuthorizationInbox
+import fi.refineid.android.rapp.RappCustodianService
 import fi.refineid.android.rapp.RappPairingCode
 import fi.refineid.android.rapp.RappPairingModel
 import fi.refineid.android.settings.TimestampAuthorityRepository
@@ -269,7 +270,9 @@ internal fun MainScreen(
 
     val permissionContext = LocalContext.current
     val notificationPermissionLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) RappCustodianService.refreshNotification(permissionContext)
+        }
     val remoteAccessServing =
         rappPairingModel?.let { it.isRemoteAccessEnabled && it.pairedDevices.isNotEmpty() } ?: false
     LaunchedEffect(remoteAccessServing) {
