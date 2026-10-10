@@ -15,6 +15,19 @@ is holding, and a laptop needs no card reader at all.
 Apple already implements both roles. Android implementing the same protocol is
 what turns a proven pair of devices into a cross-platform one.
 
+## Roles
+
+Android pairs only as the custodian: the phone shows the pairing code, serves
+the RAPP v26.10.9 offer over the stream transport, and holds the card. No
+screen pairs the phone as a requester, so the app never calls
+`RappPairingBridge.fromBootstrap`.
+
+`RemoteCardModel` and `RappRequesterClient` open sessions for a stored pairing
+whose role is requester, but the app cannot create such a pairing, so in
+practice they are idle. Giving Android a requester role needs a product
+decision and a pairing entry point (dial a phone in pairing mode, read its
+offer, type its code); the session side is already in place.
+
 ## The protocol is not implemented here
 
 `refineid-rapp` in the refineid-core repository (`crates/rapp`) is the

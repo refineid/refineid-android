@@ -30,6 +30,7 @@ internal class StreamRelayBrowser(
     private val context: Context,
     private val scope: CoroutineScope,
     private val targetMode: String,
+    private val rank: (Map<String, ByteArray?>) -> Int? = { RappDialCandidates.BEST_RANK },
     private val onEvent: (StreamRelayEvent) -> Unit,
 ) : AutoCloseable {
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
@@ -48,6 +49,8 @@ internal class StreamRelayBrowser(
     private val isConnected = AtomicBoolean(false)
     private val isResolving = AtomicBoolean(false)
     private var activeServiceCallback: Any? = null
+    private val candidates = RappDialCandidates()
+    private var graceJob: Job? = null
 
     fun start() {
         if (isClosed.get()) return
@@ -94,7 +97,9 @@ internal class StreamRelayBrowser(
                     serviceType: String,
                     errorCode: Int,
                 ) {
-                    android.util.Log.e("STREAM_BROWSER", "onStartDiscoveryFailed: $serviceType, code=$errorCode")
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.e("STREAM_BROWSER", "onStartDiscoveryFailed, code=$errorCode")
+                    }
                     onEvent(StreamRelayEvent.Error(IOException("NSD discovery failed: $errorCode")))
                 }
 
@@ -102,7 +107,9 @@ internal class StreamRelayBrowser(
                     serviceType: String,
                     errorCode: Int,
                 ) {
-                    android.util.Log.w("STREAM_BROWSER", "onStopDiscoveryFailed: $serviceType, code=$errorCode")
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.w("STREAM_BROWSER", "onStopDiscoveryFailed, code=$errorCode")
+                    }
                 }
 
                 override fun onServiceFound(serviceInfo: NsdServiceInfo) {
@@ -114,7 +121,7 @@ internal class StreamRelayBrowser(
 
                 override fun onServiceLost(serviceInfo: NsdServiceInfo) {
                     if (BuildConfig.DEBUG) {
-                        android.util.Log.d("STREAM_BROWSER", "onServiceLost: ${serviceInfo.serviceName}")
+                        android.util.Log.d("STREAM_BROWSER", "onServiceLost")
                     }
                 }
             }
@@ -126,7 +133,9 @@ internal class StreamRelayBrowser(
                 listener,
             )
         } catch (e: Exception) {
-            android.util.Log.e("STREAM_BROWSER", "discoverServices error", e)
+            if (BuildConfig.DEBUG) {
+                android.util.Log.e("STREAM_BROWSER", "discoverServices error", e)
+            }
             onEvent(StreamRelayEvent.Error(e))
         }
     }
@@ -142,6 +151,42 @@ internal class StreamRelayBrowser(
         }
     }
 
+    /**
+     * Ranks one resolved phone and dials it, holds it as a fallback, or
+     * ignores it (see [RappDialCandidates]).
+     */
+    private fun consider(
+        host: String?,
+        port: Int,
+        attributes: Map<String, ByteArray?>,
+    ) {
+        if (host == null || port <= 0 || !StreamRendezvousName.matches(attributes, targetMode)) return
+        when (val decision = candidates.offer(RappDialCandidates.Endpoint(host, port), rank(attributes))) {
+            is RappDialCandidates.Decision.DialNow -> {
+                dialOnce(decision.endpoint)
+            }
+
+            is RappDialCandidates.Decision.Hold -> {
+                if (decision.startGrace) {
+                    graceJob =
+                        scope.launch {
+                            delay(RappDialCandidates.GRACE_MS)
+                            candidates.bestHeld()?.let(::dialOnce)
+                        }
+                }
+            }
+
+            RappDialCandidates.Decision.Ignore -> {}
+        }
+    }
+
+    private fun dialOnce(endpoint: RappDialCandidates.Endpoint) {
+        if (isClosed.get() || !isConnected.compareAndSet(false, true)) return
+        graceJob?.cancel()
+        stopDiscovery()
+        connectToEndpoint(endpoint.host, endpoint.port)
+    }
+
     private fun resolveAndConnect(serviceInfo: NsdServiceInfo) {
         if (isConnected.get() || isClosed.get()) return
         if (!isResolving.compareAndSet(false, true)) return
@@ -152,10 +197,12 @@ internal class StreamRelayBrowser(
                     object : NsdManager.ServiceInfoCallback {
                         override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) {
                             activeServiceCallback = null
-                            android.util.Log.w(
-                                "STREAM_BROWSER",
-                                "registerServiceInfoCallback failed: $errorCode, trying fallback",
-                            )
+                            if (BuildConfig.DEBUG) {
+                                android.util.Log.w(
+                                    "STREAM_BROWSER",
+                                    "registerServiceInfoCallback failed: $errorCode, trying fallback",
+                                )
+                            }
                             isResolving.set(false)
                             resolveLegacy(serviceInfo)
                         }
@@ -164,30 +211,18 @@ internal class StreamRelayBrowser(
                             if (BuildConfig.DEBUG) {
                                 android.util.Log.i(
                                     "STREAM_BROWSER",
-                                    "onServiceUpdated: ${resolved.serviceName} hostAddresses=${resolved.hostAddresses} port=${resolved.port}",
+                                    "onServiceUpdated",
                                 )
                             }
                             val host = resolved.hostAddresses.firstOrNull()?.hostAddress ?: resolved.host?.hostAddress
-                            val port = resolved.port
-                            if (!StreamRendezvousName.matches(resolved.attributes, targetMode)) {
-                                isResolving.set(false)
-                                activeServiceCallback = null
-                                try {
-                                    nsdManager?.unregisterServiceInfoCallback(this)
-                                } catch (_: Exception) {
-                                }
-                                return
+                            if (host == null || resolved.port <= 0) return
+                            isResolving.set(false)
+                            activeServiceCallback = null
+                            try {
+                                nsdManager?.unregisterServiceInfoCallback(this)
+                            } catch (_: Exception) {
                             }
-                            if (host != null && port > 0 && isConnected.compareAndSet(false, true)) {
-                                isResolving.set(false)
-                                activeServiceCallback = null
-                                try {
-                                    nsdManager?.unregisterServiceInfoCallback(this)
-                                } catch (_: Exception) {
-                                }
-                                stopDiscovery()
-                                connectToEndpoint(host, port)
-                            }
+                            consider(host, resolved.port, resolved.attributes)
                         }
 
                         override fun onServiceLost() {
@@ -208,7 +243,9 @@ internal class StreamRelayBrowser(
                 )
                 return
             } catch (e: Exception) {
-                android.util.Log.w("STREAM_BROWSER", "registerServiceInfoCallback exception, fallback", e)
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.w("STREAM_BROWSER", "registerServiceInfoCallback exception, fallback", e)
+                }
             }
         }
         resolveLegacy(serviceInfo)
@@ -228,10 +265,12 @@ internal class StreamRelayBrowser(
                         serviceInfo: NsdServiceInfo,
                         errorCode: Int,
                     ) {
-                        android.util.Log.w(
-                            "STREAM_BROWSER",
-                            "resolveService failed: ${serviceInfo.serviceName}, code=$errorCode",
-                        )
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.w(
+                                "STREAM_BROWSER",
+                                "resolveService failed, code=$errorCode",
+                            )
+                        }
                         isResolving.set(false)
                     }
 
@@ -242,22 +281,17 @@ internal class StreamRelayBrowser(
                         if (BuildConfig.DEBUG) {
                             android.util.Log.i(
                                 "STREAM_BROWSER",
-                                "onServiceResolved: ${resolved.serviceName} at $host:$port",
+                                "onServiceResolved",
                             )
                         }
-                        if (host != null &&
-                            port > 0 &&
-                            StreamRendezvousName.matches(resolved.attributes, targetMode) &&
-                            isConnected.compareAndSet(false, true)
-                        ) {
-                            stopDiscovery()
-                            connectToEndpoint(host, port)
-                        }
+                        consider(host, port, resolved.attributes)
                     }
                 },
             )
         } catch (e: Exception) {
-            android.util.Log.e("STREAM_BROWSER", "resolveService exception", e)
+            if (BuildConfig.DEBUG) {
+                android.util.Log.e("STREAM_BROWSER", "resolveService exception", e)
+            }
             isResolving.set(false)
         }
     }
@@ -268,7 +302,7 @@ internal class StreamRelayBrowser(
     ) {
         if (host == null || port <= 0) return
         if (BuildConfig.DEBUG) {
-            android.util.Log.i("STREAM_BROWSER", "Connecting to endpoint $host:$port")
+            android.util.Log.i("STREAM_BROWSER", "Connecting to endpoint")
         }
         scope.launch(Dispatchers.IO) {
             try {
@@ -278,7 +312,7 @@ internal class StreamRelayBrowser(
                 socket = s
                 outputStream = DataOutputStream(s.getOutputStream())
                 if (BuildConfig.DEBUG) {
-                    android.util.Log.i("STREAM_BROWSER", "Connected to $host:$port!")
+                    android.util.Log.i("STREAM_BROWSER", "Connected")
                 }
                 onEvent(StreamRelayEvent.Connected)
 
@@ -296,7 +330,7 @@ internal class StreamRelayBrowser(
                 isConnected.set(false)
                 isResolving.set(false)
                 if (BuildConfig.DEBUG) {
-                    android.util.Log.w("STREAM_BROWSER", "Socket loop disconnected/error: ${e.message}")
+                    android.util.Log.w("STREAM_BROWSER", "Socket loop disconnected: ${e.javaClass.simpleName}")
                 }
                 if (!isClosed.get()) {
                     onEvent(StreamRelayEvent.Disconnected)

@@ -4,6 +4,7 @@ package fi.refineid.android.rapp
 
 import android.content.Context
 import android.util.Base64
+import fi.refineid.android.BuildConfig
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.CertificateHolderName
 import fi.refineid.android.core.PersonCardDetails
@@ -204,7 +205,9 @@ internal class RemoteCardModel(
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("REMOTE_CARD_MODEL", "connect failed", e)
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.e("REMOTE_CARD_MODEL", "connect failed", e)
+                }
             } finally {
                 _isConnecting.value = false
             }

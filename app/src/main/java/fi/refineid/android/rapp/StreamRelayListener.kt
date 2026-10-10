@@ -65,6 +65,7 @@ internal class StreamRelayListener(
     private var authDeadlineJob: Job? = null
     private val isClosed = AtomicBoolean(false)
     private var registrationListener: NsdManager.RegistrationListener? = null
+    private var advertisedName: String? = null
 
     val port: Int?
         get() = serverSocket?.localPort
@@ -88,55 +89,11 @@ internal class StreamRelayListener(
             serverSocket = server
             AppTrace.rappListenerStarted(server.localPort)
             if (BuildConfig.DEBUG) {
-                android.util.Log.i("STREAM_LISTENER", "ServerSocket listening on port ${server.localPort}")
+                android.util.Log.i("STREAM_LISTENER", "ServerSocket listening")
             }
 
-            val serviceInfo =
-                NsdServiceInfo().apply {
-                    serviceName = instanceName
-                    serviceType = SERVICE_TYPE
-                    port = server.localPort
-                    attributes.forEach { (key, value) -> setAttribute(key, value) }
-                }
-
-            val regListener =
-                object : NsdManager.RegistrationListener {
-                    override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
-                        AppTrace.rappListenerServiceRegistered(serviceInfo.serviceName)
-                        if (BuildConfig.DEBUG) {
-                            android.util.Log.i("STREAM_LISTENER", "onServiceRegistered: ${serviceInfo.serviceName}")
-                        }
-                    }
-
-                    override fun onRegistrationFailed(
-                        serviceInfo: NsdServiceInfo,
-                        errorCode: Int,
-                    ) {
-                        AppTrace.rappListenerFailed("registration_failed_code_$errorCode")
-                        android.util.Log.e(
-                            "STREAM_LISTENER",
-                            "onRegistrationFailed: ${serviceInfo.serviceName}, errorCode: $errorCode",
-                        )
-                    }
-
-                    override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
-                        if (BuildConfig.DEBUG) {
-                            android.util.Log.i("STREAM_LISTENER", "onServiceUnregistered: ${serviceInfo.serviceName}")
-                        }
-                    }
-
-                    override fun onUnregistrationFailed(
-                        serviceInfo: NsdServiceInfo,
-                        errorCode: Int,
-                    ) {
-                        android.util.Log.e(
-                            "STREAM_LISTENER",
-                            "onUnregistrationFailed: ${serviceInfo.serviceName}, errorCode: $errorCode",
-                        )
-                    }
-                }
-            registrationListener = regListener
-            nsdManager?.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, regListener)
+            advertisedName = instanceName
+            register(instanceName, server.localPort, attributes)
 
             listenerJob =
                 scope.launch(Dispatchers.IO) {
@@ -206,8 +163,13 @@ internal class StreamRelayListener(
                             }
                         } catch (e: IOException) {
                             if (!isClosed.get()) {
-                                AppTrace.rappListenerFailed("accept_loop_exited_${e.message}")
-                                android.util.Log.w("STREAM_LISTENER", "ServerSocket accept loop exited: ${e.message}")
+                                AppTrace.rappListenerFailed("accept_loop_exited_${e.javaClass.simpleName}")
+                                if (BuildConfig.DEBUG) {
+                                    android.util.Log.w(
+                                        "STREAM_LISTENER",
+                                        "ServerSocket accept loop exited: ${e.javaClass.simpleName}",
+                                    )
+                                }
                                 onEvent(StreamRelayEvent.Error(e))
                             }
                             break
@@ -215,8 +177,10 @@ internal class StreamRelayListener(
                     }
                 }
         } catch (e: IOException) {
-            AppTrace.rappListenerFailed("start_failed_${e.message}")
-            android.util.Log.e("STREAM_LISTENER", "start failed", e)
+            AppTrace.rappListenerFailed("start_failed_${e.javaClass.simpleName}")
+            if (BuildConfig.DEBUG) {
+                android.util.Log.e("STREAM_LISTENER", "start failed", e)
+            }
             onEvent(StreamRelayEvent.Error(e))
         }
     }
@@ -241,7 +205,7 @@ internal class StreamRelayListener(
             }
         } catch (e: IOException) {
             if (BuildConfig.DEBUG) {
-                android.util.Log.w("STREAM_LISTENER", "Socket read loop ended: ${e.message}")
+                android.util.Log.w("STREAM_LISTENER", "Socket read loop ended: ${e.javaClass.simpleName}")
             }
             val notifyDisconnect =
                 synchronized(this) {
@@ -272,6 +236,81 @@ internal class StreamRelayListener(
                 }
             }
         }
+    }
+
+    /**
+     * Replaces the published TXT attributes, keeping the instance name and
+     * the listening socket, so a connected peer is not disturbed.
+     */
+    fun updateAttributes(attributes: Map<String, String>) {
+        if (isClosed.get()) return
+        val name = advertisedName ?: return
+        val listeningPort = serverSocket?.localPort ?: return
+        registrationListener?.let {
+            try {
+                nsdManager?.unregisterService(it)
+            } catch (_: Exception) {
+            }
+        }
+        registrationListener = null
+        register(name, listeningPort, attributes)
+    }
+
+    private fun register(
+        instanceName: String,
+        listeningPort: Int,
+        attributes: Map<String, String>,
+    ) {
+        val serviceInfo =
+            NsdServiceInfo().apply {
+                serviceName = instanceName
+                serviceType = SERVICE_TYPE
+                this.port = listeningPort
+                attributes.forEach { (key, value) -> setAttribute(key, value) }
+            }
+
+        val regListener =
+            object : NsdManager.RegistrationListener {
+                override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                    AppTrace.rappListenerServiceRegistered(serviceInfo.serviceName)
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.i("STREAM_LISTENER", "onServiceRegistered")
+                    }
+                }
+
+                override fun onRegistrationFailed(
+                    serviceInfo: NsdServiceInfo,
+                    errorCode: Int,
+                ) {
+                    AppTrace.rappListenerFailed("registration_failed_code_$errorCode")
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.e(
+                            "STREAM_LISTENER",
+                            "onRegistrationFailed, errorCode: $errorCode",
+                        )
+                    }
+                }
+
+                override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.i("STREAM_LISTENER", "onServiceUnregistered")
+                    }
+                }
+
+                override fun onUnregistrationFailed(
+                    serviceInfo: NsdServiceInfo,
+                    errorCode: Int,
+                ) {
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.e(
+                            "STREAM_LISTENER",
+                            "onUnregistrationFailed, errorCode: $errorCode",
+                        )
+                    }
+                }
+            }
+        registrationListener = regListener
+        nsdManager?.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, regListener)
     }
 
     fun send(frame: ByteArray) {

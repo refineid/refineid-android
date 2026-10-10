@@ -84,7 +84,9 @@ internal class RappRequesterClient(
                 try {
                     rappStreamSessionPreamble(token)
                 } catch (e: Exception) {
-                    android.util.Log.e("REQUESTER_CLIENT", "rappStreamSessionPreamble failed", e)
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.e("REQUESTER_CLIENT", "rappStreamSessionPreamble failed", e)
+                    }
                     return@withTimeoutOrNull null
                 }
 
@@ -113,7 +115,28 @@ internal class RappRequesterClient(
             }
 
             browser =
-                StreamRelayBrowser(context, scope, StreamRendezvousName.MODE_SESSION) { event ->
+                StreamRelayBrowser(
+                    context,
+                    scope,
+                    StreamRendezvousName.MODE_SESSION,
+                    rank = { attributes ->
+                        // A phone whose hint names this pairing first, then
+                        // one publishing no hints; never one whose hints
+                        // name only other pairings (discovery hierarchy
+                        // section 4.3).
+                        when (
+                            StreamRendezvousName.hintMatch(
+                                attributes,
+                                token,
+                                StreamRendezvousName.nowUnixSeconds(),
+                            )
+                        ) {
+                            StreamRendezvousName.HintMatch.NAMED -> RappDialCandidates.BEST_RANK
+                            StreamRendezvousName.HintMatch.UNHINTED -> RappDialCandidates.UNHINTED_RANK
+                            StreamRendezvousName.HintMatch.OTHER -> null
+                        }
+                    },
+                ) { event ->
                     when (event) {
                         is StreamRelayEvent.Connected -> {
                             try {
@@ -132,7 +155,9 @@ internal class RappRequesterClient(
                                 browser?.send(handshake1)
                                 state = SessionState.AWAITING_RESPONDER_HANDSHAKE
                             } catch (e: Exception) {
-                                android.util.Log.e("REQUESTER_CLIENT", "Failed starting handshake", e)
+                                if (BuildConfig.DEBUG) {
+                                    android.util.Log.e("REQUESTER_CLIENT", "Failed starting handshake", e)
+                                }
                                 deferred.complete(null)
                                 cleanup()
                             }
@@ -183,12 +208,19 @@ internal class RappRequesterClient(
                                     } else if (action.kind == RappBridgeActionKind.TERMINAL ||
                                         action.kind == RappBridgeActionKind.SESSION_CLOSED
                                     ) {
-                                        android.util.Log.w("REQUESTER_CLIENT", "Operation ended with ${action.kind}")
+                                        if (BuildConfig.DEBUG) {
+                                            android.util.Log.w(
+                                                "REQUESTER_CLIENT",
+                                                "Operation ended with ${action.kind}",
+                                            )
+                                        }
                                         deferred.complete(null)
                                         cleanup()
                                     }
                                 } catch (e: Exception) {
-                                    android.util.Log.e("REQUESTER_CLIENT", "receiveFrame failed in operation", e)
+                                    if (BuildConfig.DEBUG) {
+                                        android.util.Log.e("REQUESTER_CLIENT", "receiveFrame failed in operation", e)
+                                    }
                                     deferred.complete(null)
                                     cleanup()
                                 }
@@ -200,7 +232,12 @@ internal class RappRequesterClient(
                                     try {
                                         sess.readHandshakeFrame(event.data)
                                         if (!sess.handshakeComplete()) {
-                                            android.util.Log.w("REQUESTER_CLIENT", "Handshake not complete after reply")
+                                            if (BuildConfig.DEBUG) {
+                                                android.util.Log.w(
+                                                    "REQUESTER_CLIENT",
+                                                    "Handshake not complete after reply",
+                                                )
+                                            }
                                             deferred.complete(null)
                                             cleanup()
                                             return@StreamRelayBrowser
@@ -211,7 +248,9 @@ internal class RappRequesterClient(
                                         browser?.send(ready)
                                         state = SessionState.AWAITING_RESPONDER_READY
                                     } catch (e: Exception) {
-                                        android.util.Log.e("REQUESTER_CLIENT", "Handshake reply failed", e)
+                                        if (BuildConfig.DEBUG) {
+                                            android.util.Log.e("REQUESTER_CLIENT", "Handshake reply failed", e)
+                                        }
                                         deferred.complete(null)
                                         cleanup()
                                     }
@@ -252,11 +291,13 @@ internal class RappRequesterClient(
                                             browser?.send(action.frame!!)
                                         }
                                     } catch (e: Exception) {
-                                        android.util.Log.e(
-                                            "REQUESTER_CLIENT",
-                                            "Failed establishing or startOperation",
-                                            e,
-                                        )
+                                        if (BuildConfig.DEBUG) {
+                                            android.util.Log.e(
+                                                "REQUESTER_CLIENT",
+                                                "Failed establishing or startOperation",
+                                                e,
+                                            )
+                                        }
                                         deferred.complete(null)
                                         cleanup()
                                     }
