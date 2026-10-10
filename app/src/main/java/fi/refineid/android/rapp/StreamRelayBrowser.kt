@@ -30,7 +30,7 @@ internal class StreamRelayBrowser(
     private val context: Context,
     private val scope: CoroutineScope,
     private val targetMode: String,
-    private val accepts: (Map<String, ByteArray?>) -> Boolean = { true },
+    private val rank: (Map<String, ByteArray?>) -> Int? = { RappDialCandidates.BEST_RANK },
     private val onEvent: (StreamRelayEvent) -> Unit,
 ) : AutoCloseable {
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
@@ -49,6 +49,8 @@ internal class StreamRelayBrowser(
     private val isConnected = AtomicBoolean(false)
     private val isResolving = AtomicBoolean(false)
     private var activeServiceCallback: Any? = null
+    private val candidates = RappDialCandidates()
+    private var graceJob: Job? = null
 
     fun start() {
         if (isClosed.get()) return
@@ -149,9 +151,41 @@ internal class StreamRelayBrowser(
         }
     }
 
-    /** Whether a resolved record advertises the target mode and passes [accepts]. */
-    private fun isWanted(attributes: Map<String, ByteArray?>): Boolean =
-        StreamRendezvousName.matches(attributes, targetMode) && accepts(attributes)
+    /**
+     * Ranks one resolved phone and dials it, holds it as a fallback, or
+     * ignores it (see [RappDialCandidates]).
+     */
+    private fun consider(
+        host: String?,
+        port: Int,
+        attributes: Map<String, ByteArray?>,
+    ) {
+        if (host == null || port <= 0 || !StreamRendezvousName.matches(attributes, targetMode)) return
+        when (val decision = candidates.offer(RappDialCandidates.Endpoint(host, port), rank(attributes))) {
+            is RappDialCandidates.Decision.DialNow -> {
+                dialOnce(decision.endpoint)
+            }
+
+            is RappDialCandidates.Decision.Hold -> {
+                if (decision.startGrace) {
+                    graceJob =
+                        scope.launch {
+                            delay(RappDialCandidates.GRACE_MS)
+                            candidates.bestHeld()?.let(::dialOnce)
+                        }
+                }
+            }
+
+            RappDialCandidates.Decision.Ignore -> {}
+        }
+    }
+
+    private fun dialOnce(endpoint: RappDialCandidates.Endpoint) {
+        if (isClosed.get() || !isConnected.compareAndSet(false, true)) return
+        graceJob?.cancel()
+        stopDiscovery()
+        connectToEndpoint(endpoint.host, endpoint.port)
+    }
 
     private fun resolveAndConnect(serviceInfo: NsdServiceInfo) {
         if (isConnected.get() || isClosed.get()) return
@@ -181,26 +215,14 @@ internal class StreamRelayBrowser(
                                 )
                             }
                             val host = resolved.hostAddresses.firstOrNull()?.hostAddress ?: resolved.host?.hostAddress
-                            val port = resolved.port
-                            if (!isWanted(resolved.attributes)) {
-                                isResolving.set(false)
-                                activeServiceCallback = null
-                                try {
-                                    nsdManager?.unregisterServiceInfoCallback(this)
-                                } catch (_: Exception) {
-                                }
-                                return
+                            if (host == null || resolved.port <= 0) return
+                            isResolving.set(false)
+                            activeServiceCallback = null
+                            try {
+                                nsdManager?.unregisterServiceInfoCallback(this)
+                            } catch (_: Exception) {
                             }
-                            if (host != null && port > 0 && isConnected.compareAndSet(false, true)) {
-                                isResolving.set(false)
-                                activeServiceCallback = null
-                                try {
-                                    nsdManager?.unregisterServiceInfoCallback(this)
-                                } catch (_: Exception) {
-                                }
-                                stopDiscovery()
-                                connectToEndpoint(host, port)
-                            }
+                            consider(host, resolved.port, resolved.attributes)
                         }
 
                         override fun onServiceLost() {
@@ -262,14 +284,7 @@ internal class StreamRelayBrowser(
                                 "onServiceResolved",
                             )
                         }
-                        if (host != null &&
-                            port > 0 &&
-                            isWanted(resolved.attributes) &&
-                            isConnected.compareAndSet(false, true)
-                        ) {
-                            stopDiscovery()
-                            connectToEndpoint(host, port)
-                        }
+                        consider(host, port, resolved.attributes)
                     }
                 },
             )

@@ -119,11 +119,22 @@ internal class RappRequesterClient(
                     context,
                     scope,
                     StreamRendezvousName.MODE_SESSION,
-                    accepts = { attributes ->
-                        // Never dial a phone whose hints name only other
-                        // pairings (discovery hierarchy section 4.3).
-                        StreamRendezvousName.hintMatch(attributes, token, StreamRendezvousName.nowUnixSeconds()) !=
-                            StreamRendezvousName.HintMatch.OTHER
+                    rank = { attributes ->
+                        // A phone whose hint names this pairing first, then
+                        // one publishing no hints; never one whose hints
+                        // name only other pairings (discovery hierarchy
+                        // section 4.3).
+                        when (
+                            StreamRendezvousName.hintMatch(
+                                attributes,
+                                token,
+                                StreamRendezvousName.nowUnixSeconds(),
+                            )
+                        ) {
+                            StreamRendezvousName.HintMatch.NAMED -> RappDialCandidates.BEST_RANK
+                            StreamRendezvousName.HintMatch.UNHINTED -> RappDialCandidates.UNHINTED_RANK
+                            StreamRendezvousName.HintMatch.OTHER -> null
+                        }
                     },
                 ) { event ->
                     when (event) {
