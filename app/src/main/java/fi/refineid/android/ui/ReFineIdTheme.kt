@@ -75,3 +75,36 @@ internal fun successStatusColor(): Color =
 @Composable
 internal fun permissionStatusColor(): Color =
     if (LocalRefineIdDarkTheme.current) WARNING_AMBER_DARK else WARNING_AMBER_LIGHT
+
+private val SUCCESS_CONTAINER_LIGHT = Color(0xFFD4F2DF)
+private val ON_SUCCESS_CONTAINER_LIGHT = Color(0xFF00391B)
+private val SUCCESS_CONTAINER_DARK = Color(0xFF1D4A30)
+private val ON_SUCCESS_CONTAINER_DARK = Color(0xFFB7F0C8)
+private val WARNING_CONTAINER_LIGHT = Color(0xFFFFE8C2)
+private val ON_WARNING_CONTAINER_LIGHT = Color(0xFF3A2400)
+private val WARNING_CONTAINER_DARK = Color(0xFF5A3E00)
+private val ON_WARNING_CONTAINER_DARK = Color(0xFFFFDDB0)
+
+/** Container and content colors of a status banner. */
+internal data class StatusContainerColors(
+    val container: Color,
+    val content: Color,
+)
+
+/** Green banner colors for a completed action, readable in both themes. */
+@Composable
+internal fun successContainerColors(): StatusContainerColors =
+    if (LocalRefineIdDarkTheme.current) {
+        StatusContainerColors(SUCCESS_CONTAINER_DARK, ON_SUCCESS_CONTAINER_DARK)
+    } else {
+        StatusContainerColors(SUCCESS_CONTAINER_LIGHT, ON_SUCCESS_CONTAINER_LIGHT)
+    }
+
+/** Amber banner colors for a caution, readable in both themes. */
+@Composable
+internal fun warningContainerColors(): StatusContainerColors =
+    if (LocalRefineIdDarkTheme.current) {
+        StatusContainerColors(WARNING_CONTAINER_DARK, ON_WARNING_CONTAINER_DARK)
+    } else {
+        StatusContainerColors(WARNING_CONTAINER_LIGHT, ON_WARNING_CONTAINER_LIGHT)
+    }
