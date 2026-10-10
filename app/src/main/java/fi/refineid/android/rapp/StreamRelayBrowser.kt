@@ -94,7 +94,9 @@ internal class StreamRelayBrowser(
                     serviceType: String,
                     errorCode: Int,
                 ) {
-                    android.util.Log.e("STREAM_BROWSER", "onStartDiscoveryFailed: $serviceType, code=$errorCode")
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.e("STREAM_BROWSER", "onStartDiscoveryFailed, code=$errorCode")
+                    }
                     onEvent(StreamRelayEvent.Error(IOException("NSD discovery failed: $errorCode")))
                 }
 
@@ -102,7 +104,9 @@ internal class StreamRelayBrowser(
                     serviceType: String,
                     errorCode: Int,
                 ) {
-                    android.util.Log.w("STREAM_BROWSER", "onStopDiscoveryFailed: $serviceType, code=$errorCode")
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.w("STREAM_BROWSER", "onStopDiscoveryFailed, code=$errorCode")
+                    }
                 }
 
                 override fun onServiceFound(serviceInfo: NsdServiceInfo) {
@@ -114,7 +118,7 @@ internal class StreamRelayBrowser(
 
                 override fun onServiceLost(serviceInfo: NsdServiceInfo) {
                     if (BuildConfig.DEBUG) {
-                        android.util.Log.d("STREAM_BROWSER", "onServiceLost: ${serviceInfo.serviceName}")
+                        android.util.Log.d("STREAM_BROWSER", "onServiceLost")
                     }
                 }
             }
@@ -126,7 +130,9 @@ internal class StreamRelayBrowser(
                 listener,
             )
         } catch (e: Exception) {
-            android.util.Log.e("STREAM_BROWSER", "discoverServices error", e)
+            if (BuildConfig.DEBUG) {
+                android.util.Log.e("STREAM_BROWSER", "discoverServices error", e)
+            }
             onEvent(StreamRelayEvent.Error(e))
         }
     }
@@ -152,10 +158,12 @@ internal class StreamRelayBrowser(
                     object : NsdManager.ServiceInfoCallback {
                         override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) {
                             activeServiceCallback = null
-                            android.util.Log.w(
-                                "STREAM_BROWSER",
-                                "registerServiceInfoCallback failed: $errorCode, trying fallback",
-                            )
+                            if (BuildConfig.DEBUG) {
+                                android.util.Log.w(
+                                    "STREAM_BROWSER",
+                                    "registerServiceInfoCallback failed: $errorCode, trying fallback",
+                                )
+                            }
                             isResolving.set(false)
                             resolveLegacy(serviceInfo)
                         }
@@ -164,7 +172,7 @@ internal class StreamRelayBrowser(
                             if (BuildConfig.DEBUG) {
                                 android.util.Log.i(
                                     "STREAM_BROWSER",
-                                    "onServiceUpdated: ${resolved.serviceName} hostAddresses=${resolved.hostAddresses} port=${resolved.port}",
+                                    "onServiceUpdated",
                                 )
                             }
                             val host = resolved.hostAddresses.firstOrNull()?.hostAddress ?: resolved.host?.hostAddress
@@ -208,7 +216,9 @@ internal class StreamRelayBrowser(
                 )
                 return
             } catch (e: Exception) {
-                android.util.Log.w("STREAM_BROWSER", "registerServiceInfoCallback exception, fallback", e)
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.w("STREAM_BROWSER", "registerServiceInfoCallback exception, fallback", e)
+                }
             }
         }
         resolveLegacy(serviceInfo)
@@ -228,10 +238,12 @@ internal class StreamRelayBrowser(
                         serviceInfo: NsdServiceInfo,
                         errorCode: Int,
                     ) {
-                        android.util.Log.w(
-                            "STREAM_BROWSER",
-                            "resolveService failed: ${serviceInfo.serviceName}, code=$errorCode",
-                        )
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.w(
+                                "STREAM_BROWSER",
+                                "resolveService failed, code=$errorCode",
+                            )
+                        }
                         isResolving.set(false)
                     }
 
@@ -242,7 +254,7 @@ internal class StreamRelayBrowser(
                         if (BuildConfig.DEBUG) {
                             android.util.Log.i(
                                 "STREAM_BROWSER",
-                                "onServiceResolved: ${resolved.serviceName} at $host:$port",
+                                "onServiceResolved",
                             )
                         }
                         if (host != null &&
@@ -257,7 +269,9 @@ internal class StreamRelayBrowser(
                 },
             )
         } catch (e: Exception) {
-            android.util.Log.e("STREAM_BROWSER", "resolveService exception", e)
+            if (BuildConfig.DEBUG) {
+                android.util.Log.e("STREAM_BROWSER", "resolveService exception", e)
+            }
             isResolving.set(false)
         }
     }
@@ -268,7 +282,7 @@ internal class StreamRelayBrowser(
     ) {
         if (host == null || port <= 0) return
         if (BuildConfig.DEBUG) {
-            android.util.Log.i("STREAM_BROWSER", "Connecting to endpoint $host:$port")
+            android.util.Log.i("STREAM_BROWSER", "Connecting to endpoint")
         }
         scope.launch(Dispatchers.IO) {
             try {
@@ -278,7 +292,7 @@ internal class StreamRelayBrowser(
                 socket = s
                 outputStream = DataOutputStream(s.getOutputStream())
                 if (BuildConfig.DEBUG) {
-                    android.util.Log.i("STREAM_BROWSER", "Connected to $host:$port!")
+                    android.util.Log.i("STREAM_BROWSER", "Connected")
                 }
                 onEvent(StreamRelayEvent.Connected)
 
@@ -296,7 +310,7 @@ internal class StreamRelayBrowser(
                 isConnected.set(false)
                 isResolving.set(false)
                 if (BuildConfig.DEBUG) {
-                    android.util.Log.w("STREAM_BROWSER", "Socket loop disconnected/error: ${e.message}")
+                    android.util.Log.w("STREAM_BROWSER", "Socket loop disconnected: ${e.javaClass.simpleName}")
                 }
                 if (!isClosed.get()) {
                     onEvent(StreamRelayEvent.Disconnected)

@@ -88,7 +88,7 @@ internal class StreamRelayListener(
             serverSocket = server
             AppTrace.rappListenerStarted(server.localPort)
             if (BuildConfig.DEBUG) {
-                android.util.Log.i("STREAM_LISTENER", "ServerSocket listening on port ${server.localPort}")
+                android.util.Log.i("STREAM_LISTENER", "ServerSocket listening")
             }
 
             val serviceInfo =
@@ -104,7 +104,7 @@ internal class StreamRelayListener(
                     override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
                         AppTrace.rappListenerServiceRegistered(serviceInfo.serviceName)
                         if (BuildConfig.DEBUG) {
-                            android.util.Log.i("STREAM_LISTENER", "onServiceRegistered: ${serviceInfo.serviceName}")
+                            android.util.Log.i("STREAM_LISTENER", "onServiceRegistered")
                         }
                     }
 
@@ -113,15 +113,17 @@ internal class StreamRelayListener(
                         errorCode: Int,
                     ) {
                         AppTrace.rappListenerFailed("registration_failed_code_$errorCode")
-                        android.util.Log.e(
-                            "STREAM_LISTENER",
-                            "onRegistrationFailed: ${serviceInfo.serviceName}, errorCode: $errorCode",
-                        )
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.e(
+                                "STREAM_LISTENER",
+                                "onRegistrationFailed, errorCode: $errorCode",
+                            )
+                        }
                     }
 
                     override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
                         if (BuildConfig.DEBUG) {
-                            android.util.Log.i("STREAM_LISTENER", "onServiceUnregistered: ${serviceInfo.serviceName}")
+                            android.util.Log.i("STREAM_LISTENER", "onServiceUnregistered")
                         }
                     }
 
@@ -129,10 +131,12 @@ internal class StreamRelayListener(
                         serviceInfo: NsdServiceInfo,
                         errorCode: Int,
                     ) {
-                        android.util.Log.e(
-                            "STREAM_LISTENER",
-                            "onUnregistrationFailed: ${serviceInfo.serviceName}, errorCode: $errorCode",
-                        )
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.e(
+                                "STREAM_LISTENER",
+                                "onUnregistrationFailed, errorCode: $errorCode",
+                            )
+                        }
                     }
                 }
             registrationListener = regListener
@@ -206,8 +210,13 @@ internal class StreamRelayListener(
                             }
                         } catch (e: IOException) {
                             if (!isClosed.get()) {
-                                AppTrace.rappListenerFailed("accept_loop_exited_${e.message}")
-                                android.util.Log.w("STREAM_LISTENER", "ServerSocket accept loop exited: ${e.message}")
+                                AppTrace.rappListenerFailed("accept_loop_exited_${e.javaClass.simpleName}")
+                                if (BuildConfig.DEBUG) {
+                                    android.util.Log.w(
+                                        "STREAM_LISTENER",
+                                        "ServerSocket accept loop exited: ${e.javaClass.simpleName}",
+                                    )
+                                }
                                 onEvent(StreamRelayEvent.Error(e))
                             }
                             break
@@ -215,8 +224,10 @@ internal class StreamRelayListener(
                     }
                 }
         } catch (e: IOException) {
-            AppTrace.rappListenerFailed("start_failed_${e.message}")
-            android.util.Log.e("STREAM_LISTENER", "start failed", e)
+            AppTrace.rappListenerFailed("start_failed_${e.javaClass.simpleName}")
+            if (BuildConfig.DEBUG) {
+                android.util.Log.e("STREAM_LISTENER", "start failed", e)
+            }
             onEvent(StreamRelayEvent.Error(e))
         }
     }
@@ -241,7 +252,7 @@ internal class StreamRelayListener(
             }
         } catch (e: IOException) {
             if (BuildConfig.DEBUG) {
-                android.util.Log.w("STREAM_LISTENER", "Socket read loop ended: ${e.message}")
+                android.util.Log.w("STREAM_LISTENER", "Socket read loop ended: ${e.javaClass.simpleName}")
             }
             val notifyDisconnect =
                 synchronized(this) {
