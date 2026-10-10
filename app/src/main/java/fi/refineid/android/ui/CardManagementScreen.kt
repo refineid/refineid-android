@@ -732,11 +732,8 @@ private fun GuidanceBanner(
             }
 
             BannerTone.WARNING -> {
-                Triple(
-                    MaterialTheme.colorScheme.tertiaryContainer,
-                    MaterialTheme.colorScheme.onTertiaryContainer,
-                    Icons.Outlined.Warning,
-                )
+                val warning = warningContainerColors()
+                Triple(warning.container, warning.content, Icons.Outlined.Warning)
             }
 
             BannerTone.INFO -> {
@@ -846,18 +843,9 @@ private fun OutcomeBanner(
     message: String,
     isError: Boolean,
 ) {
-    val containerColor =
-        if (isError) {
-            MaterialTheme.colorScheme.errorContainer
-        } else {
-            MaterialTheme.colorScheme.tertiaryContainer
-        }
-    val contentColor =
-        if (isError) {
-            MaterialTheme.colorScheme.onErrorContainer
-        } else {
-            MaterialTheme.colorScheme.onTertiaryContainer
-        }
+    val success = successContainerColors()
+    val containerColor = if (isError) MaterialTheme.colorScheme.errorContainer else success.container
+    val contentColor = if (isError) MaterialTheme.colorScheme.onErrorContainer else success.content
 
     Card(
         modifier = Modifier.fillMaxWidth(),
