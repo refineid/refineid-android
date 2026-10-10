@@ -253,7 +253,7 @@ class RefineIdApplication : Application() {
         val stored =
             fi.refineid.android.rapp.RappStoredPairs
                 .load(rappPairCatalog, rappVault)
-        val newest = stored.maxByOrNull { (peer, _) -> peer.createdAtMs } ?: return
+        val newest = stored.maxByOrNull { (peer, _) -> peer.lastUsedMs } ?: return
         try {
             if (newest.second.metadata().role == uniffi.refineid_rapp.RappEndpointRole.PROXY) {
                 rappProxyDispatcher.startListening(rappVault)

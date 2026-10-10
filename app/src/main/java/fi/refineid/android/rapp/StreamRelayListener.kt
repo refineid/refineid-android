@@ -65,6 +65,10 @@ internal class StreamRelayListener(
     private var authDeadlineJob: Job? = null
     private val isClosed = AtomicBoolean(false)
     private var registrationListener: NsdManager.RegistrationListener? = null
+
+    /** A registration that waits for the previous one to finish unregistering. */
+    private var nextRegistration: (() -> Unit)? = null
+    private var isWithdrawn = false
     private var advertisedName: String? = null
 
     /**
@@ -254,14 +258,7 @@ internal class StreamRelayListener(
         if (isClosed.get()) return
         val name = advertisedName ?: return
         val listeningPort = serverSocket?.localPort ?: return
-        registrationListener?.let {
-            try {
-                nsdManager?.unregisterService(it)
-            } catch (_: Exception) {
-            }
-        }
-        registrationListener = null
-        register(name, listeningPort, attributes)
+        reregister(name, listeningPort, attributes)
     }
 
     /**
@@ -270,24 +267,45 @@ internal class StreamRelayListener(
      * section 4.5 steps 2 and 3).
      */
     fun withdraw(attributes: Map<String, String>) {
-        if (isClosed.get()) return
+        if (isClosed.get() || isWithdrawn) return
         val name = advertisedName ?: return
         val listeningPort = serverSocket?.localPort ?: return
+        isWithdrawn = true
         listenerJob?.cancel()
         try {
             serverSocket?.close()
         } catch (_: Exception) {
         }
         disconnectClient()
-        registrationListener?.let {
-            try {
-                nsdManager?.unregisterService(it)
-            } catch (_: Exception) {
-            }
+        reregister(name, listeningPort, attributes)
+    }
+
+    /**
+     * Registers the same instance anew once the current registration has
+     * finished unregistering, so the responder does not see the name as
+     * taken and rename the instance.
+     */
+    private fun reregister(
+        instanceName: String,
+        listeningPort: Int,
+        attributes: Map<String, String>,
+    ) {
+        val current = registrationListener
+        if (current == null) {
+            register(instanceName, listeningPort, attributes)
+            return
         }
         registrationListener = null
-        register(name, listeningPort, attributes)
+        synchronized(this) { nextRegistration = { register(instanceName, listeningPort, attributes) } }
+        try {
+            nsdManager?.unregisterService(current)
+        } catch (_: Exception) {
+            takeNextRegistration()?.invoke()
+        }
     }
+
+    @Synchronized
+    private fun takeNextRegistration(): (() -> Unit)? = nextRegistration.also { nextRegistration = null }
 
     private fun register(
         instanceName: String,
@@ -330,12 +348,14 @@ internal class StreamRelayListener(
                     if (BuildConfig.DEBUG) {
                         android.util.Log.i("STREAM_LISTENER", "onServiceUnregistered")
                     }
+                    if (!isClosed.get()) takeNextRegistration()?.invoke()
                 }
 
                 override fun onUnregistrationFailed(
                     serviceInfo: NsdServiceInfo,
                     errorCode: Int,
                 ) {
+                    if (!isClosed.get()) takeNextRegistration()?.invoke()
                     if (BuildConfig.DEBUG) {
                         android.util.Log.e(
                             "STREAM_LISTENER",
@@ -398,6 +418,7 @@ internal class StreamRelayListener(
             if (BuildConfig.DEBUG) android.util.Log.i("STREAM_LISTENER", "close() called")
             authDeadlineJob?.cancel()
             authDeadlineJob = null
+            takeNextRegistration()
             registrationListener?.let {
                 try {
                     nsdManager?.unregisterService(it)

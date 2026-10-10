@@ -132,7 +132,7 @@ internal class RappPhoneProxyDispatcher(
         withdrawalJob?.cancel()
         withdrawalJob = null
         this.vault = vault
-        pairRecord = null
+        releasePairRecord()
         activeListener?.close()
         sessionRouting?.close()
         sessionRouting = RappSessionRouting()
@@ -252,7 +252,7 @@ internal class RappPhoneProxyDispatcher(
         operationBridge = null
         sessionBridge?.close()
         sessionBridge = null
-        pairRecord = null
+        releasePairRecord()
         vault = null
         _connectedPeer.value = null
         lastReadAuthCertDer = null
@@ -287,7 +287,7 @@ internal class RappPhoneProxyDispatcher(
                 sessionHandshakeDone = false
                 operationBridge?.close()
                 operationBridge = null
-                pairRecord = null
+                releasePairRecord()
                 if (!preAuthenticationLimiter.admit(RappClock.monotonicMs())) {
                     activeListener?.disconnectClient()
                 }
@@ -314,6 +314,7 @@ internal class RappPhoneProxyDispatcher(
                 sessionHandshakeDone = false
                 operationBridge?.close()
                 operationBridge = null
+                releasePairRecord()
                 _connectedPeer.value = null
                 lastReadAuthCertDer = null
                 clearPendingPins()
@@ -345,8 +346,13 @@ internal class RappPhoneProxyDispatcher(
             // pairing; anything else closes the connection and changes no
             // stored state.
             val pairs = storedPairs(vlt)
-            val pair = sessionRouting?.route(event.data, pairs)
-            pairs.filter { it !== pair }.forEach(RappPairRecord::close)
+            var pair: RappPairRecord? = null
+            try {
+                pair = sessionRouting?.route(event.data, pairs)
+            } catch (_: Exception) {
+            } finally {
+                pairs.filter { it !== pair }.forEach(RappPairRecord::close)
+            }
             if (pair == null) {
                 activeListener?.disconnectClient()
                 return
@@ -715,6 +721,12 @@ internal class RappPhoneProxyDispatcher(
             }
     }
 
+    /** Closes the routed pairing's record handle; the session keeps its own. */
+    private fun releasePairRecord() {
+        pairRecord?.close()
+        pairRecord = null
+    }
+
     /** Tears down the active stream so Mac must reconnect for the next request. */
     private fun dropConnection() {
         AppTrace.rappConnectionDropped("proxy dispatcher dropConnection")
@@ -729,6 +741,7 @@ internal class RappPhoneProxyDispatcher(
         sessionBridge?.close()
         sessionBridge = null
         sessionHandshakeDone = false
+        releasePairRecord()
         clearPendingPins()
         _connectedPeer.value = null
         dismissInbox()
@@ -1751,6 +1764,7 @@ internal class RappPhoneProxyDispatcher(
         operationBridge = null
         sessionBridge?.close()
         sessionBridge = null
+        releasePairRecord()
         dismissInbox()
     }
 }

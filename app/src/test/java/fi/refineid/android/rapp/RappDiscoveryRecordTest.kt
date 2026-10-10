@@ -82,6 +82,15 @@ class RappDiscoveryRecordTest {
     }
 
     @Test
+    fun aWithdrawnRecordWithoutPairingsIsAllFiller() {
+        val (requester, _) = RappTestOffers.pairRecords(PROFILES, NOW)
+        val withdrawn = rappWithdrawnRecord(emptyList())
+        val entries = StreamRendezvousName.attributes(withdrawn).getValue("withdrawn").split(',')
+        assertEquals(WITHDRAWN_ENTRIES, entries.size)
+        assertFalse(requester.matchesWithdrawnRecord(INSTANCE, withdrawn, NOW_SECONDS))
+    }
+
+    @Test
     fun recordKeysMatchWithoutRegardToCase() {
         val record = mapOf("V" to "1".encodeToByteArray(), "Mode" to "session".encodeToByteArray())
         assertTrue(StreamRendezvousName.matches(record, StreamRendezvousName.MODE_SESSION))
