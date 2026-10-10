@@ -1,9 +1,11 @@
 package fi.refineid.android.rapp
 
 import android.content.Context
+import android.content.res.Resources
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import fi.refineid.android.R
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin2Submission
 
@@ -69,9 +71,9 @@ internal class RappAuthorizationInbox(
             notificationManager.dismissNotification()
         } else {
             currentRequest?.let {
-                notificationManager.postAuthorizationNotification(it.requestId)
+                notificationManager.postAuthorizationNotification(it.requestId, requestText(it))
             } ?: currentTapPrompt?.let {
-                notificationManager.postAuthorizationNotification(it.requestId)
+                notificationManager.postAuthorizationNotification(it.requestId, tapPromptText(it))
             }
         }
     }
@@ -99,7 +101,7 @@ internal class RappAuthorizationInbox(
             )
         currentRequest = req
         if (!isForeground) {
-            notificationManager.postAuthorizationNotification(requestId)
+            notificationManager.postAuthorizationNotification(requestId, requestText(req))
         }
     }
 
@@ -128,7 +130,7 @@ internal class RappAuthorizationInbox(
             )
         currentRequest = req
         if (!isForeground) {
-            notificationManager.postAuthorizationNotification(requestId)
+            notificationManager.postAuthorizationNotification(requestId, requestText(req))
         }
     }
 
@@ -149,7 +151,9 @@ internal class RappAuthorizationInbox(
                 },
             )
         if (!isForeground) {
-            notificationManager.postAuthorizationNotification(requestId)
+            currentTapPrompt?.let {
+                notificationManager.postAuthorizationNotification(requestId, tapPromptText(it))
+            }
         }
     }
 
@@ -184,6 +188,11 @@ internal class RappAuthorizationInbox(
         }
     }
 
+    private fun requestText(request: RappAuthRequest): String = rappRequestText(context.resources, request)
+
+    private fun tapPromptText(prompt: RappCardTapPrompt): String =
+        context.getString(R.string.remote_card_needed, prompt.requester)
+
     fun dismissAll() {
         currentRequest?.onDenied?.invoke()
         currentRequest = null
@@ -192,3 +201,23 @@ internal class RappAuthorizationInbox(
         notificationManager.dismissNotification()
     }
 }
+
+/** What a request asks of the holder, independent of the card reader in use. */
+internal fun rappRequestText(
+    resources: Resources,
+    request: RappAuthRequest,
+): String =
+    when (request) {
+        is RappAuthRequest.BrowserAuth -> {
+            resources.getString(R.string.remote_authentication_request, request.requester)
+        }
+
+        is RappAuthRequest.DocumentSign -> {
+            val count = request.documentNames.size
+            if (count > 1) {
+                resources.getQuantityString(R.plurals.remote_signature_request_many, count, request.requester, count)
+            } else {
+                resources.getString(R.string.remote_signature_request, request.requester)
+            }
+        }
+    }

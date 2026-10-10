@@ -15,6 +15,7 @@
     <string name="retry">Retry</string>
     <string name="card">Card</string>
     <string name="nfc" translatable="false">NFC</string>
+    <string name="on">On</string>
     <string name="off">Off</string>
     <string name="turn_on">Turn on</string>
     <string name="card_recognized">Card recognized</string>
@@ -115,7 +116,17 @@
     <string name="pin1_section_title">Basic PIN (PIN 1)</string>
     <string name="pin2_section_title">Signature PIN (PIN 2)</string>
     <string name="paired_devices">Paired computers</string>
-    <string name="connected_status">Connected</string>
     <string name="card_remote_access">Card Remote Access</string>
     <string name="no_paired_devices">No paired computers</string>
+    <string name="remote_requests_channel">Requests</string>
+    <string name="remote_authentication_request">%1$s requests login with your ID card.</string>
+    <string name="remote_signature_request">%1$s requests a signature.</string>
+    <string name="remote_card_needed">%1$s needs your ID card.</string>
+    <string name="insert_card_into_reader">Insert your ID card into the reader.</string>
+    <string name="remote_in_use">In use</string>
+    <string name="allow_notifications">Allow notifications</string>
+    <plurals name="remote_signature_request_many">
+        <item quantity="one">%1$s requests %2$d signature.</item>
+        <item quantity="other">%1$s requests %2$d signatures.</item>
+    </plurals>
 </resources>

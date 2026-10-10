@@ -129,6 +129,7 @@ internal class RappPhoneProxyDispatcher(
             }
         activeListener = listener
         listener.start(StreamRendezvousName.ephemeralName(), sessionAttributes(vault))
+        RappCustodianService.ensureRunning(context)
         hintRefreshJob?.cancel()
         hintRefreshJob =
             scope.launch {
@@ -155,6 +156,7 @@ internal class RappPhoneProxyDispatcher(
     }
 
     fun stopListening() {
+        RappCustodianService.stop(context)
         hintRefreshJob?.cancel()
         hintRefreshJob = null
         activeListener?.close()
@@ -1649,6 +1651,7 @@ internal class RappPhoneProxyDispatcher(
 
     override fun close() {
         isClosed = true
+        RappCustodianService.stop(context)
         livenessJob?.cancel()
         livenessJob = null
         activeOperationJob?.cancel()

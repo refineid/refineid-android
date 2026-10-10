@@ -12,7 +12,13 @@ import androidx.core.app.NotificationManagerCompat
 import fi.refineid.android.MainActivity
 import fi.refineid.android.R
 
-/** Posts heads-up notifications when an incoming signature request arrives from a paired Mac/iPad. */
+/**
+ * Posts the notification that carries a paired computer's request to the
+ * holder while RefineID has no foreground activity.
+ *
+ * The channel is high importance, so the request appears as a heads-up
+ * notification; tapping it opens the consent dialog.
+ */
 @SuppressLint("MissingPermission")
 internal class RappNotificationManager(
     private val context: Context,
@@ -29,12 +35,10 @@ internal class RappNotificationManager(
     }
 
     private fun createNotificationChannel() {
-        val name = context.getString(R.string.app_name)
-        val descriptionText = "Notifications for cross-device authentication and signing requests"
+        val name = context.getString(R.string.remote_requests_channel)
         val importance = NotificationManager.IMPORTANCE_HIGH
         val channel =
             NotificationChannel(CHANNEL_ID, name, importance).apply {
-                description = descriptionText
                 enableVibration(true)
                 setShowBadge(true)
             }
@@ -42,7 +46,10 @@ internal class RappNotificationManager(
         notificationManager?.createNotificationChannel(channel)
     }
 
-    fun postAuthorizationNotification(requestId: String) {
+    fun postAuthorizationNotification(
+        requestId: String,
+        body: String,
+    ) {
         val intent =
             Intent(context, MainActivity::class.java).apply {
                 setClass(context, MainActivity::class.java)
@@ -64,8 +71,7 @@ internal class RappNotificationManager(
             )
 
         val title = context.getString(R.string.app_name)
-        val body = context.getString(R.string.hold_card_against_back)
-        val notification =
+        val builder =
             NotificationCompat
                 .Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
@@ -77,10 +83,10 @@ internal class RappNotificationManager(
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
-                .build()
+        val notificationManager = NotificationManagerCompat.from(context)
 
         try {
-            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+            notificationManager.notify(NOTIFICATION_ID, builder.build())
         } catch (_: SecurityException) {
         }
     }

@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -110,12 +111,7 @@ internal fun NavigationRow(
     }
 }
 
-@Suppress(
-    "FunctionName",
-    "ktlint:standard:function-naming",
-    "ComposableLambdaParameterNaming",
-    "ComposableLambdaParameterPosition",
-)
+@Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 internal fun NavigationRow(
     icon: Painter,
@@ -123,9 +119,10 @@ internal fun NavigationRow(
     tag: String,
     enabled: Boolean = true,
     iconTint: Color? = null,
-    badge: @Composable (() -> Unit)? = null,
+    stateDescription: String? = null,
     onClick: () -> Unit,
 ) {
+    val rowState = stateDescription
     val contentColor =
         if (enabled) {
             MaterialTheme.colorScheme.onSurface
@@ -137,6 +134,7 @@ internal fun NavigationRow(
             Modifier
                 .fillMaxWidth()
                 .clickable(enabled = enabled, onClick = onClick)
+                .semantics { rowState?.let { this.stateDescription = it } }
                 .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING)
                 .testTag(tag),
         verticalAlignment = Alignment.CenterVertically,
@@ -161,7 +159,6 @@ internal fun NavigationRow(
             modifier = Modifier.weight(ROW_LABEL_WEIGHT),
             maxLines = 1,
         )
-        badge?.invoke()
         Icon(
             imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
             contentDescription = null,
@@ -231,10 +228,6 @@ internal const val ROW_LABEL_WEIGHT = 1f
 internal val SUBSCREEN_HORIZONTAL_PADDING = 16.dp
 internal val SUBSCREEN_VERTICAL_PADDING = 8.dp
 internal val SUBSCREEN_ITEM_SPACING = 14.dp
-internal const val CONNECTED_STATUS_COLOR_HEX = 0xFF34C759
-internal val CONNECTED_STATUS_COLOR = Color(CONNECTED_STATUS_COLOR_HEX)
-internal const val CONNECTED_STATUS_BADGE_ALPHA = 0.15f
-internal val STATUS_BADGE_CORNER_RADIUS = 12.dp
 internal val PAIRED_PEER_ROW_VERTICAL_PADDING = 12.dp
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
