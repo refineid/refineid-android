@@ -32,7 +32,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import uniffi.refineid_rapp.RappAnnouncementCandidate
 import uniffi.refineid_rapp.RappBridgeActionKind
+import uniffi.refineid_rapp.RappCloseReason
 import uniffi.refineid_rapp.RappEndpointRole
 import uniffi.refineid_rapp.RappLivenessConfiguration
 import uniffi.refineid_rapp.RappOperationBridge
@@ -42,8 +44,9 @@ import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappPreAuthenticationLimiter
 import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
+import uniffi.refineid_rapp.rappSessionRecord
 import uniffi.refineid_rapp.rappStreamProfileName
-import uniffi.refineid_rapp.rappStreamSessionPreamble
+import uniffi.refineid_rapp.rappWithdrawnRecord
 import java.security.SecureRandom
 
 /**
@@ -65,6 +68,8 @@ internal class RappPhoneProxyDispatcher(
     private val activeAuthCertDer: () -> ByteArray? = { null },
 ) : AutoCloseable {
     private var activeListener: StreamRelayListener? = null
+    private var sessionRouting: RappSessionRouting? = null
+    private var withdrawalJob: Job? = null
     private var sessionBridge: RappSessionBridge? = null
     private var sessionHandshakeDone = false
     private var operationBridge: RappOperationBridge? = null
@@ -98,6 +103,9 @@ internal class RappPhoneProxyDispatcher(
         private const val SESSION_NONCE_BYTES = 32
         private const val SHA256_DIGEST_LENGTH = 32
         private const val SHA384_DIGEST_LENGTH = 48
+
+        /** How long the withdrawn record stays advertised (RAPP section 4.5: 2 to 10 seconds). */
+        private const val WITHDRAWN_ANNOUNCEMENT_MS = 3_000L
     }
 
     private fun dismissInbox(opIdHex: String? = null) {
@@ -114,15 +122,20 @@ internal class RappPhoneProxyDispatcher(
      * Starts the one session listener for every stored pairing (RAPP
      * discovery hierarchy section 4.2-4.3).
      *
-     * It is published under a fresh random instance name with TXT `v=1` and
-     * `mode=session`; nothing derived from a rendezvous token is published.
-     * Each connection names its pairing only inside the routing preamble.
+     * It is published under a fresh random instance name with TXT `v=1`,
+     * `mode=session` and the rotating hints of the most recently used
+     * pairings. Each connection names its pairing only through the routing
+     * tag in its preamble.
      */
     fun startListening(vault: AndroidRappVault) {
         if (isClosed) return
+        withdrawalJob?.cancel()
+        withdrawalJob = null
         this.vault = vault
-        pairRecord = null
+        releasePairRecord()
         activeListener?.close()
+        sessionRouting?.close()
+        sessionRouting = RappSessionRouting()
         val listener =
             StreamRelayListener(context, scope) { event ->
                 handleRelayEvent(event)
@@ -144,19 +157,91 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Session-mode TXT attributes carrying the current rotating hints of
-     * the stored custodian pairings (discovery hierarchy section 4.3).
+     * the most recently used custodian pairings (discovery hierarchy
+     * section 4.3).
      */
     private fun sessionAttributes(vault: AndroidRappVault): Map<String, String> {
-        val tokens =
-            storedPairs(vault).mapNotNull { record ->
-                val metadata = record.metadata()
-                metadata.rendezvousToken.takeIf { metadata.role == RappEndpointRole.PROXY }
+        val now = StreamRendezvousName.nowUnixSeconds().toULong()
+        val candidates =
+            announcementCandidates(vault) { record -> record.discoveryHint(now) }
+        return try {
+            StreamRendezvousName.attributes(rappSessionRecord(candidates))
+        } catch (_: Exception) {
+            StreamRendezvousName.attributes(StreamRendezvousName.MODE_SESSION)
+        }
+    }
+
+    /** One announcement candidate per stored custodian pairing, with its last use. */
+    private fun announcementCandidates(
+        vault: AndroidRappVault,
+        hint: (RappPairRecord) -> ByteArray,
+    ): List<RappAnnouncementCandidate> =
+        RappStoredPairs.load(catalog, vault).mapNotNull { (peer, record) ->
+            try {
+                if (record.metadata().role != RappEndpointRole.PROXY) {
+                    null
+                } else {
+                    RappAnnouncementCandidate(hint(record), peer.lastUsedMs.toULong())
+                }
+            } catch (_: Exception) {
+                null
+            } finally {
+                record.close()
             }
-        return StreamRendezvousName.sessionAttributes(tokens, StreamRendezvousName.nowUnixSeconds())
+        }
+
+    /**
+     * Withdraws the service the user switched off (RAPP section 4.5): the
+     * open session is closed as withdrawn, the listener stops accepting,
+     * the instance is advertised as withdrawn for a few seconds, and then
+     * everything stops.
+     */
+    fun withdraw() {
+        val listener = activeListener
+        val vlt = vault
+        val instance = listener?.registeredName
+        if (listener == null || vlt == null || instance == null) {
+            disconnectClient()
+            stopListening()
+            return
+        }
+        hintRefreshJob?.cancel()
+        hintRefreshJob = null
+        operationBridge?.let { bridge ->
+            try {
+                for (frame in listOfNotNull(bridge.closeWithReason(RappCloseReason.SERVICE_WITHDRAWN).frame)) {
+                    listener.send(frame)
+                }
+            } catch (_: Exception) {
+            }
+        }
+        val now = StreamRendezvousName.nowUnixSeconds().toULong()
+        val withdrawn =
+            try {
+                StreamRendezvousName.attributes(
+                    rappWithdrawnRecord(announcementCandidates(vlt) { it.withdrawalHint(instance, now) }),
+                )
+            } catch (_: Exception) {
+                null
+            }
+        dropConnection()
+        if (withdrawn == null) {
+            stopListening()
+            return
+        }
+        listener.withdraw(withdrawn)
+        withdrawalJob?.cancel()
+        withdrawalJob =
+            scope.launch {
+                delay(WITHDRAWN_ANNOUNCEMENT_MS)
+                if (activeListener === listener) stopListening()
+            }
     }
 
     fun stopListening() {
         RappCustodianService.stop(context)
+        sessionRouting?.close()
+        sessionRouting = null
         hintRefreshJob?.cancel()
         hintRefreshJob = null
         activeListener?.close()
@@ -167,7 +252,7 @@ internal class RappPhoneProxyDispatcher(
         operationBridge = null
         sessionBridge?.close()
         sessionBridge = null
-        pairRecord = null
+        releasePairRecord()
         vault = null
         _connectedPeer.value = null
         lastReadAuthCertDer = null
@@ -202,7 +287,7 @@ internal class RappPhoneProxyDispatcher(
                 sessionHandshakeDone = false
                 operationBridge?.close()
                 operationBridge = null
-                pairRecord = null
+                releasePairRecord()
                 if (!preAuthenticationLimiter.admit(RappClock.monotonicMs())) {
                     activeListener?.disconnectClient()
                 }
@@ -229,6 +314,7 @@ internal class RappPhoneProxyDispatcher(
                 sessionHandshakeDone = false
                 operationBridge?.close()
                 operationBridge = null
+                releasePairRecord()
                 _connectedPeer.value = null
                 lastReadAuthCertDer = null
                 clearPendingPins()
@@ -239,13 +325,7 @@ internal class RappPhoneProxyDispatcher(
 
     /** Every stored pairing this phone can load from the vault. */
     private fun storedPairs(vault: AndroidRappVault): List<RappPairRecord> =
-        catalog.listPairs().mapNotNull { stored ->
-            try {
-                RappPairingModel.decodeHexOrNull(stored.pairIdHex)?.let { RappPairRecord.loadFromVault(it, vault) }
-            } catch (_: Exception) {
-                null
-            }
-        }
+        RappStoredPairs.load(catalog, vault).map { (_, record) -> record }
 
     private fun handleRelayFrame(event: StreamRelayEvent.Frame) {
         val vlt = vault ?: return
@@ -265,7 +345,14 @@ internal class RappPhoneProxyDispatcher(
             // The first frame must be the session preamble of a stored
             // pairing; anything else closes the connection and changes no
             // stored state.
-            val pair = RappSessionRouting.route(event.data, storedPairs(vlt))
+            val pairs = storedPairs(vlt)
+            var pair: RappPairRecord? = null
+            try {
+                pair = sessionRouting?.route(event.data, pairs)
+            } catch (_: Exception) {
+            } finally {
+                pairs.filter { it !== pair }.forEach(RappPairRecord::close)
+            }
             if (pair == null) {
                 activeListener?.disconnectClient()
                 return
@@ -340,6 +427,7 @@ internal class RappPhoneProxyDispatcher(
                             platform = "macOS",
                             createdAtMs = System.currentTimeMillis(),
                         )
+                catalog.markUsed(hex, System.currentTimeMillis())
                 _connectedPeer.value = peer
                 AppTrace.rappPairingCompleted(peer.displayName)
             }
@@ -633,6 +721,12 @@ internal class RappPhoneProxyDispatcher(
             }
     }
 
+    /** Closes the routed pairing's record handle; the session keeps its own. */
+    private fun releasePairRecord() {
+        pairRecord?.close()
+        pairRecord = null
+    }
+
     /** Tears down the active stream so Mac must reconnect for the next request. */
     private fun dropConnection() {
         AppTrace.rappConnectionDropped("proxy dispatcher dropConnection")
@@ -647,6 +741,7 @@ internal class RappPhoneProxyDispatcher(
         sessionBridge?.close()
         sessionBridge = null
         sessionHandshakeDone = false
+        releasePairRecord()
         clearPendingPins()
         _connectedPeer.value = null
         dismissInbox()
@@ -1093,8 +1188,27 @@ internal class RappPhoneProxyDispatcher(
                     }
 
                     if (pinCache?.isVerified(pin1Submission) != true) {
-                        val candidate = Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes())
-                        val verification = service.verifyAuthenticationPin(candidate)
+                        val readyService: AuthenticationCardService = service
+                        val verification =
+                            RappCardRetry.run(
+                                command = {
+                                    (authCardService() ?: readyService)
+                                        .verifyAuthenticationPin(
+                                            Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes()),
+                                        )
+                                },
+                                cardLeft = { it.result.authenticationFailure()?.meansCardLeft() == true },
+                                awaitCard = {
+                                    ensureCardOrAbort(
+                                        opId,
+                                        opIdHex,
+                                        RappAuthAction.BROWSER_AUTH,
+                                        bridge,
+                                        forcePrompt = true,
+                                    )
+                                },
+                            ) ?: return@launch
+                        service = authCardService() ?: service
                         val failure = verification.result.authenticationFailure()
                         if (failure != null) {
                             handleBrowserAuthFailure(
@@ -1158,50 +1272,33 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
     ): Pair<AuthenticationCardService, AuthenticationSignResult>? {
         var service = initialService
-        val initialBytes =
-            try {
-                pin1Submission.copyBytes()
-            } catch (_: IllegalStateException) {
-                return null
-            }
-        var result =
-            service.signAuthenticationDigest(
-                algorithm = algorithm,
-                pin1 = Pin1Submission.fromOwnedBytes(initialBytes),
-                digest = digest,
-            )
-        if (result is AuthenticationSignResult.Failure &&
-            result.kind == AuthenticationSignFailure.CARD_UNAVAILABLE
-        ) {
-            val cardReady =
-                ensureCardOrAbort(
-                    opId = opId,
-                    opIdHex = opIdHex,
-                    action = RappAuthAction.BROWSER_AUTH,
-                    bridge = bridge,
-                    forcePrompt = true,
-                )
-            if (!cardReady) {
-                return null
-            }
-            val retryService = authCardService()
-            if (retryService != null) {
-                service = retryService
-                val retryBytes =
-                    try {
-                        pin1Submission.copyBytes()
-                    } catch (_: IllegalStateException) {
-                        return null
-                    }
-                result =
-                    retryService.signAuthenticationDigest(
-                        algorithm = algorithm,
-                        pin1 = Pin1Submission.fromOwnedBytes(retryBytes),
-                        digest = digest,
+        return try {
+            RappCardRetry.run(
+                command = {
+                    service = authCardService() ?: service
+                    service to
+                        service.signAuthenticationDigest(
+                            algorithm = algorithm,
+                            pin1 = Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes()),
+                            digest = digest,
+                        )
+                },
+                cardLeft = { (_, result) ->
+                    result is AuthenticationSignResult.Failure && result.kind.meansCardLeft()
+                },
+                awaitCard = {
+                    ensureCardOrAbort(
+                        opId = opId,
+                        opIdHex = opIdHex,
+                        action = RappAuthAction.BROWSER_AUTH,
+                        bridge = bridge,
+                        forcePrompt = true,
                     )
-            }
+                },
+            )
+        } catch (_: IllegalStateException) {
+            null
         }
-        return Pair(service, result)
     }
 
     private fun handleBrowserAuthSuccess(
@@ -1413,7 +1510,7 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Signs every document of a batch with the one PIN 2 entry the holder
-     * approved, journaling each signature before the next (RAPP v26.10.9
+     * approved, journaling each signature before the next (RAPP v26.10.10
      * section 9.3). A batch stopped after a signature answers ambiguous, and
      * the signatures made so far travel with it.
      */
@@ -1657,12 +1754,26 @@ internal class RappPhoneProxyDispatcher(
         activeOperationJob?.cancel()
         activeOperationJob = null
         clearPendingPins()
+        withdrawalJob?.cancel()
+        withdrawalJob = null
         activeListener?.close()
         activeListener = null
+        sessionRouting?.close()
+        sessionRouting = null
         operationBridge?.close()
         operationBridge = null
         sessionBridge?.close()
         sessionBridge = null
+        releasePairRecord()
         dismissInbox()
     }
 }
+
+/**
+ * Whether a failure means the card was not in the field for the command, so
+ * the request waits for the card and tries once more instead of failing.
+ */
+private fun AuthenticationSignFailure.meansCardLeft(): Boolean =
+    this == AuthenticationSignFailure.CARD_UNAVAILABLE ||
+        this == AuthenticationSignFailure.TRANSPORT_ERROR ||
+        this == AuthenticationSignFailure.BRIDGE_ERROR

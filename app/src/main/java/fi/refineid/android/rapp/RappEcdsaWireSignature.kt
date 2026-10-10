@@ -5,7 +5,7 @@ package fi.refineid.android.rapp
 import fi.refineid.android.core.NativeCardKeyProfile
 
 /**
- * The RAPP wire form of an ECDSA signature (RAPP v26.10.9 section 9.2):
+ * The RAPP wire form of an ECDSA signature (RAPP v26.10.10 section 9.2):
  * fixed-width big-endian `r || s`, each coordinate left-padded to the curve
  * size, never DER.
  */

@@ -14,6 +14,7 @@ internal data class PairedPeer(
     val createdAtMs: Long,
     val holderName: String? = null,
     val certificateDerBase64: String? = null,
+    val lastUsedMs: Long = createdAtMs,
 )
 
 /** Persists authenticated RAPP paired devices locally on Android. */
@@ -44,6 +45,7 @@ internal class RappPairCatalog(
                         createdAtMs = obj.getLong("createdAtMs"),
                         holderName = obj.optString("holderName").takeIf { it.isNotBlank() },
                         certificateDerBase64 = obj.optString("certificateDerBase64").takeIf { it.isNotBlank() },
+                        lastUsedMs = obj.optLong("lastUsedMs", obj.getLong("createdAtMs")),
                     ),
                 )
             }
@@ -106,6 +108,16 @@ internal class RappPairCatalog(
         persistPairs(current)
     }
 
+    /** Records that the pairing [pairIdHex] carried a session at [nowMs]. */
+    fun markUsed(
+        pairIdHex: String,
+        nowMs: Long,
+    ) {
+        persistPairs(
+            listPairs().map { peer -> if (peer.pairIdHex == pairIdHex) peer.copy(lastUsedMs = nowMs) else peer },
+        )
+    }
+
     fun removePair(pairIdHex: String) {
         val current = listPairs().filter { it.pairIdHex != pairIdHex }
         persistPairs(current)
@@ -125,6 +137,7 @@ internal class RappPairCatalog(
             obj.put("createdAtMs", p.createdAtMs)
             p.holderName?.let { obj.put("holderName", it) }
             p.certificateDerBase64?.let { obj.put("certificateDerBase64", it) }
+            obj.put("lastUsedMs", p.lastUsedMs)
             arr.put(obj)
         }
         prefs.edit { putString(KEY_PAIRS, arr.toString()) }

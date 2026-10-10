@@ -6,7 +6,7 @@ import fi.refineid.android.core.QualifiedSignResult
 
 /**
  * Signs the documents of one `batch_sign_documents` request in order
- * (RAPP v26.10.9 section 9.3).
+ * (RAPP v26.10.10 section 9.3).
  *
  * Each signature is recorded, and so journaled by the bridge, before the
  * next document is signed. The run stops at the first document that does not

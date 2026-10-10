@@ -112,6 +112,18 @@ class RappProxyAndCatalogTest {
     }
 
     @Test
+    fun aPairingsLastUseStartsAtCreationAndFollowsItsSessions() {
+        val catalog = RappPairCatalog(FakeSharedPreferences())
+        catalog.savePair(byteArrayOf(1, 2), "Laptop", "macOS", createdAtMs = 1_000L)
+        catalog.savePair(byteArrayOf(3, 4), "Desktop", "Windows", createdAtMs = 2_000L)
+        assertEquals(1_000L, catalog.listPairs().first { it.pairIdHex == "0102" }.lastUsedMs)
+        catalog.markUsed("0102", 5_000L)
+        val pairs = catalog.listPairs()
+        assertEquals(5_000L, pairs.first { it.pairIdHex == "0102" }.lastUsedMs)
+        assertEquals(2_000L, pairs.first { it.pairIdHex == "0304" }.lastUsedMs)
+    }
+
+    @Test
     fun rappSettingsDefaultsToFalseWhenNoPairsExist() {
         val prefs = FakeSharedPreferences()
         val settings = RappSettings(prefs, pairCatalogSupplier = { emptyList() })

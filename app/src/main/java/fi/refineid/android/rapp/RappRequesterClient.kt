@@ -24,7 +24,6 @@ import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
 import uniffi.refineid_rapp.rappStreamProfileName
-import uniffi.refineid_rapp.rappStreamSessionPreamble
 import java.security.SecureRandom
 
 /**
@@ -79,16 +78,6 @@ internal class RappRequesterClient(
     ): ByteArray? =
         withTimeoutOrNull(timeoutMs) {
             val deferred = CompletableDeferred<ByteArray?>()
-            val token = pairRecord.metadata().rendezvousToken
-            val preamble =
-                try {
-                    rappStreamSessionPreamble(token)
-                } catch (e: Exception) {
-                    if (BuildConfig.DEBUG) {
-                        android.util.Log.e("REQUESTER_CLIENT", "rappStreamSessionPreamble failed", e)
-                    }
-                    return@withTimeoutOrNull null
-                }
 
             var browser: StreamRelayBrowser? = null
             var sessionBridge: RappSessionBridge? = null
@@ -124,16 +113,19 @@ internal class RappRequesterClient(
                         // one publishing no hints; never one whose hints
                         // name only other pairings (discovery hierarchy
                         // section 4.3).
-                        when (
-                            StreamRendezvousName.hintMatch(
-                                attributes,
-                                token,
-                                StreamRendezvousName.nowUnixSeconds(),
-                            )
-                        ) {
-                            StreamRendezvousName.HintMatch.NAMED -> RappDialCandidates.BEST_RANK
-                            StreamRendezvousName.HintMatch.UNHINTED -> RappDialCandidates.UNHINTED_RANK
-                            StreamRendezvousName.HintMatch.OTHER -> null
+                        val named =
+                            try {
+                                pairRecord.matchesDiscoveryRecord(
+                                    StreamRendezvousName.entries(attributes),
+                                    StreamRendezvousName.nowUnixSeconds().toULong(),
+                                )
+                            } catch (_: Exception) {
+                                false
+                            }
+                        when {
+                            named -> RappDialCandidates.BEST_RANK
+                            !StreamRendezvousName.hasHints(attributes) -> RappDialCandidates.UNHINTED_RANK
+                            else -> null
                         }
                     },
                 ) { event ->
@@ -143,7 +135,8 @@ internal class RappRequesterClient(
                                 if (BuildConfig.DEBUG) {
                                     android.util.Log.i("REQUESTER_CLIENT", "Connected to proxy, sending preamble")
                                 }
-                                browser?.send(preamble)
+                                // A fresh nonce and routing tag on every dial (RAPP section 2.2.1).
+                                browser?.send(pairRecord.sessionPreamble(rappStreamProfileName()))
                                 val sess =
                                     RappSessionBridge.beginRequester(
                                         pair = pairRecord,
