@@ -79,8 +79,9 @@ When remote reader proxying is enabled, RefineID implements a strict fallback hi
 - **Privacy (RFC 8882)**:
   - The service instance name MUST be a fresh, ephemeral random string generated on each registration: `refineid-[random_8_hex]._refineid-stream._tcp.local.`, preventing long-term device tracking across networks.
   - The SRV record target MUST use an anonymized, ephemeral host label: `refineid-[random_8_hex].local.`, avoiding leakage of Android device or user names.
-  - The persistent 16-byte `rendezvous_token` (RAPP v26.10.1 §4.3) is **NEVER** published in mDNS records or instance names; it is transmitted strictly over the established point-to-point TCP stream during `Phase::Routing`.
-  - TXT records publish `mode=pairing` (with the 16-byte ephemeral `offer_id`) during pairing, and `mode=session` (with optional 15-minute rotating HMAC discovery hints) during operational reconnection.
+  - No value that stays the same across connections is published or sent. Each session dial opens with a fresh 16-byte nonce and a routing tag keyed from the pairing's static agreement (RAPP v26.10.10 §2.2.1); the phone routes it with one `RappSessionRouter` per listener and refuses unknown or replayed tags without answering.
+  - TXT records publish `mode=pairing` during pairing, `mode=session` with the rotating 15-minute discovery hints of the four most recently used pairings (built by `rappSessionRecord`) during operational reconnection, and `mode=withdrawn` when the user switches the service off.
+- **Withdrawal** (RAPP v26.10.10 §4.5): switching Remote Access off closes the open session with `service_withdrawn`, stops accepting connections, re-registers the same instance with the `rappWithdrawnRecord` TXT for three seconds, and then unregisters. The system suspending the app is not a withdrawal.
 - **Stream Lifecycle**:
   1. User toggles `Allow Remote Reader` on Android.
   2. Android app binds ephemeral `ServerSocket(0)` and registers `NsdServiceInfo` with `NsdManager`.
@@ -94,6 +95,6 @@ When remote reader proxying is enabled, RefineID implements a strict fallback hi
 
 1. **Explicit Toggle Control**:
    - The phone does not broadcast BLE beacons or advertise mDNS services in background without user intent.
-   - When the user leaves or disables "Allow Remote Reader", the `NsdManager` service is unregistered and `BluetoothLeAdvertiser.stopAdvertising` is invoked immediately.
+   - When the user disables "Allow Remote Reader", the `NsdManager` service announces the withdrawal for three seconds and is then unregistered, and `BluetoothLeAdvertiser.stopAdvertising` is invoked immediately.
 2. **Auditability & Zero Secret Leakage**:
    - Strictly zero PIN data, candidate lengths, CAN values, or card authentication tokens are ever logged in Logcat, file dumps, or network traces.

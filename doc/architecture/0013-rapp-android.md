@@ -18,7 +18,7 @@ what turns a proven pair of devices into a cross-platform one.
 ## Roles
 
 Android pairs only as the custodian: the phone shows the pairing code, serves
-the RAPP v26.10.9 offer over the stream transport, and holds the card. No
+the RAPP v26.10.10 offer over the stream transport, and holds the card. No
 screen pairs the phone as a requester, so the app never calls
 `RappPairingBridge.fromBootstrap`.
 
@@ -27,6 +27,10 @@ whose role is requester, but the app cannot create such a pairing, so in
 practice they are idle. Giving Android a requester role needs a product
 decision and a pairing entry point (dial a phone in pairing mode, read its
 offer, type its code); the session side is already in place.
+
+`RappStoredPairs` loads every catalogued pairing through the core. A record
+in a format the core no longer decodes is removed from the catalog and the
+vault when the app starts, and its device pairs again.
 
 ## The protocol is not implemented here
 

@@ -16,7 +16,7 @@ import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappPairingBackoff
 import uniffi.refineid_rapp.RappPairingBridge
 import uniffi.refineid_rapp.RappPreAuthenticationLimiter
-import uniffi.refineid_rapp.rappStreamPairingPreamble
+import uniffi.refineid_rapp.rappPairingPreamble
 import uniffi.refineid_rapp.rappStreamProfileName
 
 internal sealed interface PairingPhase {
@@ -111,8 +111,7 @@ internal class RappPairingModel(
         } else {
             reset()
             val app = context.applicationContext as? RefineIdApplication
-            app?.rappProxyDispatcher?.disconnectClient()
-            app?.rappProxyDispatcher?.stopListening()
+            app?.rappProxyDispatcher?.withdraw()
         }
     }
 
@@ -200,7 +199,7 @@ internal class RappPairingModel(
 
     /**
      * A new connection must be admitted by the pre-authentication limiter
-     * (RAPP v26.10.9 section 3.3) and then open with the pairing preamble.
+     * (RAPP v26.10.10 section 3.3) and then open with the pairing preamble.
      */
     private fun handleProxyConnected() {
         ceremony = null
@@ -225,7 +224,7 @@ internal class RappPairingModel(
         code: String,
     ) {
         awaitingPreamble = false
-        if (!preamble.contentEquals(rappStreamPairingPreamble())) {
+        if (!preamble.contentEquals(rappPairingPreamble(rappStreamProfileName()))) {
             listener?.disconnectClient()
             return
         }

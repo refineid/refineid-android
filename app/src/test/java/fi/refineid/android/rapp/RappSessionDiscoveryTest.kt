@@ -10,13 +10,12 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import uniffi.refineid_rapp.rappStreamPairingPreamble
-import uniffi.refineid_rapp.rappStreamSessionPreamble
+import uniffi.refineid_rapp.rappPairingPreamble
+import uniffi.refineid_rapp.rappStreamProfileName
 
 /**
- * Session discovery publishes nothing derived from a rendezvous token, and
- * a connection is routed only by its preamble (RAPP discovery hierarchy
- * section 4.1-4.3).
+ * Session discovery publishes no stable value, and a connection is routed
+ * only by the routing tag in its preamble (RAPP v26.10.10 section 2.2.1).
  */
 class RappSessionDiscoveryTest {
     private companion object {
@@ -39,17 +38,11 @@ class RappSessionDiscoveryTest {
     }
 
     @Test
-    fun theSessionRecordCarriesOnlyVersionAndMode() {
+    fun theUnhintedSessionRecordCarriesOnlyVersionAndMode() {
         assertEquals(
             mapOf("v" to "1", "mode" to "session"),
             StreamRendezvousName.attributes(StreamRendezvousName.MODE_SESSION),
         )
-        val (_, custodian) = RappTestOffers.pairRecords(PROFILES, NOW)
-        val token = custodian.metadata().rendezvousToken.joinToString("") { "%02x".format(it) }
-        val published =
-            StreamRendezvousName.attributes(StreamRendezvousName.MODE_SESSION).values +
-                StreamRendezvousName.ephemeralName()
-        assertFalse(published.any { it.contains(token.take(TOKEN_BYTES)) })
     }
 
     @Test
@@ -62,24 +55,37 @@ class RappSessionDiscoveryTest {
 
     @Test
     fun aPreambleRoutesToItsOwnCustodianPairing() {
-        val (_, first) = RappTestOffers.pairRecords(PROFILES, NOW)
-        val (_, second) = RappTestOffers.pairRecords(PROFILES, NOW)
+        val (firstRequester, first) = RappTestOffers.pairRecords(PROFILES, NOW)
+        val (secondRequester, second) = RappTestOffers.pairRecords(PROFILES, NOW)
         val pairs = listOf(first, second)
-
-        fun preambleOf(record: uniffi.refineid_rapp.RappPairRecord) =
-            rappStreamSessionPreamble(record.metadata().rendezvousToken)
-        assertSame(second, RappSessionRouting.route(preambleOf(second), pairs))
-        assertSame(first, RappSessionRouting.route(preambleOf(first), pairs))
+        RappSessionRouting().use { routing ->
+            assertSame(second, routing.route(secondRequester.sessionPreamble(rappStreamProfileName()), pairs))
+            assertSame(first, routing.route(firstRequester.sessionPreamble(rappStreamProfileName()), pairs))
+        }
     }
 
     @Test
-    fun anUnknownTokenOrAnotherFrameIsRefused() {
+    fun aPreambleIsFreshOnEveryDial() {
+        val (requester, _) = RappTestOffers.pairRecords(PROFILES, NOW)
+        assertNotEquals(
+            requester.sessionPreamble(rappStreamProfileName()).toList(),
+            requester.sessionPreamble(rappStreamProfileName()).toList(),
+        )
+    }
+
+    @Test
+    fun aReplayedUnknownOrOtherFrameIsRefused() {
         val (requester, custodian) = RappTestOffers.pairRecords(PROFILES, NOW)
+        val (stranger, _) = RappTestOffers.pairRecords(PROFILES, NOW)
         val pairs = listOf(custodian, requester)
-        assertNull(RappSessionRouting.route(rappStreamSessionPreamble(ByteArray(TOKEN_BYTES)), pairs))
-        assertNull(RappSessionRouting.route(rappStreamPairingPreamble(), pairs))
-        // A requester-role record never serves a session on this phone.
-        val requesterPreamble = rappStreamSessionPreamble(requester.metadata().rendezvousToken)
-        assertNull(RappSessionRouting.route(requesterPreamble, listOf(requester)))
+        RappSessionRouting().use { routing ->
+            val preamble = requester.sessionPreamble(rappStreamProfileName())
+            assertSame(custodian, routing.route(preamble, pairs))
+            assertNull(routing.route(preamble, pairs))
+            assertNull(routing.route(stranger.sessionPreamble(rappStreamProfileName()), pairs))
+            assertNull(routing.route(rappPairingPreamble(rappStreamProfileName()), pairs))
+            // A requester-role record never serves a session on this phone.
+            assertNull(routing.route(requester.sessionPreamble(rappStreamProfileName()), listOf(requester)))
+        }
     }
 }

@@ -3,12 +3,12 @@ package fi.refineid.android.rapp
 import java.security.SecureRandom
 import java.text.Normalizer
 
-/** Generates, formats, and validates 6-character Crockford Base32 pairing codes for RAPP v26.10.9. */
+/** Generates, formats, and validates 6-character Crockford Base32 pairing codes for RAPP v26.10.10. */
 internal object RappPairingCode {
     const val CODE_LENGTH = 6
     const val GROUP_SIZE = 2
 
-    /** Offer lifetime both peers bind into the offer hash (RAPP v26.10.9 section 3.3). */
+    /** Offer lifetime both peers bind into the offer hash (RAPP v26.10.10 section 3.3). */
     const val DEFAULT_LIFETIME_MS: Long = 60_000L
 
     /** Crockford Base32 alphabet (32 symbols, excluding I, L, O, U). */
@@ -27,7 +27,7 @@ internal object RappPairingCode {
     private const val STRIPPED_CHARS = " \t\n\u000B\u000C\r-"
 
     /**
-     * Applies the Crockford Base32 canonicalization pipeline per RAPP v26.10.9 section 3.1.
+     * Applies the Crockford Base32 canonicalization pipeline per RAPP v26.10.10 section 3.1.
      *
      * NFKC first, then ASCII-only uppercasing, removal of ASCII whitespace
      * and hyphens, and the Crockford decode aliases (I and L to 1, O to 0).

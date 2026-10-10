@@ -207,6 +207,8 @@ class RefineIdApplication : Application() {
         rappPairCatalog =
             fi.refineid.android.rapp
                 .RappPairCatalog(this)
+        fi.refineid.android.rapp.RappStoredPairs
+            .dropUndecodable(rappPairCatalog, rappVault)
         remoteCardModel =
             fi.refineid.android.rapp.RemoteCardModel(
                 context = this,
@@ -248,23 +250,19 @@ class RefineIdApplication : Application() {
         if (!settings.isCardRemoteAccessEnabled) {
             return
         }
-        val existingPairs = rappPairCatalog.listPairs()
-        if (existingPairs.isNotEmpty()) {
-            val newestPair = existingPairs.maxByOrNull { it.createdAtMs } ?: existingPairs.first()
-            val pairIdBytes =
-                newestPair.pairIdHex
-                    .chunked(2)
-                    .map { it.toInt(16).toByte() }
-                    .toByteArray()
-            try {
-                val record = uniffi.refineid_rapp.RappPairRecord.loadFromVault(pairIdBytes, rappVault)
-                if (record.metadata().role == uniffi.refineid_rapp.RappEndpointRole.PROXY) {
-                    rappProxyDispatcher.startListening(rappVault)
-                } else {
-                    remoteCardModel.refresh()
-                }
-            } catch (_: Exception) {
+        val stored =
+            fi.refineid.android.rapp.RappStoredPairs
+                .load(rappPairCatalog, rappVault)
+        val newest = stored.maxByOrNull { (peer, _) -> peer.createdAtMs } ?: return
+        try {
+            if (newest.second.metadata().role == uniffi.refineid_rapp.RappEndpointRole.PROXY) {
+                rappProxyDispatcher.startListening(rappVault)
+            } else {
+                remoteCardModel.refresh()
             }
+        } catch (_: Exception) {
+        } finally {
+            stored.forEach { (_, record) -> record.close() }
         }
     }
 

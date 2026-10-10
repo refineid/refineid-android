@@ -7,7 +7,7 @@ import uniffi.refineid_rapp.RappPairingBridge
 import java.security.SecureRandom
 
 /**
- * Builds the two bridges of one pairing the way RAPP v26.10.9 section 4.2
+ * Builds the two bridges of one pairing the way RAPP v26.10.10 section 4.2
  * does: the custodian creates a random offer, and the requester decodes the
  * bootstrap bytes the custodian serves over the stream transport.
  */

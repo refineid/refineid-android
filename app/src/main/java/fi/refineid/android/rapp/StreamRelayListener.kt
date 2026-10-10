@@ -67,6 +67,14 @@ internal class StreamRelayListener(
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var advertisedName: String? = null
 
+    /**
+     * The instance portion of the name the service is registered under,
+     * which the system may have changed to resolve a conflict.
+     */
+    @Volatile
+    var registeredName: String? = null
+        private set
+
     val port: Int?
         get() = serverSocket?.localPort
 
@@ -256,6 +264,31 @@ internal class StreamRelayListener(
         register(name, listeningPort, attributes)
     }
 
+    /**
+     * Stops accepting connections and drops the connected peer, then keeps
+     * the instance advertised with [attributes] until [close] (RAPP
+     * section 4.5 steps 2 and 3).
+     */
+    fun withdraw(attributes: Map<String, String>) {
+        if (isClosed.get()) return
+        val name = advertisedName ?: return
+        val listeningPort = serverSocket?.localPort ?: return
+        listenerJob?.cancel()
+        try {
+            serverSocket?.close()
+        } catch (_: Exception) {
+        }
+        disconnectClient()
+        registrationListener?.let {
+            try {
+                nsdManager?.unregisterService(it)
+            } catch (_: Exception) {
+            }
+        }
+        registrationListener = null
+        register(name, listeningPort, attributes)
+    }
+
     private fun register(
         instanceName: String,
         listeningPort: Int,
@@ -272,6 +305,8 @@ internal class StreamRelayListener(
         val regListener =
             object : NsdManager.RegistrationListener {
                 override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                    registeredName = serviceInfo.serviceName
+                    advertisedName = serviceInfo.serviceName
                     AppTrace.rappListenerServiceRegistered(serviceInfo.serviceName)
                     if (BuildConfig.DEBUG) {
                         android.util.Log.i("STREAM_LISTENER", "onServiceRegistered")
