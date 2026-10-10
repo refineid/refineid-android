@@ -30,6 +30,8 @@ internal sealed interface RappAuthRequest {
     data class DocumentSign(
         override val requestId: String,
         override val requester: String,
+        /** Every document the approval signs, in signing order. */
+        val documentNames: List<String>,
         val onApproved: (Pin2Submission) -> Unit,
         override val onDenied: () -> Unit,
     ) : RappAuthRequest {
@@ -104,6 +106,7 @@ internal class RappAuthorizationInbox(
     fun askDocumentSign(
         requestId: String,
         requester: String,
+        documentNames: List<String>,
         onApproved: (Pin2Submission) -> Unit,
         onDenied: () -> Unit,
     ) {
@@ -111,6 +114,7 @@ internal class RappAuthorizationInbox(
             RappAuthRequest.DocumentSign(
                 requestId = requestId,
                 requester = requester,
+                documentNames = documentNames,
                 onApproved = { pin2 ->
                     notificationManager.dismissNotification()
                     currentRequest = null

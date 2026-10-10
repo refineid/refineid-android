@@ -8,9 +8,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -82,21 +85,14 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                 )
 
                 Text(
-                    text =
-                        when (request.action) {
-                            RappAuthAction.BROWSER_AUTH -> {
-                                "${request.requester} needs your identity card.\n" +
-                                    "Enter PIN 1 and hold the card to the phone."
-                            }
-
-                            RappAuthAction.DOCUMENT_SIGN -> {
-                                "${request.requester} is requesting a document signature.\n" +
-                                    "Enter PIN 2 and hold your ID card to the phone to sign."
-                            }
-                        },
+                    text = requestDescription(request),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                if (request is RappAuthRequest.DocumentSign) {
+                    RappDocumentNames(request.documentNames)
+                }
 
                 OutlinedTextField(
                     value = pin,
@@ -170,6 +166,48 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** What the request asks of the holder. */
+private fun requestDescription(request: RappAuthRequest): String =
+    when (request) {
+        is RappAuthRequest.BrowserAuth -> {
+            "${request.requester} needs your identity card.\n" +
+                "Enter PIN 1 and hold the card to the phone."
+        }
+
+        is RappAuthRequest.DocumentSign -> {
+            if (request.documentNames.size > 1) {
+                "${request.requester} is requesting ${request.documentNames.size} document signatures.\n" +
+                    "Enter PIN 2 once and hold your ID card to the phone to sign them all."
+            } else {
+                "${request.requester} is requesting a document signature.\n" +
+                    "Enter PIN 2 and hold your ID card to the phone to sign."
+            }
+        }
+    }
+
+/** The documents an approval signs, in signing order. */
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Composable
+private fun RappDocumentNames(names: List<String>) {
+    if (names.isEmpty()) return
+    Column(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 200.dp)
+                .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        names.forEach { name ->
+            Text(
+                text = name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 }

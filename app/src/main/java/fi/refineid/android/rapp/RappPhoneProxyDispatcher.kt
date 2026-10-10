@@ -580,7 +580,7 @@ internal class RappPhoneProxyDispatcher(
                 }
             }
 
-            RappOperationKind.SIGN_DOCUMENT -> {
+            RappOperationKind.SIGN_DOCUMENT, RappOperationKind.BATCH_SIGN_DOCUMENTS -> {
                 val requesterName =
                     catalog
                         .listPairs()
@@ -588,10 +588,17 @@ internal class RappPhoneProxyDispatcher(
                         ?.displayName
                         ?.takeIf { it.isNotBlank() }
                         ?: DEFAULT_REQUESTER_DISPLAY_NAME
+                val documentNames =
+                    if (desc.kind == RappOperationKind.BATCH_SIGN_DOCUMENTS) {
+                        desc.documentNames
+                    } else {
+                        listOfNotNull(desc.displayContext)
+                    }
                 scope.launch(Dispatchers.Main) {
                     inbox.askDocumentSign(
                         requestId = opIdHex,
                         requester = requesterName,
+                        documentNames = documentNames,
                         onApproved = { pin2Submission ->
                             pendingPin2.remove(opIdHex)?.close()
                             pendingPin2[opIdHex] = pin2Submission
@@ -690,6 +697,16 @@ internal class RappPhoneProxyDispatcher(
                     return
                 }
                 executeDocumentSign(opId, desc, pin2Submission, bridge)
+            }
+
+            RappOperationKind.BATCH_SIGN_DOCUMENTS -> {
+                val pin2Submission = pendingPin2.remove(opIdHex)
+                if (pin2Submission == null) {
+                    AppTrace.rappOperationDenied(opIdHex, "pin2_missing")
+                    respondBridgeDeny(opId, bridge)
+                    return
+                }
+                executeBatchDocumentSign(opId, desc, pin2Submission, bridge)
             }
 
             else -> {
@@ -1286,6 +1303,60 @@ internal class RappPhoneProxyDispatcher(
             else -> null
         }
 
+    private class QualifiedSigningSetup(
+        val algorithm: QualifiedSigningAlgorithm,
+        val expectedCert: NativeQualifiedCertificate,
+    )
+
+    /**
+     * Resolves the algorithm, brings the card, and reads the signature
+     * certificate the card must sign with; answers the bridge and returns
+     * null when any of that fails.
+     */
+    private suspend fun prepareQualifiedSigning(
+        opId: ByteArray,
+        opIdHex: String,
+        desc: RappOperationDescriptor,
+        bridge: RappOperationBridge,
+    ): QualifiedSigningSetup? {
+        if (sessionBridge == null || activeListener == null) {
+            respondCardRemoved(opId, bridge)
+            return null
+        }
+        val algorithm = resolveQualifiedAlgorithm(desc)
+        if (algorithm == null) {
+            AppTrace.rappOperationFailed("document_sign", opIdHex, "unsupported_algorithm")
+            respondBridgeInvalid(opId, bridge)
+            return null
+        }
+        if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge)) {
+            return null
+        }
+        if (qualifiedCardService() == null) {
+            if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge, forcePrompt = true)) {
+                return null
+            }
+        }
+        if (qualifiedCardService() == null) {
+            AppTrace.rappOperationFailed("document_sign", opIdHex, "service_unavailable")
+            respondCardRemoved(opId, bridge)
+            return null
+        }
+        var expectedCert = readSignatureCertificateWithTimeout()
+        if (expectedCert == null) {
+            if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge, forcePrompt = true)) {
+                return null
+            }
+            expectedCert = readSignatureCertificateWithTimeout()
+        }
+        if (expectedCert == null) {
+            AppTrace.rappOperationFailed("document_sign", opIdHex, "certificate_read_timeout")
+            respondCardRemoved(opId, bridge)
+            return null
+        }
+        return QualifiedSigningSetup(algorithm, expectedCert)
+    }
+
     private fun executeDocumentSign(
         opId: ByteArray,
         desc: RappOperationDescriptor,
@@ -1296,70 +1367,18 @@ internal class RappPhoneProxyDispatcher(
         activeOperationJob =
             scope.launch(Dispatchers.IO) {
                 try {
-                    if (sessionBridge == null || activeListener == null) {
-                        respondCardRemoved(opId, bridge)
-                        return@launch
-                    }
                     val startedNs = System.nanoTime()
                     val opIdHex = opId.joinToString("") { "%02x".format(it) }
-                    val algorithm = resolveQualifiedAlgorithm(desc)
-                    if (algorithm == null) {
-                        AppTrace.rappOperationFailed("document_sign", opIdHex, "unsupported_algorithm")
-                        respondBridgeInvalid(opId, bridge)
-                        return@launch
-                    }
-                    if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge)) {
-                        return@launch
-                    }
-                    var service = qualifiedCardService()
-                    if (service == null) {
-                        val cardReady =
-                            ensureCardOrAbort(
-                                opId = opId,
-                                opIdHex = opIdHex,
-                                action = RappAuthAction.DOCUMENT_SIGN,
-                                bridge = bridge,
-                                forcePrompt = true,
-                            )
-                        if (!cardReady) {
-                            return@launch
-                        }
-                        service = qualifiedCardService()
-                    }
-                    if (service == null) {
-                        AppTrace.rappOperationFailed("document_sign", opIdHex, "service_unavailable")
-                        respondCardRemoved(opId, bridge)
-                        return@launch
-                    }
-                    var expectedCert = readSignatureCertificateWithTimeout()
-                    if (expectedCert == null) {
-                        val cardReady =
-                            ensureCardOrAbort(
-                                opId = opId,
-                                opIdHex = opIdHex,
-                                action = RappAuthAction.DOCUMENT_SIGN,
-                                bridge = bridge,
-                                forcePrompt = true,
-                            )
-                        if (!cardReady) {
-                            return@launch
-                        }
-                        expectedCert = readSignatureCertificateWithTimeout()
-                    }
-                    if (expectedCert == null) {
-                        AppTrace.rappOperationFailed("document_sign", opIdHex, "certificate_read_timeout")
-                        respondCardRemoved(opId, bridge)
-                        return@launch
-                    }
+                    val setup = prepareQualifiedSigning(opId, opIdHex, desc, bridge) ?: return@launch
                     try {
                         val signResult =
                             performQualifiedSignWithRetry(
                                 opId = opId,
                                 opIdHex = opIdHex,
-                                desc = desc,
+                                digest = desc.digest,
                                 pin2Submission = pin2Submission,
-                                algorithm = algorithm,
-                                expectedCert = expectedCert,
+                                algorithm = setup.algorithm,
+                                expectedCert = setup.expectedCert,
                                 bridge = bridge,
                             ) ?: return@launch
                         when (signResult) {
@@ -1383,7 +1402,7 @@ internal class RappPhoneProxyDispatcher(
                             }
                         }
                     } finally {
-                        expectedCert.close()
+                        setup.expectedCert.close()
                     }
                 } finally {
                     pin2Submission.close()
@@ -1391,10 +1410,122 @@ internal class RappPhoneProxyDispatcher(
             }
     }
 
+    /**
+     * Signs every document of a batch with the one PIN 2 entry the holder
+     * approved, journaling each signature before the next (RAPP v26.10.9
+     * section 9.3). A batch stopped after a signature answers ambiguous, and
+     * the signatures made so far travel with it.
+     */
+    private fun executeBatchDocumentSign(
+        opId: ByteArray,
+        desc: RappOperationDescriptor,
+        pin2Submission: Pin2Submission,
+        bridge: RappOperationBridge,
+    ) {
+        activeOperationJob?.cancel()
+        activeOperationJob =
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val startedNs = System.nanoTime()
+                    val opIdHex = opId.joinToString("") { "%02x".format(it) }
+                    val setup = prepareQualifiedSigning(opId, opIdHex, desc, bridge) ?: return@launch
+                    try {
+                        val run =
+                            RappBatchSignatureRun(
+                                digests = desc.digests,
+                                sign = { digest ->
+                                    signBatchDocument(opId, opIdHex, digest, pin2Submission, setup, bridge)
+                                },
+                                record = { wireSignature -> bridge.recordBatchSignature(opId, wireSignature) },
+                            )
+                        finishBatch(opId, opIdHex, startedNs, run.run(), bridge)
+                    } finally {
+                        setup.expectedCert.close()
+                    }
+                } finally {
+                    pin2Submission.close()
+                }
+            }
+    }
+
+    private suspend fun signBatchDocument(
+        opId: ByteArray,
+        opIdHex: String,
+        digest: ByteArray,
+        pin2Submission: Pin2Submission,
+        setup: QualifiedSigningSetup,
+        bridge: RappOperationBridge,
+    ): RappBatchSignatureRun.Step {
+        val result =
+            performQualifiedSignWithRetry(
+                opId = opId,
+                opIdHex = opIdHex,
+                digest = digest,
+                pin2Submission = pin2Submission,
+                algorithm = setup.algorithm,
+                expectedCert = setup.expectedCert,
+                bridge = bridge,
+            ) ?: return RappBatchSignatureRun.Step.Failed(null)
+        return when (result) {
+            is QualifiedSignResult.Success -> {
+                try {
+                    RappBatchSignatureRun.Step.Signed(wireSignature(result))
+                } finally {
+                    result.signature.close()
+                }
+            }
+
+            is QualifiedSignResult.Failure -> {
+                RappBatchSignatureRun.Step.Failed(result)
+            }
+        }
+    }
+
+    private fun finishBatch(
+        opId: ByteArray,
+        opIdHex: String,
+        startedNs: Long,
+        outcome: RappBatchSignatureRun.Outcome,
+        bridge: RappOperationBridge,
+    ) {
+        try {
+            when (outcome) {
+                RappBatchSignatureRun.Outcome.Completed -> {
+                    val resp = bridge.completeBatch(opId)
+                    AppTrace.rappOperationCompleted(
+                        "batch_sign",
+                        opIdHex,
+                        (System.nanoTime() - startedNs) / NANOS_PER_MICROSECOND,
+                    )
+                    handleBridgeAction(resp, bridge)
+                }
+
+                is RappBatchSignatureRun.Outcome.Stopped -> {
+                    val failure = outcome.failure
+                    AppTrace.rappOperationFailed("batch_sign", opIdHex, failure?.kind?.name ?: "interrupted")
+                    when {
+                        outcome.signedCount > 0 -> {
+                            handleBridgeAction(bridge.cardCompletionAmbiguous(opId), bridge)
+                        }
+
+                        failure != null -> {
+                            handleDocumentSignFailure(opId, opIdHex, failure, bridge)
+                        }
+
+                        else -> {
+                            respondCardRemoved(opId, bridge)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     private suspend fun performQualifiedSignWithRetry(
         opId: ByteArray,
         opIdHex: String,
-        desc: RappOperationDescriptor,
+        digest: ByteArray,
         pin2Submission: Pin2Submission,
         algorithm: QualifiedSigningAlgorithm,
         expectedCert: NativeQualifiedCertificate,
@@ -1411,7 +1542,7 @@ internal class RappPhoneProxyDispatcher(
         service.requestQualifiedDigestSignature(
             algorithm = algorithm,
             pin2 = Pin2Submission.fromOwnedBytes(pinBytes),
-            digest = desc.digest,
+            digest = digest,
             expectedCertificate = expectedCert,
         ) { signResult ->
             deferred.complete(signResult)
@@ -1432,7 +1563,7 @@ internal class RappPhoneProxyDispatcher(
                     retryService.requestQualifiedDigestSignature(
                         algorithm = algorithm,
                         pin2 = Pin2Submission.fromOwnedBytes(retryPinBytes),
-                        digest = desc.digest,
+                        digest = digest,
                         expectedCertificate = freshCert,
                     ) { rResult ->
                         retryDeferred.complete(rResult)
@@ -1456,14 +1587,7 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
     ) {
         try {
-            val rawSig = result.signature.copyBytes()
-            val wireSig =
-                if (result.signature.algorithm == QualifiedSigningAlgorithm.ECDSA_P384_SHA384) {
-                    P384EcdsaSignature.toDer(rawSig)
-                } else {
-                    rawSig
-                }
-            val resp = bridge.completeSignature(opId, wireSig)
+            val resp = bridge.completeSignature(opId, wireSignature(result))
             AppTrace.rappOperationCompleted(
                 "document_sign",
                 opIdHex,
@@ -1473,6 +1597,16 @@ internal class RappPhoneProxyDispatcher(
         } catch (_: Exception) {
         } finally {
             result.signature.close()
+        }
+    }
+
+    /** The wire form of a qualified signature, as the single-document path sends it. */
+    private fun wireSignature(result: QualifiedSignResult.Success): ByteArray {
+        val rawSig = result.signature.copyBytes()
+        return if (result.signature.algorithm == QualifiedSigningAlgorithm.ECDSA_P384_SHA384) {
+            P384EcdsaSignature.toDer(rawSig)
+        } else {
+            rawSig
         }
     }
 
