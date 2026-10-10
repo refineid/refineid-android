@@ -10,21 +10,20 @@ import org.junit.Before
 import org.junit.Test
 import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappPairingBridge
-import uniffi.refineid_rapp.RappTransportCandidate
 import java.security.SecureRandom
 
 /**
  * Drives [RappCustodianPairingCeremony] against a requester bridge in the
- * order RAPP v26.10.1 section 6.1.3 fixes, as the Apple and Windows
- * requesters send it.
+ * order RAPP v26.10.9 section 6.1.3 fixes, after the requester decoded the
+ * custodian's offer bootstrap (section 4.2).
  */
 class RappCustodianPairingCeremonyTest {
     private companion object {
-        const val STREAM_CANDIDATE_ID = "stream-1"
-        const val STREAM_PROFILE = "fi.refineid.stream.v1"
+        const val STREAM_CANDIDATE_ID = RappTestOffers.STREAM_CANDIDATE_ID
         const val CPACE_RANDOM_BYTES = 64
-        const val EMPTY_CBOR_MAP_BYTE = 0xa0
         const val OFFER_STARTED_AT_MS = 1_000UL
+        const val ATTEMPT_SPACING_MS = 1_000UL
+        const val ATTEMPTS_PER_OFFER = 3
         const val WALL_CLOCK_MS = 1_700_000_000_000UL
         val OFFERED_PROFILES =
             listOf(
@@ -34,38 +33,41 @@ class RappCustodianPairingCeremonyTest {
             )
     }
 
-    private val candidates =
-        listOf(
-            RappTransportCandidate(
-                profile = STREAM_PROFILE,
-                candidateId = STREAM_CANDIDATE_ID,
-                parametersCbor = byteArrayOf(EMPTY_CBOR_MAP_BYTE.toByte()),
-            ),
-        )
-
     @Before
     fun setUp() {
         RappNativeTestLibrary.require()
     }
 
-    private fun bridge(
+    private fun begin(
+        bridge: RappPairingBridge,
         code: String,
-        custodian: Boolean,
-    ): RappPairingBridge {
-        val ttl = RappPairingCode.DEFAULT_LIFETIME_MS.toULong()
-        val bridge =
-            if (custodian) {
-                RappPairingBridge.fromProxyCodeOffer(code, OFFERED_PROFILES, candidates, ttl, OFFER_STARTED_AT_MS)
-            } else {
-                RappPairingBridge.createRequesterCodeOffer(code, OFFERED_PROFILES, candidates, ttl, OFFER_STARTED_AT_MS)
-            }
+        now: ULong,
+    ) {
         val random = ByteArray(CPACE_RANDOM_BYTES).also { SecureRandom().nextBytes(it) }
         try {
-            bridge.beginCpace(STREAM_CANDIDATE_ID, code, random, OFFER_STARTED_AT_MS)
+            bridge.beginCpace(STREAM_CANDIDATE_ID, code, random, now)
         } finally {
             random.fill(0)
         }
-        return bridge
+    }
+
+    /** The custodian and requester bridges of one offer, CPace begun with the given codes. */
+    private fun bridges(
+        custodianCode: String,
+        requesterCode: String = custodianCode,
+    ): Pair<RappPairingBridge, RappPairingBridge> {
+        val (custodian, requester) = RappTestOffers.custodianAndRequester(OFFERED_PROFILES, OFFER_STARTED_AT_MS)
+        begin(custodian, custodianCode, OFFER_STARTED_AT_MS)
+        begin(requester, requesterCode, OFFER_STARTED_AT_MS)
+        return custodian to requester
+    }
+
+    private fun otherCode(code: String): String {
+        var other = RappPairingCode.generate()
+        while (other == code) {
+            other = RappPairingCode.generate()
+        }
+        return other
     }
 
     private fun ceremony(bridge: RappPairingBridge) =
@@ -83,9 +85,7 @@ class RappCustodianPairingCeremonyTest {
 
     @Test
     fun custodianCompletesTheThreeMessageCpaceAndNoiseOrder() {
-        val code = RappPairingCode.generate()
-        val requester = bridge(code, custodian = false)
-        val custodianBridge = bridge(code, custodian = true)
+        val (custodianBridge, requester) = bridges(RappPairingCode.generate())
         val custodian = ceremony(custodianBridge)
         val now = OFFER_STARTED_AT_MS
 
@@ -101,47 +101,68 @@ class RappCustodianPairingCeremonyTest {
         requester.enterConfirmation(now)
 
         val (custodianHello, grant) =
-            custodian.receive(requester.sendHello(displayName = "Workstation", platform = "Windows")).frames()
-        assertEquals("Phone", requester.receiveHello(custodianHello, WALL_CLOCK_MS).displayName)
-        val granted = requester.receiveConfirmation(grant, WALL_CLOCK_MS)
+            custodian.receive(requester.sendHello("Workstation", "Windows", now)).frames()
+        assertEquals("Phone", requester.receiveHello(custodianHello, now).displayName)
+        val granted = requester.receiveConfirmation(grant, now)
         assertEquals(OFFERED_PROFILES.sorted(), granted.sorted())
 
-        val outcome = custodian.receive(requester.sendConfirmation(granted))
+        val outcome = custodian.receive(requester.sendConfirmation(granted, now))
         val paired = outcome as RappCustodianPairingCeremony.Outcome.Paired
         assertEquals("Workstation", paired.peer.displayName)
         assertArrayEquals(
-            requester.finishPairing(WALL_CLOCK_MS).metadata().pairId,
+            requester.finishPairing(WALL_CLOCK_MS, now).metadata().pairId,
             paired.record.metadata().pairId,
         )
         assertEquals(RappCustodianPairingCeremony.Step.COMPLETED, custodian.step)
     }
 
     @Test
-    fun aWrongCodeFailsAtTagBOnTheRequesterAndEndsTheCustodianAttempt() {
+    fun aWrongCodeFailsAtTagBOnTheRequesterAndSpendsOneCustodianAttempt() {
         val code = RappPairingCode.generate()
-        var wrongCode = RappPairingCode.generate()
-        while (wrongCode == code) {
-            wrongCode = RappPairingCode.generate()
-        }
-        val requester = bridge(wrongCode, custodian = false)
-        val custodian = ceremony(bridge(code, custodian = true))
+        val (custodianBridge, requester) = bridges(code, requesterCode = otherCode(code))
+        val custodian = ceremony(custodianBridge)
         val now = OFFER_STARTED_AT_MS
 
         val stepTwo = custodian.receive(requester.writeCpaceFrame(now)).frames().single()
         assertThrows(RappBindingException::class.java) { requester.readCpaceFrame(stepTwo, now) }
 
-        // The requester never sends T_A. A forged one fails the custodian's tag
-        // check, and the failed attempt leaves nothing to retry on this offer.
-        val forgedTagA = ByteArray(stepTwo.size / 2)
-        assertThrows(RappBindingException::class.java) { custodian.receive(forgedTagA) }
-        assertThrows(RappBindingException::class.java) { custodian.receive(forgedTagA) }
+        // The requester never sends T_A and disconnects; the attempt is spent
+        // and the offer stays for another connection (section 3.3).
+        assertTrue(custodianBridge.candidateFailed(now))
+    }
+
+    @Test
+    fun threeWrongCodesExhaustTheOffer() {
+        val code = RappPairingCode.generate()
+        val (custodianBridge, _) = RappTestOffers.custodianAndRequester(OFFERED_PROFILES, OFFER_STARTED_AT_MS)
+        var now = OFFER_STARTED_AT_MS
+        repeat(ATTEMPTS_PER_OFFER) { attempt ->
+            val requester =
+                RappPairingBridge.fromBootstrap(
+                    custodianBridge.bootstrapBytes(now),
+                    RappTestOffers.STREAM_PROFILE,
+                    now,
+                )
+            begin(custodianBridge, code, now)
+            begin(requester, otherCode(code), now)
+            custodianBridge.readCpaceFrame(requester.writeCpaceFrame(now), now)
+            custodianBridge.writeCpaceFrame(now)
+            val kept =
+                try {
+                    custodianBridge.candidateFailed(now)
+                } catch (_: RappBindingException.AttemptsExhausted) {
+                    false
+                }
+            assertEquals(attempt < ATTEMPTS_PER_OFFER - 1, kept)
+            now += ATTEMPT_SPACING_MS
+        }
+        assertThrows(RappBindingException::class.java) { begin(custodianBridge, code, now) }
     }
 
     @Test
     fun aFrameOutOfOrderIsRefused() {
-        val code = RappPairingCode.generate()
-        val requester = bridge(code, custodian = false)
-        val custodian = ceremony(bridge(code, custodian = true))
+        val (custodianBridge, requester) = bridges(RappPairingCode.generate())
+        val custodian = ceremony(custodianBridge)
         val now = OFFER_STARTED_AT_MS
 
         val stepOne = requester.writeCpaceFrame(now)

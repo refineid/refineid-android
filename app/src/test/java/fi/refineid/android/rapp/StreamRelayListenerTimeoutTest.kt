@@ -50,7 +50,7 @@ class StreamRelayListenerTimeoutTest {
             }
 
         try {
-            listener.start("test-listener")
+            listener.start("test-listener", emptyMap())
             val port = listener.port
             assertTrue("Listener must have bound to a port", port != null && port > 0)
 

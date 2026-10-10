@@ -10,15 +10,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import uniffi.refineid_rapp.RappBindingException
-import uniffi.refineid_rapp.RappPairingBridge
-import uniffi.refineid_rapp.RappTransportCandidate
 import java.security.SecureRandom
 
 class RappCpacePairingFlowTest {
     companion object {
-        private const val STREAM_CANDIDATE_ID = "stream-1"
-        private const val STREAM_PROFILE = "fi.refineid.stream.v1"
-        private val EMPTY_CBOR_MAP = byteArrayOf(0xa0.toByte())
+        private const val STREAM_CANDIDATE_ID = RappTestOffers.STREAM_CANDIDATE_ID
         private const val CPACE_RANDOM_BYTES = 64
     }
 
@@ -27,15 +23,6 @@ class RappCpacePairingFlowTest {
             "fi.refineid.card-status.v1",
             "fi.refineid.authentication.v1",
             "fi.refineid.document-signing.v1",
-        )
-
-    private val candidates: List<RappTransportCandidate> =
-        listOf(
-            RappTransportCandidate(
-                profile = STREAM_PROFILE,
-                candidateId = STREAM_CANDIDATE_ID,
-                parametersCbor = EMPTY_CBOR_MAP,
-            ),
         )
 
     @Before
@@ -48,22 +35,7 @@ class RappCpacePairingFlowTest {
         val code = RappPairingCode.generate()
         val nowMono = RappClock.monotonicMs()
 
-        val requester =
-            RappPairingBridge.createRequesterCodeOffer(
-                pairingCode = code,
-                profiles = profiles,
-                transports = candidates,
-                offerTtlMs = RappPairingCode.DEFAULT_LIFETIME_MS.toULong(),
-                startedAtMonotonicMs = nowMono,
-            )
-        val proxy =
-            RappPairingBridge.fromProxyCodeOffer(
-                pairingCode = code,
-                profiles = profiles,
-                transports = candidates,
-                offerTtlMs = RappPairingCode.DEFAULT_LIFETIME_MS.toULong(),
-                startedAtMonotonicMs = nowMono,
-            )
+        val (proxy, requester) = RappTestOffers.custodianAndRequester(profiles, nowMono)
 
         val randomReq = ByteArray(CPACE_RANDOM_BYTES).apply { SecureRandom().nextBytes(this) }
         val randomProxy = ByteArray(CPACE_RANDOM_BYTES).apply { SecureRandom().nextBytes(this) }
@@ -114,21 +86,21 @@ class RappCpacePairingFlowTest {
             requester.enterConfirmation(RappClock.monotonicMs())
             proxy.enterConfirmation(RappClock.monotonicMs())
 
-            val reqHello = requester.sendHello(displayName = "MacBook Pro", platform = "macOS")
-            val proxyHello = proxy.sendHello(displayName = "Pixel Phone", platform = "Android")
+            val reqHello = requester.sendHello("MacBook Pro", "macOS", RappClock.monotonicMs())
+            val proxyHello = proxy.sendHello("Pixel Phone", "Android", RappClock.monotonicMs())
 
-            requester.receiveHello(proxyHello, RappClock.wallMs())
-            proxy.receiveHello(reqHello, RappClock.wallMs())
+            requester.receiveHello(proxyHello, RappClock.monotonicMs())
+            proxy.receiveHello(reqHello, RappClock.monotonicMs())
 
-            val proxyConfirm = proxy.sendConfirmation(profiles)
-            val reqConfirm = requester.sendConfirmation(profiles)
+            val proxyConfirm = proxy.sendConfirmation(profiles, RappClock.monotonicMs())
+            val reqConfirm = requester.sendConfirmation(profiles, RappClock.monotonicMs())
 
-            requester.receiveConfirmation(proxyConfirm, RappClock.wallMs())
-            proxy.receiveConfirmation(reqConfirm, RappClock.wallMs())
+            requester.receiveConfirmation(proxyConfirm, RappClock.monotonicMs())
+            proxy.receiveConfirmation(reqConfirm, RappClock.monotonicMs())
 
             // 4. Session established with matching pair ID
-            val reqPair = requester.finishPairing(RappClock.wallMs())
-            val proxyPair = proxy.finishPairing(RappClock.wallMs())
+            val reqPair = requester.finishPairing(RappClock.wallMs(), RappClock.monotonicMs())
+            val proxyPair = proxy.finishPairing(RappClock.wallMs(), RappClock.monotonicMs())
 
             assertArrayEquals(reqPair.metadata().pairId, proxyPair.metadata().pairId)
         } finally {
@@ -143,22 +115,7 @@ class RappCpacePairingFlowTest {
         val wrongCode = RappPairingCode.generate()
         val nowMono = RappClock.monotonicMs()
 
-        val requester =
-            RappPairingBridge.createRequesterCodeOffer(
-                pairingCode = correctCode,
-                profiles = profiles,
-                transports = candidates,
-                offerTtlMs = RappPairingCode.DEFAULT_LIFETIME_MS.toULong(),
-                startedAtMonotonicMs = nowMono,
-            )
-        val proxy =
-            RappPairingBridge.fromProxyCodeOffer(
-                pairingCode = wrongCode,
-                profiles = profiles,
-                transports = candidates,
-                offerTtlMs = RappPairingCode.DEFAULT_LIFETIME_MS.toULong(),
-                startedAtMonotonicMs = nowMono,
-            )
+        val (proxy, requester) = RappTestOffers.custodianAndRequester(profiles, nowMono)
 
         val randomReq = ByteArray(CPACE_RANDOM_BYTES).apply { SecureRandom().nextBytes(this) }
         val randomProxy = ByteArray(CPACE_RANDOM_BYTES).apply { SecureRandom().nextBytes(this) }

@@ -236,11 +236,7 @@ class RefineIdApplication : Application() {
             try {
                 val record = uniffi.refineid_rapp.RappPairRecord.loadFromVault(pairIdBytes, rappVault)
                 if (record.metadata().role == uniffi.refineid_rapp.RappEndpointRole.PROXY) {
-                    val token = record.metadata().rendezvousToken
-                    val rendezvousName =
-                        fi.refineid.android.rapp.StreamRendezvousName
-                            .name(sharingValue = token)
-                    rappProxyDispatcher.startListening(rendezvousName, record, rappVault)
+                    rappProxyDispatcher.startListening(rappVault)
                 } else {
                     remoteCardModel.refresh()
                 }

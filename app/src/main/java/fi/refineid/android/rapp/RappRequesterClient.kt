@@ -23,6 +23,7 @@ import uniffi.refineid_rapp.RappOperationBridge
 import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
+import uniffi.refineid_rapp.rappStreamProfileName
 import uniffi.refineid_rapp.rappStreamSessionPreamble
 import java.security.SecureRandom
 
@@ -86,7 +87,6 @@ internal class RappRequesterClient(
                     android.util.Log.e("REQUESTER_CLIENT", "rappStreamSessionPreamble failed", e)
                     return@withTimeoutOrNull null
                 }
-            val serviceName = StreamRendezvousName.name(sharingValue = token)
 
             var browser: StreamRelayBrowser? = null
             var sessionBridge: RappSessionBridge? = null
@@ -113,7 +113,7 @@ internal class RappRequesterClient(
             }
 
             browser =
-                StreamRelayBrowser(context, scope, serviceName) { event ->
+                StreamRelayBrowser(context, scope, StreamRendezvousName.MODE_SESSION) { event ->
                     when (event) {
                         is StreamRelayEvent.Connected -> {
                             try {
@@ -121,7 +121,12 @@ internal class RappRequesterClient(
                                     android.util.Log.i("REQUESTER_CLIENT", "Connected to proxy, sending preamble")
                                 }
                                 browser?.send(preamble)
-                                val sess = RappSessionBridge.beginRequester(pair = pairRecord, vault = vault)
+                                val sess =
+                                    RappSessionBridge.beginRequester(
+                                        pair = pairRecord,
+                                        vault = vault,
+                                        transportProfile = rappStreamProfileName(),
+                                    )
                                 sessionBridge = sess
                                 val handshake1 = sess.writeHandshakeFrame()
                                 browser?.send(handshake1)
