@@ -87,7 +87,6 @@ internal class RappRequesterClient(
                     android.util.Log.e("REQUESTER_CLIENT", "rappStreamSessionPreamble failed", e)
                     return@withTimeoutOrNull null
                 }
-            val serviceName = StreamRendezvousName.name(sharingValue = token)
 
             var browser: StreamRelayBrowser? = null
             var sessionBridge: RappSessionBridge? = null
@@ -114,7 +113,7 @@ internal class RappRequesterClient(
             }
 
             browser =
-                StreamRelayBrowser(context, scope, serviceName) { event ->
+                StreamRelayBrowser(context, scope, StreamRendezvousName.MODE_SESSION) { event ->
                     when (event) {
                         is StreamRelayEvent.Connected -> {
                             try {

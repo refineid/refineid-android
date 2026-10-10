@@ -372,9 +372,7 @@ internal class RappPairingModel(
             oldListener?.close()
         }
 
-        val rendezvousToken = record.metadata().rendezvousToken
-        val sessionRendezvousName = StreamRendezvousName.name(sharingValue = rendezvousToken)
-        app?.rappProxyDispatcher?.startListening(sessionRendezvousName, record, vault)
+        app?.rappProxyDispatcher?.startListening(vault)
     }
 
     private fun startHandshakeDeadline() {

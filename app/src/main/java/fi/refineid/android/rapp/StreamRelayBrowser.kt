@@ -22,12 +22,14 @@ import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Browses for a published RAPP stream matching a rendezvous name and connects.
+ * Browses for a published RAPP stream advertising [targetMode] in its TXT
+ * record and connects to the first one that resolves. Instance names are
+ * random and carry nothing to match.
  */
 internal class StreamRelayBrowser(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val targetServiceName: String,
+    private val targetMode: String,
     private val onEvent: (StreamRelayEvent) -> Unit,
 ) : AutoCloseable {
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
@@ -64,7 +66,7 @@ internal class StreamRelayBrowser(
                     delay(3000L)
                     if (!isClosed.get() && !isConnected.get() && !isResolving.get()) {
                         if (BuildConfig.DEBUG) {
-                            android.util.Log.d("STREAM_BROWSER", "Discovery refresh pulse for $targetServiceName")
+                            android.util.Log.d("STREAM_BROWSER", "Discovery refresh pulse for mode $targetMode")
                         }
                         restartDiscovery()
                     }
@@ -78,7 +80,7 @@ internal class StreamRelayBrowser(
             object : NsdManager.DiscoveryListener {
                 override fun onDiscoveryStarted(regType: String) {
                     if (BuildConfig.DEBUG) {
-                        android.util.Log.d("STREAM_BROWSER", "onDiscoveryStarted: $regType (target=$targetServiceName)")
+                        android.util.Log.d("STREAM_BROWSER", "onDiscoveryStarted: $regType (mode=$targetMode)")
                     }
                 }
 
@@ -104,20 +106,10 @@ internal class StreamRelayBrowser(
                 }
 
                 override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                    val rawName = serviceInfo.serviceName
-                    val cleanName = rawName.replace("\\", "").trimEnd('.')
                     if (BuildConfig.DEBUG) {
-                        android.util.Log.i(
-                            "STREAM_BROWSER",
-                            "onServiceFound: $rawName (clean=$cleanName) type=${serviceInfo.serviceType} target=$targetServiceName",
-                        )
+                        android.util.Log.i("STREAM_BROWSER", "onServiceFound type=${serviceInfo.serviceType}")
                     }
-                    if (cleanName == targetServiceName ||
-                        cleanName.contains(targetServiceName) ||
-                        targetServiceName.contains(cleanName)
-                    ) {
-                        resolveAndConnect(serviceInfo)
-                    }
+                    resolveAndConnect(serviceInfo)
                 }
 
                 override fun onServiceLost(serviceInfo: NsdServiceInfo) {
@@ -177,6 +169,15 @@ internal class StreamRelayBrowser(
                             }
                             val host = resolved.hostAddresses.firstOrNull()?.hostAddress ?: resolved.host?.hostAddress
                             val port = resolved.port
+                            if (!StreamRendezvousName.matches(resolved.attributes, targetMode)) {
+                                isResolving.set(false)
+                                activeServiceCallback = null
+                                try {
+                                    nsdManager?.unregisterServiceInfoCallback(this)
+                                } catch (_: Exception) {
+                                }
+                                return
+                            }
                             if (host != null && port > 0 && isConnected.compareAndSet(false, true)) {
                                 isResolving.set(false)
                                 activeServiceCallback = null
@@ -244,7 +245,11 @@ internal class StreamRelayBrowser(
                                 "onServiceResolved: ${resolved.serviceName} at $host:$port",
                             )
                         }
-                        if (host != null && port > 0 && isConnected.compareAndSet(false, true)) {
+                        if (host != null &&
+                            port > 0 &&
+                            StreamRendezvousName.matches(resolved.attributes, targetMode) &&
+                            isConnected.compareAndSet(false, true)
+                        ) {
                             stopDiscovery()
                             connectToEndpoint(host, port)
                         }

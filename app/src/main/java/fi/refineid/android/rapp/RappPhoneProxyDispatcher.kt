@@ -40,6 +40,7 @@ import uniffi.refineid_rapp.RappOperationBridge
 import uniffi.refineid_rapp.RappOperationDescriptor
 import uniffi.refineid_rapp.RappOperationKind
 import uniffi.refineid_rapp.RappPairRecord
+import uniffi.refineid_rapp.RappPreAuthenticationLimiter
 import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
 import uniffi.refineid_rapp.rappStreamProfileName
@@ -71,6 +72,7 @@ internal class RappPhoneProxyDispatcher(
     private var pairRecord: RappPairRecord? = null
     private var vault: AndroidRappVault? = null
     private val catalog = RappPairCatalog(context)
+    private val preAuthenticationLimiter = RappPreAuthenticationLimiter()
     private var isClosed = false
 
     @Volatile
@@ -109,21 +111,28 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
-    fun startListening(
-        rendezvousName: String,
-        pairRecord: RappPairRecord,
-        vault: AndroidRappVault,
-    ) {
+    /**
+     * Starts the one session listener for every stored pairing (RAPP
+     * discovery hierarchy section 4.2-4.3).
+     *
+     * It is published under a fresh random instance name with TXT `v=1` and
+     * `mode=session`; nothing derived from a rendezvous token is published.
+     * Each connection names its pairing only inside the routing preamble.
+     */
+    fun startListening(vault: AndroidRappVault) {
         if (isClosed) return
-        this.pairRecord = pairRecord
         this.vault = vault
+        pairRecord = null
         activeListener?.close()
         val listener =
             StreamRelayListener(context, scope) { event ->
                 handleRelayEvent(event)
             }
         activeListener = listener
-        listener.start(rendezvousName, emptyMap())
+        listener.start(
+            StreamRendezvousName.ephemeralName(),
+            StreamRendezvousName.attributes(StreamRendezvousName.MODE_SESSION),
+        )
     }
 
     fun stopListening() {
@@ -156,12 +165,9 @@ internal class RappPhoneProxyDispatcher(
         lastReadAuthCertDer = null
         clearPendingPins()
         dismissInbox()
-        val currentPair = pairRecord
         val vlt = vault
-        if (currentPair != null && vlt != null && !isClosed) {
-            val token = currentPair.metadata().rendezvousToken
-            val name = StreamRendezvousName.name(sharingValue = token)
-            startListening(name, currentPair, vlt)
+        if (vlt != null && !isClosed) {
+            startListening(vlt)
         }
     }
 
@@ -173,6 +179,10 @@ internal class RappPhoneProxyDispatcher(
                 sessionHandshakeDone = false
                 operationBridge?.close()
                 operationBridge = null
+                pairRecord = null
+                if (!preAuthenticationLimiter.admit(RappClock.monotonicMs())) {
+                    activeListener?.disconnectClient()
+                }
             }
 
             is StreamRelayEvent.Frame -> {
@@ -204,8 +214,17 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
+    /** Every stored pairing this phone can load from the vault. */
+    private fun storedPairs(vault: AndroidRappVault): List<RappPairRecord> =
+        catalog.listPairs().mapNotNull { stored ->
+            try {
+                RappPairingModel.decodeHexOrNull(stored.pairIdHex)?.let { RappPairRecord.loadFromVault(it, vault) }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
     private fun handleRelayFrame(event: StreamRelayEvent.Frame) {
-        val pair = pairRecord ?: return
         val vlt = vault ?: return
 
         val opBridge = operationBridge
@@ -220,45 +239,24 @@ internal class RappPhoneProxyDispatcher(
 
         val currentSession = sessionBridge
         if (currentSession == null) {
-            try {
-                val token = pair.metadata().rendezvousToken
-                val preamble = rappStreamSessionPreamble(token)
-                if (event.data.contentEquals(preamble)) {
-                    sessionBridge =
-                        RappSessionBridge.beginProxy(
-                            pair = pair,
-                            vault = vlt,
-                            transportProfile = rappStreamProfileName(),
-                        )
-                    return
-                }
-            } catch (_: Exception) {
+            // The first frame must be the session preamble of a stored
+            // pairing; anything else closes the connection and changes no
+            // stored state.
+            val pair = RappSessionRouting.route(event.data, storedPairs(vlt))
+            if (pair == null) {
+                activeListener?.disconnectClient()
+                return
             }
-
-            // Not preamble or preamble was skipped: treat as Noise Message 1
             try {
-                val sess =
+                pairRecord = pair
+                sessionBridge =
                     RappSessionBridge.beginProxy(
                         pair = pair,
                         vault = vlt,
                         transportProfile = rappStreamProfileName(),
                     )
-                sessionBridge = sess
-                sess.readHandshakeFrame(event.data)
-                val reply = sess.writeHandshakeFrame()
-                activeListener?.send(reply)
-                if (sess.handshakeComplete()) {
-                    sessionHandshakeDone = true
-                    sess.enterAuthentication()
-                    val nonce = ByteArray(SESSION_NONCE_BYTES).also { SecureRandom().nextBytes(it) }
-                    try {
-                        val ready = sess.sendReady(nonce)
-                        activeListener?.send(ready)
-                    } finally {
-                        nonce.fill(0)
-                    }
-                }
             } catch (_: Exception) {
+                activeListener?.disconnectClient()
             }
             return
         }

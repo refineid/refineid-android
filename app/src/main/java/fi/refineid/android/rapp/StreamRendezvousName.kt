@@ -1,6 +1,5 @@
 package fi.refineid.android.rapp
 
-import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
@@ -14,7 +13,6 @@ import java.security.SecureRandom
 internal object StreamRendezvousName {
     private const val PREFIX = "refineid-"
     private const val RANDOM_BYTE_COUNT = 4
-    private const val SESSION_DIGEST_PREFIX_BYTES = 8
     const val ATTRIBUTE_VERSION = "v"
     const val ATTRIBUTE_MODE = "mode"
     const val VERSION = "1"
@@ -29,12 +27,6 @@ internal object StreamRendezvousName {
 
     /** The TXT attributes of the given discovery mode. */
     fun attributes(mode: String): Map<String, String> = mapOf(ATTRIBUTE_VERSION to VERSION, ATTRIBUTE_MODE to mode)
-
-    /** Session listener name derived from a rendezvous token. */
-    fun name(sharingValue: ByteArray): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(sharingValue)
-        return "rf-" + digest.take(SESSION_DIGEST_PREFIX_BYTES).joinToString("") { "%02x".format(it) }
-    }
 
     /** Whether resolved TXT attributes advertise the given mode. */
     fun matches(

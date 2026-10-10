@@ -110,25 +110,7 @@ class RappProxyJournalRecoveryTest {
 
     private fun random(size: Int) = ByteArray(size).also { SecureRandom().nextBytes(it) }
 
-    private fun pair(): Pair<RappPairRecord, RappPairRecord> {
-        val code = RappPairingCode.generate()
-        val (custodian, requester) = RappTestOffers.custodianAndRequester(PROFILES, NOW)
-        requester.beginCpace(STREAM_CANDIDATE_ID, code, random(CPACE_RANDOM_BYTES), NOW)
-        custodian.beginCpace(STREAM_CANDIDATE_ID, code, random(CPACE_RANDOM_BYTES), NOW)
-        custodian.readCpaceFrame(requester.writeCpaceFrame(NOW), NOW)
-        requester.readCpaceFrame(custodian.writeCpaceFrame(NOW), NOW)
-        custodian.readCpaceFrame(requester.writeCpaceFrame(NOW), NOW)
-        custodian.readHandshakeFrame(requester.writeHandshakeFrame(NOW), NOW)
-        requester.readHandshakeFrame(custodian.writeHandshakeFrame(NOW), NOW)
-        custodian.readHandshakeFrame(requester.writeHandshakeFrame(NOW), NOW)
-        requester.enterConfirmation(NOW)
-        custodian.enterConfirmation(NOW)
-        custodian.receiveHello(requester.sendHello("Workstation", "Windows", NOW), NOW)
-        requester.receiveHello(custodian.sendHello("Phone", "Android", NOW), NOW)
-        requester.receiveConfirmation(custodian.sendConfirmation(PROFILES, NOW), NOW)
-        custodian.receiveConfirmation(requester.sendConfirmation(PROFILES, NOW), NOW)
-        return requester.finishPairing(WALL, NOW) to custodian.finishPairing(WALL, NOW)
-    }
+    private fun pair(): Pair<RappPairRecord, RappPairRecord> = RappTestOffers.pairRecords(PROFILES, NOW)
 
     private fun session(
         requesterPair: RappPairRecord,
