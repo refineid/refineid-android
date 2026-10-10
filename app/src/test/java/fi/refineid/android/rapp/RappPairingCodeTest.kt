@@ -53,4 +53,25 @@ class RappPairingCodeTest {
         assertEquals("", RappPairingCode.normalize("7K#4M9"))
         assertFalse(RappPairingCode.isValid("7K#4M9"))
     }
+
+    @Test
+    fun testRejectsOverlongCodeInsteadOfTruncating() {
+        assertEquals("7KX4M9AB", RappPairingCode.normalize("7KX4M9AB"))
+        assertFalse(RappPairingCode.isValid("7KX4M9AB"))
+        assertFalse(RappPairingCode.isValid("7K X4 M9 A"))
+    }
+
+    @Test
+    fun testUppercasesAsciiOnly() {
+        // Dotless i uppercases to I under full Unicode rules; the pipeline rejects it.
+        assertEquals("", RappPairingCode.normalize("7KX4M\u0131"))
+        assertFalse(RappPairingCode.isValid("7KX4M\u0131"))
+    }
+
+    @Test
+    fun testStripsAsciiWhitespaceOnly() {
+        assertTrue(RappPairingCode.isValid("7K\tX4\nM9"))
+        // Ogham space mark is Unicode whitespace that NFKC keeps and step 4 does not strip.
+        assertFalse(RappPairingCode.isValid("7K\u1680X4M9"))
+    }
 }
