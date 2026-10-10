@@ -10,10 +10,8 @@ import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationSignFailure
 import fi.refineid.android.core.AuthenticationSignResult
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
-import fi.refineid.android.core.NativeCardKeyProfile
 import fi.refineid.android.core.NativeCertificateReadResult
 import fi.refineid.android.core.NativeQualifiedCertificate
-import fi.refineid.android.core.P384EcdsaSignature
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin2Submission
 import fi.refineid.android.core.QualifiedCardService
@@ -1232,9 +1230,10 @@ internal class RappPhoneProxyDispatcher(
         ensureAuthCertCached(service)
         try {
             val rawSig = result.signature.copyBytes()
+            val coordinateBytes = RappEcdsaWireSignature.coordinateBytes(result.signature.algorithm.keyProfile)
             val wireSig =
-                if (result.signature.algorithm.keyProfile == NativeCardKeyProfile.ECDSA_P384) {
-                    P384EcdsaSignature.toDer(rawSig)
+                if (coordinateBytes != null) {
+                    RappEcdsaWireSignature.toRaw(rawSig, coordinateBytes)
                 } else {
                     rawSig
                 }
@@ -1600,11 +1599,12 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
-    /** The wire form of a qualified signature, as the single-document path sends it. */
+    /** The section 9.2 wire form of a qualified signature: raw `r || s` for ECDSA. */
     private fun wireSignature(result: QualifiedSignResult.Success): ByteArray {
         val rawSig = result.signature.copyBytes()
-        return if (result.signature.algorithm == QualifiedSigningAlgorithm.ECDSA_P384_SHA384) {
-            P384EcdsaSignature.toDer(rawSig)
+        val coordinateBytes = RappEcdsaWireSignature.coordinateBytes(result.signature.algorithm.keyProfile)
+        return if (coordinateBytes != null) {
+            RappEcdsaWireSignature.toRaw(rawSig, coordinateBytes)
         } else {
             rawSig
         }
