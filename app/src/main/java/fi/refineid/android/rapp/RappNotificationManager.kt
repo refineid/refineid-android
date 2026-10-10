@@ -17,9 +17,7 @@ import fi.refineid.android.R
  * holder while RefineID has no foreground activity.
  *
  * The channel is high importance, so the request appears as a heads-up
- * notification. When the platform allows full-screen intents for this app,
- * the request also wakes the screen; the consent activity does not show
- * over the keyguard, so a locked phone asks for unlock first.
+ * notification; tapping it opens the consent dialog.
  */
 @SuppressLint("MissingPermission")
 internal class RappNotificationManager(
@@ -86,9 +84,6 @@ internal class RappNotificationManager(
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
         val notificationManager = NotificationManagerCompat.from(context)
-        if (notificationManager.canUseFullScreenIntent()) {
-            builder.setFullScreenIntent(pendingIntent, true)
-        }
 
         try {
             notificationManager.notify(NOTIFICATION_ID, builder.build())

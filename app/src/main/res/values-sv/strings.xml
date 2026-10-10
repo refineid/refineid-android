@@ -121,7 +121,6 @@
     <string name="insert_card_into_reader">Sätt in ID-kortet i läsaren.</string>
     <string name="remote_in_use">Används</string>
     <string name="allow_notifications">Tillåt aviseringar</string>
-    <string name="allow_full_screen_requests">Tillåt förfrågningar i helskärm</string>
     <plurals name="remote_signature_request_many">
         <item quantity="one">%1$s begär %2$d underskrift.</item>
         <item quantity="other">%1$s begär %2$d underskrifter.</item>

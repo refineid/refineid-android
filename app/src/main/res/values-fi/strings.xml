@@ -121,7 +121,6 @@
     <string name="insert_card_into_reader">Aseta henkilökortti lukijaan.</string>
     <string name="remote_in_use">Käytössä</string>
     <string name="allow_notifications">Salli ilmoitukset</string>
-    <string name="allow_full_screen_requests">Salli koko näytön pyynnöt</string>
     <plurals name="remote_signature_request_many">
         <item quantity="one">%1$s pyytää %2$d allekirjoitusta.</item>
         <item quantity="other">%1$s pyytää %2$d allekirjoitusta.</item>

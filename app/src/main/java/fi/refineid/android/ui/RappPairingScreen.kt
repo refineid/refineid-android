@@ -4,8 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -77,7 +75,6 @@ internal fun RappPairingScreen(
     val phase = model.phase
 
     var notificationsAllowed by remember { mutableStateOf(rappNotificationsAllowed(context)) }
-    var fullScreenAllowed by remember { mutableStateOf(rappFullScreenAllowed(context)) }
     val notificationPermissionLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission(),
@@ -85,10 +82,7 @@ internal fun RappPairingScreen(
     val settingsLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult(),
-        ) { _ ->
-            notificationsAllowed = rappNotificationsAllowed(context)
-            fullScreenAllowed = rappFullScreenAllowed(context)
-        }
+        ) { _ -> notificationsAllowed = rappNotificationsAllowed(context) }
 
     LaunchedEffect(model.isRemoteAccessEnabled, phase, authenticationReady) {
         if (authenticationReady && model.isRemoteAccessEnabled && phase is PairingPhase.Idle &&
@@ -120,35 +114,19 @@ internal fun RappPairingScreen(
             },
         )
 
-        if (model.isRemoteAccessEnabled && (!notificationsAllowed || !fullScreenAllowed)) {
+        if (model.isRemoteAccessEnabled && !notificationsAllowed) {
             NavigationGroup {
-                if (!notificationsAllowed) {
-                    NavigationRow(
-                        icon = Icons.Outlined.Notifications,
-                        label = stringResource(R.string.allow_notifications),
-                        tag = UiAutomationIds.ALLOW_NOTIFICATIONS_ROW,
-                        onClick = {
-                            settingsLauncher.launch(
-                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName),
-                            )
-                        },
-                    )
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    NavigationRow(
-                        icon = Icons.Outlined.Notifications,
-                        label = stringResource(R.string.allow_full_screen_requests),
-                        tag = UiAutomationIds.ALLOW_FULL_SCREEN_ROW,
-                        onClick = {
-                            settingsLauncher.launch(
-                                Intent(
-                                    Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
-                                    Uri.fromParts("package", context.packageName, null),
-                                ),
-                            )
-                        },
-                    )
-                }
+                NavigationRow(
+                    icon = Icons.Outlined.Notifications,
+                    label = stringResource(R.string.allow_notifications),
+                    tag = UiAutomationIds.ALLOW_NOTIFICATIONS_ROW,
+                    onClick = {
+                        settingsLauncher.launch(
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName),
+                        )
+                    },
+                )
             }
         }
 
@@ -491,6 +469,3 @@ private const val STEADY_FALL_MS = 2_000L
 
 private fun rappNotificationsAllowed(context: Context): Boolean =
     NotificationManagerCompat.from(context).areNotificationsEnabled()
-
-private fun rappFullScreenAllowed(context: Context): Boolean =
-    NotificationManagerCompat.from(context).canUseFullScreenIntent()

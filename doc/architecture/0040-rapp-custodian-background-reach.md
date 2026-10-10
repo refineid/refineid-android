@@ -21,10 +21,10 @@ The protocol does not create any of them:
 - Android 10 and newer block activity starts from the background. RefineID
   cannot raise its own consent screen from a network event.
 - On Android 13 and newer, notifications need the runtime `POST_NOTIFICATIONS`
-  permission. Without it, posted notifications are silently discarded. On
-  Android 14 and newer, full-screen intents need the special
-  `USE_FULL_SCREEN_INTENT` access, which Google Play grants by default only to
-  calling and alarm apps. The holder can grant it in system settings.
+  permission. Without it, posted notifications are silently discarded.
+- Google Play allows full-screen intents only for apps whose core function is
+  calling or alarms. RefineID follows Google Play policy, so it does not
+  declare `USE_FULL_SCREEN_INTENT`.
 
 A USB card reader does not change any of this. The phone never needs the card
 held against it unless the card is on the contactless interface.
@@ -45,16 +45,13 @@ held against it unless the card is on the contactless interface.
 - **Requests.** A request that arrives with no RefineID activity resumed posts
   a high-importance notification. Its text names the requester and the action
   (login, one signature, or a batch count), never the card interface. Tapping
-  it opens the consent dialog for that request. When
-  `NotificationManagerCompat.canUseFullScreenIntent()` holds, the notification
-  also carries a full-screen intent, so a sleeping screen wakes for it. The
-  consent activity does not show over the keyguard: on a locked phone the
-  holder unlocks first, because PIN 1 may be cached and an approval must come
-  from the device owner.
+  it opens the consent dialog for that request. The consent activity does not
+  show over the keyguard: on a locked phone the holder unlocks first, because
+  PIN 1 may be cached and an approval must come from the device owner.
 - **Permissions.** RefineID asks for `POST_NOTIFICATIONS` when Remote Access
   is on with a pairing, and again when the holder turns Remote Access on. While
-  notifications or full-screen access are off, the Remote Access screen offers
-  one row that opens the matching system settings page.
+  notifications are off, the Remote Access screen offers one row that opens
+  the app's notification settings.
 - **Card wait.** The card prompt during a remote operation follows the
   available reader. With a USB reader attached it asks the holder to insert the
   card. Otherwise it asks the holder to hold the card against the phone.
@@ -71,8 +68,8 @@ Observed on a stock Android 16 phone with a debug build:
 - A Mac on the same network browsed `_refineid-stream._tcp` and found the
   phone's session instance while no RefineID activity had been started.
 
-Not yet observed: delivery after a reboot, and the full-screen intent on a
-locked phone.
+Not yet observed: delivery after a reboot, and the request notification on
+a locked phone.
 
 ## Consequences
 
@@ -81,6 +78,6 @@ the platform's price for a reachable background listener, and it tells the
 holder that the phone answers paired computers. Turning Remote Access off, or
 removing the last pairing, stops the service and removes the notification.
 
-A Google Play release must declare the `connectedDevice` foreground-service
-use. Play reviews full-screen intent use: without the default grant, the
-request still arrives as a heads-up notification.
+A Google Play release declares the `connectedDevice` foreground-service use
+in Play Console: interaction with a USB card reader and with paired computers
+over the local network.

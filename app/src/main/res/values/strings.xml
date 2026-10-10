@@ -125,7 +125,6 @@
     <string name="insert_card_into_reader">Insert your ID card into the reader.</string>
     <string name="remote_in_use">In use</string>
     <string name="allow_notifications">Allow notifications</string>
-    <string name="allow_full_screen_requests">Allow full-screen requests</string>
     <plurals name="remote_signature_request_many">
         <item quantity="one">%1$s requests %2$d signature.</item>
         <item quantity="other">%1$s requests %2$d signatures.</item>
