@@ -14,6 +14,7 @@ import fi.refineid.android.prime.PrimedCanStore
 import fi.refineid.android.settings.TimestampAuthorityStore
 import fi.refineid.android.trust.CaCertificateStore
 import fi.refineid.android.usb.CardPresence
+import fi.refineid.android.usb.ReaderCardPresenceWatch
 import fi.refineid.android.usb.UsbReaderController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +56,24 @@ class RefineIdApplication : Application() {
             }
         } finally {
             pin.fill(0)
+        }
+    }
+
+    /**
+     * Forgets the PIN1 accepted while a card sat in the USB reader, once
+     * that card is removed or the reader disconnects. A primed contactless
+     * identity keeps the PIN1 its holder chose to store with it.
+     */
+    private fun forgetReaderPin1() {
+        synchronized(authenticationCustodyLock) {
+            authenticationPinCache.clear()
+        }
+        authenticationScope.launch {
+            if (!primedCanStore.isPrimed()) return@launch
+            val stored = primedCanStore.readPin1() ?: return@launch
+            synchronized(authenticationCustodyLock) {
+                authenticationPinCache.recordVerified(stored)
+            }
         }
     }
 
@@ -213,6 +232,10 @@ class RefineIdApplication : Application() {
                 pinAuthorizer = pinPromptBroker,
                 issuerCertificateSource = caStore,
             )
+        val readerCardPresence = ReaderCardPresenceWatch()
+        readerController.addStateListener { snapshot ->
+            if (readerCardPresence.presenceEnded(snapshot)) forgetReaderPin1()
+        }
         readerController.start()
         rappProxyDispatcher = createRappProxyDispatcher(primedStore)
         startRappProxyListening()

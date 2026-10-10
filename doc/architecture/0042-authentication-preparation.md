@@ -39,6 +39,13 @@ local card session when needed and uses the accepted local PIN1. A retained
 session can sign without another credential VERIFY while its validated state
 remains active. A new card session must establish its own validated state.
 
+## Reader PIN1 rule
+
+A PIN1 accepted while the card sits in the USB reader lives only as long as
+that card's presence: removing the card or disconnecting the reader forgets it,
+and the card's next use asks for PIN1 again, over the reader or over NFC. A
+primed contactless identity keeps the PIN1 its holder chose to store with it.
+
 ## Failure and lifecycle
 
 A wrong or locked PIN stops the operation without retry. The app clears accepted
