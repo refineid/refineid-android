@@ -1175,8 +1175,27 @@ internal class RappPhoneProxyDispatcher(
                     }
 
                     if (pinCache?.isVerified(pin1Submission) != true) {
-                        val candidate = Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes())
-                        val verification = service.verifyAuthenticationPin(candidate)
+                        val readyService: AuthenticationCardService = service
+                        val verification =
+                            RappCardRetry.run(
+                                command = {
+                                    (authCardService() ?: readyService)
+                                        .verifyAuthenticationPin(
+                                            Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes()),
+                                        )
+                                },
+                                cardLeft = { it.result.authenticationFailure()?.meansCardLeft() == true },
+                                awaitCard = {
+                                    ensureCardOrAbort(
+                                        opId,
+                                        opIdHex,
+                                        RappAuthAction.BROWSER_AUTH,
+                                        bridge,
+                                        forcePrompt = true,
+                                    )
+                                },
+                            ) ?: return@launch
+                        service = authCardService() ?: service
                         val failure = verification.result.authenticationFailure()
                         if (failure != null) {
                             handleBrowserAuthFailure(
@@ -1240,50 +1259,33 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
     ): Pair<AuthenticationCardService, AuthenticationSignResult>? {
         var service = initialService
-        val initialBytes =
-            try {
-                pin1Submission.copyBytes()
-            } catch (_: IllegalStateException) {
-                return null
-            }
-        var result =
-            service.signAuthenticationDigest(
-                algorithm = algorithm,
-                pin1 = Pin1Submission.fromOwnedBytes(initialBytes),
-                digest = digest,
-            )
-        if (result is AuthenticationSignResult.Failure &&
-            result.kind == AuthenticationSignFailure.CARD_UNAVAILABLE
-        ) {
-            val cardReady =
-                ensureCardOrAbort(
-                    opId = opId,
-                    opIdHex = opIdHex,
-                    action = RappAuthAction.BROWSER_AUTH,
-                    bridge = bridge,
-                    forcePrompt = true,
-                )
-            if (!cardReady) {
-                return null
-            }
-            val retryService = authCardService()
-            if (retryService != null) {
-                service = retryService
-                val retryBytes =
-                    try {
-                        pin1Submission.copyBytes()
-                    } catch (_: IllegalStateException) {
-                        return null
-                    }
-                result =
-                    retryService.signAuthenticationDigest(
-                        algorithm = algorithm,
-                        pin1 = Pin1Submission.fromOwnedBytes(retryBytes),
-                        digest = digest,
+        return try {
+            RappCardRetry.run(
+                command = {
+                    service = authCardService() ?: service
+                    service to
+                        service.signAuthenticationDigest(
+                            algorithm = algorithm,
+                            pin1 = Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes()),
+                            digest = digest,
+                        )
+                },
+                cardLeft = { (_, result) ->
+                    result is AuthenticationSignResult.Failure && result.kind.meansCardLeft()
+                },
+                awaitCard = {
+                    ensureCardOrAbort(
+                        opId = opId,
+                        opIdHex = opIdHex,
+                        action = RappAuthAction.BROWSER_AUTH,
+                        bridge = bridge,
+                        forcePrompt = true,
                     )
-            }
+                },
+            )
+        } catch (_: IllegalStateException) {
+            null
         }
-        return Pair(service, result)
     }
 
     private fun handleBrowserAuthSuccess(
@@ -1752,3 +1754,12 @@ internal class RappPhoneProxyDispatcher(
         dismissInbox()
     }
 }
+
+/**
+ * Whether a failure means the card was not in the field for the command, so
+ * the request waits for the card and tries once more instead of failing.
+ */
+private fun AuthenticationSignFailure.meansCardLeft(): Boolean =
+    this == AuthenticationSignFailure.CARD_UNAVAILABLE ||
+        this == AuthenticationSignFailure.TRANSPORT_ERROR ||
+        this == AuthenticationSignFailure.BRIDGE_ERROR
