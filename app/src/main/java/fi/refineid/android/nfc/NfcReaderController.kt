@@ -11,6 +11,7 @@ import android.nfc.tech.IsoDep
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.CanSessionStore
@@ -32,6 +33,7 @@ import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.keychain.nextProviderGeneration
 import fi.refineid.android.prime.PrimedCanStore
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
@@ -40,6 +42,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 
 /**
@@ -102,6 +105,9 @@ internal class NfcReaderController(
     private val providerGenerationRandom = SecureRandom()
 
     private val isOpeningSession = AtomicBoolean(false)
+
+    /** Remote or local operations currently waiting on the card. */
+    private val activeWaits = AtomicInteger(0)
 
     @Volatile
     private var currentAuthCertDer: ByteArray? = null
@@ -273,53 +279,97 @@ internal class NfcReaderController(
     val isCardReady: Boolean
         get() = latestSnapshot.status == NfcReaderStatus.CARD_READY
 
-    suspend fun awaitCardReady(timeoutMs: Long = 30_000L): Boolean {
+    /**
+     * Waits for an open session, opening one on any recognized card whose
+     * access number is known, for as long as [NfcCardWait] allows.
+     */
+    suspend fun awaitCardReady(): Boolean {
         if (isCardReady) {
             return true
         }
-        val resting = latestIsoDep
         AppTrace.nfcAwaitCardReady(
             isCardReady = false,
             status = latestSnapshot.status.name,
-            hasResting = resting != null,
+            hasResting = latestIsoDep != null,
         )
-        if (resting != null && isOpeningSession.compareAndSet(false, true)) {
-            val inMemoryCan = CanSessionStore.canBytes()
-            val generation = probeGeneration
-            try {
-                probeExecutor.execute {
-                    val storedCan = inMemoryCan ?: primedCanStore.read()
-                    if (storedCan == null) {
-                        isOpeningSession.set(false)
-                        return@execute
+        val snapshots = Channel<NfcReaderSnapshot>(Channel.CONFLATED)
+        val listener: (NfcReaderSnapshot) -> Unit = { snapshots.trySend(it) }
+        activeWaits.incrementAndGet()
+        try {
+            var current =
+                suspendCancellableCoroutine { continuation ->
+                    mainHandler.post {
+                        addStateListener(listener)
+                        continuation.resume(latestSnapshot)
                     }
-                    openSessionBytes(
-                        canBytes = storedCan,
-                        generation = generation,
-                        mintOnSuccess = false,
-                        pin1 = null,
-                        isoDepTarget = resting,
+                }
+            val startedAt = SystemClock.elapsedRealtime()
+            var lastChangeAt = startedAt
+            while (true) {
+                if (current.status == NfcReaderStatus.CARD_READY) {
+                    return true
+                }
+                openRestingCard(current.status)
+                val deadline =
+                    NfcCardWait.deadline(
+                        startedAt = startedAt,
+                        lastChangeAt = lastChangeAt,
+                        waitingOnHolder = NfcCardWait.needsAccessNumber(current.status, accessNumberKnown()),
                     )
+                val remaining = deadline - SystemClock.elapsedRealtime()
+                if (remaining <= 0) {
+                    return false
                 }
-            } catch (_: RejectedExecutionException) {
-                isOpeningSession.set(false)
+                val next = withTimeoutOrNull(remaining) { snapshots.receive() } ?: return false
+                if (next.status != current.status) {
+                    lastChangeAt = SystemClock.elapsedRealtime()
+                }
+                current = next
             }
+        } finally {
+            activeWaits.decrementAndGet()
+            mainHandler.post { removeStateListener(listener) }
+            snapshots.close()
         }
-        return withTimeoutOrNull(timeoutMs) {
-            suspendCancellableCoroutine { continuation ->
-                lateinit var listener: (NfcReaderSnapshot) -> Unit
-                listener = { snapshot ->
-                    if (snapshot.status == NfcReaderStatus.CARD_READY && continuation.isActive) {
-                        removeStateListener(listener)
-                        continuation.resume(true)
-                    }
+    }
+
+    private fun accessNumberKnown(): Boolean = CanSessionStore.hasCan || primedCardStored
+
+    /** Opens a session on the recognized card resting in the field, when it can. */
+    private fun openRestingCard(status: NfcReaderStatus) {
+        val resting = latestIsoDep
+        val canOpen =
+            NfcCardWait.shouldOpenSession(
+                status = status,
+                cardInField = resting != null,
+                accessNumberKnown = accessNumberKnown(),
+                opening = isOpeningSession.get(),
+            )
+        if (resting == null || !canOpen || !isOpeningSession.compareAndSet(false, true)) {
+            return
+        }
+        val inMemoryCan = CanSessionStore.canBytes()
+        val generation = probeGeneration
+        try {
+            probeExecutor.execute {
+                val storedCan = inMemoryCan ?: primedCanStore.read()
+                if (storedCan == null) {
+                    isOpeningSession.set(false)
+                    AppTrace.nfcAccessNumberMissing()
+                    return@execute
                 }
-                mainHandler.post { addStateListener(listener) }
-                continuation.invokeOnCancellation {
-                    mainHandler.post { removeStateListener(listener) }
-                }
+                openSessionBytes(
+                    canBytes = storedCan,
+                    generation = generation,
+                    mintOnSuccess = false,
+                    pin1 = null,
+                    isoDepTarget = resting,
+                )
             }
-        } ?: false
+        } catch (_: RejectedExecutionException) {
+            inMemoryCan?.fill(0)
+            isOpeningSession.set(false)
+        }
     }
 
     /**
@@ -604,6 +654,9 @@ internal class NfcReaderController(
                 latestIsoDep = null
             }
             AppTrace.nfcSessionClosed()
+            if (result.toReaderStatus() == NfcReaderStatus.WAITING_FOR_CARD) {
+                signalLostCard()
+            }
         }
         // A primed card still needs PIN1 to unlock; the UI shows a
         // PIN-only prompt on this recognized state.
@@ -742,7 +795,17 @@ internal class NfcReaderController(
             }
             AppTrace.nfcSessionClosed()
         }
+        if (status == NfcReaderStatus.WAITING_FOR_CARD) {
+            signalLostCard()
+        }
         publishAsync(generation, status, awaitingCard = status == NfcReaderStatus.WAITING_FOR_CARD)
+    }
+
+    /** The error tone for a card that slipped away while something waited on it. */
+    private fun signalLostCard() {
+        if (activeWaits.get() > 0 || wantsCard()) {
+            feedback.onCardError()
+        }
     }
 
     /**
@@ -777,6 +840,7 @@ internal class NfcReaderController(
                 canBytes.fill(0)
                 pin1?.close()
                 AppTrace.nfcSessionOpenFailed()
+                signalLostCard()
                 publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = wantsCard())
                 return
             }

@@ -119,6 +119,9 @@
     <string name="remote_signature_request">%1$s begär en underskrift.</string>
     <string name="remote_card_needed">%1$s behöver ditt ID-kort.</string>
     <string name="insert_card_into_reader">Sätt in ID-kortet i läsaren.</string>
+    <string name="card_reading_hold_still">Kortet läses. Håll det stilla.</string>
+    <string name="card_contact_lost">Kontakten med kortet bröts. Håll det mot telefonen igen.</string>
+    <string name="card_found_enter_can" tools:ignore="Typos">Kortet hittades. Ange dess CAN.</string>
     <string name="remote_in_use">Används</string>
     <string name="allow_notifications">Tillåt aviseringar</string>
     <plurals name="remote_signature_request_many">

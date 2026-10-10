@@ -301,18 +301,24 @@ class RefineIdApplication : Application() {
                     coroutineScope {
                         val usbWait = async { readerController.awaitCardReady() }
                         val nfcWait = async { nfcReaderController.awaitCardReady() }
-                        select {
-                            usbWait.onAwait { ready ->
-                                nfcWait.cancel()
-                                ready
+                        // Either reader may supply the card; one that gives up
+                        // leaves the wait to the other.
+                        val usbFirst =
+                            select {
+                                usbWait.onAwait { true }
+                                nfcWait.onAwait { false }
                             }
-                            nfcWait.onAwait { ready ->
-                                usbWait.cancel()
-                                if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
-                                    readerController.awaitCardReady()
-                                } else {
-                                    ready
-                                }
+                        val usbReady = if (usbFirst) usbWait.await() else false
+                        if (usbReady) {
+                            nfcWait.cancel()
+                            true
+                        } else {
+                            val nfcReady = nfcWait.await()
+                            usbWait.cancel()
+                            if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
+                                readerController.awaitCardReady()
+                            } else {
+                                nfcReady
                             }
                         }
                     }

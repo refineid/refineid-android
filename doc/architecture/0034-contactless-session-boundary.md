@@ -79,6 +79,24 @@ Wrong CAN on a refused handshake, Ready with card presence once the
 session holds the certificate. Qualified signing over contactless
 remains out of scope (ADR 0013: MF traversal can tear the channel down).
 
+## Access number rule
+
+Contactless access to the card always needs its access number (CAN); a
+card in the USB reader never does. When an operation, local or requested
+from a paired computer, will run over NFC and no access number is known,
+the phone asks for it, before the card is presented or as soon as it is
+recognized. It never waits on the card in silence: the remote card prompt
+shows the access number field, and the wait runs on to its limit while
+the holder types. A request arriving while the app is in the background
+reaches the holder through its notification, which opens that prompt.
+
+While a remote operation waits, the prompt names what the reader is
+doing (reading, card lost, access number needed or wrong), and any
+recognized card whose access number is known is opened at once, so a
+card presented during any wait completes that request. A wait ends after
+30 seconds without a change in the reader's state and never later than
+90 seconds after it began.
+
 ## Failure story
 
 A wrong CAN never consumes a PIN retry; the holder corrects it and
