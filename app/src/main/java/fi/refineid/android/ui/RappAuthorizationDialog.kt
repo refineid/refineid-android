@@ -93,8 +93,8 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                 Text(
                     text =
                         when (request.action) {
-                            RappAuthAction.BROWSER_AUTH -> "Enter PIN 1"
-                            RappAuthAction.DOCUMENT_SIGN -> "Sign Document"
+                            RappAuthAction.BROWSER_AUTH -> stringResource(R.string.enter_pin1)
+                            RappAuthAction.DOCUMENT_SIGN -> stringResource(R.string.sign_document)
                         },
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
@@ -126,8 +126,8 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                     label = {
                         Text(
                             when (request.action) {
-                                RappAuthAction.BROWSER_AUTH -> "PIN 1"
-                                RappAuthAction.DOCUMENT_SIGN -> "PIN 2"
+                                RappAuthAction.BROWSER_AUTH -> stringResource(R.string.pin1)
+                                RappAuthAction.DOCUMENT_SIGN -> stringResource(R.string.pin2)
                             },
                         )
                     },
@@ -152,8 +152,8 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                         // Document sign: Deny (explicit refusal to sign).
                         Text(
                             when (request.action) {
-                                RappAuthAction.BROWSER_AUTH -> "Cancel"
-                                RappAuthAction.DOCUMENT_SIGN -> "Deny"
+                                RappAuthAction.BROWSER_AUTH -> stringResource(R.string.cancel)
+                                RappAuthAction.DOCUMENT_SIGN -> stringResource(R.string.deny)
                             },
                         )
                     }
@@ -175,8 +175,8 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                     ) {
                         Text(
                             when (request.action) {
-                                RappAuthAction.BROWSER_AUTH -> "Continue"
-                                RappAuthAction.DOCUMENT_SIGN -> "Approve & Sign"
+                                RappAuthAction.BROWSER_AUTH -> stringResource(R.string.proceed)
+                                RappAuthAction.DOCUMENT_SIGN -> stringResource(R.string.approve_and_sign)
                             },
                         )
                     }
