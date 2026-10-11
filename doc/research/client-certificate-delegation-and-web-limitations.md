@@ -214,4 +214,4 @@ keys rather than an extensible cryptographic dispatch router. Until Android
 introduces a public Service Provider Interface (SPI) for delegated signing in
 KeyChain — matching what Apple accomplished with CryptoTokenKit — mobile users
 remain divided between custom AOSP platform images (`IExternalKeyProviderService`)
-and dedicated in-app browsers (`ReFineIdWebViewClient`).
+and dedicated in-app browsers (`RefineIdWebViewClient`).

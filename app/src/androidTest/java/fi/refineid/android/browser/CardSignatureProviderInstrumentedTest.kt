@@ -17,14 +17,14 @@ import java.security.Signature
 internal class CardSignatureProviderInstrumentedTest {
     @Before
     fun installProviderThroughTheProductionRegistrationPath() {
-        Security.removeProvider(ReFineIdCardProvider.NAME)
-        assertTrue(ReFineIdCardProviderRegistration.install())
-        assertTrue(ReFineIdCardProviderRegistration.install())
+        Security.removeProvider(RefineIdCardProvider.NAME)
+        assertTrue(RefineIdCardProviderRegistration.install())
+        assertTrue(RefineIdCardProviderRegistration.install())
     }
 
     @After
     fun removeProvider() {
-        Security.removeProvider(ReFineIdCardProvider.NAME)
+        Security.removeProvider(RefineIdCardProvider.NAME)
     }
 
     @Test
@@ -48,7 +48,7 @@ internal class CardSignatureProviderInstrumentedTest {
             val encodedSignature = signer.sign()
 
             try {
-                assertEquals(ReFineIdCardProvider.NAME, signer.provider.name)
+                assertEquals(RefineIdCardProvider.NAME, signer.provider.name)
                 assertEquals(case.cardAlgorithm, observedAlgorithm)
                 assertArrayEquals(SYNTHETIC_MESSAGE, observedMessage)
                 assertArrayEquals(case.expectedSignature(case.cardAlgorithm), encodedSignature)
@@ -98,56 +98,56 @@ internal class CardSignatureProviderInstrumentedTest {
         val SIGNATURE_CASES =
             listOf(
                 SignatureCase(
-                    jcaName = ReFineIdCardProvider.JCA_SHA256_WITH_RSA,
+                    jcaName = RefineIdCardProvider.JCA_SHA256_WITH_RSA,
                     cardAlgorithm = AuthenticationSigningAlgorithm.RSA_PKCS1_SHA256,
                     keyAlgorithm = JCA_KEY_ALGORITHM_RSA,
                     cardSignature = ::syntheticRsaSignature,
                     expectedSignature = ::syntheticRsaSignature,
                 ),
                 SignatureCase(
-                    jcaName = ReFineIdCardProvider.JCA_SHA256_WITH_RSA_PSS,
+                    jcaName = RefineIdCardProvider.JCA_SHA256_WITH_RSA_PSS,
                     cardAlgorithm = AuthenticationSigningAlgorithm.RSA_PSS_SHA256,
                     keyAlgorithm = JCA_KEY_ALGORITHM_RSA,
                     cardSignature = ::syntheticRsaSignature,
                     expectedSignature = ::syntheticRsaSignature,
                 ),
                 SignatureCase(
-                    jcaName = ReFineIdCardProvider.JCA_SHA384_WITH_RSA,
+                    jcaName = RefineIdCardProvider.JCA_SHA384_WITH_RSA,
                     cardAlgorithm = AuthenticationSigningAlgorithm.RSA_PKCS1_SHA384,
                     keyAlgorithm = JCA_KEY_ALGORITHM_RSA,
                     cardSignature = ::syntheticRsaSignature,
                     expectedSignature = ::syntheticRsaSignature,
                 ),
                 SignatureCase(
-                    jcaName = ReFineIdCardProvider.JCA_SHA384_WITH_RSA_PSS,
+                    jcaName = RefineIdCardProvider.JCA_SHA384_WITH_RSA_PSS,
                     cardAlgorithm = AuthenticationSigningAlgorithm.RSA_PSS_SHA384,
                     keyAlgorithm = JCA_KEY_ALGORITHM_RSA,
                     cardSignature = ::syntheticRsaSignature,
                     expectedSignature = ::syntheticRsaSignature,
                 ),
                 SignatureCase(
-                    jcaName = ReFineIdCardProvider.JCA_SHA512_WITH_RSA,
+                    jcaName = RefineIdCardProvider.JCA_SHA512_WITH_RSA,
                     cardAlgorithm = AuthenticationSigningAlgorithm.RSA_PKCS1_SHA512,
                     keyAlgorithm = JCA_KEY_ALGORITHM_RSA,
                     cardSignature = ::syntheticRsaSignature,
                     expectedSignature = ::syntheticRsaSignature,
                 ),
                 SignatureCase(
-                    jcaName = ReFineIdCardProvider.JCA_SHA512_WITH_RSA_PSS,
+                    jcaName = RefineIdCardProvider.JCA_SHA512_WITH_RSA_PSS,
                     cardAlgorithm = AuthenticationSigningAlgorithm.RSA_PSS_SHA512,
                     keyAlgorithm = JCA_KEY_ALGORITHM_RSA,
                     cardSignature = ::syntheticRsaSignature,
                     expectedSignature = ::syntheticRsaSignature,
                 ),
                 SignatureCase(
-                    jcaName = ReFineIdCardProvider.JCA_SHA256_WITH_ECDSA,
+                    jcaName = RefineIdCardProvider.JCA_SHA256_WITH_ECDSA,
                     cardAlgorithm = AuthenticationSigningAlgorithm.ECDSA_P384_SHA256,
                     keyAlgorithm = JCA_KEY_ALGORITHM_EC,
                     cardSignature = ::syntheticRawEcdsaSignature,
                     expectedSignature = { SYNTHETIC_DER_ECDSA_SIGNATURE.copyOf() },
                 ),
                 SignatureCase(
-                    jcaName = ReFineIdCardProvider.JCA_SHA384_WITH_ECDSA,
+                    jcaName = RefineIdCardProvider.JCA_SHA384_WITH_ECDSA,
                     cardAlgorithm = AuthenticationSigningAlgorithm.ECDSA_P384_SHA384,
                     keyAlgorithm = JCA_KEY_ALGORITHM_EC,
                     cardSignature = ::syntheticRawEcdsaSignature,

@@ -242,7 +242,7 @@ internal class MainScreenTest {
             ),
         )
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 MainScreen(
                     snapshot = snapshot,
                     onRequestPermission = {},
@@ -277,7 +277,7 @@ internal class MainScreenTest {
     fun awaitingCardShowsNfcCardTapDialogAndCancelInvokesCallback() {
         var cancelInvoked = false
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 MainScreen(
                     snapshot = UsbReaderSnapshot(),
                     onRequestPermission = {},
@@ -307,7 +307,7 @@ internal class MainScreenTest {
     fun readCardWithoutRememberedCanShowsCanDialog() {
         CanSessionStore.drop()
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 MainScreen(
                     snapshot = UsbReaderSnapshot(),
                     onRequestPermission = {},
@@ -332,7 +332,7 @@ internal class MainScreenTest {
         CanSessionStore.remember("123456")
         var connectedCan: String? = null
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 MainScreen(
                     snapshot = UsbReaderSnapshot(),
                     onRequestPermission = {},
@@ -362,7 +362,7 @@ internal class MainScreenTest {
         CanSessionStore.recordRejected("123456")
         var connectedCan: String? = null
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 MainScreen(
                     snapshot = UsbReaderSnapshot(),
                     onRequestPermission = {},
@@ -407,7 +407,7 @@ internal class MainScreenTest {
         browserCardService: AuthenticationCardService? = null,
     ) {
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 MainScreen(
                     snapshot = snapshot,
                     onRequestPermission = onRequestPermission,
@@ -420,7 +420,7 @@ internal class MainScreenTest {
 
     private fun showSigning(snapshotState: MutableState<UsbReaderSnapshot>) {
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 MainScreen(
                     snapshot = snapshotState.value,
                     onRequestPermission = {},

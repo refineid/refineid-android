@@ -20,16 +20,16 @@ import java.security.SignatureException
 class CardSignatureProviderTest {
     @Before
     fun installProviderAheadOfPlatformProviders() {
-        Security.removeProvider(ReFineIdCardProvider.NAME)
+        Security.removeProvider(RefineIdCardProvider.NAME)
         assertEquals(
             FIRST_PROVIDER_POSITION,
-            Security.insertProviderAt(ReFineIdCardProvider(), FIRST_PROVIDER_POSITION),
+            Security.insertProviderAt(RefineIdCardProvider(), FIRST_PROVIDER_POSITION),
         )
     }
 
     @After
     fun removeProvider() {
-        Security.removeProvider(ReFineIdCardProvider.NAME)
+        Security.removeProvider(RefineIdCardProvider.NAME)
     }
 
     @Test
@@ -53,7 +53,7 @@ class CardSignatureProviderTest {
             signer.update(MESSAGE_SUFFIX)
             val signature = signer.sign()
 
-            assertEquals(ReFineIdCardProvider.NAME, signer.provider.name)
+            assertEquals(RefineIdCardProvider.NAME, signer.provider.name)
             assertEquals(expectedAlgorithm, observedAlgorithm)
             assertArrayEquals(MESSAGE, observedMessage)
             assertTrue(signature.all { byte -> byte == RSA_SIGNATURE_FILL })
@@ -78,7 +78,7 @@ class CardSignatureProviderTest {
             signer.update(MESSAGE)
             val signature = signer.sign()
 
-            assertEquals(ReFineIdCardProvider.NAME, signer.provider.name)
+            assertEquals(RefineIdCardProvider.NAME, signer.provider.name)
             assertArrayEquals(SYNTHETIC_DER_ECDSA_SIGNATURE, signature)
             signature.fill(ZERO_BYTE)
             rawSignature.fill(ZERO_BYTE)
@@ -108,14 +108,14 @@ class CardSignatureProviderTest {
                 .getInstance(JCA_KEY_ALGORITHM_RSA)
                 .apply { initialize(SYNTHETIC_RSA_KEY_LENGTH_BITS) }
                 .generateKeyPair()
-        val signer = Signature.getInstance(ReFineIdCardProvider.JCA_SHA256_WITH_RSA)
+        val signer = Signature.getInstance(RefineIdCardProvider.JCA_SHA256_WITH_RSA)
 
         signer.initSign(keyPair.private)
         signer.update(MESSAGE)
         val signature = signer.sign()
 
-        assertFalse(signer.provider.name == ReFineIdCardProvider.NAME)
-        val verifier = Signature.getInstance(ReFineIdCardProvider.JCA_SHA256_WITH_RSA)
+        assertFalse(signer.provider.name == RefineIdCardProvider.NAME)
+        val verifier = Signature.getInstance(RefineIdCardProvider.JCA_SHA256_WITH_RSA)
         verifier.initVerify(keyPair.public)
         verifier.update(MESSAGE)
         assertTrue(verifier.verify(signature))
@@ -133,7 +133,7 @@ class CardSignatureProviderTest {
                     ByteArray(algorithm.signatureLength),
                 )
             }
-        val signer = Signature.getInstance(ReFineIdCardProvider.JCA_SHA256_WITH_RSA)
+        val signer = Signature.getInstance(RefineIdCardProvider.JCA_SHA256_WITH_RSA)
         signer.initSign(key)
         val overlengthMessage =
             ByteArray(MAXIMUM_AUTHENTICATION_MESSAGE_LENGTH + SINGLE_EXCESS_BYTE_COUNT)
@@ -174,24 +174,24 @@ class CardSignatureProviderTest {
         val MESSAGE = MESSAGE_PREFIX + MESSAGE_SUFFIX
         val RSA_CASES =
             listOf(
-                ReFineIdCardProvider.JCA_SHA256_WITH_RSA to
+                RefineIdCardProvider.JCA_SHA256_WITH_RSA to
                     AuthenticationSigningAlgorithm.RSA_PKCS1_SHA256,
-                ReFineIdCardProvider.JCA_SHA256_WITH_RSA_PSS to
+                RefineIdCardProvider.JCA_SHA256_WITH_RSA_PSS to
                     AuthenticationSigningAlgorithm.RSA_PSS_SHA256,
-                ReFineIdCardProvider.JCA_SHA384_WITH_RSA to
+                RefineIdCardProvider.JCA_SHA384_WITH_RSA to
                     AuthenticationSigningAlgorithm.RSA_PKCS1_SHA384,
-                ReFineIdCardProvider.JCA_SHA384_WITH_RSA_PSS to
+                RefineIdCardProvider.JCA_SHA384_WITH_RSA_PSS to
                     AuthenticationSigningAlgorithm.RSA_PSS_SHA384,
-                ReFineIdCardProvider.JCA_SHA512_WITH_RSA to
+                RefineIdCardProvider.JCA_SHA512_WITH_RSA to
                     AuthenticationSigningAlgorithm.RSA_PKCS1_SHA512,
-                ReFineIdCardProvider.JCA_SHA512_WITH_RSA_PSS to
+                RefineIdCardProvider.JCA_SHA512_WITH_RSA_PSS to
                     AuthenticationSigningAlgorithm.RSA_PSS_SHA512,
             )
         val ECDSA_CASES =
             listOf(
-                ReFineIdCardProvider.JCA_SHA256_WITH_ECDSA to
+                RefineIdCardProvider.JCA_SHA256_WITH_ECDSA to
                     AuthenticationSigningAlgorithm.ECDSA_P384_SHA256,
-                ReFineIdCardProvider.JCA_SHA384_WITH_ECDSA to
+                RefineIdCardProvider.JCA_SHA384_WITH_ECDSA to
                     AuthenticationSigningAlgorithm.ECDSA_P384_SHA384,
             )
         val SYNTHETIC_DER_ECDSA_SIGNATURE =

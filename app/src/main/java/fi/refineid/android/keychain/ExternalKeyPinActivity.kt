@@ -39,7 +39,7 @@ import fi.refineid.android.R
 import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.ui.Pin1InputTransformation
-import fi.refineid.android.ui.ReFineIdTheme
+import fi.refineid.android.ui.RefineIdTheme
 import fi.refineid.android.ui.UiAutomationIds
 
 class ExternalKeyPinActivity : ComponentActivity() {
@@ -83,7 +83,7 @@ class ExternalKeyPinActivity : ComponentActivity() {
             },
         )
         setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 ExternalKeyPinScreen(
                     callerLabel = prompt.callerLabel,
                     onSubmit = ::submitPin,

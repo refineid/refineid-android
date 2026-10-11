@@ -17,7 +17,7 @@ import fi.refineid.android.diagnostics.BuildDiagnostics
 import fi.refineid.android.nfc.NfcReaderController
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.ui.MainScreen
-import fi.refineid.android.ui.ReFineIdTheme
+import fi.refineid.android.ui.RefineIdTheme
 import fi.refineid.android.usb.CardPresence
 import fi.refineid.android.usb.UsbReaderController
 import fi.refineid.android.usb.UsbReaderSnapshot
@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
             )
 
         setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 MainScreen(
                     snapshot = readerSnapshot,
                     authenticationPreparation = preparation,

@@ -11,7 +11,7 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /** Card-backed provider state with generation-bound removal suppression. */
-internal class ReFineIdExternalKeyProviderBackend(
+internal class RefineIdExternalKeyProviderBackend(
     private val cardSession: ExternalKeyCardSession,
     private val signingCoordinator: ExternalKeySigningCoordinator,
     private val issuerCertificateSource: AuthenticationIssuerCertificateSource,
@@ -128,7 +128,7 @@ internal class ReFineIdExternalKeyProviderBackend(
 
     override fun toString(): String =
         identityLock.withLock {
-            "ReFineIdExternalKeyProviderBackend(" +
+            "RefineIdExternalKeyProviderBackend(" +
                 "suppressed=" + (suppressedGeneration != null) +
                 ", closed=" + isClosed +
                 ")"
@@ -239,7 +239,7 @@ internal class ExternalKeyProviderRuntime(
         )
 
     private val ownedBackend =
-        ReFineIdExternalKeyProviderBackend(
+        RefineIdExternalKeyProviderBackend(
             cardSession = cardSession,
             signingCoordinator = signingCoordinator,
             issuerCertificateSource = issuerCertificateSource,

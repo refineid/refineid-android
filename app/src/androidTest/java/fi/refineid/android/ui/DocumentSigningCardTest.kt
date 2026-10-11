@@ -237,7 +237,7 @@ internal class DocumentSigningCardTest {
         },
     ) {
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 DocumentSigningCard(
                     hasDocument = hasDocument,
                     documentNames = if (hasDocument) listOf("test_document.pdf") else emptyList(),

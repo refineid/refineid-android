@@ -265,7 +265,7 @@ internal class DocumentSigningHarnessLifecycleTest {
         val owner = TestRegistryOwner(registry)
         composeRule.setContent {
             CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
-                ReFineIdTheme {
+                RefineIdTheme {
                     DocumentSigningHarness(
                         signingAvailable = available.value,
                         cardService =

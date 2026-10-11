@@ -7,7 +7,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import fi.refineid.android.ui.ReFineIdTheme
+import fi.refineid.android.ui.RefineIdTheme
 import fi.refineid.android.ui.UiAutomationIds
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
@@ -24,7 +24,7 @@ class ExternalKeyPinScreenInstrumentedTest {
         var wasSubmitted = false
         var wasCancelled = false
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 ExternalKeyPinScreen(
                     callerLabel = SYNTHETIC_CALLER_LABEL,
                     onSubmit = { pin1 ->
@@ -66,7 +66,7 @@ class ExternalKeyPinScreenInstrumentedTest {
         var wasSubmitted = false
         var wasCancelled = false
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 ExternalKeyPinScreen(
                     callerLabel = SYNTHETIC_CALLER_LABEL,
                     onSubmit = { pin1 ->

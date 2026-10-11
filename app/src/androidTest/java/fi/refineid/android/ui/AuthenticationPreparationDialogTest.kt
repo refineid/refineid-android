@@ -54,7 +54,7 @@ internal class AuthenticationPreparationDialogTest {
         val preparation = AuthenticationPreparation(scope, Backend(), AuthenticationPinCache())
         try {
             composeRule.setContent {
-                ReFineIdTheme {
+                RefineIdTheme {
                     MainScreen(
                         snapshot = UsbReaderSnapshot(),
                         authenticationPreparation = preparation,
@@ -80,7 +80,7 @@ internal class AuthenticationPreparationDialogTest {
         val preparation = AuthenticationPreparation(scope, Backend(), AuthenticationPinCache())
         try {
             composeRule.setContent {
-                ReFineIdTheme {
+                RefineIdTheme {
                     MainScreen(
                         snapshot =
                             UsbReaderSnapshot(
@@ -110,7 +110,7 @@ internal class AuthenticationPreparationDialogTest {
         try {
             composeRule.setContent {
                 val state by preparation.state.collectAsState()
-                ReFineIdTheme { AuthenticationPreparationDialog(preparation, state) }
+                RefineIdTheme { AuthenticationPreparationDialog(preparation, state) }
             }
             composeRule.runOnIdle { preparation.start {} }
             composeRule.onNodeWithTag("AuthenticationPreparationCan").assertDoesNotExist()
