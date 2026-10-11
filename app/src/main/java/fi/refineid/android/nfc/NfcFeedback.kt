@@ -3,9 +3,11 @@ package fi.refineid.android.nfc
 import android.content.Context
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import java.util.concurrent.atomic.AtomicLong
 
 internal class NfcFeedback(
     context: Context,
@@ -20,13 +22,18 @@ internal class NfcFeedback(
             null
         }
 
-    private var lastDiscoveryAtMillis = 0L
+    /** When the card was last seen, on the monotonic clock. */
+    private val lastDiscoveryAtMillis = AtomicLong(0L)
 
-    /** One cue per arrival: the stack's re-polls of a resting card stay quiet. */
+    /**
+     * One cue per arrival. Every sighting moves the window, so the
+     * stack's re-polls of a card that stays put remain quiet and the
+     * cue plays again only after the card has been away.
+     */
     fun onCardDiscovered() {
-        val now = System.currentTimeMillis()
-        if (now - lastDiscoveryAtMillis < DISCOVERY_QUIET_MS) return
-        lastDiscoveryAtMillis = now
+        val now = SystemClock.elapsedRealtime()
+        val previous = lastDiscoveryAtMillis.getAndSet(now)
+        if (now - previous < DISCOVERY_QUIET_MS) return
         playTone(ToneGenerator.TONE_PROP_BEEP, DISCOVERY_BEEP_DURATION_MS)
         vibrate(DISCOVERY_VIBRATION_MS)
     }
