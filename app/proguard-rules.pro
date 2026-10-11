@@ -75,8 +75,10 @@
 }
 
 # JNA binds its own classes, and the fields of Structure and Callback
-# subclasses in the generated RAPP binding, from native code by name.
+# subclasses in the generated RAPP binding, from native code by name,
+# and reads each Structure's field order from its runtime annotation.
 -keep class com.sun.jna.** { *; }
 -keepclassmembers class * extends com.sun.jna.Structure { *; }
 -keepclassmembers class * implements com.sun.jna.Callback { *; }
+-keepattributes RuntimeVisibleAnnotations
 -dontwarn java.awt.**
