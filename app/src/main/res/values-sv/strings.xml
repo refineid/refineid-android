@@ -45,7 +45,7 @@
     <string name="person_label">Person</string>
     <string name="forget_identity_title">Glöm identitet?</string>
     <string name="forget_identity">Glöm identitet</string>
-    <string name="card_untampered">Kortet är äkta och orört.</string>
+    <string name="card_data_authentic">Kortets uppgifter är äkta och oförändrade.</string>
     <string name="copy_photo">Kopiera bild</string>
     <string name="share_photo">Dela bild</string>
     <string name="photo_copied">Bilden kopierades till urklipp</string>
