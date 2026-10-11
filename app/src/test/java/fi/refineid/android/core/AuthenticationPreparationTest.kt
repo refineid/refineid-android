@@ -27,7 +27,7 @@ internal class AuthenticationPreparationTest {
             val cache = AuthenticationPinCache()
             val preparation = AuthenticationPreparation(this, backend, cache)
             var opened = false
-            preparation.start { opened = true }
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
             assertEquals(AuthenticationPreparationState.Credentials(true, true), preparation.state.value)
             preparation.submit(null, syntheticPin())
             preparation.state.first { it == AuthenticationPreparationState.Ready }
@@ -42,7 +42,7 @@ internal class AuthenticationPreparationTest {
         runBlocking {
             val backend = Backend().apply { ready = AuthenticationReadiness(true, false, true) }
             val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
-            preparation.start {}
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
             assertEquals(AuthenticationPreparationState.Credentials(false, true), preparation.state.value)
         }
 
@@ -53,7 +53,7 @@ internal class AuthenticationPreparationTest {
             val cache = AuthenticationPinCache().apply { recordVerified(syntheticPin().consume { it.copyOf() }) }
             val preparation = AuthenticationPreparation(this, backend, cache)
             var opened = false
-            preparation.start { opened = true }
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
             assertTrue(opened)
             assertEquals(0, backend.verifications)
         }
@@ -65,7 +65,7 @@ internal class AuthenticationPreparationTest {
             val cache = AuthenticationPinCache()
             val preparation = AuthenticationPreparation(this, backend, cache)
             var opened = false
-            preparation.start { opened = true }
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
             preparation.submit(null, syntheticPin())
             preparation.state.first { it is AuthenticationPreparationState.Failed }
             assertFalse(opened)
@@ -82,7 +82,7 @@ internal class AuthenticationPreparationTest {
             val cache = AuthenticationPinCache()
             val preparation = AuthenticationPreparation(this, backend, cache)
             var opened = false
-            preparation.start { opened = true }
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
             preparation.submit(null, syntheticPin())
             preparation.state.first { it is AuthenticationPreparationState.Failed }
             assertFalse(opened)
@@ -99,7 +99,7 @@ internal class AuthenticationPreparationTest {
             val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
             val candidate = syntheticPin()
             var opened = false
-            preparation.start { opened = true }
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
             preparation.submit(null, candidate)
             preparation.state.first { it == AuthenticationPreparationState.WaitingForCard }
             preparation.cancel()
@@ -115,7 +115,7 @@ internal class AuthenticationPreparationTest {
         runBlocking {
             val backend = Backend()
             val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
-            preparation.start {}
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
             preparation.submit(null, syntheticPin())
             preparation.state.first { it == AuthenticationPreparationState.Ready }
             preparation.cancel()
@@ -130,7 +130,7 @@ internal class AuthenticationPreparationTest {
             val cache = AuthenticationPinCache()
             val preparation = AuthenticationPreparation(this, backend, cache)
             var opened = false
-            preparation.start { opened = true }
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
             preparation.submit(null, syntheticPin())
             backend.awaitCardCommand()
             preparation.cancel()
@@ -151,7 +151,7 @@ internal class AuthenticationPreparationTest {
             val backend = Backend().apply { cardAnswer = answer }
             val cache = AuthenticationPinCache()
             val preparation = AuthenticationPreparation(this, backend, cache)
-            preparation.start {}
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
             preparation.submit(null, syntheticPin())
             backend.awaitCardCommand()
             preparation.cancel()
@@ -170,7 +170,7 @@ internal class AuthenticationPreparationTest {
             val cache = AuthenticationPinCache()
             val preparation = AuthenticationPreparation(this, backend, cache)
             var opened = false
-            preparation.start { opened = true }
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
             preparation.submit(null, syntheticPin())
             backend.awaitCardCommand()
             preparation.cancel()
@@ -193,7 +193,7 @@ internal class AuthenticationPreparationTest {
             val cache = AuthenticationPinCache()
             val preparation = AuthenticationPreparation(this, backend, cache)
             val candidate = syntheticPin()
-            preparation.start {}
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
             preparation.submit(null, candidate)
             preparation.state.first { it == AuthenticationPreparationState.Verifying }
             preparation.cancel()
@@ -213,8 +213,8 @@ internal class AuthenticationPreparationTest {
         runBlocking {
             val preparation = AuthenticationPreparation(this, Backend(), AuthenticationPinCache())
             var abandoned = 0
-            preparation.start({}, { abandoned++ })
-            preparation.start({}, { abandoned++ })
+            preparation.start(AuthenticationPurpose.SIGN_IN, onCancelled = { abandoned++ }) {}
+            preparation.start(AuthenticationPurpose.SIGN_IN, onCancelled = { abandoned++ }) {}
             assertEquals(1, abandoned)
             preparation.cancel()
             assertEquals(2, abandoned)
@@ -225,7 +225,7 @@ internal class AuthenticationPreparationTest {
         runBlocking {
             val backend = Backend().apply { wait = CompletableDeferred() }
             val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
-            preparation.start {}
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
             preparation.submit(null, syntheticPin())
             preparation.submit(null, syntheticPin())
             preparation.state.first { it == AuthenticationPreparationState.WaitingForCard }

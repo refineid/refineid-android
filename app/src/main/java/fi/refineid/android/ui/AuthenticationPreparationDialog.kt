@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -25,34 +26,33 @@ import androidx.compose.ui.window.SecureFlagPolicy
 import fi.refineid.android.R
 import fi.refineid.android.core.AuthenticationPreparation
 import fi.refineid.android.core.AuthenticationPreparationState
+import fi.refineid.android.core.AuthenticationPurpose
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationResult
+import fi.refineid.android.nfc.NfcReaderStatus
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 internal fun AuthenticationPreparationDialog(
     preparation: AuthenticationPreparation,
     state: AuthenticationPreparationState,
+    nfcStatus: NfcReaderStatus? = null,
 ) {
+    val title = purposeTitle(preparation.purpose.collectAsState().value)
     when (state) {
         is AuthenticationPreparationState.Credentials -> {
-            PreparationCredentialsDialog(preparation, state)
+            PreparationCredentialsDialog(preparation, state, title)
         }
 
         is AuthenticationPreparationState.Failed -> {
-            val message =
-                when (state.result) {
-                    Pin1VerificationResult.WRONG_PIN -> R.string.wrong_pin
-                    Pin1VerificationResult.PIN_LOCKED -> R.string.pin_locked
-                    Pin1VerificationResult.SAFETY_REFUSED -> R.string.unavailable
-                    else -> R.string.error
-                }
+            val message = failureMessage(state.result) ?: return
             AlertDialog(
                 onDismissRequest = preparation::cancel,
                 properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
-                title = { Text(stringResource(message)) },
+                title = { Text(stringResource(title)) },
+                text = { Text(stringResource(message)) },
                 confirmButton = { TextButton(onClick = preparation::retry) { Text(stringResource(R.string.retry)) } },
                 dismissButton = { TextButton(onClick = preparation::cancel) { Text(stringResource(R.string.cancel)) } },
             )
@@ -62,20 +62,8 @@ internal fun AuthenticationPreparationDialog(
             AlertDialog(
                 onDismissRequest = preparation::cancel,
                 properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
-                title = { Text(stringResource(R.string.sign_in)) },
-                text = {
-                    Text(
-                        stringResource(
-                            if (state ==
-                                AuthenticationPreparationState.WaitingForCard
-                            ) {
-                                R.string.hold_card
-                            } else {
-                                R.string.checking
-                            },
-                        ),
-                    )
-                },
+                title = { Text(stringResource(title)) },
+                text = { Text(stringResource(cardMessage(state, nfcStatus))) },
                 confirmButton = { TextButton(onClick = preparation::cancel) { Text(stringResource(R.string.cancel)) } },
             )
         }
@@ -84,11 +72,58 @@ internal fun AuthenticationPreparationDialog(
     }
 }
 
+private fun purposeTitle(purpose: AuthenticationPurpose): Int =
+    when (purpose) {
+        AuthenticationPurpose.SIGN_IN -> R.string.sign_in
+        AuthenticationPurpose.REMOTE_ACCESS -> R.string.card_remote_access
+    }
+
+/** What stopped the preparation; a verified result shows nothing. */
+private fun failureMessage(result: Pin1VerificationResult): Int? =
+    when (result) {
+        Pin1VerificationResult.VERIFIED -> null
+        Pin1VerificationResult.CARD_UNAVAILABLE -> R.string.card_not_found
+        Pin1VerificationResult.TRANSPORT_ERROR -> R.string.card_contact_lost
+        Pin1VerificationResult.PACE_REJECTED -> R.string.wrong_can
+        Pin1VerificationResult.INVALID_PIN -> R.string.pin_invalid
+        Pin1VerificationResult.WRONG_PIN -> R.string.wrong_pin
+        Pin1VerificationResult.PIN_LOCKED -> R.string.pin_locked
+        Pin1VerificationResult.SAFETY_REFUSED -> R.string.refuse_low_attempts_pin
+        Pin1VerificationResult.VERIFICATION_REJECTED -> R.string.pin_refused
+        Pin1VerificationResult.BRIDGE_ERROR -> R.string.card_read_failed
+    }
+
+/**
+ * Where the card is, as the reader sees it: found and being read, lost
+ * again, or still awaited. A reader without NFC status is a USB slot.
+ */
+private fun cardMessage(
+    state: AuthenticationPreparationState,
+    nfcStatus: NfcReaderStatus?,
+): Int =
+    when {
+        state == AuthenticationPreparationState.Verifying -> R.string.card_reading_hold_still
+        nfcStatus == null -> R.string.hold_card
+        nfcStatus in CARD_BEING_READ -> R.string.card_reading_hold_still
+        nfcStatus == NfcReaderStatus.WRONG_CAN -> R.string.wrong_can
+        nfcStatus == NfcReaderStatus.TRANSPORT_ERROR -> R.string.card_contact_lost
+        else -> R.string.hold_card_against_back
+    }
+
+private val CARD_BEING_READ =
+    setOf(
+        NfcReaderStatus.CHECKING,
+        NfcReaderStatus.CARD_RECOGNIZED,
+        NfcReaderStatus.CONNECTING,
+        NfcReaderStatus.CARD_READY,
+    )
+
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 private fun PreparationCredentialsDialog(
     preparation: AuthenticationPreparation,
     state: AuthenticationPreparationState.Credentials,
+    title: Int,
 ) {
     val can = remember { TextFieldState(CanSessionStore.currentCan ?: "") }
     val pin = remember { TextFieldState() }
@@ -104,7 +139,7 @@ private fun PreparationCredentialsDialog(
         onDismissRequest = preparation::cancel,
         modifier = Modifier.testTag("AuthenticationPreparationDialog"),
         properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
-        title = { Text(stringResource(R.string.sign_in)) },
+        title = { Text(stringResource(title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 if (state.needsCan) {

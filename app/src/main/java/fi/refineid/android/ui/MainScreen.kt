@@ -92,6 +92,7 @@ import fi.refineid.android.BuildConfig
 import fi.refineid.android.R
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.AuthenticationPinCache
+import fi.refineid.android.core.AuthenticationPurpose
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.PersonCardDetails
@@ -160,9 +161,6 @@ internal fun MainScreen(
         preparationState != null &&
             preparationState != fi.refineid.android.core.AuthenticationPreparationState.Idle &&
             preparationState != fi.refineid.android.core.AuthenticationPreparationState.Ready
-    if (authenticationPreparation != null && preparationState != null) {
-        AuthenticationPreparationDialog(authenticationPreparation, preparationState)
-    }
     DisposableEffect(authenticationPreparation) {
         onDispose { authenticationPreparation?.cancel() }
     }
@@ -223,6 +221,18 @@ internal fun MainScreen(
         snapshot.status == ReaderConnectionStatus.READY &&
             snapshot.cardPresence == CardPresence.PRESENT
     val usbReaderPresent = snapshot.status != ReaderConnectionStatus.NOT_CONNECTED
+    if (authenticationPreparation != null && preparationState != null) {
+        AuthenticationPreparationDialog(
+            authenticationPreparation,
+            preparationState,
+            nfcStatus =
+                if (usbReaderPresent || nfcSnapshot.status == NfcReaderStatus.NOT_AVAILABLE) {
+                    null
+                } else {
+                    nfcSnapshot.status
+                },
+        )
+    }
 
     val usbActivationRequired = snapshot.status == ReaderConnectionStatus.ACTIVATION_REQUIRED
     val nfcActivationRequired = nfcSnapshot.status == NfcReaderStatus.ACTIVATION_REQUIRED
@@ -459,7 +469,7 @@ internal fun MainScreen(
                     },
                 onPrepareAuthentication =
                     authenticationPreparation?.let { preparation ->
-                        { action, cancelled -> preparation.start(action, cancelled) }
+                        { action, cancelled -> preparation.start(AuthenticationPurpose.SIGN_IN, cancelled, action) }
                     },
                 pinCache = pinCache,
                 nfcStatus =
@@ -494,7 +504,8 @@ internal fun MainScreen(
                                 model.createOffer()
                             }
                         }
-                        authenticationPreparation?.start(offer) ?: offer()
+                        authenticationPreparation?.start(AuthenticationPurpose.REMOTE_ACCESS, onReady = offer)
+                            ?: offer()
                     }
                 },
                 onOpenCardManagement = { destination = MainDestination.CARD_MANAGEMENT },
@@ -576,7 +587,8 @@ internal fun MainScreen(
                         authenticationReady = pinCache?.hasPin == true && (usbCardReady || nfcSnapshot.isPrimed),
                         onEnableRemoteAccess = {
                             val enable = { model.setRemoteAccessEnabled(true) }
-                            authenticationPreparation?.start(enable) ?: enable()
+                            authenticationPreparation?.start(AuthenticationPurpose.REMOTE_ACCESS, onReady = enable)
+                                ?: enable()
                         },
                     )
                 }
