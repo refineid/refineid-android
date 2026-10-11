@@ -44,7 +44,7 @@ internal class PersonScreenTest {
 
     private fun show(containerWidth: Dp) {
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 Box(modifier = Modifier.width(containerWidth)) {
                     PersonScreen(
                         details =

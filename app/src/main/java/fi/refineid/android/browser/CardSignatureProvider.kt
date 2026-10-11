@@ -18,7 +18,7 @@ import java.security.spec.PSSParameterSpec
 
 /** JCA provider consumed by Chromium's Android client-certificate bridge. */
 @Suppress("DEPRECATION")
-internal class ReFineIdCardProvider : Provider(NAME, VERSION, DESCRIPTION) {
+internal class RefineIdCardProvider : Provider(NAME, VERSION, DESCRIPTION) {
     init {
         register(
             jcaName = JCA_SHA256_WITH_RSA,
@@ -89,16 +89,16 @@ internal class ReFineIdCardProvider : Provider(NAME, VERSION, DESCRIPTION) {
 }
 
 /** Installs the provider only when no different provider owns its reserved name. */
-internal object ReFineIdCardProviderRegistration {
+internal object RefineIdCardProviderRegistration {
     @Synchronized
     fun install(): Boolean {
-        val existing = Security.getProvider(ReFineIdCardProvider.NAME)
+        val existing = Security.getProvider(RefineIdCardProvider.NAME)
         if (existing != null) {
-            return existing is ReFineIdCardProvider
+            return existing is RefineIdCardProvider
         }
         val position =
             Security.insertProviderAt(
-                ReFineIdCardProvider(),
+                RefineIdCardProvider(),
                 FIRST_PROVIDER_POSITION,
             )
         return position == FIRST_PROVIDER_POSITION

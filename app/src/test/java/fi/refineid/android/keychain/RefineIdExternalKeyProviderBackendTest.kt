@@ -14,7 +14,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class ReFineIdExternalKeyProviderBackendTest {
+class RefineIdExternalKeyProviderBackendTest {
     @Test
     fun publishesSupportedIdentityAndSignsOnlyItsGenerationAndProfile() {
         val fixture = Fixture()
@@ -153,7 +153,7 @@ class ReFineIdExternalKeyProviderBackendTest {
                 replayLease = ExternalSignatureReplayLease(InertReplayScheduler),
             )
         val backend =
-            ReFineIdExternalKeyProviderBackend(
+            RefineIdExternalKeyProviderBackend(
                 cardSession = cardSession,
                 signingCoordinator = coordinator,
                 issuerCertificateSource = issuerCertificateSource,

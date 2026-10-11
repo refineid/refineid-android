@@ -65,7 +65,7 @@ import fi.refineid.android.browser.BrowserPinCoordinator
 import fi.refineid.android.browser.BrowserPinRequest
 import fi.refineid.android.browser.BrowserSignatureStatus
 import fi.refineid.android.browser.BundledIssuerCertificates
-import fi.refineid.android.browser.ReFineIdCardProviderRegistration
+import fi.refineid.android.browser.RefineIdCardProviderRegistration
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.Pin1Submission
@@ -201,7 +201,7 @@ private fun BrowserDialog(
         remember(context) {
             runCatching { BundledIssuerCertificates.load(context) }.getOrNull()
         }
-    val providerReady = remember { ReFineIdCardProviderRegistration.install() }
+    val providerReady = remember { RefineIdCardProviderRegistration.install() }
     LaunchedEffect(providerReady, issuerCandidates) {
         AppTrace.browserInitialized(
             providerReady = providerReady,
@@ -213,7 +213,7 @@ private fun BrowserDialog(
             if (issuerCandidates == null || !providerReady) {
                 null
             } else {
-                ReFineIdWebViewClient(
+                RefineIdWebViewClient(
                     cardService = cardService,
                     issuerCandidates = issuerCandidates,
                     signatureOperation = coordinator,
@@ -721,7 +721,7 @@ internal class BrowserCardUnlockRequest(
     val giveUp: () -> Unit,
 )
 
-private class ReFineIdWebViewClient(
+private class RefineIdWebViewClient(
     private val cardService: AuthenticationCardService,
     private val issuerCandidates: List<X509Certificate>,
     private val signatureOperation: BrowserPinCoordinator,

@@ -20,7 +20,7 @@ private val REFINED_ID_SURFACE_VARIANT = Color(0xFFE2E8F0)
 private val REFINED_ID_ON_SURFACE_VARIANT = Color(0xFF424A54)
 private val REFINED_ID_ERROR = Color(0xFFBA1A1A)
 
-private val ReFineIdColors =
+private val RefineIdColors =
     lightColorScheme(
         primary = REFINED_ID_PRIMARY,
         onPrimary = Color.White,
@@ -41,20 +41,20 @@ private val ReFineIdColors =
  * Dark theme is the Android-provided Material baseline, not a second
  * hand-rolled brand palette: it tracks the platform in both themes.
  */
-private val ReFineIdDarkColors = darkColorScheme()
+private val RefineIdDarkColors = darkColorScheme()
 
 /** Effective dark flag for status colors, following the system theme. */
 internal val LocalRefineIdDarkTheme = compositionLocalOf { false }
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-internal fun ReFineIdTheme(
+internal fun RefineIdTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
     CompositionLocalProvider(LocalRefineIdDarkTheme provides darkTheme) {
         MaterialTheme(
-            colorScheme = if (darkTheme) ReFineIdDarkColors else ReFineIdColors,
+            colorScheme = if (darkTheme) RefineIdDarkColors else RefineIdColors,
             typography = Typography(),
             content = content,
         )

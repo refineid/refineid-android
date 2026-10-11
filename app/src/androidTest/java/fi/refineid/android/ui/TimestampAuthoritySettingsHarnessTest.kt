@@ -137,7 +137,7 @@ internal class TimestampAuthoritySettingsHarnessTest {
 
     private fun show(repository: TimestampAuthorityRepository) {
         composeRule.setContent {
-            ReFineIdTheme {
+            RefineIdTheme {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     TimestampAuthoritySettingsHarness(repository)
                 }
