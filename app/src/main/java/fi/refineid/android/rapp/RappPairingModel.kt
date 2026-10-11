@@ -31,10 +31,6 @@ internal sealed interface PairingPhase {
         val message: String,
     ) : PairingPhase
 
-    data class Paired(
-        val peer: PairedPeer,
-    ) : PairingPhase
-
     data class Failed(
         val reason: String,
     ) : PairingPhase
@@ -113,10 +109,6 @@ internal class RappPairingModel(
             val app = context.applicationContext as? RefineIdApplication
             app?.rappProxyDispatcher?.withdraw()
         }
-    }
-
-    fun disconnectActivePeer() {
-        app?.rappProxyDispatcher?.disconnectClient()
     }
 
     fun createOffer() {
@@ -362,7 +354,7 @@ internal class RappPairingModel(
         )
         pairedDevices = catalog.listPairs()
         pairingBackoff.recordSuccess()
-        phase = PairingPhase.Paired(peer)
+        phase = PairingPhase.Idle
 
         val oldListener = listener
         listener = null
@@ -407,7 +399,11 @@ internal class RappPairingModel(
                     }
                     delay(1000L)
                 }
-                if (phase is PairingPhase.Offering || phase is PairingPhase.Connecting) {
+                if (phase is PairingPhase.Offering) {
+                    scope.launch(Dispatchers.Main) {
+                        if (phase is PairingPhase.Offering) createOffer()
+                    }
+                } else if (phase is PairingPhase.Connecting) {
                     phase = PairingPhase.Failed("Pairing timed out")
                     reset()
                 }
