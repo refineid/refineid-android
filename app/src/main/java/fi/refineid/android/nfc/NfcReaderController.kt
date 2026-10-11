@@ -538,6 +538,8 @@ internal class NfcReaderController(
             return
         }
         if (isSessionActive) {
+            // The field cycled, so the card left and is back in place.
+            feedback.onCardDiscovered()
             try {
                 probeExecutor.execute {
                     adoptRestingTag(isoDep, generation)
