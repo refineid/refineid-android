@@ -40,6 +40,10 @@
     <string name="wrong_pin">Fel PIN</string>
     <string name="pin_locked">PIN låst</string>
     <string name="unavailable">Inte tillgänglig</string>
+    <string name="card_not_found">Kortet hittades inte</string>
+    <string name="pin_invalid">Ogiltig PIN</string>
+    <string name="pin_refused">Kortet avvisade PIN-koden</string>
+    <string name="card_read_failed">Kortet kunde inte läsas</string>
     <string name="pair_computer">Fjärråtkomst</string>
     <string name="section_identity">Identitet</string>
     <string name="person_label">Person</string>

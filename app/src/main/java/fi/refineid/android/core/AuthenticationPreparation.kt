@@ -35,6 +35,12 @@ internal interface AuthenticationPreparationBackend {
     fun cancel() = Unit
 }
 
+/** What the holder is readying the card for; the prompt names it. */
+internal enum class AuthenticationPurpose {
+    SIGN_IN,
+    REMOTE_ACCESS,
+}
+
 internal sealed interface AuthenticationPreparationState {
     data object Idle : AuthenticationPreparationState
 
@@ -62,17 +68,16 @@ internal class AuthenticationPreparation(
 ) {
     private val mutableState = MutableStateFlow<AuthenticationPreparationState>(AuthenticationPreparationState.Idle)
     val state: StateFlow<AuthenticationPreparationState> = mutableState.asStateFlow()
+    private val mutablePurpose = MutableStateFlow(AuthenticationPurpose.SIGN_IN)
+    val purpose: StateFlow<AuthenticationPurpose> = mutablePurpose.asStateFlow()
     private var job: Job? = null
     private var continuation: (() -> Unit)? = null
     private var cancellation: (() -> Unit)? = null
 
-    fun start(onReady: () -> Unit) {
-        start(onReady, {})
-    }
-
     fun start(
+        purpose: AuthenticationPurpose,
+        onCancelled: () -> Unit = {},
         onReady: () -> Unit,
-        onCancelled: () -> Unit,
     ) {
         if (job?.isActive == true) {
             onCancelled()
@@ -81,6 +86,7 @@ internal class AuthenticationPreparation(
         cancellation?.invoke()
         continuation = onReady
         cancellation = onCancelled
+        mutablePurpose.value = purpose
         val ready = backend.readiness()
         when {
             !ready.available -> {
@@ -163,7 +169,7 @@ internal class AuthenticationPreparation(
         val action = continuation ?: return
         val cancelled = cancellation ?: {}
         cancellation = null
-        start(action, cancelled)
+        start(mutablePurpose.value, cancelled, action)
     }
 
     fun cancel() {

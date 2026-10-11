@@ -44,6 +44,10 @@
     <string name="wrong_pin">Wrong PIN</string>
     <string name="pin_locked">PIN locked</string>
     <string name="unavailable">Unavailable</string>
+    <string name="card_not_found">Card not found</string>
+    <string name="pin_invalid">Invalid PIN</string>
+    <string name="pin_refused">The card refused the PIN</string>
+    <string name="card_read_failed">The card could not be read</string>
     <string name="pair_computer">Remote Access</string>
     <string name="section_identity">Identity</string>
     <string name="person_label">Person</string>
