@@ -25,15 +25,21 @@ internal object CertificateHolderName {
 
     internal fun stripIdentifier(cn: String): String {
         val tokens = cn.split(" ").filter { it.isNotBlank() }
-        if (tokens.isNotEmpty() &&
-            tokens.last().matches("[0-9A-Za-z]{6,12}".toRegex()) &&
-            tokens.last().any { it.isDigit() }
-        ) {
-            val nameTokens = tokens.dropLast(1)
-            if (nameTokens.isNotEmpty()) {
-                return nameTokens.joinToString(" ")
-            }
+        if (trailingIdentifier(tokens) != null) {
+            return tokens.dropLast(1).joinToString(" ")
         }
         return cn
     }
+
+    /** The identifier a common name ends with, after at least one name token. */
+    internal fun trailingIdentifier(cn: String): String? = trailingIdentifier(cn.split(" ").filter { it.isNotBlank() })
+
+    private fun trailingIdentifier(tokens: List<String>): String? {
+        if (tokens.size < 2) return null
+        val last = tokens.last()
+        val isIdentifier = last.matches(IDENTIFIER_TOKEN) && last.any { it.isDigit() }
+        return if (isIdentifier) last else null
+    }
+
+    private val IDENTIFIER_TOKEN = "[0-9A-Za-z]{6,12}".toRegex()
 }

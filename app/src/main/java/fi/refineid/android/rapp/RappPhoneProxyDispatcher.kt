@@ -10,6 +10,7 @@ import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationSignFailure
 import fi.refineid.android.core.AuthenticationSignResult
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
+import fi.refineid.android.core.CertificateIdentity
 import fi.refineid.android.core.NativeCertificateReadResult
 import fi.refineid.android.core.NativeQualifiedCertificate
 import fi.refineid.android.core.Pin1Submission
@@ -1025,6 +1026,10 @@ internal class RappPhoneProxyDispatcher(
         val desc = action.operation ?: return
         val opIdHex = opId.joinToString("") { "%02x".format(it) }
         AppTrace.rappOperationReceived(desc.kind.name, opIdHex)
+        if (desc.kind == RappOperationKind.READ_IDENTITY) {
+            handleReadIdentity(opId, opIdHex, desc.kind.name, bridge)
+            return
+        }
         val isAuth =
             when (desc.kind) {
                 RappOperationKind.READ_AUTHENTICATION_CERTIFICATE -> true
@@ -1071,6 +1076,65 @@ internal class RappPhoneProxyDispatcher(
                 }
             }
     }
+
+    /**
+     * The identity is read off the authentication certificate, which the
+     * phone holds once the card has been read; only a phone that has never
+     * read the card asks for it.
+     */
+    private fun handleReadIdentity(
+        opId: ByteArray,
+        opIdHex: String,
+        opKindName: String,
+        bridge: RappOperationBridge,
+    ) {
+        activeOperationJob?.cancel()
+        activeOperationJob =
+            scope.launch(Dispatchers.IO) {
+                if (sessionBridge == null || activeListener == null) {
+                    respondCardRemoved(opId, bridge)
+                    return@launch
+                }
+                val certDer =
+                    heldAuthCertificate()
+                        ?: run {
+                            if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.BROWSER_AUTH, bridge)) return@launch
+                            readAuthCertWithTimeout()
+                        }
+                if (certDer == null) {
+                    AppTrace.rappOperationFailed(opKindName, opIdHex, "certificate_read_timeout")
+                    respondCardRemoved(opId, bridge)
+                    return@launch
+                }
+                storeReadAuthCertificate(certDer)
+                val identity = CertificateIdentity.fromDer(certDer)
+                if (identity == null) {
+                    AppTrace.rappOperationFailed(opKindName, opIdHex, "certificate_unreadable")
+                    respondBridgeInvalid(opId, bridge)
+                    return@launch
+                }
+                AppTrace.rappOperationCompleted(opKindName, opIdHex, 0L)
+                try {
+                    val resp =
+                        bridge.completeIdentity(
+                            opId,
+                            identity.holderName,
+                            identity.cardId,
+                            identity.issuanceDate,
+                            identity.expirationDate,
+                            listOf(certDer),
+                        )
+                    handleBridgeAction(resp, bridge)
+                } catch (_: Exception) {
+                }
+            }
+    }
+
+    /** The authentication certificate from any read this phone has kept. */
+    private fun heldAuthCertificate(): ByteArray? =
+        lastReadAuthCertDer?.copyOf()
+            ?: activeAuthCertDer()?.copyOf()
+            ?: primedCanStore?.readAuthCertificateDer()
 
     private suspend fun readAuthCertWithTimeout(): ByteArray? {
         val deferred = CompletableDeferred<ByteArray?>()
