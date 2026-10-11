@@ -49,7 +49,7 @@
     <string name="person_label">Person</string>
     <string name="forget_identity_title">Forget identity?</string>
     <string name="forget_identity">Forget identity</string>
-    <string name="card_untampered">Card is genuine and untampered.</string>
+    <string name="card_data_authentic">Card data is authentic and unaltered.</string>
     <string name="copy_photo">Copy photo</string>
     <string name="share_photo">Share photo</string>
     <string name="photo_copied">Photo copied to clipboard</string>

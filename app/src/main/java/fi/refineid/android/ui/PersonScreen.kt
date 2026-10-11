@@ -301,7 +301,7 @@ internal fun PersonScreen(
                         modifier = Modifier.size(ROW_ICON_SIZE),
                     )
                     Text(
-                        text = stringResource(R.string.card_untampered),
+                        text = stringResource(R.string.card_data_authentic),
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface,
