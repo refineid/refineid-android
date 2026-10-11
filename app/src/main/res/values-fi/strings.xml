@@ -35,6 +35,10 @@
     <string name="timestamp_authorities">Aikaleimapalvelut</string>
     <string name="authenticate">Tunnistaudu</string>
     <string name="cancel">Peruuta</string>
+    <string name="enter_pin1">Syötä PIN 1</string>
+    <string name="sign_document">Allekirjoita asiakirja</string>
+    <string name="deny">Hylkää</string>
+    <string name="approve_and_sign">Hyväksy ja allekirjoita</string>
     <string name="signing">Allekirjoitetaan</string>
     <string name="signed">Allekirjoitettu</string>
     <string name="wrong_pin">Väärä PIN</string>

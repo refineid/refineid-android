@@ -32,6 +32,7 @@
     <string name="not_present">Not present</string>
     <string name="authentication">Authentication</string>
     <string name="pin1" translatable="false">PIN 1</string>
+    <string name="pin2" translatable="false">PIN 2</string>
     <string name="sign">Sign</string>
     <string name="verify">Verify</string>
     <string name="back">Back</string>
@@ -39,6 +40,10 @@
     <string name="timestamp_authorities">Timestamp services</string>
     <string name="authenticate">Authenticate</string>
     <string name="cancel">Cancel</string>
+    <string name="enter_pin1">Enter PIN 1</string>
+    <string name="sign_document">Sign document</string>
+    <string name="deny">Deny</string>
+    <string name="approve_and_sign">Approve and sign</string>
     <string name="signing">Signing</string>
     <string name="signed">Signed</string>
     <string name="wrong_pin">Wrong PIN</string>
