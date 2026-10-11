@@ -106,6 +106,7 @@ private fun cardMessage(
         nfcStatus == null -> R.string.hold_card
         nfcStatus in CARD_BEING_READ -> R.string.card_reading_hold_still
         nfcStatus == NfcReaderStatus.WRONG_CAN -> R.string.wrong_can
+        nfcStatus == NfcReaderStatus.TRANSPORT_ERROR -> R.string.card_contact_lost
         else -> R.string.hold_card_against_back
     }
 

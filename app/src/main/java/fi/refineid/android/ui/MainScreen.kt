@@ -226,7 +226,7 @@ internal fun MainScreen(
             authenticationPreparation,
             preparationState,
             nfcStatus =
-                if (usbCardReady || nfcSnapshot.status == NfcReaderStatus.NOT_AVAILABLE) {
+                if (usbReaderPresent || nfcSnapshot.status == NfcReaderStatus.NOT_AVAILABLE) {
                     null
                 } else {
                     nfcSnapshot.status
