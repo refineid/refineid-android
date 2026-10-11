@@ -20,7 +20,13 @@ internal class NfcFeedback(
             null
         }
 
+    private var lastDiscoveryAtMillis = 0L
+
+    /** One cue per arrival: the stack's re-polls of a resting card stay quiet. */
     fun onCardDiscovered() {
+        val now = System.currentTimeMillis()
+        if (now - lastDiscoveryAtMillis < DISCOVERY_QUIET_MS) return
+        lastDiscoveryAtMillis = now
         playTone(ToneGenerator.TONE_PROP_BEEP, DISCOVERY_BEEP_DURATION_MS)
         vibrate(DISCOVERY_VIBRATION_MS)
     }
@@ -58,6 +64,7 @@ internal class NfcFeedback(
     private companion object {
         const val FEEDBACK_TONE_VOLUME = 70
         const val DISCOVERY_BEEP_DURATION_MS = 40
+        const val DISCOVERY_QUIET_MS = 1_500L
         const val DISCOVERY_VIBRATION_MS = 35L
         const val SUCCESS_BEEP_DURATION_MS = 80
         const val SUCCESS_VIBRATION_MS = 50L
