@@ -108,7 +108,7 @@
     <string name="confirm_activation_dialog_msg_single">Olet aktivoimassa puuttuvan tunnusluvun (%1$s). Se tulee voimaan heti. Varmista, että olet kirjoittanut sen muistiin.</string>
     <string name="pin1_section_title">Perustunnusluku (PIN 1)</string>
     <string name="pin2_section_title">Allekirjoitus-PIN (PIN 2)</string>
-    <string name="paired_devices">Paritetut tietokoneet</string>
+    <string name="paired_devices">Liitetyt tietokoneet</string>
     <string name="card_remote_access">Kortin etäkäyttö</string>
     <string name="remote_requests_channel">Pyynnöt</string>
     <string name="remote_authentication_request">%1$s pyytää tunnistautumista henkilökortilla.</string>

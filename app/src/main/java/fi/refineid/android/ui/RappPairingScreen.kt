@@ -83,7 +83,7 @@ internal fun RappPairingScreen(
             contract = ActivityResultContracts.StartActivityForResult(),
         ) { _ -> refreshNotifications() }
 
-    LaunchedEffect(model.isRemoteAccessEnabled, phase, authenticationReady) {
+    LaunchedEffect(model.isRemoteAccessEnabled, authenticationReady) {
         if (authenticationReady && model.isRemoteAccessEnabled && phase is PairingPhase.Idle &&
             model.activeConnectedPeer == null
         ) {
@@ -140,10 +140,10 @@ internal fun RappPairingScreen(
                 }
 
                 is PairingPhase.Failed -> {
-                    FailedPhaseView(reason = phase.reason, onRetry = { model.reset() })
+                    FailedPhaseView(reason = phase.reason, onRetry = { model.createOffer() })
                 }
 
-                is PairingPhase.Idle, is PairingPhase.Paired -> {
+                is PairingPhase.Idle -> {
                 }
             }
         }
