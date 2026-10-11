@@ -578,10 +578,6 @@ internal fun MainScreen(
                             val enable = { model.setRemoteAccessEnabled(true) }
                             authenticationPreparation?.start(enable) ?: enable()
                         },
-                        onBack = {
-                            model.reset()
-                            destination = MainDestination.HOME
-                        },
                     )
                 }
             }

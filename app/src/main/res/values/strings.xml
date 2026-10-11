@@ -53,12 +53,9 @@
     <string name="copy_photo">Copy photo</string>
     <string name="share_photo">Share photo</string>
     <string name="photo_copied">Photo copied to clipboard</string>
-    <string name="disconnect">Disconnect</string>
     <string name="pairing_failed">Pairing failed</string>
-    <string name="peer_connected">%1$s connected.</string>
     <string name="hold_card_against_back">Please hold your ID card against the back of the phone.</string>
     <string name="connect_id_card">Connect ID card</string>
-    <string name="regenerate_code">Regenerate code</string>
     <string name="card_pins">PINs</string>
     <string name="change_pin1">Change PIN 1</string>
     <string name="change_pin2">Change PIN 2</string>
@@ -117,7 +114,6 @@
     <string name="pin2_section_title">Signature PIN (PIN 2)</string>
     <string name="paired_devices">Paired computers</string>
     <string name="card_remote_access">Card Remote Access</string>
-    <string name="no_paired_devices">No paired computers</string>
     <string name="remote_requests_channel">Requests</string>
     <string name="remote_authentication_request">%1$s requests login with your ID card.</string>
     <string name="remote_signature_request">%1$s requests a signature.</string>
@@ -126,7 +122,6 @@
     <string name="card_reading_hold_still">Reading the card. Keep it still.</string>
     <string name="card_contact_lost">Lost the card. Hold it against the phone again.</string>
     <string name="card_found_enter_can" tools:ignore="Typos">Card found. Enter its CAN.</string>
-    <string name="remote_in_use">In use</string>
     <string name="allow_notifications">Allow notifications</string>
     <plurals name="remote_signature_request_many">
         <item quantity="one">%1$s requests %2$d signature.</item>

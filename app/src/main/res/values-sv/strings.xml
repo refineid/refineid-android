@@ -49,12 +49,9 @@
     <string name="copy_photo">Kopiera bild</string>
     <string name="share_photo">Dela bild</string>
     <string name="photo_copied">Bilden kopierades till urklipp</string>
-    <string name="disconnect">Koppla från</string>
     <string name="pairing_failed">Anslutning misslyckades</string>
-    <string name="peer_connected">%1$s ansluten.</string>
     <string name="hold_card_against_back">Håll ID-kortet mot baksidan.</string>
     <string name="connect_id_card">Anslut identitetskort</string>
-    <string name="regenerate_code">Skapa ny kod</string>
     <string name="card_pins">PIN-koder</string>
     <string name="change_pin1">Ändra PIN 1</string>
     <string name="change_pin2">Ändra PIN 2</string>
@@ -113,7 +110,6 @@
     <string name="pin2_section_title">Underskrifts-PIN (PIN 2)</string>
     <string name="paired_devices">Kopplade datorer</string>
     <string name="card_remote_access">Fjärråtkomst för kort</string>
-    <string name="no_paired_devices">Inga kopplade datorer</string>
     <string name="remote_requests_channel">Förfrågningar</string>
     <string name="remote_authentication_request">%1$s begär inloggning med ditt ID-kort.</string>
     <string name="remote_signature_request">%1$s begär en underskrift.</string>
@@ -122,7 +118,6 @@
     <string name="card_reading_hold_still">Kortet läses. Håll det stilla.</string>
     <string name="card_contact_lost">Kontakten med kortet bröts. Håll det mot telefonen igen.</string>
     <string name="card_found_enter_can" tools:ignore="Typos">Kortet hittades. Ange dess CAN.</string>
-    <string name="remote_in_use">Används</string>
     <string name="allow_notifications">Tillåt aviseringar</string>
     <plurals name="remote_signature_request_many">
         <item quantity="one">%1$s begär %2$d underskrift.</item>

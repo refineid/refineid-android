@@ -8,7 +8,6 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Notifications
@@ -28,7 +26,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -57,9 +54,7 @@ import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappCustodianService
 import fi.refineid.android.rapp.RappPairingCode
 import fi.refineid.android.rapp.RappPairingModel
-import kotlinx.coroutines.delay
 
-private const val PAIRED_AUTO_DISMISS_DELAY_MS = 1500L
 private val OFFERING_CODE_FONT_SIZE = 36.sp
 private val OFFERING_CODE_LETTER_SPACING = 2.sp
 
@@ -70,7 +65,6 @@ internal fun RappPairingScreen(
     modifier: Modifier = Modifier,
     authenticationReady: Boolean = true,
     onEnableRemoteAccess: () -> Unit = { model.setRemoteAccessEnabled(true) },
-    onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val phase = model.phase
@@ -138,54 +132,31 @@ internal fun RappPairingScreen(
         if (model.isRemoteAccessEnabled) {
             when (phase) {
                 is PairingPhase.Offering -> {
-                    OfferingPhaseView(
-                        code = phase.code,
-                        onRegenerateCode = { model.createOffer() },
-                    )
+                    OfferingPhaseView(code = phase.code)
                 }
 
                 is PairingPhase.Connecting -> {
                     ConnectingPhaseView(message = phase.message)
                 }
 
-                is PairingPhase.Paired -> {
-                    PairedPhaseView(peer = phase.peer, onBack = onBack)
-                }
-
                 is PairingPhase.Failed -> {
                     FailedPhaseView(reason = phase.reason, onRetry = { model.reset() })
                 }
 
-                is PairingPhase.Idle -> {
+                is PairingPhase.Idle, is PairingPhase.Paired -> {
                 }
             }
         }
 
-        Section(stringResource(R.string.paired_devices)) {
-            NavigationGroup {
-                if (model.pairedDevices.isEmpty()) {
-                    Box(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.no_paired_devices),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
+        if (model.pairedDevices.isNotEmpty()) {
+            Section(stringResource(R.string.paired_devices)) {
+                NavigationGroup {
                     model.pairedDevices.forEachIndexed { index, peer ->
                         if (index > 0) {
                             HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
                         }
-                        val inUse = rememberSteadyFlag(model.activeConnectedPeer?.pairIdHex == peer.pairIdHex)
                         PairedPeerRow(
                             peer = peer,
-                            inUse = inUse,
-                            onDisconnect = { model.disconnectActivePeer() },
                             onRemove = { model.removePair(peer.pairIdHex) },
                         )
                     }
@@ -253,8 +224,6 @@ private fun CardRemoteAccessSwitchCard(
 @Composable
 private fun PairedPeerRow(
     peer: PairedPeer,
-    inUse: Boolean,
-    onDisconnect: () -> Unit,
     onRemove: () -> Unit,
 ) {
     Row(
@@ -273,19 +242,10 @@ private fun PairedPeerRow(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = if (inUse) stringResource(R.string.remote_in_use) else peer.platform,
+                text = peer.platform,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (inUse) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-        if (inUse) {
-            IconButton(onClick = onDisconnect) {
-                Icon(
-                    imageVector = Icons.Outlined.Clear,
-                    contentDescription = stringResource(R.string.disconnect),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
         IconButton(onClick = onRemove) {
             Icon(
@@ -299,10 +259,7 @@ private fun PairedPeerRow(
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-private fun OfferingPhaseView(
-    code: String,
-    onRegenerateCode: () -> Unit,
-) {
+private fun OfferingPhaseView(code: String) {
     Card(
         modifier =
             Modifier
@@ -330,15 +287,6 @@ private fun OfferingPhaseView(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.testTag("offeringCodeText"),
             )
-            OutlinedButton(
-                onClick = onRegenerateCode,
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .testTag("regenerateCodeButton"),
-            ) {
-                Text(stringResource(R.string.regenerate_code))
-            }
         }
     }
 }
@@ -364,47 +312,6 @@ private fun ConnectingPhaseView(message: String) {
             Text(
                 text = message,
                 style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-            )
-        }
-    }
-}
-
-@Suppress("FunctionName", "ktlint:standard:function-naming")
-@Composable
-private fun PairedPhaseView(
-    peer: PairedPeer,
-    onBack: () -> Unit,
-) {
-    LaunchedEffect(Unit) {
-        delay(PAIRED_AUTO_DISMISS_DELAY_MS)
-        onBack()
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = GROUP_ELEVATION),
-        shape = RoundedCornerShape(GROUP_CORNER_RADIUS),
-    ) {
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Check,
-                contentDescription = stringResource(R.string.peer_connected, peer.displayName),
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(44.dp),
-            )
-            Text(
-                text = stringResource(R.string.peer_connected, peer.displayName),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
             )
         }
@@ -453,24 +360,6 @@ private fun FailedPhaseView(
         }
     }
 }
-
-/**
- * A session flag that rises only after [active] has held for
- * [STEADY_RISE_MS] and falls [STEADY_FALL_MS] after it ends, so the
- * per-operation connections a requester opens do not blink the row.
- */
-@Composable
-private fun rememberSteadyFlag(active: Boolean): Boolean {
-    var steady by remember { mutableStateOf(false) }
-    LaunchedEffect(active) {
-        delay(if (active) STEADY_RISE_MS else STEADY_FALL_MS)
-        steady = active
-    }
-    return steady
-}
-
-private const val STEADY_RISE_MS = 750L
-private const val STEADY_FALL_MS = 2_000L
 
 private fun rappNotificationsAllowed(context: Context): Boolean =
     NotificationManagerCompat.from(context).areNotificationsEnabled()

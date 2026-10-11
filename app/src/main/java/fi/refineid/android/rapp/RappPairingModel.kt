@@ -115,10 +115,6 @@ internal class RappPairingModel(
         }
     }
 
-    fun disconnectActivePeer() {
-        app?.rappProxyDispatcher?.disconnectClient()
-    }
-
     fun createOffer() {
         reset()
         if (!isRemoteAccessEnabled) {
@@ -407,7 +403,9 @@ internal class RappPairingModel(
                     }
                     delay(1000L)
                 }
-                if (phase is PairingPhase.Offering || phase is PairingPhase.Connecting) {
+                if (phase is PairingPhase.Offering) {
+                    createOffer()
+                } else if (phase is PairingPhase.Connecting) {
                     phase = PairingPhase.Failed("Pairing timed out")
                     reset()
                 }
