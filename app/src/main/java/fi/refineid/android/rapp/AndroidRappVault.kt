@@ -132,6 +132,10 @@ internal class AndroidRappVault(
         return revokedPairs.containsKey(hex(pairId))
     }
 
+    /** The identifier of every stored pair record that is not revoked. */
+    val storedPairIds: List<String>
+        get() = pairRecords.pairIdentifiers().filterNot(revokedPairs::containsKey)
+
     // --- Revocation retentions (RAPP v26.10.18 section 4.6) ---
 
     /** Keeps the retention the core returned for a revoked pairing, so it can be announced. */

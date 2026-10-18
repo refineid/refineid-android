@@ -255,7 +255,13 @@ internal class RappPairingModel(
     private fun revokeUnconfirmedRecord() {
         val stored = ceremony?.storedRecord ?: return
         RappPairRevocation.revoke(stored, vault())
+        val app = context.applicationContext as? RefineIdApplication
+        app?.rappProxyDispatcher?.refreshAnnouncement()
     }
+
+    /** Whether the session record still has a revocation to announce (RAPP v26.10.18 section 4.6 item 4). */
+    private fun announcesRevocations(vault: AndroidRappVault): Boolean =
+        vault.unexpiredRevocations(StreamRendezvousName.nowUnixSeconds().toULong()).isNotEmpty()
 
     private fun handleProxyDisconnected(bridge: RappPairingBridge) {
         handshakeDeadlineJob?.cancel()
@@ -443,7 +449,7 @@ internal class RappPairingModel(
         }
         catalog.removePair(pairIdHex)
         pairedDevices = catalog.listPairs()
-        if (pairedDevices.isEmpty()) {
+        if (pairedDevices.isEmpty() && !announcesRevocations(vault)) {
             app?.rappProxyDispatcher?.stopListening()
         } else {
             app?.rappProxyDispatcher?.refreshAnnouncement()
@@ -481,7 +487,6 @@ internal class RappPairingModel(
         reset()
         val app = context.applicationContext as? RefineIdApplication
         app?.rappProxyDispatcher?.disconnectClient()
-        app?.rappProxyDispatcher?.stopListening()
         val vault = vault()
         for (pair in catalog.listPairs()) {
             try {
@@ -495,6 +500,11 @@ internal class RappPairingModel(
         catalog.clearAll()
         pairedDevices = emptyList()
         activeConnectedPeer = null
+        if (announcesRevocations(vault)) {
+            app?.rappProxyDispatcher?.refreshAnnouncement()
+        } else {
+            app?.rappProxyDispatcher?.stopListening()
+        }
     }
 
     companion object {

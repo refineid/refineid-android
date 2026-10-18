@@ -25,12 +25,32 @@ internal object RappStoredPairs {
             .sortedByDescending { it.lastUsedMs }
             .mapNotNull { peer -> loadOne(peer, catalog, vault)?.let { peer to it } }
 
-    /** Removes every catalogued pairing whose record the core no longer decodes. */
-    fun dropUndecodable(
+    /**
+     * Removes every catalogued pairing whose record the core no longer
+     * decodes, revokes catalogued records left unconfirmed, and revokes every
+     * vault record no catalogue entry names: a ceremony interrupted after it
+     * stored its record leaves one behind (RAPP v26.10.18 section 4.3 item
+     * 4), and its revocation is retained for announcement.
+     */
+    fun cleanAtStartup(
         catalog: RappPairCatalog,
         vault: AndroidRappVault,
     ) {
         catalog.listPairs().forEach { peer -> loadOne(peer, catalog, vault)?.close() }
+        val catalogued = catalog.listPairs().map { it.pairIdHex }
+        for (pairIdHex in orphanPairIds(vault.storedPairIds, catalogued)) {
+            val pairId = RappPairingModel.decodeHexOrNull(pairIdHex) ?: continue
+            RappPairRevocation.revoke(pairId, vault)
+        }
+    }
+
+    /** The stored record identifiers that no catalogue entry names. */
+    internal fun orphanPairIds(
+        stored: Collection<String>,
+        catalogued: Collection<String>,
+    ): List<String> {
+        val named = catalogued.mapTo(HashSet()) { it.lowercase() }
+        return stored.filterNot { it.lowercase() in named }
     }
 
     /** Revokes a record whose peer never confirmed storage; the retention is kept to announce it. */

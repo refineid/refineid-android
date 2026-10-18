@@ -129,6 +129,8 @@ class RappCustodianPairingCeremonyTest {
         assertEquals("Workstation", paired.peer.displayName)
         assertTrue(paired.record.metadata().storageConfirmed)
         assertNull(custodian.storedRecord)
+        // The unconfirmed handle is closed once the confirmed record replaces it.
+        assertThrows(IllegalStateException::class.java) { persisted.single().metadata() }
         assertArrayEquals(
             checkNotNull(requester.activatePairing(now)).metadata().pairId,
             paired.record.metadata().pairId,

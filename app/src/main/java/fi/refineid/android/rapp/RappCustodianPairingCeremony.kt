@@ -148,6 +148,7 @@ internal class RappCustodianPairingCeremony(
                 bridge.receiveStored(frame, now)
                 val confirmed =
                     checkNotNull(bridge.activatePairing(now)) { "both storage confirmations exchanged" }
+                storedRecord?.close()
                 storedRecord = null
                 step = Step.COMPLETED
                 Outcome.Paired(confirmed, checkNotNull(peer))

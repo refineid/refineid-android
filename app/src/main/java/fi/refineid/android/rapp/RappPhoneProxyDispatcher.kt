@@ -26,6 +26,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,6 +50,7 @@ import uniffi.refineid_rapp.rappSessionRecord
 import uniffi.refineid_rapp.rappStreamProfileName
 import uniffi.refineid_rapp.rappWithdrawnRecord
 import java.security.SecureRandom
+import java.util.concurrent.Executors
 
 /**
  * Handles incoming RAPP protocol requests from a paired Mac, coordinates user approvals,
@@ -143,6 +145,15 @@ internal class RappPhoneProxyDispatcher(
             }
         activeListener = listener
         val instance = StreamRendezvousName.ephemeralName()
+        announcedInstance = instance
+        listener.onRegistered = { registered ->
+            // Hints are bound to the instance name; a name the responder
+            // changed to resolve a conflict gets its own record.
+            if (activeListener === listener && registered != announcedInstance) {
+                announcedInstance = registered
+                listener.updateAttributes(sessionAttributes(vault, registered))
+            }
+        }
         listener.start(instance, sessionAttributes(vault, instance))
         RappCustodianService.ensureRunning(context)
         hintRefreshJob?.cancel()
@@ -157,11 +168,16 @@ internal class RappPhoneProxyDispatcher(
             }
     }
 
-    /** Republishes the session record, after the set of pairings or revocations changed. */
+    /**
+     * Republishes the session record, after the set of pairings or
+     * revocations changed. Before the responder has confirmed the
+     * registration the record is republished under the name it was
+     * requested with.
+     */
     fun refreshAnnouncement() {
         val listener = activeListener ?: return
         val vlt = vault ?: return
-        val instance = listener.registeredName ?: return
+        val instance = listener.registeredName ?: announcedInstance ?: return
         listener.updateAttributes(sessionAttributes(vlt, instance))
     }
 
@@ -199,7 +215,8 @@ internal class RappPhoneProxyDispatcher(
         if (currentHex != pairIdHex) return
         operationBridge?.let { bridge ->
             try {
-                for (frame in listOfNotNull(bridge.closeWithReason(RappCloseReason.PAIRING_REVOKED).frame)) {
+                val action = bridge.closeWithReason(RappCloseReason.PAIRING_REVOKED)
+                for (frame in listOfNotNull(action.frame) + action.additionalFrames) {
                     activeListener?.send(frame)
                 }
             } catch (_: Exception) {
@@ -215,6 +232,12 @@ internal class RappPhoneProxyDispatcher(
      * material without a card is absence.
      */
     fun cardPresenceChanged(present: Boolean) {
+        if (isClosed) return
+        scope.launch(cardStatusLane) { reportCardPresence(present) }
+    }
+
+    /** Runs on [cardStatusLane], so reports from the two readers are ordered. */
+    private fun reportCardPresence(present: Boolean) {
         val bridge = operationBridge ?: return
         if (lastReportedCardPresent == present) return
         lastReportedCardPresent = present
@@ -300,6 +323,7 @@ internal class RappPhoneProxyDispatcher(
         hintRefreshJob = null
         activeListener?.close()
         activeListener = null
+        announcedInstance = null
         operationBridge?.close()
         livenessJob?.cancel()
         livenessJob = null
@@ -500,6 +524,13 @@ internal class RappPhoneProxyDispatcher(
     /** The card presence last sent on the open session; null before the first report. */
     @Volatile
     private var lastReportedCardPresent: Boolean? = null
+
+    /** One lane for card presence reports: the two readers' listeners call in on their own threads. */
+    private val cardStatusLane = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+
+    /** The instance name the session record is published under, as the responder last confirmed it. */
+    @Volatile
+    private var announcedInstance: String? = null
 
     private fun clearPendingPins() {
         pendingPin1.values.forEach { it.close() }
@@ -731,8 +762,8 @@ internal class RappPhoneProxyDispatcher(
                                 }
                             },
                             onDenied = { deny(opId, bridge) },
+                            onShown = { scope.launch(Dispatchers.IO) { reportConsentShown(opId, bridge) } },
                         )
-                        reportConsentShown(opId, bridge)
                     }
                 }
             }
@@ -762,8 +793,8 @@ internal class RappPhoneProxyDispatcher(
                             approve(opId, bridge)
                         },
                         onDenied = { deny(opId, bridge) },
+                        onShown = { scope.launch(Dispatchers.IO) { reportConsentShown(opId, bridge) } },
                     )
-                    reportConsentShown(opId, bridge)
                 }
             }
 
@@ -1898,6 +1929,7 @@ internal class RappPhoneProxyDispatcher(
     override fun close() {
         isClosed = true
         RappCustodianService.stop(context)
+        cardStatusLane.close()
         livenessJob?.cancel()
         livenessJob = null
         activeOperationJob?.cancel()

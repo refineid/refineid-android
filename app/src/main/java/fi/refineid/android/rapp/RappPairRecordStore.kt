@@ -69,6 +69,17 @@ internal class RappPairRecordStore(
             Unit
         }
 
+    /** The pair identifier of every record stored here. */
+    fun pairIdentifiers(): List<String> =
+        synchronized(LOCK) {
+            root
+                .listFiles()
+                .orEmpty()
+                .filter { it.isFile && it.name.endsWith(RECORD_SUFFIX) }
+                .map { it.name.removeSuffix(RECORD_SUFFIX) }
+                .filter(::isPairIdentifier)
+        }
+
     /**
      * Seals every legacy plaintext record into this store and returns the
      * identifiers it migrated, so the caller can erase them from their old

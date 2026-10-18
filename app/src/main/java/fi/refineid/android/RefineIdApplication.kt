@@ -208,7 +208,7 @@ class RefineIdApplication : Application() {
             fi.refineid.android.rapp
                 .RappPairCatalog(this)
         fi.refineid.android.rapp.RappStoredPairs
-            .dropUndecodable(rappPairCatalog, rappVault)
+            .cleanAtStartup(rappPairCatalog, rappVault)
         remoteCardModel =
             fi.refineid.android.rapp.RemoteCardModel(
                 context = this,
@@ -248,12 +248,7 @@ class RefineIdApplication : Application() {
     }
 
     /** Whether a card is ready on the USB reader or on NFC; primed material alone is not a card. */
-    private fun isAnyCardReady(): Boolean =
-        if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
-            readerController.isCardReady
-        } else {
-            nfcReaderController.isCardReady
-        }
+    private fun isAnyCardReady(): Boolean = readerController.isCardReady || nfcReaderController.isCardReady
 
     internal fun startRappProxyListening() {
         val settings =
@@ -265,9 +260,20 @@ class RefineIdApplication : Application() {
         val stored =
             fi.refineid.android.rapp.RappStoredPairs
                 .load(rappPairCatalog, rappVault)
-        val newest = stored.maxByOrNull { (peer, _) -> peer.lastUsedMs } ?: return
+        val newest = stored.maxByOrNull { (peer, _) -> peer.lastUsedMs }
         try {
-            if (newest.second.metadata().role == uniffi.refineid_rapp.RappEndpointRole.PROXY) {
+            if (newest == null) {
+                // Without a pairing the session record is still published
+                // while a revocation remains to announce (RAPP v26.10.18
+                // section 4.6 item 4).
+                val now =
+                    fi.refineid.android.rapp.StreamRendezvousName
+                        .nowUnixSeconds()
+                        .toULong()
+                if (rappVault.unexpiredRevocations(now).isNotEmpty()) {
+                    rappProxyDispatcher.startListening(rappVault)
+                }
+            } else if (newest.second.metadata().role == uniffi.refineid_rapp.RappEndpointRole.PROXY) {
                 rappProxyDispatcher.startListening(rappVault)
             } else {
                 remoteCardModel.refresh()
