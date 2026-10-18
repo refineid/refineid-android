@@ -29,11 +29,11 @@ internal object RappPairingCode {
     /**
      * Applies the Crockford Base32 canonicalization pipeline per RAPP v26.10.18 section 3.1.
      *
-     * NFKC first, then ASCII-only uppercasing, removal of ASCII whitespace
-     * and hyphens, and the Crockford decode aliases (I and L to 1, O to 0).
-     * Returns the canonical string, which may be shorter or longer than a
-     * code, or an empty string when any character is outside the alphabet
-     * or is the rejected U. [isValid] decides the exact length.
+     * NFKC first, then ASCII-only uppercasing and removal of ASCII
+     * whitespace and hyphens. Returns the canonical string, which may be
+     * shorter or longer than a code, or an empty string when any character
+     * is outside the alphabet, the excluded letters I, L, O and U among
+     * them. [isValid] decides the exact length.
      */
     fun normalize(input: String): String {
         val nfkc = Normalizer.normalize(input, Normalizer.Form.NFKC)
@@ -41,8 +41,6 @@ internal object RappPairingCode {
         for (c in nfkc) {
             if (c in STRIPPED_CHARS) continue
             when (val upper = if (c in 'a'..'z') c - ('a' - 'A') else c) {
-                'I', 'L' -> sb.append('1')
-                'O' -> sb.append('0')
                 in ALPHABET -> sb.append(upper)
                 else -> return ""
             }

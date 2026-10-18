@@ -32,11 +32,11 @@ class RappPairingCodeTest {
     }
 
     @Test
-    fun testCrockfordDecodeAliases() {
-        // I and L map to 1; O maps to 0
-        assertEquals("1108K2", RappPairingCode.normalize("iLo8k2"))
-        assertEquals("1108K2", RappPairingCode.normalize("ILO8K2"))
-        assertTrue(RappPairingCode.isValid("1108K2"))
+    fun testRejectsExcludedLetters() {
+        assertEquals("", RappPairingCode.normalize("iLo8k2"))
+        assertEquals("", RappPairingCode.normalize("ILO8K2"))
+        assertFalse(RappPairingCode.isValid("7KX4MO"))
+        assertTrue(RappPairingCode.isValid("7KX4M0"))
     }
 
     @Test
