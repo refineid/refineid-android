@@ -27,6 +27,14 @@ internal sealed interface NativePin1State {
     data object Unrecognized : NativePin1State
 }
 
+/** The attempts the card still allows, or null when the card did not say. */
+internal fun NativePin1State.attemptsLeft(): Int? =
+    when (this) {
+        is NativePin1State.Remaining -> attempts
+        NativePin1State.Locked -> 0
+        NativePin1State.Verified, NativePin1State.NoInformation, NativePin1State.Unrecognized -> null
+    }
+
 internal data class NativePin1Preflight(
     val referenceScheme: NativePinReferenceScheme,
     val state: NativePin1State,

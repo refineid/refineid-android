@@ -221,6 +221,217 @@ internal class AuthenticationPreparationTest {
         }
 
     @Test
+    fun aCardNotSeenIsWaitedForAgainWithThePinAlreadyEntered() =
+        runBlocking {
+            val backend = Backend().apply { requiresCan = true }
+            val lostTaps = listOf(CardConnection.ABSENT, CardConnection.ABSENT)
+            backend.connectAnswers.addAll(lostTaps)
+            val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
+            var opened = false
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
+            preparation.submit(CanSubmission.from(SYNTHETIC_CAN), syntheticPin())
+            preparation.state.first { it == AuthenticationPreparationState.Ready }
+            assertTrue(opened)
+            assertEquals(lostTaps.size + 1, backend.connections)
+            assertEquals(lostTaps.size + 1, backend.cansOffered)
+            assertEquals(1, backend.attemptsReads)
+            assertEquals(1, backend.verifications)
+            assertTrue(backend.retained)
+        }
+
+    @Test
+    fun aTimedOutWaitFailsTheAttemptAndKeepsThePinForTheRetry() =
+        runBlocking {
+            val backend = Backend().apply { wait = CompletableDeferred() }
+            val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache(), SHORT_TIMEOUT_MS)
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it is AuthenticationPreparationState.Failed }
+            assertEquals(
+                AuthenticationPreparationState.Failed(Pin1VerificationResult.CARD_UNAVAILABLE),
+                preparation.state.value,
+            )
+            preparation.retry()
+            assertEquals(AuthenticationPreparationState.Credentials(true, false), preparation.state.value)
+            preparation.cancel()
+        }
+
+    @Test
+    fun aLostAnswerSendsThePinAgainOnlyWhileTheCardAllowsAsManyAttempts() =
+        runBlocking {
+            val backend = Backend()
+            backend.verifyAnswers.add(Pin1VerificationResult.TRANSPORT_ERROR)
+            val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
+            var opened = false
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it == AuthenticationPreparationState.Ready }
+            assertTrue(opened)
+            assertEquals(2, backend.attemptsReads)
+            assertEquals(2, backend.verifications)
+        }
+
+    @Test
+    fun aLostAnswerWithFewerAttemptsLeftIsARejectionAndAsksThePinAgain() =
+        runBlocking {
+            val backend = Backend()
+            backend.verifyAnswers.add(Pin1VerificationResult.TRANSPORT_ERROR)
+            backend.attemptsAnswers.addAll(listOf(FULL_ATTEMPTS, FULL_ATTEMPTS - 1))
+            val cache = AuthenticationPinCache()
+            val preparation = AuthenticationPreparation(this, backend, cache)
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it is AuthenticationPreparationState.Credentials && !it.needsCan }
+            assertEquals(
+                AuthenticationPreparationState.Credentials(false, true, FULL_ATTEMPTS - 1),
+                preparation.state.value,
+            )
+            assertEquals(1, backend.verifications)
+            assertEquals(1, backend.invalidations.get())
+            syntheticPin().use { assertTrue(cache.isRejected(it)) }
+        }
+
+    @Test
+    fun aLostAnswerWithNoAttemptsLeftLocksAndReleasesThePin() =
+        runBlocking {
+            val backend = Backend()
+            backend.verifyAnswers.add(Pin1VerificationResult.TRANSPORT_ERROR)
+            backend.attemptsAnswers.addAll(listOf(1, 0))
+            val cache = AuthenticationPinCache()
+            val preparation = AuthenticationPreparation(this, backend, cache)
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it is AuthenticationPreparationState.Failed }
+            assertEquals(
+                AuthenticationPreparationState.Failed(Pin1VerificationResult.PIN_LOCKED),
+                preparation.state.value,
+            )
+            assertEquals(1, backend.invalidations.get())
+            syntheticPin().use { assertFalse(cache.isRejected(it)) }
+            preparation.retry()
+            assertEquals(AuthenticationPreparationState.Credentials(true, true), preparation.state.value)
+        }
+
+    @Test
+    fun aCardWithNoAttemptsLeftLocksBeforeAnyPinIsSent() =
+        runBlocking {
+            val backend = Backend()
+            backend.attemptsAnswers.add(0)
+            val cache = AuthenticationPinCache()
+            val preparation = AuthenticationPreparation(this, backend, cache)
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it is AuthenticationPreparationState.Failed }
+            assertEquals(
+                AuthenticationPreparationState.Failed(Pin1VerificationResult.PIN_LOCKED),
+                preparation.state.value,
+            )
+            assertEquals(0, backend.verifications)
+            assertEquals(1, backend.invalidations.get())
+            preparation.retry()
+            assertEquals(AuthenticationPreparationState.Credentials(true, true), preparation.state.value)
+        }
+
+    @Test
+    fun aLostAnswerWithUnreadableAttemptsAsksThePinAgain() =
+        runBlocking {
+            val backend = Backend()
+            backend.verifyAnswers.add(Pin1VerificationResult.TRANSPORT_ERROR)
+            backend.attemptsAnswers.addAll(listOf(FULL_ATTEMPTS, null))
+            val cache = AuthenticationPinCache()
+            val preparation = AuthenticationPreparation(this, backend, cache)
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it is AuthenticationPreparationState.Credentials && !it.needsCan }
+            assertEquals(AuthenticationPreparationState.Credentials(false, true), preparation.state.value)
+            assertEquals(1, backend.verifications)
+            assertEquals(0, backend.invalidations.get())
+            syntheticPin().use { assertFalse(cache.isRejected(it)) }
+        }
+
+    @Test
+    fun contactLostDuringVerificationTriesTheSamePinAgain() =
+        runBlocking {
+            val backend = Backend()
+            val lostAnswers = listOf(Pin1VerificationResult.TRANSPORT_ERROR, Pin1VerificationResult.CARD_UNAVAILABLE)
+            backend.verifyAnswers.addAll(lostAnswers)
+            val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
+            var opened = false
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it == AuthenticationPreparationState.Ready }
+            assertTrue(opened)
+            assertEquals(lostAnswers.size + 1, backend.verifications)
+            assertEquals(lostAnswers.size + 1, backend.connections)
+            assertEquals(0, backend.invalidations.get())
+        }
+
+    @Test
+    fun aCardThatCannotBeUsedFailsAndTheRetryAsksNoPin() =
+        runBlocking {
+            val backend = Backend()
+            backend.connectAnswers.add(CardConnection.REFUSED)
+            val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it is AuthenticationPreparationState.Failed }
+            assertEquals(
+                AuthenticationPreparationState.Failed(Pin1VerificationResult.CARD_UNAVAILABLE),
+                preparation.state.value,
+            )
+            preparation.retry()
+            assertEquals(AuthenticationPreparationState.Credentials(true, false), preparation.state.value)
+            preparation.submit(CanSubmission.from(SYNTHETIC_CAN), null)
+            preparation.state.first { it == AuthenticationPreparationState.Ready }
+            assertEquals(1, backend.verifications)
+        }
+
+    @Test
+    fun aWrongCanFailsAsSuchAndKeepsThePin() =
+        runBlocking {
+            val backend = Backend()
+            backend.connectAnswers.add(CardConnection.WRONG_CAN)
+            val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
+            preparation.submit(CanSubmission.from(SYNTHETIC_CAN), syntheticPin())
+            preparation.state.first { it is AuthenticationPreparationState.Failed }
+            assertEquals(
+                AuthenticationPreparationState.Failed(Pin1VerificationResult.PACE_REJECTED),
+                preparation.state.value,
+            )
+            preparation.retry()
+            assertEquals(AuthenticationPreparationState.Credentials(true, false), preparation.state.value)
+            preparation.cancel()
+        }
+
+    @Test
+    fun aRejectedPinIsAskedAgainOnRetry() =
+        runBlocking {
+            val backend = Backend().apply { result = Pin1VerificationResult.WRONG_PIN }
+            val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it is AuthenticationPreparationState.Failed }
+            preparation.retry()
+            assertEquals(AuthenticationPreparationState.Credentials(true, true), preparation.state.value)
+        }
+
+    @Test
+    fun cancellingAfterAFailedTapClearsTheHeldPin() =
+        runBlocking {
+            val backend = Backend()
+            backend.connectAnswers.add(CardConnection.REFUSED)
+            val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
+            val candidate = syntheticPin()
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
+            preparation.submit(null, candidate)
+            preparation.state.first { it is AuthenticationPreparationState.Failed }
+            assertTrue(runCatching { candidate.copyBytes() }.isSuccess)
+            preparation.cancel()
+            assertTrue(runCatching { candidate.copyBytes() }.isFailure)
+        }
+
+    @Test
     fun duplicateSubmissionsDoNotStartAnotherCardOperation() =
         runBlocking {
             val backend = Backend().apply { wait = CompletableDeferred() }
@@ -244,7 +455,24 @@ internal class AuthenticationPreparationTest {
         @Volatile
         var verifications = 0
         var connections = 0
+        var cansOffered = 0
+        var attemptsReads = 0
         var retained = false
+
+        /** The card answers READY only to a wait that offers the access number. */
+        var requiresCan = false
+
+        /** Attempts the card allows when no scripted answer is queued. */
+        var attemptsLeft: Int? = FULL_ATTEMPTS
+
+        /** Answers to successive reads of the attempts left, then [attemptsLeft]. */
+        val attemptsAnswers = ArrayDeque<Int?>()
+
+        /** Answers to successive waits for the card, then READY. */
+        val connectAnswers = ArrayDeque<CardConnection>()
+
+        /** Answers to successive card commands, then [result]. */
+        val verifyAnswers = ArrayDeque<Pin1VerificationResult>()
         val invalidations = AtomicInteger()
         var cancelled = false
         var wait: CompletableDeferred<Boolean>? = null
@@ -254,9 +482,19 @@ internal class AuthenticationPreparationTest {
 
         override fun readiness(): AuthenticationReadiness = ready
 
-        override suspend fun connect(can: CanSubmission?): Boolean {
+        override suspend fun connect(can: CanSubmission?): CardConnection {
             connections++
-            return wait?.await() ?: true
+            if (can != null) cansOffered++
+            can?.close()
+            if (wait?.await() == false) return CardConnection.ABSENT
+            val answer = connectAnswers.removeFirstOrNull() ?: CardConnection.READY
+            if (answer == CardConnection.READY && requiresCan && can == null) return CardConnection.WRONG_CAN
+            return answer
+        }
+
+        override suspend fun pin1AttemptsLeft(): Int? {
+            attemptsReads++
+            return if (attemptsAnswers.isEmpty()) attemptsLeft else attemptsAnswers.removeFirst()
         }
 
         override suspend fun verify(
@@ -268,7 +506,9 @@ internal class AuthenticationPreparationTest {
                     submission.close()
                     verifications++
                     cardCommand.complete(Unit)
-                    cardAnswer?.get(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS) ?: result
+                    cardAnswer?.get(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                        ?: verifyAnswers.removeFirstOrNull()
+                        ?: result
                 }
             } finally {
                 verifyReturned.complete(Unit)
@@ -303,6 +543,9 @@ internal class AuthenticationPreparationTest {
     private companion object {
         const val CLEARED_BYTE: Byte = 0
         const val TEST_TIMEOUT_SECONDS = 5L
+        const val SHORT_TIMEOUT_MS = 50L
+        const val FULL_ATTEMPTS = 5
+        val SYNTHETIC_CAN = CharArray(CanSubmission.CAN_DIGITS) { '0' }.concatToString()
 
         fun syntheticPin(): Pin1Submission =
             Pin1Submission.from(CharArray(PIN1_MINIMUM_LENGTH) { '0' }.concatToString())

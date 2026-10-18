@@ -18,6 +18,7 @@ import fi.refineid.android.core.AuthenticationSignResult
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.CardConnection
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationOutcome
@@ -142,7 +143,9 @@ internal class AuthenticationPreparationDialogTest {
     ) : AuthenticationPreparationBackend {
         override fun readiness(): AuthenticationReadiness = AuthenticationReadiness(primed, !primed, true)
 
-        override suspend fun connect(can: CanSubmission?): Boolean = error("no card operation expected")
+        override suspend fun connect(can: CanSubmission?): CardConnection = error("no card operation expected")
+
+        override suspend fun pin1AttemptsLeft(): Int? = error("no card operation expected")
 
         override suspend fun verify(
             pin1: Pin1Submission,

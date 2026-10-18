@@ -43,6 +43,7 @@ import fi.refineid.android.core.QualifiedSignResult
 import fi.refineid.android.core.QualifiedSignatureVerifier
 import fi.refineid.android.core.QualifiedSigningAlgorithm
 import fi.refineid.android.core.QualifiedSigningInputMode
+import fi.refineid.android.core.attemptsLeft
 import fi.refineid.android.diagnostics.AppTrace
 import kotlin.concurrent.thread
 
@@ -307,6 +308,10 @@ internal class CcidUsbSession(
             }
         }
     }
+
+    /** PIN 1 attempts the card allows now, read afresh without a VERIFY; null when the card did not say. */
+    fun pin1AttemptsLeft(): Int? =
+        (cachePin1Preflight() as? NativePin1PreflightResult.Success)?.preflight?.state?.attemptsLeft()
 
     fun cachePin1Preflight(): NativePin1PreflightResult {
         checkOwnerThread()

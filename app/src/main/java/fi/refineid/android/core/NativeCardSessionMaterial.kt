@@ -28,6 +28,11 @@ internal class NativeCardSessionMaterial : AutoCloseable {
         return requireAuthenticationCertificate().copyOwned()
     }
 
+    fun cachedPin1Preflight(): NativePin1Preflight? {
+        checkOpen()
+        return pin1Preflight
+    }
+
     fun requirePin1Preflight(): NativePin1Preflight {
         checkOpen()
         return checkNotNull(pin1Preflight) {

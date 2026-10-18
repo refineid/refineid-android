@@ -36,6 +36,7 @@ import fi.refineid.android.core.QualifiedSignResult
 import fi.refineid.android.core.QualifiedSignatureVerifier
 import fi.refineid.android.core.QualifiedSigningAlgorithm
 import fi.refineid.android.core.QualifiedSigningInputMode
+import fi.refineid.android.core.attemptsLeft
 import fi.refineid.android.core.verifyPin1OnHeldChannel
 import fi.refineid.android.diagnostics.AppTrace
 import java.io.IOException
@@ -62,6 +63,9 @@ internal class ContactlessSession(
     private val ownerThread = Thread.currentThread()
     private var isClosed = false
 
+    /** True after a PIN command left on this channel without a fresh preflight since. */
+    private var attemptsStale = false
+
     /**
      * Replace the tag handle after the stack re-polled the resting
      * card; the previous handle is dead once the field cycled.
@@ -84,6 +88,17 @@ internal class ContactlessSession(
         // channel; the next operation must re-run PACE on the fresh handle.
         releaseHeldSession()
         isoDep = freshIsoDep
+    }
+
+    /**
+     * PIN 1 attempts the card reported at the last open of the channel;
+     * null when it did not say, when the session is closed, or when a PIN
+     * command has left on this channel since, so the count is not known.
+     */
+    fun pin1AttemptsLeft(): Int? {
+        checkOwnerThread()
+        if (isClosed || attemptsStale) return null
+        return material.cachedPin1Preflight()?.state?.attemptsLeft()
     }
 
     fun copyAuthenticationCertificate(): NativeAuthenticationCertificate {
@@ -148,6 +163,8 @@ internal class ContactlessSession(
                 ) {
                     is fi.refineid.android.core.NativeContactlessOpenResult.Success -> {
                         opened.certificate.close()
+                        material.cachePin1Preflight(opened.preflight)
+                        attemptsStale = false
                         heldSession = true
                         null
                     }
@@ -171,12 +188,14 @@ internal class ContactlessSession(
 
             override fun closeField() = closeIsoDep()
 
-            override fun verify(pin1: Pin1Submission): fi.refineid.android.core.Pin1Verification =
-                fi.refineid.android.core.NativePin1Verification.verify(
+            override fun verify(pin1: Pin1Submission): fi.refineid.android.core.Pin1Verification {
+                attemptsStale = true
+                return fi.refineid.android.core.NativePin1Verification.verify(
                     pin1 = pin1,
                     exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
                     heldSession = true,
                 )
+            }
         }
 
     /** Clears the held channel's native keys; the shared native slot holds them until then. */

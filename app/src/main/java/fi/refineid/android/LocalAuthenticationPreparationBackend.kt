@@ -5,6 +5,7 @@ import fi.refineid.android.core.AuthenticationPreparationBackend
 import fi.refineid.android.core.AuthenticationReadiness
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.CardConnection
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationOutcome
 import fi.refineid.android.core.Pin1VerificationResult
@@ -50,7 +51,7 @@ internal class LocalAuthenticationPreparationBackend(
         )
     }
 
-    override suspend fun connect(can: CanSubmission?): Boolean {
+    override suspend fun connect(can: CanSubmission?): CardConnection {
         app.authenticationInvalidation?.join()
         val generation = app.authenticationGeneration.get()
         val wired = app.readerController.snapshot.cardPresence == CardPresence.PRESENT
@@ -62,12 +63,24 @@ internal class LocalAuthenticationPreparationBackend(
         } else {
             app.nfcReaderController.connect(can, null)
         }
-        val ready = awaitPreferredCard()
-        if (!ready || generation != app.authenticationGeneration.get()) return false
+        val connection = awaitPreferredCard()
+        if (connection != CardConnection.READY) return connection
+        if (generation != app.authenticationGeneration.get()) return CardConnection.REFUSED
         val current = currentStamp()
         stamp = current
         selected = if (current.wired) app.readerController else app.nfcReaderController.authenticationCardService
-        return true
+        return CardConnection.READY
+    }
+
+    override suspend fun pin1AttemptsLeft(): Int? {
+        val expected = stamp ?: return null
+        if (expected != currentStamp()) return null
+        val service = if (expected.wired) app.readerController else app.nfcReaderController.authenticationCardService
+        return suspendCancellableCoroutine { continuation ->
+            service.requestPin1AttemptsLeft { attempts ->
+                if (continuation.isActive) continuation.resume(attempts)
+            }
+        }
     }
 
     /**
@@ -137,33 +150,28 @@ internal class LocalAuthenticationPreparationBackend(
         }
     }
 
-    private suspend fun awaitPreferredCard(): Boolean =
+    /**
+     * Waits for the reader to settle: a card ready, a card that answered
+     * and cannot be used, or nothing within the wait, which counts as no
+     * card. A contactless card that lost contact is no card either: the
+     * caller arms the reader again and the holder taps again.
+     */
+    private suspend fun awaitPreferredCard(): CardConnection =
         withTimeoutOrNull(CARD_WAIT_TIMEOUT_MS) {
+            // A transport error the reader published before this wait began
+            // belongs to the previous tap; only a newer snapshot settles it.
+            val stale = app.nfcReaderController.snapshot.takeIf { it.status == NfcReaderStatus.TRANSPORT_ERROR }
             suspendCancellableCoroutine { continuation ->
                 lateinit var usbListener: (UsbReaderSnapshot) -> Unit
                 lateinit var nfcListener: (NfcReaderSnapshot) -> Unit
 
                 fun finish() {
-                    val usb = app.readerController.snapshot
-                    val nfc = app.nfcReaderController.snapshot
-                    val wired = usb.cardPresence == CardPresence.PRESENT
-                    val ready = if (wired) app.readerController.isCardReady else app.nfcReaderController.isCardReady
-                    val failed =
-                        if (wired) {
-                            usb.status == ReaderConnectionStatus.ACCESS_NUMBER_REQUIRED ||
-                                usb.status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER ||
-                                usb.status == ReaderConnectionStatus.ACTIVATION_REQUIRED ||
-                                usb.status == ReaderConnectionStatus.CARD_ERROR ||
-                                usb.status == ReaderConnectionStatus.TRANSPORT_ERROR
-                        } else {
-                            nfc.status == NfcReaderStatus.WRONG_CAN ||
-                                nfc.status == NfcReaderStatus.ACTIVATION_REQUIRED ||
-                                nfc.status == NfcReaderStatus.TRANSPORT_ERROR
-                        }
-                    if ((ready || failed) && continuation.isActive) {
+                    val nfcUnsettled = stale != null && app.nfcReaderController.snapshot === stale
+                    val connection = settledConnection(nfcUnsettled) ?: return
+                    if (continuation.isActive) {
                         app.readerController.removeStateListener(usbListener)
                         app.nfcReaderController.removeStateListener(nfcListener)
-                        continuation.resume(ready)
+                        continuation.resume(connection)
                     }
                 }
                 usbListener = { finish() }
@@ -178,7 +186,35 @@ internal class LocalAuthenticationPreparationBackend(
                     }
                 }
             }
-        } ?: false
+        } ?: CardConnection.ABSENT
+
+    /** What the reader holds right now, or null while it is still waiting. */
+    private fun settledConnection(nfcUnsettled: Boolean): CardConnection? {
+        val usb = app.readerController.snapshot
+        if (usb.cardPresence == CardPresence.PRESENT) {
+            return when {
+                app.readerController.isCardReady -> CardConnection.READY
+
+                usb.status == ReaderConnectionStatus.ACCESS_NUMBER_REQUIRED ||
+                    usb.status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER -> CardConnection.WRONG_CAN
+
+                usb.status == ReaderConnectionStatus.ACTIVATION_REQUIRED ||
+                    usb.status == ReaderConnectionStatus.CARD_ERROR ||
+                    usb.status == ReaderConnectionStatus.TRANSPORT_ERROR -> CardConnection.REFUSED
+
+                else -> null
+            }
+        }
+        if (nfcUnsettled) return null
+        val nfc = app.nfcReaderController.snapshot
+        return when {
+            app.nfcReaderController.isCardReady -> CardConnection.READY
+            nfc.status == NfcReaderStatus.WRONG_CAN -> CardConnection.WRONG_CAN
+            nfc.status == NfcReaderStatus.ACTIVATION_REQUIRED -> CardConnection.REFUSED
+            nfc.status == NfcReaderStatus.TRANSPORT_ERROR -> CardConnection.ABSENT
+            else -> null
+        }
+    }
 
     private fun currentStamp(): TransportStamp {
         val wired = app.readerController.snapshot.cardPresence == CardPresence.PRESENT
