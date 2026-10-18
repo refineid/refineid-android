@@ -9,6 +9,7 @@ import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.readOnOwnerThread
 import fi.refineid.android.usb.awaitPreservingInterrupt
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
@@ -33,30 +34,18 @@ internal class NfcAuthenticationCardService(
     /** Copies the public leaf while preserving session thread confinement. */
     override fun requestAuthenticationCertificate(onResult: (NativeAuthenticationCertificate?) -> Unit) {
         val generation = currentGeneration()
-        try {
-            probeExecutor.execute {
-                val certificate =
-                    if (generation == currentGeneration()) {
-                        try {
-                            activeSession()?.copyAuthenticationCertificate() ?: cachedCertificate()
-                        } catch (_: IllegalStateException) {
-                            null
-                        }
-                    } else {
-                        null
-                    }
-                mainHandler.post {
-                    if (generation == currentGeneration()) {
-                        onResult(certificate)
-                    } else {
-                        certificate?.close()
-                        onResult(null)
-                    }
-                }
-            }
-        } catch (_: RejectedExecutionException) {
-            onResult(null)
+        readOnOwnerThread(probeExecutor, mainHandler, {
+            generation == currentGeneration()
+        }, activeSession, NativeAuthenticationCertificate::close, onResult) {
+            it?.copyAuthenticationCertificate() ?: cachedCertificate()
         }
+    }
+
+    override fun requestPin1AttemptsLeft(onResult: (Int?) -> Unit) {
+        val generation = currentGeneration()
+        readOnOwnerThread(probeExecutor, mainHandler, {
+            generation == currentGeneration()
+        }, activeSession, {}, onResult) { it?.pin1AttemptsLeft() }
     }
 
     override fun verifyAuthenticationPin(

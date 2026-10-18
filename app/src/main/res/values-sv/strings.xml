@@ -43,6 +43,7 @@
     <string name="signed">Signerat</string>
     <string name="wrong_pin">Fel PIN</string>
     <string name="pin_locked">PIN låst</string>
+    <string name="pin_attempts_left" tools:ignore="PluralsCandidate">%1$d försök kvar</string>
     <string name="unavailable">Inte tillgänglig</string>
     <string name="card_not_found">Kortet hittades inte</string>
     <string name="pin_invalid">Ogiltig PIN</string>

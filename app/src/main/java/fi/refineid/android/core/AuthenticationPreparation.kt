@@ -3,6 +3,7 @@ package fi.refineid.android.core
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,10 +18,26 @@ internal data class AuthenticationReadiness(
     val available: Boolean,
 )
 
+/**
+ * How a wait for the card ended: the card is ready, no card answered
+ * (none seen, or contact lost before it was read), the card refused the
+ * access number, or the card answered and cannot be used.
+ */
+internal enum class CardConnection {
+    READY,
+    ABSENT,
+    WRONG_CAN,
+    REFUSED,
+}
+
 internal interface AuthenticationPreparationBackend {
     fun readiness(): AuthenticationReadiness
 
-    suspend fun connect(can: CanSubmission?): Boolean
+    /** Arms the reader with the holder's access number, when one is needed, and waits for the card. */
+    suspend fun connect(can: CanSubmission?): CardConnection
+
+    /** PIN 1 attempts the ready card allows, read without a VERIFY; null when it cannot be read. */
+    suspend fun pin1AttemptsLeft(): Int?
 
     /** Takes ownership of [pin1] and [outcome]; see [runPin1Verification]. */
     suspend fun verify(
@@ -47,6 +64,7 @@ internal sealed interface AuthenticationPreparationState {
     data class Credentials(
         val needsCan: Boolean,
         val needsPin: Boolean,
+        val attemptsLeft: Int? = null,
     ) : AuthenticationPreparationState
 
     data object WaitingForCard : AuthenticationPreparationState
@@ -60,11 +78,20 @@ internal sealed interface AuthenticationPreparationState {
     ) : AuthenticationPreparationState
 }
 
-/** Owns preparation and continuation; no Android types or credentials in published state. */
+/**
+ * Owns preparation and continuation; no Android types or credentials in
+ * published state. The access number and PIN 1 are asked once per
+ * preparation and held in memory until the card accepts them, answers
+ * about them, or the preparation ends; a card that was not seen or lost
+ * contact is waited for again. A VERIFY whose answer was lost may have
+ * spent an attempt, so the held PIN goes to the card again only after the
+ * attempts the card allows are read back unchanged.
+ */
 internal class AuthenticationPreparation(
     private val scope: CoroutineScope,
     private val backend: AuthenticationPreparationBackend,
     private val pinCache: AuthenticationPinCache,
+    private val preparationTimeoutMs: Long = PREPARATION_TIMEOUT_MS,
 ) {
     private val mutableState = MutableStateFlow<AuthenticationPreparationState>(AuthenticationPreparationState.Idle)
     val state: StateFlow<AuthenticationPreparationState> = mutableState.asStateFlow()
@@ -73,6 +100,14 @@ internal class AuthenticationPreparation(
     private var job: Job? = null
     private var continuation: (() -> Unit)? = null
     private var cancellation: (() -> Unit)? = null
+    private var heldPin: Pin1Submission? = null
+    private var heldCan: CanSubmission? = null
+
+    /** Attempts the card allowed before the last VERIFY left, or null when unread. */
+    private var attemptsBeforeVerify: Int? = null
+
+    /** True while a VERIFY may have reached the card without an answer. */
+    private var answerLost = false
 
     fun start(
         purpose: AuthenticationPurpose,
@@ -88,6 +123,7 @@ internal class AuthenticationPreparation(
         cancellation = onCancelled
         mutablePurpose.value = purpose
         val ready = backend.readiness()
+        val needsPin = heldPin == null && !pinCache.hasPin
         when {
             !ready.available -> {
                 fail(Pin1VerificationResult.CARD_UNAVAILABLE)
@@ -97,8 +133,8 @@ internal class AuthenticationPreparation(
                 complete()
             }
 
-            ready.needsCan || !pinCache.hasPin -> {
-                mutableState.value = AuthenticationPreparationState.Credentials(ready.needsCan, !pinCache.hasPin)
+            ready.needsCan || needsPin -> {
+                mutableState.value = AuthenticationPreparationState.Credentials(ready.needsCan, needsPin)
             }
 
             else -> {
@@ -116,37 +152,30 @@ internal class AuthenticationPreparation(
             pin1?.close()
             return
         }
+        if (pin1 != null) {
+            releasePin()
+            heldPin = pin1
+        }
+        if (can != null) {
+            heldCan?.close()
+            heldCan = can
+        }
         job =
             scope.launch {
-                val candidate = pin1 ?: pinCache.take()
-                var copy: ByteArray? = null
                 try {
-                    if (candidate == null) {
+                    val held = heldPin ?: pinCache.take()?.also { heldPin = it }
+                    if (held == null) {
                         fail(Pin1VerificationResult.INVALID_PIN)
                         return@launch
                     }
-                    if (pinCache.isRejected(candidate)) {
+                    if (pinCache.isRejected(held)) {
                         backend.invalidate()
                         fail(Pin1VerificationResult.WRONG_PIN)
                         return@launch
                     }
-                    copy = candidate.copyBytes()
-                    withTimeout(PREPARATION_TIMEOUT_MS) {
-                        mutableState.value = AuthenticationPreparationState.WaitingForCard
-                        if (!backend.connect(can)) {
-                            fail(Pin1VerificationResult.CARD_UNAVAILABLE)
-                            return@withTimeout
-                        }
-                        mutableState.value = AuthenticationPreparationState.Verifying
-                        val outcome = Pin1VerificationOutcome(candidate.copyBytes(), pinCache, backend::invalidate)
-                        val result = backend.verify(candidate, outcome)
-                        coroutineContext.ensureActive()
-                        if (result != Pin1VerificationResult.VERIFIED) {
-                            fail(result)
-                        } else if (backend.retainVerified(checkNotNull(copy))) {
-                            complete()
-                        } else {
-                            fail(Pin1VerificationResult.CARD_UNAVAILABLE)
+                    withTimeout(preparationTimeoutMs) {
+                        while (attempt(held)) {
+                            delay(REARM_PAUSE_MS)
                         }
                     }
                 } catch (error: CancellationException) {
@@ -157,12 +186,115 @@ internal class AuthenticationPreparation(
                     }
                 } catch (_: RuntimeException) {
                     fail(Pin1VerificationResult.BRIDGE_ERROR)
-                } finally {
-                    copy?.fill(0)
-                    candidate?.close()
-                    can?.close()
                 }
             }
+    }
+
+    /**
+     * One wait for the card and one verification with the held PIN. True
+     * when no card answered, so the wait starts over; false when the
+     * preparation ended, completed or failed, or asks for the PIN again.
+     */
+    private suspend fun attempt(held: Pin1Submission): Boolean {
+        mutableState.value = AuthenticationPreparationState.WaitingForCard
+        when (backend.connect(heldCan?.copy())) {
+            CardConnection.ABSENT -> {
+                return true
+            }
+
+            CardConnection.WRONG_CAN -> {
+                releaseCan()
+                fail(Pin1VerificationResult.PACE_REJECTED)
+                return false
+            }
+
+            CardConnection.REFUSED -> {
+                fail(Pin1VerificationResult.CARD_UNAVAILABLE)
+                return false
+            }
+
+            CardConnection.READY -> {}
+        }
+        val attempts = backend.pin1AttemptsLeft()
+        if (attempts == 0) {
+            lockedOut(held)
+            return false
+        }
+        if (answerLost && !pinMayGoAgain(held, attempts)) return false
+        attemptsBeforeVerify = attempts
+        mutableState.value = AuthenticationPreparationState.Verifying
+        answerLost = true
+        val result = verifyHeld(held)
+        coroutineContext.ensureActive()
+        when (result) {
+            Pin1VerificationResult.CARD_UNAVAILABLE, Pin1VerificationResult.TRANSPORT_ERROR -> {
+                return true
+            }
+
+            Pin1VerificationResult.VERIFIED -> {
+                answerLost = false
+                val retained = held.copyBytes()
+                val kept =
+                    try {
+                        backend.retainVerified(retained)
+                    } finally {
+                        retained.fill(0)
+                    }
+                if (kept) complete() else fail(Pin1VerificationResult.CARD_UNAVAILABLE)
+            }
+
+            else -> {
+                answerLost = false
+                fail(result)
+            }
+        }
+        return false
+    }
+
+    /** Sends the held PIN once; the copies the verifier takes are zeroed here on every path. */
+    private suspend fun verifyHeld(held: Pin1Submission): Pin1VerificationResult {
+        val candidate = held.copyBytes()
+        val submitted = held.copyBytes()
+        return try {
+            backend.verify(
+                Pin1Submission.fromOwnedBytes(submitted),
+                Pin1VerificationOutcome(candidate, pinCache, backend::invalidate),
+            )
+        } finally {
+            candidate.fill(0)
+            submitted.fill(0)
+        }
+    }
+
+    /**
+     * Whether a PIN whose last answer was lost may go to the card again:
+     * only when the card still allows as many attempts as before it left.
+     * Fewer means the card tested and refused it; none readable means the
+     * holder decides, with the PIN asked again.
+     */
+    private fun pinMayGoAgain(
+        held: Pin1Submission,
+        attempts: Int?,
+    ): Boolean {
+        val before = attemptsBeforeVerify
+        if (attempts != null && before != null && attempts == before) return true
+        if (attempts != null && before != null && attempts < before) {
+            Pin1VerificationOutcome(held.copyBytes(), pinCache, backend::invalidate).use {
+                it.report(Pin1VerificationResult.WRONG_PIN)
+            }
+        }
+        releasePin()
+        mutableState.value = AuthenticationPreparationState.Credentials(false, true, attempts)
+        return false
+    }
+
+    /** The card allows no PIN 1 attempt: nothing is sent, the holder is told. */
+    private fun lockedOut(held: Pin1Submission) {
+        Pin1VerificationOutcome(held.copyBytes(), pinCache, backend::invalidate).use {
+            it.report(Pin1VerificationResult.PIN_LOCKED)
+        }
+        releasePin()
+        fail(Pin1VerificationResult.PIN_LOCKED)
     }
 
     fun retry() {
@@ -179,6 +311,8 @@ internal class AuthenticationPreparation(
         job?.cancel()
         if (preparing) backend.cancel()
         job = null
+        releasePin()
+        releaseCan()
         continuation = null
         val cancelled = cancellation
         cancellation = null
@@ -187,6 +321,8 @@ internal class AuthenticationPreparation(
     }
 
     private fun complete() {
+        releasePin()
+        releaseCan()
         mutableState.value = AuthenticationPreparationState.Ready
         val action = continuation
         continuation = null
@@ -194,11 +330,36 @@ internal class AuthenticationPreparation(
         action?.invoke()
     }
 
+    /** The card's answer about the PIN ends the hold; a card not reached keeps it for the retry. */
     private fun fail(result: Pin1VerificationResult) {
+        if (result in PIN_ANSWERS) releasePin()
         mutableState.value = AuthenticationPreparationState.Failed(result)
+    }
+
+    private fun releasePin() {
+        heldPin?.close()
+        heldPin = null
+        attemptsBeforeVerify = null
+        answerLost = false
+    }
+
+    private fun releaseCan() {
+        heldCan?.close()
+        heldCan = null
     }
 
     private companion object {
         const val PREPARATION_TIMEOUT_MS = 60_000L
+
+        /** Breath between a lost card and the next wait, so a busy reader is not asked in a tight loop. */
+        const val REARM_PAUSE_MS = 250L
+        val PIN_ANSWERS =
+            setOf(
+                Pin1VerificationResult.INVALID_PIN,
+                Pin1VerificationResult.WRONG_PIN,
+                Pin1VerificationResult.PIN_LOCKED,
+                Pin1VerificationResult.SAFETY_REFUSED,
+                Pin1VerificationResult.VERIFICATION_REJECTED,
+            )
     }
 }

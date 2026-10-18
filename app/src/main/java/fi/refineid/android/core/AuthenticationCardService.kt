@@ -20,6 +20,9 @@ internal interface AuthenticationCardService {
 
     fun requestAuthenticationCertificate(onResult: (NativeAuthenticationCertificate?) -> Unit)
 
+    /** PIN 1 attempts the card allows, read without a VERIFY; null when no card answers or it does not say. */
+    fun requestPin1AttemptsLeft(onResult: (Int?) -> Unit) = onResult(null)
+
     fun signAuthenticationMessage(
         algorithm: AuthenticationSigningAlgorithm,
         pin1: Pin1Submission,

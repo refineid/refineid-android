@@ -26,6 +26,7 @@ import fi.refineid.android.core.NativeVerification
 import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationResult
+import fi.refineid.android.core.readOnOwnerThread
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.keychain.nextProviderGeneration
 import fi.refineid.android.usb.ccid.CcidSessionOpenResult
@@ -672,40 +673,27 @@ internal class UsbReaderController(
 
     /** Copies the public leaf while preserving session thread confinement. */
     override fun requestAuthenticationCertificate(onResult: (NativeAuthenticationCertificate?) -> Unit) {
-        if (
-            !isStarted ||
-            latestSnapshot.status != ReaderConnectionStatus.READY ||
-            latestSnapshot.cardPresence != CardPresence.PRESENT
-        ) {
-            onResult(null)
-            return
-        }
         val generation = probeGeneration
-        try {
-            ioExecutor.execute {
-                val certificate =
-                    if (isStarted && generation == probeGeneration) {
-                        try {
-                            activeSession?.copyAuthenticationCertificate()
-                        } catch (_: IllegalStateException) {
-                            null
-                        }
-                    } else {
-                        null
-                    }
-                mainHandler.post {
-                    if (isStarted && generation == probeGeneration) {
-                        onResult(certificate)
-                    } else {
-                        certificate?.close()
-                        onResult(null)
-                    }
-                }
-            }
-        } catch (_: RejectedExecutionException) {
-            onResult(null)
+        readOnOwnerThread(ioExecutor, mainHandler, {
+            servesReads(generation)
+        }, { activeSession }, NativeAuthenticationCertificate::close, onResult) {
+            it?.copyAuthenticationCertificate()
         }
     }
+
+    override fun requestPin1AttemptsLeft(onResult: (Int?) -> Unit) {
+        val generation = probeGeneration
+        readOnOwnerThread(ioExecutor, mainHandler, {
+            servesReads(generation)
+        }, { activeSession }, {}, onResult) { it?.pin1AttemptsLeft() }
+    }
+
+    /** Whether the ready card session of [generation] is still the one being served. */
+    private fun servesReads(generation: Int): Boolean =
+        isStarted &&
+            generation == probeGeneration &&
+            latestSnapshot.status == ReaderConnectionStatus.READY &&
+            latestSnapshot.cardPresence == CardPresence.PRESENT
 
     override fun verifyAuthenticationPin(
         pin1: Pin1Submission,

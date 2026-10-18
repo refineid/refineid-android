@@ -161,6 +161,7 @@ private fun PreparationCredentialsDialog(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         modifier = Modifier.fillMaxWidth().testTag("AuthenticationPreparationPin1"),
                     )
+                    state.attemptsLeft?.let { Text(stringResource(R.string.pin_attempts_left, it)) }
                 }
             }
         },

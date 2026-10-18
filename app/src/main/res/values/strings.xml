@@ -48,6 +48,7 @@
     <string name="signed">Signed</string>
     <string name="wrong_pin">Wrong PIN</string>
     <string name="pin_locked">PIN locked</string>
+    <string name="pin_attempts_left" tools:ignore="PluralsCandidate">%1$d attempts left</string>
     <string name="unavailable">Unavailable</string>
     <string name="card_not_found">Card not found</string>
     <string name="pin_invalid">Invalid PIN</string>
