@@ -33,10 +33,12 @@ class RappPairingCodeTest {
 
     @Test
     fun testRejectsExcludedLetters() {
-        assertEquals("", RappPairingCode.normalize("iLo8k2"))
-        assertEquals("", RappPairingCode.normalize("ILO8K2"))
-        assertFalse(RappPairingCode.isValid("7KX4MO"))
+        for (excluded in listOf("7KX4MI", "7KX4Mi", "7KX4ML", "7KX4Ml", "7KX4MO", "7KX4Mo", "7KX4MU", "7KX4Mu")) {
+            assertEquals(excluded, "", RappPairingCode.normalize(excluded))
+            assertFalse(excluded, RappPairingCode.isValid(excluded))
+        }
         assertTrue(RappPairingCode.isValid("7KX4M0"))
+        assertTrue(RappPairingCode.isValid("7KX4M1"))
     }
 
     @Test
