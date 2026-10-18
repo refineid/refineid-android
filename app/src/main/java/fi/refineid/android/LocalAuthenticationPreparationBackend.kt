@@ -60,7 +60,9 @@ internal class LocalAuthenticationPreparationBackend(
             if (!app.readerController.isCardReady) {
                 if (can != null) app.readerController.connect(can.copy(), null) else app.readerController.refresh()
             }
-        } else {
+        } else if (can != null || !app.nfcReaderController.snapshot.awaitingCard) {
+            // A controller already waiting re-polls a lost card on its own;
+            // arming it again would drop the card it is about to open.
             app.nfcReaderController.connect(can, null)
         }
         val connection = awaitPreferredCard()
@@ -158,16 +160,12 @@ internal class LocalAuthenticationPreparationBackend(
      */
     private suspend fun awaitPreferredCard(): CardConnection =
         withTimeoutOrNull(CARD_WAIT_TIMEOUT_MS) {
-            // A transport error the reader published before this wait began
-            // belongs to the previous tap; only a newer snapshot settles it.
-            val stale = app.nfcReaderController.snapshot.takeIf { it.status == NfcReaderStatus.TRANSPORT_ERROR }
             suspendCancellableCoroutine { continuation ->
                 lateinit var usbListener: (UsbReaderSnapshot) -> Unit
                 lateinit var nfcListener: (NfcReaderSnapshot) -> Unit
 
                 fun finish() {
-                    val nfcUnsettled = stale != null && app.nfcReaderController.snapshot === stale
-                    val connection = settledConnection(nfcUnsettled) ?: return
+                    val connection = settledConnection() ?: return
                     if (continuation.isActive) {
                         app.readerController.removeStateListener(usbListener)
                         app.nfcReaderController.removeStateListener(nfcListener)
@@ -189,7 +187,7 @@ internal class LocalAuthenticationPreparationBackend(
         } ?: CardConnection.ABSENT
 
     /** What the reader holds right now, or null while it is still waiting. */
-    private fun settledConnection(nfcUnsettled: Boolean): CardConnection? {
+    private fun settledConnection(): CardConnection? {
         val usb = app.readerController.snapshot
         if (usb.cardPresence == CardPresence.PRESENT) {
             return when {
@@ -205,13 +203,13 @@ internal class LocalAuthenticationPreparationBackend(
                 else -> null
             }
         }
-        if (nfcUnsettled) return null
+        // A lost field is not an answer: the reader re-polls the card on
+        // its own, and the wait ends on its own limit.
         val nfc = app.nfcReaderController.snapshot
         return when {
             app.nfcReaderController.isCardReady -> CardConnection.READY
             nfc.status == NfcReaderStatus.WRONG_CAN -> CardConnection.WRONG_CAN
             nfc.status == NfcReaderStatus.ACTIVATION_REQUIRED -> CardConnection.REFUSED
-            nfc.status == NfcReaderStatus.TRANSPORT_ERROR -> CardConnection.ABSENT
             else -> null
         }
     }
