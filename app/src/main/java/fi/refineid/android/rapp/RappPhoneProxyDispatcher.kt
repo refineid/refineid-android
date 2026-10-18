@@ -142,7 +142,8 @@ internal class RappPhoneProxyDispatcher(
                 handleRelayEvent(event)
             }
         activeListener = listener
-        listener.start(StreamRendezvousName.ephemeralName(), sessionAttributes(vault))
+        val instance = StreamRendezvousName.ephemeralName()
+        listener.start(instance, sessionAttributes(vault, instance))
         RappCustodianService.ensureRunning(context)
         hintRefreshJob?.cancel()
         hintRefreshJob =
@@ -150,25 +151,77 @@ internal class RappPhoneProxyDispatcher(
                 while (isActive && activeListener === listener) {
                     delay(StreamRendezvousName.millisUntilNextWindow(System.currentTimeMillis()))
                     if (activeListener === listener) {
-                        listener.updateAttributes(sessionAttributes(vault))
+                        listener.updateAttributes(sessionAttributes(vault, listener.registeredName ?: instance))
                     }
                 }
             }
     }
 
+    /** Republishes the session record, after the set of pairings or revocations changed. */
+    fun refreshAnnouncement() {
+        val listener = activeListener ?: return
+        val vlt = vault ?: return
+        val instance = listener.registeredName ?: return
+        listener.updateAttributes(sessionAttributes(vlt, instance))
+    }
+
     /**
      * Session-mode TXT attributes carrying the current rotating hints of
      * the most recently used custodian pairings (discovery hierarchy
-     * section 4.3).
+     * section 4.3) and the revocation hints of the pairings revoked within
+     * the announcement window, bound to [instance] (RAPP v26.10.18
+     * section 4.6 item 4).
      */
-    private fun sessionAttributes(vault: AndroidRappVault): Map<String, String> {
+    private fun sessionAttributes(
+        vault: AndroidRappVault,
+        instance: String,
+    ): Map<String, String> {
         val now = StreamRendezvousName.nowUnixSeconds().toULong()
         val candidates =
             announcementCandidates(vault) { record -> record.discoveryHint(now) }
         return try {
-            StreamRendezvousName.attributes(rappSessionRecord(candidates))
+            StreamRendezvousName.attributes(
+                rappSessionRecord(candidates, vault.unexpiredRevocations(now), instance, now),
+            )
         } catch (_: Exception) {
             StreamRendezvousName.attributes(StreamRendezvousName.MODE_SESSION)
+        }
+    }
+
+    /**
+     * Closes the open session to [pairIdHex] as revoked (RAPP v26.10.18
+     * section 4.6 item 1), so the requester learns of the revocation before
+     * this side destroys the key. A session to another pairing is left alone.
+     */
+    fun closePairingRevoked(pairIdHex: String) {
+        val currentPair = pairRecord ?: return
+        val currentHex = currentPair.metadata().pairId.joinToString("") { "%02x".format(it) }
+        if (currentHex != pairIdHex) return
+        operationBridge?.let { bridge ->
+            try {
+                for (frame in listOfNotNull(bridge.closeWithReason(RappCloseReason.PAIRING_REVOKED).frame)) {
+                    activeListener?.send(frame)
+                }
+            } catch (_: Exception) {
+            }
+        }
+        dropConnection()
+    }
+
+    /**
+     * Reports to the requester whether a card this custodian can serve is
+     * present (RAPP v26.10.18 section 8.4): once right after the session is
+     * established, and on every change while it is open. Primed or cached
+     * material without a card is absence.
+     */
+    fun cardPresenceChanged(present: Boolean) {
+        val bridge = operationBridge ?: return
+        if (lastReportedCardPresent == present) return
+        lastReportedCardPresent = present
+        try {
+            handleBridgeAction(bridge.reportCardStatus(present), bridge)
+        } catch (e: Exception) {
+            AppTrace.rappProgressReportFailed("card_status", e.javaClass.simpleName)
         }
     }
 
@@ -417,6 +470,8 @@ internal class RappPhoneProxyDispatcher(
                 )
             operationBridge = newOpBridge
             startLivenessLoop(newOpBridge)
+            lastReportedCardPresent = null
+            cardPresenceChanged(isCardReady())
             val currentPair = pairRecord
             if (currentPair != null) {
                 val hex = currentPair.metadata().pairId.joinToString("") { "%02x".format(it) }
@@ -441,6 +496,10 @@ internal class RappPhoneProxyDispatcher(
     private var activeOperationJob: Job? = null
     private var livenessJob: Job? = null
     private var hintRefreshJob: Job? = null
+
+    /** The card presence last sent on the open session; null before the first report. */
+    @Volatile
+    private var lastReportedCardPresent: Boolean? = null
 
     private fun clearPendingPins() {
         pendingPin1.values.forEach { it.close() }
@@ -525,11 +584,19 @@ internal class RappPhoneProxyDispatcher(
 
             RappBridgeActionKind.PAIR_REVOKED -> {
                 val currentPair = pairRecord
+                val vlt = vault
                 if (currentPair != null) {
                     val hex = currentPair.metadata().pairId.joinToString("") { "%02x".format(it) }
                     catalog.removePair(hex)
+                    if (vlt != null) {
+                        // The core revoked the pairing; what remains of it
+                        // yields the retention that announces the revocation.
+                        pairRecord = null
+                        RappPairRevocation.revoke(currentPair, vlt)
+                    }
                 }
                 dropConnection()
+                refreshAnnouncement()
                 return true
             }
 
@@ -665,6 +732,7 @@ internal class RappPhoneProxyDispatcher(
                             },
                             onDenied = { deny(opId, bridge) },
                         )
+                        reportConsentShown(opId, bridge)
                     }
                 }
             }
@@ -695,6 +763,7 @@ internal class RappPhoneProxyDispatcher(
                         },
                         onDenied = { deny(opId, bridge) },
                     )
+                    reportConsentShown(opId, bridge)
                 }
             }
 
@@ -742,10 +811,26 @@ internal class RappPhoneProxyDispatcher(
         sessionBridge?.close()
         sessionBridge = null
         sessionHandshakeDone = false
+        lastReportedCardPresent = null
         releasePairRecord()
         clearPendingPins()
         _connectedPeer.value = null
         dismissInbox()
+    }
+
+    /** Tells the requester the consent view is on screen (RAPP v26.10.18 section 8.2 item 3). */
+    private fun reportConsentShown(
+        opId: ByteArray,
+        bridge: RappOperationBridge,
+    ) {
+        try {
+            handleBridgeAction(
+                bridge.reportProgress(opId, uniffi.refineid_rapp.RappProgressEvent.CONSENT_SHOWN),
+                bridge,
+            )
+        } catch (e: Exception) {
+            AppTrace.rappProgressReportFailed("consent_shown", e.javaClass.simpleName)
+        }
     }
 
     private fun deny(
@@ -954,7 +1039,7 @@ internal class RappPhoneProxyDispatcher(
     }
 
     /**
-     * Reports a credential the card refused (RAPP v26.10.1 section 10.2). A
+     * Reports a credential the card refused (RAPP v26.10.18 section 10.2). A
      * wrong PIN with attempts left keeps the pairing; a blocked counter, or a
      * refusal whose count is unknown, revokes it.
      */
@@ -1574,7 +1659,7 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Signs every document of a batch with the one PIN 2 entry the holder
-     * approved, journaling each signature before the next (RAPP v26.10.10
+     * approved, journaling each signature before the next (RAPP v26.10.18
      * section 9.3). A batch stopped after a signature answers ambiguous, and
      * the signatures made so far travel with it.
      */

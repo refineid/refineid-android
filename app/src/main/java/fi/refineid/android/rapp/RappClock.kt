@@ -15,9 +15,11 @@ internal object RappClock {
     fun wallMs(): ULong = System.currentTimeMillis().toULong()
 
     /**
-     * Milliseconds of monotonic time; never moves backwards and keeps
-     * counting across device sleep, so offer and liveness deadlines track
-     * real elapsed time.
+     * Milliseconds of the continuous clock (RAPP v26.10.18 section 8.2 item
+     * 1): never moves backwards and keeps counting through device sleep and
+     * process suspension, so offer, liveness and operation deadlines track
+     * real elapsed time. `SystemClock.uptimeMillis` pauses in deep sleep and
+     * is never used for a deadline.
      */
     fun monotonicMs(): ULong = SystemClock.elapsedRealtime().toULong()
 }

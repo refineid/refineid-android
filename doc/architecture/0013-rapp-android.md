@@ -18,7 +18,7 @@ what turns a proven pair of devices into a cross-platform one.
 ## Roles
 
 Android pairs only as the custodian: the phone shows the pairing code, serves
-the RAPP v26.10.10 offer over the stream transport, and holds the card. No
+the RAPP v26.10.18 offer over the stream transport, and holds the card. No
 screen pairs the phone as a requester, so the app never calls
 `RappPairingBridge.fromBootstrap`.
 

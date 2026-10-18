@@ -98,11 +98,12 @@ class RappCpacePairingFlowTest {
             requester.receiveConfirmation(proxyConfirm, RappClock.monotonicMs())
             proxy.receiveConfirmation(reqConfirm, RappClock.monotonicMs())
 
-            // 4. Session established with matching pair ID
-            val reqPair = requester.finishPairing(RappClock.wallMs(), RappClock.monotonicMs())
-            val proxyPair = proxy.finishPairing(RappClock.wallMs(), RappClock.monotonicMs())
+            // 4. Storage confirmed on both sides, with matching pair ID
+            val (reqPair, proxyPair) = RappTestOffers.confirmStorage(requester, proxy, RappClock.monotonicMs())
 
             assertArrayEquals(reqPair.metadata().pairId, proxyPair.metadata().pairId)
+            assertTrue(reqPair.metadata().storageConfirmed)
+            assertTrue(proxyPair.metadata().storageConfirmed)
         } finally {
             randomReq.fill(0)
             randomProxy.fill(0)

@@ -227,7 +227,7 @@ internal class RemoteCardModel(
                         .chunked(2)
                         .map { it.toInt(16).toByte() }
                         .toByteArray()
-                vault.revokeDeviceOnly(bytes, RappClock.wallMs())
+                RappPairRevocation.revoke(bytes, vault)
             } catch (_: Exception) {
             }
             catalog.removePair(p.pairIdHex)
