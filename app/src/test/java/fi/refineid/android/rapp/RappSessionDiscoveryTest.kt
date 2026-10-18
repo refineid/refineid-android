@@ -15,7 +15,7 @@ import uniffi.refineid_rapp.rappStreamProfileName
 
 /**
  * Session discovery publishes no stable value, and a connection is routed
- * only by the routing tag in its preamble (RAPP v26.10.10 section 2.2.1).
+ * only by the routing tag in its preamble (RAPP v26.10.18 section 2.2.1).
  */
 class RappSessionDiscoveryTest {
     private companion object {

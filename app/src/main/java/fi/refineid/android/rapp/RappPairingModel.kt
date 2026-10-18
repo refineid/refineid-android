@@ -191,7 +191,7 @@ internal class RappPairingModel(
 
     /**
      * A new connection must be admitted by the pre-authentication limiter
-     * (RAPP v26.10.10 section 3.3) and then open with the pairing preamble.
+     * (RAPP v26.10.18 section 3.3) and then open with the pairing preamble.
      */
     private fun handleProxyConnected() {
         ceremony = null
@@ -233,6 +233,7 @@ internal class RappPairingModel(
         } finally {
             random64.fill(0)
         }
+        val vault = vault()
         ceremony =
             RappCustodianPairingCeremony(
                 bridge = bridge,
@@ -241,8 +242,26 @@ internal class RappPairingModel(
                 platform = "Android",
                 monotonicMs = RappClock::monotonicMs,
                 wallMs = RappClock::wallMs,
+                persistUnconfirmed = { record -> record.persistDeviceOnly(vault) },
             )
     }
+
+    private fun vault(): AndroidRappVault = app?.rappVault ?: AndroidRappVault(context)
+
+    /**
+     * Revokes the record a ceremony stored but the requester never confirmed
+     * (RAPP v26.10.18 section 4.3 item 4), retaining its revocation.
+     */
+    private fun revokeUnconfirmedRecord() {
+        val stored = ceremony?.storedRecord ?: return
+        RappPairRevocation.revoke(stored, vault())
+        val app = context.applicationContext as? RefineIdApplication
+        app?.rappProxyDispatcher?.refreshAnnouncement()
+    }
+
+    /** Whether the session record still has a revocation to announce (RAPP v26.10.18 section 4.6 item 4). */
+    private fun announcesRevocations(vault: AndroidRappVault): Boolean =
+        vault.unexpiredRevocations(StreamRendezvousName.nowUnixSeconds().toULong()).isNotEmpty()
 
     private fun handleProxyDisconnected(bridge: RappPairingBridge) {
         handshakeDeadlineJob?.cancel()
@@ -260,6 +279,7 @@ internal class RappPairingModel(
      */
     private fun candidateEnded(bridge: RappPairingBridge) {
         val pastOffer = ceremony?.isPastOfferPhase == true
+        revokeUnconfirmedRecord()
         ceremony = null
         if (pastOffer) {
             phase = PairingPhase.Failed("Peer disconnected")
@@ -308,6 +328,7 @@ internal class RappPairingModel(
             handshakeDeadlineJob?.cancel()
             handshakeDeadlineJob = null
             if (ceremony?.isPastOfferPhase == true) {
+                revokeUnconfirmedRecord()
                 ceremony = null
                 phase = PairingPhase.Failed("Pairing error: ${e.javaClass.simpleName}")
             } else {
@@ -332,8 +353,8 @@ internal class RappPairingModel(
             )
 
         val app = context.applicationContext as? RefineIdApplication
-        val vault = app?.rappVault ?: AndroidRappVault(context)
-        record.persistDeviceOnly(vault)
+        val vault = vault()
+        record.replaceDeviceOnly(vault)
 
         val primedStore = app?.primedCanStore
         val certDer =
@@ -410,21 +431,28 @@ internal class RappPairingModel(
             }
     }
 
+    /**
+     * Forgets one pairing (RAPP v26.10.18 section 4.6): an open session to
+     * it is closed as revoked first, then the record is revoked and its
+     * revocation retained for the session record to announce.
+     */
     fun removePair(pairIdHex: String) {
         val app = context.applicationContext as? RefineIdApplication
-        val vault = app?.rappVault ?: AndroidRappVault(context)
+        val vault = vault()
+        if (activeConnectedPeer?.pairIdHex == pairIdHex) {
+            app?.rappProxyDispatcher?.closePairingRevoked(pairIdHex)
+            activeConnectedPeer = null
+        }
         val pairIdBytes = decodeHexOrNull(pairIdHex)
         if (pairIdBytes != null) {
-            vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
+            RappPairRevocation.revoke(pairIdBytes, vault)
         }
         catalog.removePair(pairIdHex)
         pairedDevices = catalog.listPairs()
-        if (activeConnectedPeer?.pairIdHex == pairIdHex) {
-            app?.rappProxyDispatcher?.disconnectClient()
-            activeConnectedPeer = null
-        }
-        if (pairedDevices.isEmpty()) {
+        if (pairedDevices.isEmpty() && !announcesRevocations(vault)) {
             app?.rappProxyDispatcher?.stopListening()
+        } else {
+            app?.rappProxyDispatcher?.refreshAnnouncement()
         }
     }
 
@@ -446,6 +474,7 @@ internal class RappPairingModel(
         } catch (_: Exception) {
         }
         pairingBridge = null
+        revokeUnconfirmedRecord()
         ceremony = null
         awaitingPreamble = false
         if (!keepPhase) {
@@ -458,13 +487,12 @@ internal class RappPairingModel(
         reset()
         val app = context.applicationContext as? RefineIdApplication
         app?.rappProxyDispatcher?.disconnectClient()
-        app?.rappProxyDispatcher?.stopListening()
-        val vault = app?.rappVault ?: AndroidRappVault(context)
+        val vault = vault()
         for (pair in catalog.listPairs()) {
             try {
                 val pairIdBytes = decodeHexOrNull(pair.pairIdHex)
                 if (pairIdBytes != null) {
-                    vault.revokeDeviceOnly(pairIdBytes, RappClock.wallMs())
+                    RappPairRevocation.revoke(pairIdBytes, vault)
                 }
             } catch (_: Exception) {
             }
@@ -472,6 +500,11 @@ internal class RappPairingModel(
         catalog.clearAll()
         pairedDevices = emptyList()
         activeConnectedPeer = null
+        if (announcesRevocations(vault)) {
+            app?.rappProxyDispatcher?.refreshAnnouncement()
+        } else {
+            app?.rappProxyDispatcher?.stopListening()
+        }
     }
 
     companion object {

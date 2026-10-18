@@ -20,11 +20,15 @@ internal sealed interface RappAuthRequest {
     val action: RappAuthAction
     val onDenied: () -> Unit
 
+    /** Called once the consent view is on screen (RAPP v26.10.18 section 8.2 item 3). */
+    val onShown: () -> Unit
+
     data class BrowserAuth(
         override val requestId: String,
         override val requester: String,
         val onApproved: (Pin1Submission) -> Unit,
         override val onDenied: () -> Unit,
+        override val onShown: () -> Unit,
     ) : RappAuthRequest {
         override val action: RappAuthAction get() = RappAuthAction.BROWSER_AUTH
     }
@@ -36,6 +40,7 @@ internal sealed interface RappAuthRequest {
         val documentNames: List<String>,
         val onApproved: (Pin2Submission) -> Unit,
         override val onDenied: () -> Unit,
+        override val onShown: () -> Unit,
     ) : RappAuthRequest {
         override val action: RappAuthAction get() = RappAuthAction.DOCUMENT_SIGN
     }
@@ -83,6 +88,7 @@ internal class RappAuthorizationInbox(
         requester: String,
         onApproved: (Pin1Submission) -> Unit,
         onDenied: () -> Unit,
+        onShown: () -> Unit = {},
     ) {
         val req =
             RappAuthRequest.BrowserAuth(
@@ -98,6 +104,7 @@ internal class RappAuthorizationInbox(
                     currentRequest = null
                     onDenied()
                 },
+                onShown = onShown,
             )
         currentRequest = req
         if (!isForeground) {
@@ -111,6 +118,7 @@ internal class RappAuthorizationInbox(
         documentNames: List<String>,
         onApproved: (Pin2Submission) -> Unit,
         onDenied: () -> Unit,
+        onShown: () -> Unit = {},
     ) {
         val req =
             RappAuthRequest.DocumentSign(
@@ -127,6 +135,7 @@ internal class RappAuthorizationInbox(
                     currentRequest = null
                     onDenied()
                 },
+                onShown = onShown,
             )
         currentRequest = req
         if (!isForeground) {

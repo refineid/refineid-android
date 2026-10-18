@@ -657,9 +657,12 @@ internal interface UniffiCallbackInterfaceRappPairVaultMethod1 : com.sun.jna.Cal
     fun callback(`uniffiHandle`: Long,`pairId`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
 }
 internal interface UniffiCallbackInterfaceRappPairVaultMethod2 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`pairId`: RustBuffer.ByValue,`revokedAtMs`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+    fun callback(`uniffiHandle`: Long,`pairId`: RustBuffer.ByValue,`record`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
 internal interface UniffiCallbackInterfaceRappPairVaultMethod3 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`pairId`: RustBuffer.ByValue,`revokedAtMs`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceRappPairVaultMethod4 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`pairId`: RustBuffer.ByValue,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,)
 }
 internal interface UniffiCallbackInterfaceRappOperationVaultMethod0 : com.sun.jna.Callback {
@@ -683,29 +686,32 @@ internal interface UniffiCallbackInterfaceRappOperationVaultMethod5 : com.sun.jn
 internal interface UniffiCallbackInterfaceRappOperationVaultMethod6 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`pairId`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
 }
-@Structure.FieldOrder("uniffiFree", "uniffiClone", "insertDeviceOnly", "loadDeviceOnly", "revokeDeviceOnly", "isRevoked")
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "insertDeviceOnly", "loadDeviceOnly", "replaceDeviceOnly", "revokeDeviceOnly", "isRevoked")
 internal open class UniffiVTableCallbackInterfaceRappPairVault(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
     @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
     @JvmField internal var `insertDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod0? = null,
     @JvmField internal var `loadDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod1? = null,
-    @JvmField internal var `revokeDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod2? = null,
-    @JvmField internal var `isRevoked`: UniffiCallbackInterfaceRappPairVaultMethod3? = null,
+    @JvmField internal var `replaceDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod2? = null,
+    @JvmField internal var `revokeDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod3? = null,
+    @JvmField internal var `isRevoked`: UniffiCallbackInterfaceRappPairVaultMethod4? = null,
 ) : Structure() {
     class UniffiByValue(
         `uniffiFree`: UniffiCallbackInterfaceFree? = null,
         `uniffiClone`: UniffiCallbackInterfaceClone? = null,
         `insertDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod0? = null,
         `loadDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod1? = null,
-        `revokeDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod2? = null,
-        `isRevoked`: UniffiCallbackInterfaceRappPairVaultMethod3? = null,
-    ): UniffiVTableCallbackInterfaceRappPairVault(`uniffiFree`,`uniffiClone`,`insertDeviceOnly`,`loadDeviceOnly`,`revokeDeviceOnly`,`isRevoked`,), Structure.ByValue
+        `replaceDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod2? = null,
+        `revokeDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod3? = null,
+        `isRevoked`: UniffiCallbackInterfaceRappPairVaultMethod4? = null,
+    ): UniffiVTableCallbackInterfaceRappPairVault(`uniffiFree`,`uniffiClone`,`insertDeviceOnly`,`loadDeviceOnly`,`replaceDeviceOnly`,`revokeDeviceOnly`,`isRevoked`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceRappPairVault) {
         `uniffiFree` = other.`uniffiFree`
         `uniffiClone` = other.`uniffiClone`
         `insertDeviceOnly` = other.`insertDeviceOnly`
         `loadDeviceOnly` = other.`loadDeviceOnly`
+        `replaceDeviceOnly` = other.`replaceDeviceOnly`
         `revokeDeviceOnly` = other.`revokeDeviceOnly`
         `isRevoked` = other.`isRevoked`
     }
@@ -781,6 +787,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_refineid_rapp_checksum_func_rapp_random_byte_counts(
     ): Int
+    external fun uniffi_refineid_rapp_checksum_func_rapp_revocation_retention_expired(
+    ): Int
     external fun uniffi_refineid_rapp_checksum_func_rapp_session_record(
     ): Int
     external fun uniffi_refineid_rapp_checksum_func_rapp_stream_profile_name(
@@ -797,11 +805,17 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_matches_discovery_record(
     ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_matches_revoked_record(
+    ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_matches_withdrawn_record(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_metadata(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_persist_device_only(
+    ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_replace_device_only(
+    ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_revocation_hint(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_revoke(
     ): Int
@@ -813,6 +827,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairvault_load_device_only(
     ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rapppairvault_replace_device_only(
+    ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairvault_revoke_device_only(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairvault_is_revoked(
@@ -823,17 +839,19 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairingbackoff_record_success(
     ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_activate_pairing(
+    ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_begin_cpace(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_bootstrap_bytes(
+    ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_build_pair_record(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_cancel_pairing(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_candidate_failed(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_enter_confirmation(
-    ): Int
-    external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_finish_pairing(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_handshake_complete(
     ): Int
@@ -849,9 +867,13 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_receive_hello(
     ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_receive_stored(
+    ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_send_confirmation(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_send_hello(
+    ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_send_stored(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairingbridge_write_cpace_frame(
     ): Int
@@ -941,6 +963,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_record_batch_signature(
     ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_report_card_status(
+    ): Int
     external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_report_progress(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rappoperationbridge_request_invalid_or_unsupported(
@@ -1013,14 +1037,20 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rapppairrecord_matches_discovery_record(`ptr`: Long,`txt`: RustBuffer.ByValue,`unixTimeSeconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    external fun uniffi_refineid_rapp_fn_method_rapppairrecord_matches_revoked_record(`ptr`: Long,`instanceName`: RustBuffer.ByValue,`txt`: RustBuffer.ByValue,`unixTimeSeconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     external fun uniffi_refineid_rapp_fn_method_rapppairrecord_matches_withdrawn_record(`ptr`: Long,`instanceName`: RustBuffer.ByValue,`txt`: RustBuffer.ByValue,`unixTimeSeconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     external fun uniffi_refineid_rapp_fn_method_rapppairrecord_metadata(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rapppairrecord_persist_device_only(`ptr`: Long,`vault`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    external fun uniffi_refineid_rapp_fn_method_rapppairrecord_revoke(`ptr`: Long,`vault`: Long,`revokedAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_refineid_rapp_fn_method_rapppairrecord_replace_device_only(`ptr`: Long,`vault`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_refineid_rapp_fn_method_rapppairrecord_revocation_hint(`ptr`: Long,`instanceName`: RustBuffer.ByValue,`unixTimeSeconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_refineid_rapp_fn_method_rapppairrecord_revoke(`ptr`: Long,`vault`: Long,`revokedAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rapppairrecord_session_preamble(`ptr`: Long,`profileName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rapppairrecord_withdrawal_hint(`ptr`: Long,`instanceName`: RustBuffer.ByValue,`unixTimeSeconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1035,6 +1065,8 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_refineid_rapp_fn_method_rapppairvault_load_device_only(`ptr`: Long,`pairId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_refineid_rapp_fn_method_rapppairvault_replace_device_only(`ptr`: Long,`pairId`: RustBuffer.ByValue,`record`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_refineid_rapp_fn_method_rapppairvault_revoke_device_only(`ptr`: Long,`pairId`: RustBuffer.ByValue,`revokedAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_refineid_rapp_fn_method_rapppairvault_is_revoked(`ptr`: Long,`pairId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1059,18 +1091,20 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_refineid_rapp_fn_constructor_rapppairingbridge_from_bootstrap(`offerBytes`: RustBuffer.ByValue,`transportProfile`: RustBuffer.ByValue,`startedAtMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_activate_pairing(`ptr`: Long,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_begin_cpace(`ptr`: Long,`candidateId`: RustBuffer.ByValue,`pairingCode`: RustBuffer.ByValue,`randomBytes64`: RustBuffer.ByValue,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_bootstrap_bytes(`ptr`: Long,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_build_pair_record(`ptr`: Long,`createdAtMs`: Long,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_cancel_pairing(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_candidate_failed(`ptr`: Long,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_enter_confirmation(`ptr`: Long,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_finish_pairing(`ptr`: Long,`createdAtMs`: Long,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Long
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_handshake_complete(`ptr`: Long,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_offer_candidates(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1085,9 +1119,13 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_receive_hello(`ptr`: Long,`bytes`: RustBuffer.ByValue,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_receive_stored(`ptr`: Long,`bytes`: RustBuffer.ByValue,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_send_confirmation(`ptr`: Long,`grantedProfiles`: RustBuffer.ByValue,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_send_hello(`ptr`: Long,`displayName`: RustBuffer.ByValue,`platform`: RustBuffer.ByValue,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_send_stored(`ptr`: Long,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rapppairingbridge_write_cpace_frame(`ptr`: Long,`nowMonotonicMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1211,6 +1249,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_record_batch_signature(`ptr`: Long,`operationId`: RustBuffer.ByValue,`signature`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_report_card_status(`ptr`: Long,`cardPresent`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_report_progress(`ptr`: Long,`operationId`: RustBuffer.ByValue,`event`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_request_invalid_or_unsupported(`ptr`: Long,`operationId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1225,7 +1265,9 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_func_rapp_random_byte_counts(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    external fun uniffi_refineid_rapp_fn_func_rapp_session_record(`candidates`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_refineid_rapp_fn_func_rapp_revocation_retention_expired(`retention`: RustBuffer.ByValue,`unixTimeSeconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_refineid_rapp_fn_func_rapp_session_record(`candidates`: RustBuffer.ByValue,`retentions`: RustBuffer.ByValue,`instanceName`: RustBuffer.ByValue,`unixTimeSeconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_func_rapp_stream_profile_name(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1350,7 +1392,7 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
-    if ((lib.uniffi_refineid_rapp_checksum_func_rapp_ble_sar_payload_capacity() and 0xFFFF) != 61749) {
+    if ((lib.uniffi_refineid_rapp_checksum_func_rapp_ble_sar_payload_capacity() and 0xFFFF) != 22849) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_func_rapp_ble_sar_segment() and 0xFFFF) != 20401) {
@@ -1362,7 +1404,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_func_rapp_random_byte_counts() and 0xFFFF) != 14631) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_func_rapp_session_record() and 0xFFFF) != 21472) {
+    if ((lib.uniffi_refineid_rapp_checksum_func_rapp_revocation_retention_expired() and 0xFFFF) != 37163) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_refineid_rapp_checksum_func_rapp_session_record() and 0xFFFF) != 37192) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_func_rapp_stream_profile_name() and 0xFFFF) != 9609) {
@@ -1386,6 +1431,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_matches_discovery_record() and 0xFFFF) != 50206) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_matches_revoked_record() and 0xFFFF) != 25735) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_matches_withdrawn_record() and 0xFFFF) != 47461) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1395,7 +1443,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_persist_device_only() and 0xFFFF) != 31465) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_revoke() and 0xFFFF) != 17792) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_replace_device_only() and 0xFFFF) != 6814) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_revocation_hint() and 0xFFFF) != 1556) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_revoke() and 0xFFFF) != 29610) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_session_preamble() and 0xFFFF) != 13261) {
@@ -1410,10 +1464,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairvault_load_device_only() and 0xFFFF) != 30784) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairvault_revoke_device_only() and 0xFFFF) != 59789) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairvault_replace_device_only() and 0xFFFF) != 62186) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairvault_is_revoked() and 0xFFFF) != 15813) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairvault_revoke_device_only() and 0xFFFF) != 42176) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairvault_is_revoked() and 0xFFFF) != 17189) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbackoff_ms_until_next_offer() and 0xFFFF) != 36811) {
@@ -1425,22 +1482,25 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbackoff_record_success() and 0xFFFF) != 38791) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_activate_pairing() and 0xFFFF) != 51956) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_begin_cpace() and 0xFFFF) != 31416) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_bootstrap_bytes() and 0xFFFF) != 17401) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_cancel_pairing() and 0xFFFF) != 15880) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_build_pair_record() and 0xFFFF) != 29766) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_cancel_pairing() and 0xFFFF) != 37628) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_candidate_failed() and 0xFFFF) != 1658) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_enter_confirmation() and 0xFFFF) != 65164) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_finish_pairing() and 0xFFFF) != 11418) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_enter_confirmation() and 0xFFFF) != 7837) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_handshake_complete() and 0xFFFF) != 4080) {
@@ -1464,10 +1524,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_receive_hello() and 0xFFFF) != 17950) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_receive_stored() and 0xFFFF) != 41992) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_send_confirmation() and 0xFFFF) != 5213) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_send_hello() and 0xFFFF) != 54614) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_send_stored() and 0xFFFF) != 49197) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairingbridge_write_cpace_frame() and 0xFFFF) != 15176) {
@@ -1572,7 +1638,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_certificate() and 0xFFFF) != 2527) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_identity() and 0xFFFF) != 23654) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_identity() and 0xFFFF) != 8534) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_inspection() and 0xFFFF) != 20130) {
@@ -1602,7 +1668,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_record_batch_signature() and 0xFFFF) != 6321) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_report_progress() and 0xFFFF) != 2325) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_report_card_status() and 0xFFFF) != 27399) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_report_progress() and 0xFFFF) != 26442) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_request_invalid_or_unsupported() and 0xFFFF) != 52144) {
@@ -1614,16 +1683,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_constructor_rappblesarreassembler_new() and 0xFFFF) != 28178) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairrecord_load_from_vault() and 0xFFFF) != 50878) {
+    if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairrecord_load_from_vault() and 0xFFFF) != 53744) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbackoff_new() and 0xFFFF) != 21801) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_create_custodian_offer() and 0xFFFF) != 10321) {
+    if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_create_custodian_offer() and 0xFFFF) != 49082) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_from_bootstrap() and 0xFFFF) != 62332) {
+    if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_from_bootstrap() and 0xFFFF) != 53731) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppreauthenticationlimiter_new() and 0xFFFF) != 61721) {
@@ -2125,7 +2194,7 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
 
 /**
  * The BLE segmentation and reassembly receiver for one connection and one
- * direction (RAPP v26.10.10 §5.3).
+ * direction (RAPP v26.10.18 §5.3).
  *
  * Any refused fragment zeroizes the partial frame; the caller then drops
  * the connection.
@@ -2164,7 +2233,7 @@ public interface RappBleSarReassemblerInterface {
 
 /**
  * The BLE segmentation and reassembly receiver for one connection and one
- * direction (RAPP v26.10.10 §5.3).
+ * direction (RAPP v26.10.18 §5.3).
  *
  * Any refused fragment zeroizes the partial frame; the caller then drops
  * the connection.
@@ -2615,7 +2684,7 @@ public interface RappOperationBridgeInterface {
     fun `completeCertificate`(`operationId`: kotlin.ByteArray, `der`: kotlin.ByteArray): RappBridgeAction
     
     /**
-     * Complete an identity read (RAPP v26.10.10 section 9.1).
+     * Complete an identity read (RAPP v26.10.18 section 9.1).
      *
      * Both dates are `YYYY-MM-DD`; at least one DER certificate travels.
      *
@@ -2712,7 +2781,21 @@ public interface RappOperationBridgeInterface {
     fun `recordBatchSignature`(`operationId`: kotlin.ByteArray, `signature`: kotlin.ByteArray)
     
     /**
-     * Report authenticated advisory progress on an active operation.
+     * Tell the requester whether a card can answer now (RAPP section 8.4).
+     *
+     * The proxy calls this once right after `begin_proxy`, so the notice
+     * follows `session.ready`, and again whenever the presence of a card it
+     * can serve changes. Primed or cached material without a card is
+     * absence.
+     *
+     * # Errors
+     * [`RappBindingError`] on the wrong protocol phase or a poisoned local
+     * state.
+     */
+    fun `reportCardStatus`(`cardPresent`: kotlin.Boolean): RappBridgeAction
+    
+    /**
+     * Report authenticated progress on an active operation.
      *
      * # Errors
      * [`RappBindingError`] on invalid input or the wrong protocol phase.
@@ -3183,7 +3266,7 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
 
     
     /**
-     * Complete an identity read (RAPP v26.10.10 section 9.1).
+     * Complete an identity read (RAPP v26.10.18 section 9.1).
      *
      * Both dates are `YYYY-MM-DD`; at least one DER certificate travels.
      *
@@ -3427,7 +3510,34 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
 
     
     /**
-     * Report authenticated advisory progress on an active operation.
+     * Tell the requester whether a card can answer now (RAPP section 8.4).
+     *
+     * The proxy calls this once right after `begin_proxy`, so the notice
+     * follows `session.ready`, and again whenever the presence of a card it
+     * can serve changes. Primed or cached material without a card is
+     * absence.
+     *
+     * # Errors
+     * [`RappBindingError`] on the wrong protocol phase or a poisoned local
+     * state.
+     */
+    @Throws(RappBindingException::class)override fun `reportCardStatus`(`cardPresent`: kotlin.Boolean): RappBridgeAction {
+            return FfiConverterTypeRappBridgeAction.lift(
+    callWithHandle {
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rappoperationbridge_report_card_status(
+        it,
+        
+        FfiConverterBoolean.lower(`cardPresent`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Report authenticated progress on an active operation.
      *
      * # Errors
      * [`RappBindingError`] on invalid input or the wrong protocol phase.
@@ -4351,6 +4461,20 @@ public interface RappPairRecordInterface {
     
     /**
      * Whether the TXT attributes `txt` discovered on the service instance
+     * `instance_name` form a `mode=session` record whose `revoked`
+     * announcement carries this pairing's hint for the window containing
+     * `unix_time_seconds` or an adjacent one (RAPP section 4.6): a verified
+     * revocation, after which the caller revokes its own record. A
+     * malformed record or instance name is `false`.
+     *
+     * # Errors
+     * [`RappBindingError::InvalidInput`] on a degenerate static agreement,
+     * and [`RappBindingError::WrongPhase`] when the record was revoked.
+     */
+    fun `matchesRevokedRecord`(`instanceName`: kotlin.String, `txt`: List<RappTxtEntry>, `unixTimeSeconds`: kotlin.ULong): kotlin.Boolean
+    
+    /**
+     * Whether the TXT attributes `txt` discovered on the service instance
      * `instance_name` form a withdrawn record carrying this pairing's hint
      * for the minute containing `unix_time_seconds` or an adjacent one
      * (RAPP section 4.5). A malformed record or instance name is `false`.
@@ -4380,15 +4504,47 @@ public interface RappPairRecordInterface {
     fun `persistDeviceOnly`(`vault`: RappPairVault)
     
     /**
+     * Store the confirmed record in place of the unconfirmed one written
+     * by [`Self::persist_device_only`], once
+     * [`RappPairingBridge::activate_pairing`] returned it (§4.3 item 4).
+     *
+     * # Errors
+     * [`RappBindingError::StorageUnconfirmed`] for a record the peer has
+     * not confirmed, [`RappBindingError::WrongPhase`] for a revoked one,
+     * and [`RappBindingError::LocalStateFailure`] on a storage failure.
+     */
+    fun `replaceDeviceOnly`(`vault`: RappPairVault)
+    
+    /**
+     * This pairing's revocation hint for the advertised service instance
+     * `instance_name` in the 15-minute window containing
+     * `unix_time_seconds` (RAPP section 4.6).
+     *
+     * # Errors
+     * [`RappBindingError::InvalidInput`] on an instance name that is not the
+     * instance portion of the published name, or a degenerate static
+     * agreement, and [`RappBindingError::WrongPhase`] when the record was
+     * revoked.
+     */
+    fun `revocationHint`(`instanceName`: kotlin.String, `unixTimeSeconds`: kotlin.ULong): kotlin.ByteArray
+    
+    /**
      * Irreversibly delete active secret material and retain only a local
      * tombstone. The in-memory private key is dropped only after the vault
      * confirms deletion.
+     *
+     * Returns what the custodian keeps to announce the revocation (RAPP
+     * section 4.6): an opaque encoded retention for the platform to store
+     * beside its tombstones and pass to [`rapp_session_record`] for thirty
+     * days, with `revoked_at_ms` as milliseconds since the Unix epoch. `None`
+     * when the pairing's static agreement is degenerate, which is never
+     * announced.
      *
      * # Errors
      * [`RappBindingError`] on an already-revoked record or a storage
      * failure.
      */
-    fun `revoke`(`vault`: RappPairVault, `revokedAtMs`: kotlin.ULong)
+    fun `revoke`(`vault`: RappPairVault, `revokedAtMs`: kotlin.ULong): kotlin.ByteArray?
     
     /**
      * A fresh `"session"` routing preamble for one dial on the transport
@@ -4575,6 +4731,35 @@ open class RappPairRecord: Disposable, AutoCloseable, RappPairRecordInterface
     
     /**
      * Whether the TXT attributes `txt` discovered on the service instance
+     * `instance_name` form a `mode=session` record whose `revoked`
+     * announcement carries this pairing's hint for the window containing
+     * `unix_time_seconds` or an adjacent one (RAPP section 4.6): a verified
+     * revocation, after which the caller revokes its own record. A
+     * malformed record or instance name is `false`.
+     *
+     * # Errors
+     * [`RappBindingError::InvalidInput`] on a degenerate static agreement,
+     * and [`RappBindingError::WrongPhase`] when the record was revoked.
+     */
+    @Throws(RappBindingException::class)override fun `matchesRevokedRecord`(`instanceName`: kotlin.String, `txt`: List<RappTxtEntry>, `unixTimeSeconds`: kotlin.ULong): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rapppairrecord_matches_revoked_record(
+        it,
+        
+        FfiConverterString.lower(`instanceName`),
+        FfiConverterSequenceTypeRappTxtEntry.lower(`txt`),
+        FfiConverterULong.lower(`unixTimeSeconds`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Whether the TXT attributes `txt` discovered on the service instance
      * `instance_name` form a withdrawn record carrying this pairing's hint
      * for the minute containing `unix_time_seconds` or an adjacent one
      * (RAPP section 4.5). A malformed record or instance name is `false`.
@@ -4643,16 +4828,74 @@ open class RappPairRecord: Disposable, AutoCloseable, RappPairRecordInterface
 
     
     /**
+     * Store the confirmed record in place of the unconfirmed one written
+     * by [`Self::persist_device_only`], once
+     * [`RappPairingBridge::activate_pairing`] returned it (§4.3 item 4).
+     *
+     * # Errors
+     * [`RappBindingError::StorageUnconfirmed`] for a record the peer has
+     * not confirmed, [`RappBindingError::WrongPhase`] for a revoked one,
+     * and [`RappBindingError::LocalStateFailure`] on a storage failure.
+     */
+    @Throws(RappBindingException::class)override fun `replaceDeviceOnly`(`vault`: RappPairVault)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rapppairrecord_replace_device_only(
+        it,
+        
+        FfiConverterTypeRappPairVault.lower(`vault`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * This pairing's revocation hint for the advertised service instance
+     * `instance_name` in the 15-minute window containing
+     * `unix_time_seconds` (RAPP section 4.6).
+     *
+     * # Errors
+     * [`RappBindingError::InvalidInput`] on an instance name that is not the
+     * instance portion of the published name, or a degenerate static
+     * agreement, and [`RappBindingError::WrongPhase`] when the record was
+     * revoked.
+     */
+    @Throws(RappBindingException::class)override fun `revocationHint`(`instanceName`: kotlin.String, `unixTimeSeconds`: kotlin.ULong): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    callWithHandle {
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rapppairrecord_revocation_hint(
+        it,
+        
+        FfiConverterString.lower(`instanceName`),
+        FfiConverterULong.lower(`unixTimeSeconds`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Irreversibly delete active secret material and retain only a local
      * tombstone. The in-memory private key is dropped only after the vault
      * confirms deletion.
+     *
+     * Returns what the custodian keeps to announce the revocation (RAPP
+     * section 4.6): an opaque encoded retention for the platform to store
+     * beside its tombstones and pass to [`rapp_session_record`] for thirty
+     * days, with `revoked_at_ms` as milliseconds since the Unix epoch. `None`
+     * when the pairing's static agreement is degenerate, which is never
+     * announced.
      *
      * # Errors
      * [`RappBindingError`] on an already-revoked record or a storage
      * failure.
      */
-    @Throws(RappBindingException::class)override fun `revoke`(`vault`: RappPairVault, `revokedAtMs`: kotlin.ULong)
-        = 
+    @Throws(RappBindingException::class)override fun `revoke`(`vault`: RappPairVault, `revokedAtMs`: kotlin.ULong): kotlin.ByteArray? {
+            return FfiConverterOptionalByteArray.lift(
     callWithHandle {
     uniffiRustCallWithError(RappBindingException) { _status ->
     UniffiLib.uniffi_refineid_rapp_fn_method_rapppairrecord_revoke(
@@ -4662,7 +4905,8 @@ open class RappPairRecord: Disposable, AutoCloseable, RappPairRecordInterface
         FfiConverterULong.lower(`revokedAtMs`),_status)
 }
     }
-    
+    )
+    }
     
 
     
@@ -4728,6 +4972,12 @@ open class RappPairRecord: Disposable, AutoCloseable, RappPairRecordInterface
         
     /**
      * Load an active pair record from platform device-only storage.
+     *
+     * A record whose [`RappPairMetadata::storage_confirmed`] is false was
+     * stored inside a confirmation window this endpoint did not complete:
+     * it opens no session, routes nothing and is announced nowhere, and
+     * the caller revokes it with [`Self::revoke`] at the first start that
+     * finds it.
      *
      * # Errors
      * [`RappBindingError`] on an invalid identifier, a revoked or absent
@@ -4895,6 +5145,16 @@ public interface RappPairVault {
      * [`RappVaultError`] when storage is unavailable.
      */
     fun `loadDeviceOnly`(`pairId`: kotlin.ByteArray): kotlin.ByteArray?
+    
+    /**
+     * Atomically replace the record stored under an existing identifier:
+     * the confirmed form of a record inserted before the peer confirmed
+     * its storage (RAPP v26.10.18 §4.3 item 4).
+     *
+     * # Errors
+     * [`RappVaultError`] on an absent pair or unavailable storage.
+     */
+    fun `replaceDeviceOnly`(`pairId`: kotlin.ByteArray, `record`: kotlin.ByteArray)
     
     /**
      * Atomically destroy the record and retain a non-secret tombstone.
@@ -5067,6 +5327,29 @@ open class RappPairVaultImpl: Disposable, AutoCloseable, RappPairVault
 
     
     /**
+     * Atomically replace the record stored under an existing identifier:
+     * the confirmed form of a record inserted before the peer confirmed
+     * its storage (RAPP v26.10.18 §4.3 item 4).
+     *
+     * # Errors
+     * [`RappVaultError`] on an absent pair or unavailable storage.
+     */
+    @Throws(RappVaultException::class)override fun `replaceDeviceOnly`(`pairId`: kotlin.ByteArray, `record`: kotlin.ByteArray)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(RappVaultException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rapppairvault_replace_device_only(
+        it,
+        
+        FfiConverterByteArray.lower(`pairId`),
+        FfiConverterByteArray.lower(`record`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Atomically destroy the record and retain a non-secret tombstone.
      *
      * # Errors
@@ -5160,7 +5443,25 @@ internal object uniffiCallbackInterfaceRappPairVault {
             )
         }
     }
-    internal object `revokeDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod2 {
+    internal object `replaceDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod2 {
+        override fun callback(`uniffiHandle`: Long,`pairId`: RustBuffer.ByValue,`record`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeRappPairVault.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`replaceDeviceOnly`(
+                    FfiConverterByteArray.lift(`pairId`),
+                    FfiConverterByteArray.lift(`record`),
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCallWithError(
+                uniffiCallStatus,
+                makeCall,
+                writeReturn,
+                { e: RappVaultException -> FfiConverterTypeRappVaultError.lower(e) }
+            )
+        }
+    }
+    internal object `revokeDeviceOnly`: UniffiCallbackInterfaceRappPairVaultMethod3 {
         override fun callback(`uniffiHandle`: Long,`pairId`: RustBuffer.ByValue,`revokedAtMs`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
             val uniffiObj = FfiConverterTypeRappPairVault.handleMap.get(uniffiHandle)
             val makeCall = { ->
@@ -5178,7 +5479,7 @@ internal object uniffiCallbackInterfaceRappPairVault {
             )
         }
     }
-    internal object `isRevoked`: UniffiCallbackInterfaceRappPairVaultMethod3 {
+    internal object `isRevoked`: UniffiCallbackInterfaceRappPairVaultMethod4 {
         override fun callback(`uniffiHandle`: Long,`pairId`: RustBuffer.ByValue,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,) {
             val uniffiObj = FfiConverterTypeRappPairVault.handleMap.get(uniffiHandle)
             val makeCall = { ->
@@ -5213,6 +5514,7 @@ internal object uniffiCallbackInterfaceRappPairVault {
         uniffiClone,
         `insertDeviceOnly`,
         `loadDeviceOnly`,
+        `replaceDeviceOnly`,
         `revokeDeviceOnly`,
         `isRevoked`,
     )
@@ -5360,7 +5662,7 @@ public object FfiConverterTypeRappPairVault: FfiConverter<RappPairVault, Long> {
 
 /**
  * The custodian's process-wide backoff after locked-out offers
- * (RAPP v26.10.10 §3.3.7), driven by platform monotonic milliseconds.
+ * (RAPP v26.10.18 §3.3.7), driven by platform monotonic milliseconds.
  */
 public interface RappPairingBackoffInterface {
     
@@ -5394,7 +5696,7 @@ public interface RappPairingBackoffInterface {
 
 /**
  * The custodian's process-wide backoff after locked-out offers
- * (RAPP v26.10.10 §3.3.7), driven by platform monotonic milliseconds.
+ * (RAPP v26.10.18 §3.3.7), driven by platform monotonic milliseconds.
  */
 open class RappPairingBackoff: Disposable, AutoCloseable, RappPairingBackoffInterface
 {
@@ -5709,6 +6011,20 @@ public object FfiConverterTypeRappPairingBackoff: FfiConverter<RappPairingBackof
 public interface RappPairingBridgeInterface {
     
     /**
+     * The record in its confirmed form once both storage confirmations
+     * have been exchanged, or `None` while the peer's is still awaited.
+     * Returning the record closes the pairing channel and completes the
+     * ceremony; the caller stores the returned record with
+     * [`RappPairRecord::replace_device_only`], and the pairing is active
+     * from that write on. A `None` past the deadline is
+     * [`RappBindingError::StorageUnconfirmed`].
+     *
+     * # Errors
+     * [`RappBindingError`] outside the storage phase or past the deadline.
+     */
+    fun `activatePairing`(`nowMonotonicMs`: kotlin.ULong): RappPairRecord?
+    
+    /**
      * Begin CPace PAKE key exchange for a selected transport candidate using the 6-digit code.
      *
      * # Errors
@@ -5727,7 +6043,26 @@ public interface RappPairingBridgeInterface {
     fun `bootstrapBytes`(`nowMonotonicMs`: kotlin.ULong): kotlin.ByteArray
     
     /**
+     * Build the pair record after equal confirmation and keep the pairing
+     * channel open for the storage confirmation (§4.3 item 4). The record
+     * is unconfirmed: the caller persists it with
+     * [`RappPairRecord::persist_device_only`], then calls
+     * [`Self::send_stored`] and feeds the peer's frame to
+     * [`Self::receive_stored`]; once [`Self::activate_pairing`] returns
+     * the record, the caller stores it again with
+     * [`RappPairRecord::replace_device_only`], and only that stored form
+     * opens sessions. No private key bytes are returned to the platform.
+     *
+     * # Errors
+     * [`RappBindingError`] on the wrong phase, the passed deadline, or
+     * incomplete or unequal confirmations.
+     */
+    fun `buildPairRecord`(`createdAtMs`: kotlin.ULong, `nowMonotonicMs`: kotlin.ULong): RappPairRecord
+    
+    /**
      * Cancel pairing and destroy every in-progress offer or handshake secret.
+     * Cancelled in the storage phase, the record the caller stored is not
+     * active; the caller revokes it.
      *
      * # Errors
      * [`RappBindingError::WrongPhase`] after the pairing completed.
@@ -5746,24 +6081,14 @@ public interface RappPairingBridgeInterface {
     
     /**
      * Enter authenticated confirmation after Noise completes; hello,
-     * confirmation and storage must follow within 10 seconds of
-     * `now_monotonic_ms` (§3.3.7).
+     * confirmation, storage and the peer's storage confirmation must
+     * follow within 10 seconds of `now_monotonic_ms` (§3.3.7).
      *
      * # Errors
      * [`RappBindingError`] on an expired offer, the wrong phase, or an
      * incomplete handshake.
      */
     fun `enterConfirmation`(`nowMonotonicMs`: kotlin.ULong)
-    
-    /**
-     * Complete equal human confirmation and retain the resulting pair record
-     * in an opaque Rust object. No private key bytes are returned to Swift.
-     *
-     * # Errors
-     * [`RappBindingError`] on the wrong phase or incomplete or unequal
-     * confirmations.
-     */
-    fun `finishPairing`(`createdAtMs`: kotlin.ULong, `nowMonotonicMs`: kotlin.ULong): RappPairRecord
     
     /**
      * Whether the role-specific three-message Noise exchange has completed.
@@ -5826,6 +6151,17 @@ public interface RappPairingBridgeInterface {
     fun `receiveHello`(`bytes`: kotlin.ByteArray, `nowMonotonicMs`: kotlin.ULong): RappPeerHello
     
     /**
+     * Verify the peer's storage confirmation. A confirmation naming another
+     * pairing is an authenticated protocol violation: the ceremony fails,
+     * and the caller revokes the record it stored.
+     *
+     * # Errors
+     * [`RappBindingError`] on the wrong phase, the passed deadline, an
+     * oversized frame, or a confirmation that fails verification.
+     */
+    fun `receiveStored`(`bytes`: kotlin.ByteArray, `nowMonotonicMs`: kotlin.ULong)
+    
+    /**
      * Send the exact locally approved grant set.
      *
      * # Errors
@@ -5842,6 +6178,16 @@ public interface RappPairingBridgeInterface {
      * hello.
      */
     fun `sendHello`(`displayName`: kotlin.String, `platform`: kotlin.String, `nowMonotonicMs`: kotlin.ULong): kotlin.ByteArray
+    
+    /**
+     * Confirm to the peer that the record is durably stored: the frame to
+     * send once the vault reported the record written (§4.3 item 4).
+     *
+     * # Errors
+     * [`RappBindingError`] on the wrong phase, the passed deadline, or a
+     * second confirmation.
+     */
+    fun `sendStored`(`nowMonotonicMs`: kotlin.ULong): kotlin.ByteArray
     
     /**
      * Produce the local CPace public point frame to send to the peer.
@@ -5969,6 +6315,33 @@ open class RappPairingBridge: Disposable, AutoCloseable, RappPairingBridgeInterf
 
     
     /**
+     * The record in its confirmed form once both storage confirmations
+     * have been exchanged, or `None` while the peer's is still awaited.
+     * Returning the record closes the pairing channel and completes the
+     * ceremony; the caller stores the returned record with
+     * [`RappPairRecord::replace_device_only`], and the pairing is active
+     * from that write on. A `None` past the deadline is
+     * [`RappBindingError::StorageUnconfirmed`].
+     *
+     * # Errors
+     * [`RappBindingError`] outside the storage phase or past the deadline.
+     */
+    @Throws(RappBindingException::class)override fun `activatePairing`(`nowMonotonicMs`: kotlin.ULong): RappPairRecord? {
+            return FfiConverterOptionalTypeRappPairRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rapppairingbridge_activate_pairing(
+        it,
+        
+        FfiConverterULong.lower(`nowMonotonicMs`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Begin CPace PAKE key exchange for a selected transport candidate using the 6-digit code.
      *
      * # Errors
@@ -6015,7 +6388,40 @@ open class RappPairingBridge: Disposable, AutoCloseable, RappPairingBridgeInterf
 
     
     /**
+     * Build the pair record after equal confirmation and keep the pairing
+     * channel open for the storage confirmation (§4.3 item 4). The record
+     * is unconfirmed: the caller persists it with
+     * [`RappPairRecord::persist_device_only`], then calls
+     * [`Self::send_stored`] and feeds the peer's frame to
+     * [`Self::receive_stored`]; once [`Self::activate_pairing`] returns
+     * the record, the caller stores it again with
+     * [`RappPairRecord::replace_device_only`], and only that stored form
+     * opens sessions. No private key bytes are returned to the platform.
+     *
+     * # Errors
+     * [`RappBindingError`] on the wrong phase, the passed deadline, or
+     * incomplete or unequal confirmations.
+     */
+    @Throws(RappBindingException::class)override fun `buildPairRecord`(`createdAtMs`: kotlin.ULong, `nowMonotonicMs`: kotlin.ULong): RappPairRecord {
+            return FfiConverterTypeRappPairRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rapppairingbridge_build_pair_record(
+        it,
+        
+        FfiConverterULong.lower(`createdAtMs`),
+        FfiConverterULong.lower(`nowMonotonicMs`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Cancel pairing and destroy every in-progress offer or handshake secret.
+     * Cancelled in the storage phase, the record the caller stored is not
+     * active; the caller revokes it.
      *
      * # Errors
      * [`RappBindingError::WrongPhase`] after the pairing completed.
@@ -6058,8 +6464,8 @@ open class RappPairingBridge: Disposable, AutoCloseable, RappPairingBridgeInterf
     
     /**
      * Enter authenticated confirmation after Noise completes; hello,
-     * confirmation and storage must follow within 10 seconds of
-     * `now_monotonic_ms` (§3.3.7).
+     * confirmation, storage and the peer's storage confirmation must
+     * follow within 10 seconds of `now_monotonic_ms` (§3.3.7).
      *
      * # Errors
      * [`RappBindingError`] on an expired offer, the wrong phase, or an
@@ -6076,30 +6482,6 @@ open class RappPairingBridge: Disposable, AutoCloseable, RappPairingBridgeInterf
 }
     }
     
-    
-
-    
-    /**
-     * Complete equal human confirmation and retain the resulting pair record
-     * in an opaque Rust object. No private key bytes are returned to Swift.
-     *
-     * # Errors
-     * [`RappBindingError`] on the wrong phase or incomplete or unequal
-     * confirmations.
-     */
-    @Throws(RappBindingException::class)override fun `finishPairing`(`createdAtMs`: kotlin.ULong, `nowMonotonicMs`: kotlin.ULong): RappPairRecord {
-            return FfiConverterTypeRappPairRecord.lift(
-    callWithHandle {
-    uniffiRustCallWithError(RappBindingException) { _status ->
-    UniffiLib.uniffi_refineid_rapp_fn_method_rapppairingbridge_finish_pairing(
-        it,
-        
-        FfiConverterULong.lower(`createdAtMs`),
-        FfiConverterULong.lower(`nowMonotonicMs`),_status)
-}
-    }
-    )
-    }
     
 
     
@@ -6255,6 +6637,30 @@ open class RappPairingBridge: Disposable, AutoCloseable, RappPairingBridgeInterf
 
     
     /**
+     * Verify the peer's storage confirmation. A confirmation naming another
+     * pairing is an authenticated protocol violation: the ceremony fails,
+     * and the caller revokes the record it stored.
+     *
+     * # Errors
+     * [`RappBindingError`] on the wrong phase, the passed deadline, an
+     * oversized frame, or a confirmation that fails verification.
+     */
+    @Throws(RappBindingException::class)override fun `receiveStored`(`bytes`: kotlin.ByteArray, `nowMonotonicMs`: kotlin.ULong)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rapppairingbridge_receive_stored(
+        it,
+        
+        FfiConverterByteArray.lower(`bytes`),
+        FfiConverterULong.lower(`nowMonotonicMs`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Send the exact locally approved grant set.
      *
      * # Errors
@@ -6293,6 +6699,29 @@ open class RappPairingBridge: Disposable, AutoCloseable, RappPairingBridgeInterf
         
         FfiConverterString.lower(`displayName`),
         FfiConverterString.lower(`platform`),
+        FfiConverterULong.lower(`nowMonotonicMs`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Confirm to the peer that the record is durably stored: the frame to
+     * send once the vault reported the record written (§4.3 item 4).
+     *
+     * # Errors
+     * [`RappBindingError`] on the wrong phase, the passed deadline, or a
+     * second confirmation.
+     */
+    @Throws(RappBindingException::class)override fun `sendStored`(`nowMonotonicMs`: kotlin.ULong): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    callWithHandle {
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rapppairingbridge_send_stored(
+        it,
+        
         FfiConverterULong.lower(`nowMonotonicMs`),_status)
 }
     }
@@ -6352,7 +6781,7 @@ open class RappPairingBridge: Disposable, AutoCloseable, RappPairingBridgeInterf
     companion object {
         
     /**
-     * Create the custodian's offer (RAPP v26.10.10 §4.2) from a fresh
+     * Create the custodian's offer (RAPP v26.10.18 §4.2) from a fresh
      * platform-CSPRNG `offer_id`, the offered credential profiles, and the
      * transport profiles the offer is served on.
      *
@@ -6378,7 +6807,7 @@ open class RappPairingBridge: Disposable, AutoCloseable, RappPairingBridgeInterf
         
     /**
      * Accept the offer bootstrap the requester received over the
-     * transport `transport_profile` (RAPP v26.10.10 §4.2): the Bootstrap
+     * transport `transport_profile` (RAPP v26.10.18 §4.2): the Bootstrap
      * Characteristic value on BLE, or the custodian's first frame after the
      * pairing preamble on the stream transport.
      *
@@ -7685,9 +8114,14 @@ data class RappBridgeAction (
     var `batchSignatures`: List<kotlin.ByteArray>
     , 
     /**
-     * Advisory progress event.
+     * Progress event.
      */
     var `progressEvent`: RappProgressEvent?
+    , 
+    /**
+     * Whether the custodian can serve a card now, on a card-status action.
+     */
+    var `cardPresent`: kotlin.Boolean?
     , 
     /**
      * The session must close after this frame is delivered.
@@ -7730,6 +8164,7 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalUByte.read(buf),
             FfiConverterSequenceByteArray.read(buf),
             FfiConverterOptionalTypeRappProgressEvent.read(buf),
+            FfiConverterOptionalBoolean.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalTypeRappCloseReason.read(buf),
             FfiConverterOptionalULong.read(buf),
@@ -7747,6 +8182,7 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalUByte.allocationSize(value.`remainingRetries`) +
             FfiConverterSequenceByteArray.allocationSize(value.`batchSignatures`) +
             FfiConverterOptionalTypeRappProgressEvent.allocationSize(value.`progressEvent`) +
+            FfiConverterOptionalBoolean.allocationSize(value.`cardPresent`) +
             FfiConverterBoolean.allocationSize(value.`closeSessionAfterSend`) +
             FfiConverterOptionalTypeRappCloseReason.allocationSize(value.`closeReason`) +
             FfiConverterOptionalULong.allocationSize(value.`nextPollAtMs`)
@@ -7763,6 +8199,7 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalUByte.write(value.`remainingRetries`, buf)
             FfiConverterSequenceByteArray.write(value.`batchSignatures`, buf)
             FfiConverterOptionalTypeRappProgressEvent.write(value.`progressEvent`, buf)
+            FfiConverterOptionalBoolean.write(value.`cardPresent`, buf)
             FfiConverterBoolean.write(value.`closeSessionAfterSend`, buf)
             FfiConverterOptionalTypeRappCloseReason.write(value.`closeReason`, buf)
             FfiConverterOptionalULong.write(value.`nextPollAtMs`, buf)
@@ -8143,6 +8580,14 @@ data class RappPairMetadata (
      * Pair-record creation time supplied by the platform wall clock.
      */
     var `createdAtMs`: kotlin.ULong
+    , 
+    /**
+     * Whether the peer confirmed storing its record (RAPP v26.10.18 §4.3
+     * item 4). A record loaded unconfirmed survived a crash inside the
+     * confirmation window: it opens no session, routes nothing, and the
+     * caller revokes it.
+     */
+    var `storageConfirmed`: kotlin.Boolean
     
 ){
     
@@ -8163,6 +8608,7 @@ public object FfiConverterTypeRappPairMetadata: FfiConverterRustBuffer<RappPairM
             FfiConverterTypeRappEndpointRole.read(buf),
             FfiConverterSequenceString.read(buf),
             FfiConverterULong.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
@@ -8170,7 +8616,8 @@ public object FfiConverterTypeRappPairMetadata: FfiConverterRustBuffer<RappPairM
             FfiConverterByteArray.allocationSize(value.`pairId`) +
             FfiConverterTypeRappEndpointRole.allocationSize(value.`role`) +
             FfiConverterSequenceString.allocationSize(value.`profiles`) +
-            FfiConverterULong.allocationSize(value.`createdAtMs`)
+            FfiConverterULong.allocationSize(value.`createdAtMs`) +
+            FfiConverterBoolean.allocationSize(value.`storageConfirmed`)
     )
 
     override fun write(value: RappPairMetadata, buf: ByteBuffer) {
@@ -8178,6 +8625,7 @@ public object FfiConverterTypeRappPairMetadata: FfiConverterRustBuffer<RappPairM
             FfiConverterTypeRappEndpointRole.write(value.`role`, buf)
             FfiConverterSequenceString.write(value.`profiles`, buf)
             FfiConverterULong.write(value.`createdAtMs`, buf)
+            FfiConverterBoolean.write(value.`storageConfirmed`, buf)
     }
 }
 
@@ -8441,6 +8889,19 @@ sealed class RappBindingException: kotlin.Exception() {
     }
     
     /**
+     * The peer never confirmed that it stored the pairing (RAPP v26.10.18
+     * §4.3 item 4): the post-PAKE deadline passed in the storage phase, or
+     * a record loaded from the vault is unconfirmed. Such a record opens
+     * no session, routes nothing and is announced nowhere; the caller
+     * revokes it with [`RappPairRecord::revoke`].
+     */
+    class StorageUnconfirmed(
+        ) : RappBindingException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
      * Authenticated protocol or cryptographic processing failed.
      */
     class ProtocolFailure(
@@ -8478,7 +8939,7 @@ sealed class RappBindingException: kotlin.Exception() {
     
     /**
      * Three pairing attempts failed against one offer; the offer is
-     * destroyed (RAPP v26.10.10 §3.3).
+     * destroyed (RAPP v26.10.18 §3.3).
      */
     class AttemptsExhausted(
         ) : RappBindingException() {
@@ -8488,7 +8949,7 @@ sealed class RappBindingException: kotlin.Exception() {
     
     /**
      * A pre-authentication attempt came within 500 ms of the previous one
-     * (RAPP v26.10.10 §3.3.8); the caller refuses it and changes nothing.
+     * (RAPP v26.10.18 §3.3.8); the caller refuses it and changes nothing.
      */
     class RateLimited(
         ) : RappBindingException() {
@@ -8518,12 +8979,13 @@ public object FfiConverterTypeRappBindingError : FfiConverterRustBuffer<RappBind
             1 -> RappBindingException.InvalidInput()
             2 -> RappBindingException.WrongPhase()
             3 -> RappBindingException.OfferExpired()
-            4 -> RappBindingException.ProtocolFailure()
-            5 -> RappBindingException.LocalStateFailure()
-            6 -> RappBindingException.PairNotFound()
-            7 -> RappBindingException.UnknownOperation()
-            8 -> RappBindingException.AttemptsExhausted()
-            9 -> RappBindingException.RateLimited()
+            4 -> RappBindingException.StorageUnconfirmed()
+            5 -> RappBindingException.ProtocolFailure()
+            6 -> RappBindingException.LocalStateFailure()
+            7 -> RappBindingException.PairNotFound()
+            8 -> RappBindingException.UnknownOperation()
+            9 -> RappBindingException.AttemptsExhausted()
+            10 -> RappBindingException.RateLimited()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -8539,6 +9001,10 @@ public object FfiConverterTypeRappBindingError : FfiConverterRustBuffer<RappBind
                 4UL
             )
             is RappBindingException.OfferExpired -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is RappBindingException.StorageUnconfirmed -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
             )
@@ -8583,28 +9049,32 @@ public object FfiConverterTypeRappBindingError : FfiConverterRustBuffer<RappBind
                 buf.putInt(3)
                 Unit
             }
-            is RappBindingException.ProtocolFailure -> {
+            is RappBindingException.StorageUnconfirmed -> {
                 buf.putInt(4)
                 Unit
             }
-            is RappBindingException.LocalStateFailure -> {
+            is RappBindingException.ProtocolFailure -> {
                 buf.putInt(5)
                 Unit
             }
-            is RappBindingException.PairNotFound -> {
+            is RappBindingException.LocalStateFailure -> {
                 buf.putInt(6)
                 Unit
             }
-            is RappBindingException.UnknownOperation -> {
+            is RappBindingException.PairNotFound -> {
                 buf.putInt(7)
                 Unit
             }
-            is RappBindingException.AttemptsExhausted -> {
+            is RappBindingException.UnknownOperation -> {
                 buf.putInt(8)
                 Unit
             }
-            is RappBindingException.RateLimited -> {
+            is RappBindingException.AttemptsExhausted -> {
                 buf.putInt(9)
+                Unit
+            }
+            is RappBindingException.RateLimited -> {
+                buf.putInt(10)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -8641,7 +9111,8 @@ enum class RappBridgeActionKind {
      */
     EXECUTE_CARD_COMMAND,
     /**
-     * Frame carrying the acknowledgment of a completed result.
+     * Frame carrying the acknowledgment of a completed result; the result
+     * is released once the frame is delivered.
      */
     RESULT_ACKNOWLEDGMENT,
     /**
@@ -8649,17 +9120,24 @@ enum class RappBridgeActionKind {
      */
     COMPLETED,
     /**
-     * Operation reached the named terminal state.
+     * Operation reached the named terminal state; `frame`, when present,
+     * carries the acknowledgment of the result and is delivered like any
+     * other frame.
      */
     TERMINAL,
     /**
-     * Peer acknowledged the completed result.
+     * Peer acknowledged the result.
      */
     RESULT_ACKNOWLEDGED,
     /**
-     * Advisory progress update reported by peer.
+     * Progress update reported by peer.
      */
     PROGRESS,
+    /**
+     * The custodian reported whether it can serve a card now
+     * (`card_present`, RAPP section 8.4).
+     */
+    CARD_STATUS,
     /**
      * The peer could not admit the operation, such as while another runs.
      */
@@ -8947,11 +9425,16 @@ public object FfiConverterTypeRappOperationKind: FfiConverterRustBuffer<RappOper
 
 
 /**
- * Advisory progress events exposed to platform callers.
+ * Progress events exposed to platform callers.
  */
 
 enum class RappProgressEvent {
     
+    /**
+     * The consent view is on the custodian's screen (RAPP section 8.2
+     * item 3).
+     */
+    CONSENT_SHOWN,
     /**
      * Proxy is waiting for card presentation.
      */
@@ -9228,7 +9711,7 @@ enum class RappTerminalReason {
      */
     USER_DENIED,
     /**
-     * Local monotonic request expiry elapsed.
+     * The request's expiry elapsed on the continuous clock.
      */
     REQUEST_EXPIRED,
     /**
@@ -9574,6 +10057,38 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
         } else {
             buf.put(1)
             FfiConverterByteArray.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeRappPairRecord: FfiConverterRustBuffer<RappPairRecord?> {
+    override fun read(buf: ByteBuffer): RappPairRecord? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeRappPairRecord.read(buf)
+    }
+
+    override fun allocationSize(value: RappPairRecord?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeRappPairRecord.allocationSize(value)
+        }
+    }
+
+    override fun write(value: RappPairRecord?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeRappPairRecord.write(value, buf)
         }
     }
 }
@@ -9999,7 +10514,7 @@ public object FfiConverterSequenceTypeRappTxtEntry: FfiConverterRustBuffer<List<
 }
         /**
          * The uniform SAR fragment payload capacity for a negotiated ATT MTU and
-         * any smaller value limit the platform reports (RAPP v26.10.10 §5.3).
+         * any smaller value limit the platform reports (RAPP v26.10.18 §5.3).
          *
          * # Errors
          * [`RappBindingError::InvalidInput`] below an MTU of 512 or when the limit
@@ -10071,20 +10586,53 @@ public object FfiConverterSequenceTypeRappTxtEntry: FfiConverterRustBuffer<List<
     
 
         /**
-         * The TXT attributes of a `mode=session` record announcing the discovery
-         * hints of the four most recently used `candidates` (hierarchy
-         * specification section 4.3). No candidates give the minimal record.
+         * Whether an encoded retention returned by [`RappPairRecord::revoke`] has
+         * left its thirty-day announcement window at `unix_time_seconds`, so the
+         * platform can delete it (RAPP section 4.6 item 4).
          *
          * # Errors
-         * [`RappBindingError::InvalidInput`] for a hint of the wrong size.
+         * [`RappBindingError::InvalidInput`] for a retention that does not decode.
          */
-    @Throws(RappBindingException::class) fun `rappSessionRecord`(`candidates`: List<RappAnnouncementCandidate>): List<RappTxtEntry> {
+    @Throws(RappBindingException::class) fun `rappRevocationRetentionExpired`(`retention`: kotlin.ByteArray, `unixTimeSeconds`: kotlin.ULong): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_func_rapp_revocation_retention_expired(
+    
+        
+        FfiConverterByteArray.lower(`retention`),
+        FfiConverterULong.lower(`unixTimeSeconds`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The TXT attributes of a `mode=session` record announcing the discovery
+         * hints of the four most recently used `candidates` (hierarchy
+         * specification section 4.3) and, when any of the encoded `retentions`
+         * returned by [`RappPairRecord::revoke`] is still within its thirty days at
+         * `unix_time_seconds`, the `revoked` announcement for the advertised
+         * service instance `instance_name` in that window: the hints of the up to
+         * eight most recent revocations, random fillers, in random order (RAPP
+         * section 4.6). No candidates and no announced revocation give the minimal
+         * record.
+         *
+         * # Errors
+         * [`RappBindingError::InvalidInput`] for a hint of the wrong size, a
+         * retention that does not decode, or an instance name that is not the
+         * instance portion of the published name, and
+         * [`RappBindingError::LocalStateFailure`] when the random source fails.
+         */
+    @Throws(RappBindingException::class) fun `rappSessionRecord`(`candidates`: List<RappAnnouncementCandidate>, `retentions`: List<kotlin.ByteArray>, `instanceName`: kotlin.String, `unixTimeSeconds`: kotlin.ULong): List<RappTxtEntry> {
             return FfiConverterSequenceTypeRappTxtEntry.lift(
     uniffiRustCallWithError(RappBindingException) { _status ->
     UniffiLib.uniffi_refineid_rapp_fn_func_rapp_session_record(
     
         
-        FfiConverterSequenceTypeRappAnnouncementCandidate.lower(`candidates`),_status)
+        FfiConverterSequenceTypeRappAnnouncementCandidate.lower(`candidates`),
+        FfiConverterSequenceByteArray.lower(`retentions`),
+        FfiConverterString.lower(`instanceName`),
+        FfiConverterULong.lower(`unixTimeSeconds`),_status)
 }
     )
     }

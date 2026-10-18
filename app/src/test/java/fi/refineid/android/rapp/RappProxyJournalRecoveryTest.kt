@@ -26,7 +26,7 @@ import javax.crypto.KeyGenerator
 /**
  * The custodian's process dies after the in-flight entry is written and
  * before the card answers. A fresh process recovers the operation from disk
- * as ambiguous and never offers it again (RAPP v26.10.1 section 8.3).
+ * as ambiguous and never offers it again (RAPP v26.10.18 section 8.3).
  */
 class RappProxyJournalRecoveryTest {
     @get:Rule
@@ -50,6 +50,13 @@ class RappProxyJournalRecoveryTest {
         private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
 
         override fun insertDeviceOnly(
+            pairId: ByteArray,
+            record: ByteArray,
+        ) {
+            pairs[hex(pairId)] = record.copyOf()
+        }
+
+        override fun replaceDeviceOnly(
             pairId: ByteArray,
             record: ByteArray,
         ) {

@@ -79,6 +79,10 @@ internal class StreamRelayListener(
     var registeredName: String? = null
         private set
 
+    /** Called with the instance name each time the responder confirms a registration. */
+    @Volatile
+    var onRegistered: ((String) -> Unit)? = null
+
     val port: Int?
         get() = serverSocket?.localPort
 
@@ -326,6 +330,7 @@ internal class StreamRelayListener(
                     registeredName = serviceInfo.serviceName
                     advertisedName = serviceInfo.serviceName
                     AppTrace.rappListenerServiceRegistered(serviceInfo.serviceName)
+                    onRegistered?.invoke(serviceInfo.serviceName)
                     if (BuildConfig.DEBUG) {
                         android.util.Log.i("STREAM_LISTENER", "onServiceRegistered")
                     }

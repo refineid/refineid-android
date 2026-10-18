@@ -198,9 +198,19 @@ internal class RappRequesterClient(
                                         for (f in listOfNotNull(action.frame) + action.additionalFrames) {
                                             browser?.send(f)
                                         }
+                                    } else if (action.kind == RappBridgeActionKind.CARD_STATUS) {
+                                        // The custodian's card presence (RAPP v26.10.18 section
+                                        // 8.4); the one operation this client runs is already
+                                        // under way, so the report changes nothing here.
+                                        return@StreamRelayBrowser
                                     } else if (action.kind == RappBridgeActionKind.TERMINAL ||
                                         action.kind == RappBridgeActionKind.SESSION_CLOSED
                                     ) {
+                                        // A terminal result is acknowledged whatever its status
+                                        // (RAPP v26.10.18 section 8.2 item 5).
+                                        for (f in listOfNotNull(action.frame) + action.additionalFrames) {
+                                            browser?.send(f)
+                                        }
                                         if (BuildConfig.DEBUG) {
                                             android.util.Log.w(
                                                 "REQUESTER_CLIENT",

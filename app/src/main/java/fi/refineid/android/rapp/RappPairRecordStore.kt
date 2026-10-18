@@ -12,7 +12,7 @@ import java.security.GeneralSecurityException
 
 /**
  * Device-local store of encoded RAPP pair records, which carry the pairing's
- * static private key (RAPP v26.10.10 section 4.3.4).
+ * static private key (RAPP v26.10.18 section 4.3.4).
  *
  * Each record is one file named by its pair identifier under [root], a
  * no-backup directory, sealed by [sealer] and replaced by an atomic move. A
@@ -67,6 +67,17 @@ internal class RappPairRecordStore(
         synchronized(LOCK) {
             file(pairIdHex).delete()
             Unit
+        }
+
+    /** The pair identifier of every record stored here. */
+    fun pairIdentifiers(): List<String> =
+        synchronized(LOCK) {
+            root
+                .listFiles()
+                .orEmpty()
+                .filter { it.isFile && it.name.endsWith(RECORD_SUFFIX) }
+                .map { it.name.removeSuffix(RECORD_SUFFIX) }
+                .filter(::isPairIdentifier)
         }
 
     /**

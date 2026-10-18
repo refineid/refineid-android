@@ -60,6 +60,18 @@ class RappPairRecordStoreTest {
     }
 
     @Test
+    fun pairIdentifiersListStoredRecordsOnly() {
+        val store = store()
+        store.insert(PAIR_ID, record)
+        store.insert(OTHER_PAIR_ID, record)
+        File(folder.root, "notes.txt").writeText("not a record")
+        File(folder.root, "$PAIR_ID.tmp").writeBytes(record)
+        assertEquals(setOf(PAIR_ID, OTHER_PAIR_ID), store.pairIdentifiers().toSet())
+        store.remove(PAIR_ID)
+        assertEquals(listOf(OTHER_PAIR_ID), store.pairIdentifiers())
+    }
+
+    @Test
     fun removeDeletesOnlyThatPairing() {
         store().insert(PAIR_ID, record)
         store().insert(OTHER_PAIR_ID, record)

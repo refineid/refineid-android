@@ -208,7 +208,7 @@ class RefineIdApplication : Application() {
             fi.refineid.android.rapp
                 .RappPairCatalog(this)
         fi.refineid.android.rapp.RappStoredPairs
-            .dropUndecodable(rappPairCatalog, rappVault)
+            .cleanAtStartup(rappPairCatalog, rappVault)
         remoteCardModel =
             fi.refineid.android.rapp.RemoteCardModel(
                 context = this,
@@ -240,8 +240,15 @@ class RefineIdApplication : Application() {
         }
         readerController.start()
         rappProxyDispatcher = createRappProxyDispatcher(primedStore)
+        // Either reader's card arriving or leaving is reported on the open
+        // RAPP session (RAPP v26.10.18 section 8.4).
+        readerController.addStateListener { rappProxyDispatcher.cardPresenceChanged(isAnyCardReady()) }
+        nfcReaderController.addStateListener { rappProxyDispatcher.cardPresenceChanged(isAnyCardReady()) }
         startRappProxyListening()
     }
+
+    /** Whether a card is ready on the USB reader or on NFC; primed material alone is not a card. */
+    private fun isAnyCardReady(): Boolean = readerController.isCardReady || nfcReaderController.isCardReady
 
     internal fun startRappProxyListening() {
         val settings =
@@ -253,9 +260,20 @@ class RefineIdApplication : Application() {
         val stored =
             fi.refineid.android.rapp.RappStoredPairs
                 .load(rappPairCatalog, rappVault)
-        val newest = stored.maxByOrNull { (peer, _) -> peer.lastUsedMs } ?: return
+        val newest = stored.maxByOrNull { (peer, _) -> peer.lastUsedMs }
         try {
-            if (newest.second.metadata().role == uniffi.refineid_rapp.RappEndpointRole.PROXY) {
+            if (newest == null) {
+                // Without a pairing the session record is still published
+                // while a revocation remains to announce (RAPP v26.10.18
+                // section 4.6 item 4).
+                val now =
+                    fi.refineid.android.rapp.StreamRendezvousName
+                        .nowUnixSeconds()
+                        .toULong()
+                if (rappVault.unexpiredRevocations(now).isNotEmpty()) {
+                    rappProxyDispatcher.startListening(rappVault)
+                }
+            } else if (newest.second.metadata().role == uniffi.refineid_rapp.RappEndpointRole.PROXY) {
                 rappProxyDispatcher.startListening(rappVault)
             } else {
                 remoteCardModel.refresh()
@@ -306,13 +324,7 @@ class RefineIdApplication : Application() {
                     nfcReaderController.qualifiedCardService
                 }
             },
-            isCardReady = {
-                if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
-                    readerController.isCardReady
-                } else {
-                    nfcReaderController.isCardReady
-                }
-            },
+            isCardReady = ::isAnyCardReady,
             awaitCardReady = {
                 if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
                     readerController.awaitCardReady()

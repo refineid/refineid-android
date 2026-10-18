@@ -8,18 +8,24 @@ import uniffi.refineid_rapp.RappPeerHello
 
 /**
  * The custodian's side of one pairing ceremony over one connected candidate,
- * after the offer bootstrap, in the order RAPP v26.10.10 section 6.1.3 fixes:
+ * after the offer bootstrap, in the order RAPP v26.10.18 sections 4.3 and
+ * 6.1.3 fix:
  *
  * 1. read the requester's Y_A, answer with Y_B and T_B;
  * 2. read T_A, which consumes the offer and starts Noise_XXpsk3;
  * 3. read Noise message 1, answer with message 2;
  * 4. read message 3 and enter the authenticated pairing channel;
  * 5. read the requester's hello, answer with this hello and the grant;
- * 6. read the requester's echo of the grant and finish.
+ * 6. read the requester's echo of the grant, store the unconfirmed record
+ *    through [persistUnconfirmed], and answer with this side's
+ *    `pairing.stored`;
+ * 7. read the requester's `pairing.stored` and activate the pairing, which
+ *    yields the confirmed record the caller stores over the unconfirmed one.
  *
  * The class holds no Android types, so the whole ceremony runs against a
  * requester bridge in a JVM test. The bridge rejects any frame out of this
- * order; a rejection ends the ceremony.
+ * order; a rejection ends the ceremony. A ceremony that ends after step 6
+ * without reaching step 7 leaves [storedRecord] for the caller to revoke.
  */
 internal class RappCustodianPairingCeremony(
     private val bridge: RappPairingBridgeInterface,
@@ -28,6 +34,7 @@ internal class RappCustodianPairingCeremony(
     private val platform: String,
     private val monotonicMs: () -> ULong,
     private val wallMs: () -> ULong,
+    private val persistUnconfirmed: (RappPairRecord) -> Unit,
 ) {
     /** The next frame this custodian expects. */
     enum class Step {
@@ -37,6 +44,7 @@ internal class RappCustodianPairingCeremony(
         AWAITING_HANDSHAKE_THREE,
         AWAITING_HELLO,
         AWAITING_CONFIRMATION,
+        AWAITING_STORED,
         COMPLETED,
     }
 
@@ -47,7 +55,10 @@ internal class RappCustodianPairingCeremony(
             val frames: List<ByteArray>,
         ) : Outcome
 
-        /** The ceremony completed; the record still has to be persisted. */
+        /**
+         * The ceremony completed; [record] is the confirmed record, which the
+         * caller stores over the unconfirmed one.
+         */
         data class Paired(
             val record: RappPairRecord,
             val peer: RappPeerHello,
@@ -60,6 +71,14 @@ internal class RappCustodianPairingCeremony(
     private var peer: RappPeerHello? = null
 
     /**
+     * The unconfirmed record this side stored and announced with
+     * `pairing.stored`, until the requester's confirmation activates it.
+     * Null before step 6 and after step 7.
+     */
+    var storedRecord: RappPairRecord? = null
+        private set
+
+    /**
      * Whether T_A verified and consumed the offer, so a lost peer fails the
      * ceremony instead of returning the candidate to the offer.
      */
@@ -70,8 +89,8 @@ internal class RappCustodianPairingCeremony(
      * Consumes one frame from the requester.
      *
      * @throws uniffi.refineid_rapp.RappBindingException when the bridge
-     *   rejects the frame, including a wrong code, an expired offer, or a
-     *   frame out of order.
+     *   rejects the frame, including a wrong code, an expired offer, a frame
+     *   out of order, or a `pairing.stored` naming another pairing.
      */
     fun receive(frame: ByteArray): Outcome {
         val now = monotonicMs()
@@ -117,9 +136,22 @@ internal class RappCustodianPairingCeremony(
 
             Step.AWAITING_CONFIRMATION -> {
                 bridge.receiveConfirmation(frame, now)
-                val record = bridge.finishPairing(wallMs(), now)
+                val unconfirmed = bridge.buildPairRecord(wallMs(), now)
+                persistUnconfirmed(unconfirmed)
+                storedRecord = unconfirmed
+                val stored = bridge.sendStored(now)
+                step = Step.AWAITING_STORED
+                Outcome.Send(listOf(stored))
+            }
+
+            Step.AWAITING_STORED -> {
+                bridge.receiveStored(frame, now)
+                val confirmed =
+                    checkNotNull(bridge.activatePairing(now)) { "both storage confirmations exchanged" }
+                storedRecord?.close()
+                storedRecord = null
                 step = Step.COMPLETED
-                Outcome.Paired(record, checkNotNull(peer))
+                Outcome.Paired(confirmed, checkNotNull(peer))
             }
 
             Step.COMPLETED -> {

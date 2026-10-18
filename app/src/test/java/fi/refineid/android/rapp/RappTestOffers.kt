@@ -7,7 +7,7 @@ import uniffi.refineid_rapp.RappPairingBridge
 import java.security.SecureRandom
 
 /**
- * Builds the two bridges of one pairing the way RAPP v26.10.10 section 4.2
+ * Builds the two bridges of one pairing the way RAPP v26.10.18 section 4.2
  * does: the custodian creates a random offer, and the requester decodes the
  * bootstrap bytes the custodian serves over the stream transport.
  */
@@ -37,7 +37,12 @@ internal object RappTestOffers {
 
     private fun random(size: Int) = ByteArray(size).also { SecureRandom().nextBytes(it) }
 
-    /** A completed pairing: the requester's record and the custodian's. */
+    /**
+     * A completed pairing: the requester's confirmed record and the
+     * custodian's, after both storage confirmations were exchanged (section
+     * 4.3 item 4). The unconfirmed records a platform would persist first are
+     * built and released; the confirmed ones are returned.
+     */
     fun pairRecords(
         profiles: List<String>,
         now: ULong,
@@ -58,6 +63,24 @@ internal object RappTestOffers {
         requester.receiveHello(custodian.sendHello("Phone", "Android", now), now)
         requester.receiveConfirmation(custodian.sendConfirmation(profiles, now), now)
         custodian.receiveConfirmation(requester.sendConfirmation(profiles, now), now)
-        return requester.finishPairing(WALL_MS, now) to custodian.finishPairing(WALL_MS, now)
+        return confirmStorage(requester, custodian, now)
+    }
+
+    /**
+     * Runs the storage confirmation of both sides and returns the confirmed
+     * records, requester first.
+     */
+    fun confirmStorage(
+        requester: RappPairingBridge,
+        custodian: RappPairingBridge,
+        now: ULong,
+    ): Pair<RappPairRecord, RappPairRecord> {
+        requester.buildPairRecord(WALL_MS, now).close()
+        custodian.buildPairRecord(WALL_MS, now).close()
+        val requesterStored = requester.sendStored(now)
+        val custodianStored = custodian.sendStored(now)
+        custodian.receiveStored(requesterStored, now)
+        requester.receiveStored(custodianStored, now)
+        return checkNotNull(requester.activatePairing(now)) to checkNotNull(custodian.activatePairing(now))
     }
 }

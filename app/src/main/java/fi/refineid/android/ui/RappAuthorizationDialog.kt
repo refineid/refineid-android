@@ -63,6 +63,7 @@ import fi.refineid.android.rapp.rappRequestText
 @Composable
 internal fun RappAuthorizationDialog(request: RappAuthRequest) {
     var pin by remember(request.requestId) { mutableStateOf("") }
+    LaunchedEffect(request.requestId) { request.onShown() }
     val isPinValid =
         when (request) {
             is RappAuthRequest.BrowserAuth -> Pin1Submission.isComplete(pin)

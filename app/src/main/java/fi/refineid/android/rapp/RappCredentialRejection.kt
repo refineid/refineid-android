@@ -3,7 +3,7 @@
 package fi.refineid.android.rapp
 
 /**
- * How the custodian reports a credential the card refused (RAPP v26.10.1
+ * How the custodian reports a credential the card refused (RAPP v26.10.18
  * section 10.2). Only the card's own remaining count proves attempts remain;
  * anything else is reported as a blocked credential, which revokes the
  * pairing.

@@ -100,6 +100,13 @@ class RappBatchSignatureRunTest {
                 pairs[hex(pairId)] = record.copyOf()
             }
 
+            override fun replaceDeviceOnly(
+                pairId: ByteArray,
+                record: ByteArray,
+            ) {
+                pairs[hex(pairId)] = record.copyOf()
+            }
+
             override fun loadDeviceOnly(pairId: ByteArray): ByteArray? = pairs[hex(pairId)]?.copyOf()
 
             override fun revokeDeviceOnly(

@@ -4,6 +4,8 @@ package fi.refineid.android.rapp
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -14,7 +16,7 @@ import java.security.SecureRandom
 
 /**
  * Drives [RappCustodianPairingCeremony] against a requester bridge in the
- * order RAPP v26.10.10 section 6.1.3 fixes, after the requester decoded the
+ * order RAPP v26.10.18 section 6.1.3 fixes, after the requester decoded the
  * custodian's offer bootstrap (section 4.2).
  */
 class RappCustodianPairingCeremonyTest {
@@ -70,6 +72,9 @@ class RappCustodianPairingCeremonyTest {
         return other
     }
 
+    /** The unconfirmed records the ceremony asked to persist, in order. */
+    private val persisted = mutableListOf<uniffi.refineid_rapp.RappPairRecord>()
+
     private fun ceremony(bridge: RappPairingBridge) =
         RappCustodianPairingCeremony(
             bridge = bridge,
@@ -78,6 +83,7 @@ class RappCustodianPairingCeremonyTest {
             platform = "Android",
             monotonicMs = { OFFER_STARTED_AT_MS },
             wallMs = { WALL_CLOCK_MS },
+            persistUnconfirmed = { record -> persisted.add(record) },
         )
 
     private fun RappCustodianPairingCeremony.Outcome.frames(): List<ByteArray> =
@@ -106,14 +112,53 @@ class RappCustodianPairingCeremonyTest {
         val granted = requester.receiveConfirmation(grant, now)
         assertEquals(OFFERED_PROFILES.sorted(), granted.sorted())
 
-        val outcome = custodian.receive(requester.sendConfirmation(granted, now))
+        // The custodian stores its unconfirmed record and announces it;
+        // the pairing is not active until the requester confirms (section
+        // 4.3 item 4).
+        val custodianStored = custodian.receive(requester.sendConfirmation(granted, now)).frames().single()
+        assertEquals(RappCustodianPairingCeremony.Step.AWAITING_STORED, custodian.step)
+        assertEquals(1, persisted.size)
+        assertTrue(!persisted.single().metadata().storageConfirmed)
+        assertNotNull(custodian.storedRecord)
+
+        requester.buildPairRecord(WALL_CLOCK_MS, now).close()
+        val requesterStored = requester.sendStored(now)
+        requester.receiveStored(custodianStored, now)
+        val outcome = custodian.receive(requesterStored)
         val paired = outcome as RappCustodianPairingCeremony.Outcome.Paired
         assertEquals("Workstation", paired.peer.displayName)
+        assertTrue(paired.record.metadata().storageConfirmed)
+        assertNull(custodian.storedRecord)
+        // The unconfirmed handle is closed once the confirmed record replaces it.
+        assertThrows(IllegalStateException::class.java) { persisted.single().metadata() }
         assertArrayEquals(
-            requester.finishPairing(WALL_CLOCK_MS, now).metadata().pairId,
+            checkNotNull(requester.activatePairing(now)).metadata().pairId,
             paired.record.metadata().pairId,
         )
         assertEquals(RappCustodianPairingCeremony.Step.COMPLETED, custodian.step)
+    }
+
+    @Test
+    fun aCeremonyAbandonedAfterStoringLeavesTheRecordToRevoke() {
+        val (custodianBridge, requester) = bridges(RappPairingCode.generate())
+        val custodian = ceremony(custodianBridge)
+        val now = OFFER_STARTED_AT_MS
+
+        requester.readCpaceFrame(custodian.receive(requester.writeCpaceFrame(now)).frames().single(), now)
+        custodian.receive(requester.writeCpaceFrame(now))
+        requester.readHandshakeFrame(custodian.receive(requester.writeHandshakeFrame(now)).frames().single(), now)
+        custodian.receive(requester.writeHandshakeFrame(now))
+        requester.enterConfirmation(now)
+        val (custodianHello, grant) = custodian.receive(requester.sendHello("Workstation", "Windows", now)).frames()
+        requester.receiveHello(custodianHello, now)
+        val granted = requester.receiveConfirmation(grant, now)
+        custodian.receive(requester.sendConfirmation(granted, now))
+
+        // The requester never confirms: the stored record is the caller's to
+        // revoke, and the bridge activates nothing.
+        val stored = checkNotNull(custodian.storedRecord)
+        assertTrue(!stored.metadata().storageConfirmed)
+        assertNull(custodianBridge.activatePairing(now))
     }
 
     @Test

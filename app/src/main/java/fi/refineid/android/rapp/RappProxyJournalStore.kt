@@ -23,7 +23,7 @@ internal interface RappJournalSealer {
 }
 
 /**
- * The custodian's durable RAPP operation journal (RAPP v26.10.1 sections 8.1
+ * The custodian's durable RAPP operation journal (RAPP v26.10.18 sections 8.1
  * and 8.2.5): one sealed file per operation under one directory per pairing.
  *
  * Every transition replaces the operation's file atomically, record and
