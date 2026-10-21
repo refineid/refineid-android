@@ -12,16 +12,17 @@ colliding and keeps the main checkout pristine for integration.
 
 ## Topology and naming
 
-- The main checkout is never edited directly. It integrates and releases.
-- Each task gets a worktree under `~/src/wt/`, never under `/tmp` or directly in `~/src/`:
-  `~/src/wt/refineid-android-<topic>` on branch `agent/<topic>`.
+- Reading does not require a worktree; writing does. The main checkout is
+  never edited directly. It integrates and releases.
+- Each task gets a worktree under `../wt/`, never under `/tmp` or loose beside repositories:
+  `../wt/refineid-android-<topic>` on branch `<topic>`.
 - One branch carries one pull request. Never stack unrelated work onto a
   branch that already has an open pull request.
 
 ## Starting a task
 
 1. Update local main: `git checkout main && git pull --ff-only`.
-2. Create the worktree: `git worktree add ~/src/wt/refineid-android-<topic> -b agent/<topic>`.
+2. Create the worktree: `git worktree add ../wt/refineid-android-<topic> -b <topic>`.
 3. Copy `local.properties` into the worktree (machine-global SDK path).
    Never copy signing secrets (`keystore.properties`, service accounts):
    worktrees build debug only, release signing stays in the main checkout.
