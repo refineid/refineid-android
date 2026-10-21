@@ -29,6 +29,7 @@ internal class AesGcmJournalSealer(
         cipher.init(
             Cipher.DECRYPT_MODE,
             key(),
+            // nosemgrep: kotlin.lang.security.gcm-detection.gcm-detection
             GCMParameterSpec(TAG_BITS, sealed, 0, IV_BYTES),
         )
         return cipher.doFinal(sealed, IV_BYTES, sealed.size - IV_BYTES)
