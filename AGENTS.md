@@ -97,13 +97,19 @@
 - Commit often when the build and lint are clean. Push when a feature is
   ready. Subject and body only: no AI attribution, co-author, sign-off, or
   review trailers.
-- One task, one worktree (`~/src/wt/refineid-android-<topic>`) on one
-  `agent/<topic>` branch, one pull request per branch. Run
-  `Scripts/agent-housekeeping.sh` when starting and keep the house clean. Merge
+- Reading does not require a worktree; writing does. The main checkout is
+  never edited directly. Before writing code or modifying files for any task,
+  create a dedicated git worktree strictly under `../wt/`
+  (`../wt/refineid-android-<topic>`) on a `<topic>` branch. Never work
+  directly on `main` or modify files in the main checkout.
+- All worktrees MUST live strictly under `../wt/`, never loose beside
+  repositories or in parent directories.
+- Never put a git worktree under `/tmp`. It is cleared on reboot and takes the
+  branch's only checkout with it.
+- One task, one worktree, one branch (`<topic>`), one pull request per branch.
+  Run `Scripts/agent-housekeeping.sh` when starting and keep the house clean. Merge
   the pull request once CI is green, then remove the worktree and branch and
   fast-forward `main`. Full workflow: `doc/process/agent-worktrees.md`.
-- Never put a git worktree under `/tmp` or directly in `~/src/`; all worktrees
-  must live under `~/src/wt/`.
 - Never poll background commands or set rapid check timers (e.g. 10s-30s). When running builds, tests, or async tasks, execute asynchronously and wait strictly for system completion notifications.
 - Whenever modifying Android application code or UI, proactively build and install the debug APK to any connected physical test device (`adb install -r app/build/outputs/apk/debug/app-debug.apk`) without waiting for explicit user instructions. When a device is attached over USB, also configure and maintain Wi-Fi debugging (`adb tcpip 5555 && adb connect <ip>:5555`) so deployment and verification continue smoothly if the cable is detached. Always verify installation success. If no device is attached or reachable, notify the user immediately.
 - When stuck, research with fellow AI available.
