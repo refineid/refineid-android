@@ -1087,18 +1087,12 @@ private fun SingleIdentityRow(
             modifier = Modifier.size(ROW_ICON_SIZE),
         )
         if (holderName != null) {
-            Column(modifier = Modifier.weight(ROW_LABEL_WEIGHT)) {
-                Text(
-                    text = stringResource(R.string.person_label),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = holderName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                text = holderName,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(ROW_LABEL_WEIGHT),
+            )
         } else {
             Text(
                 text =
