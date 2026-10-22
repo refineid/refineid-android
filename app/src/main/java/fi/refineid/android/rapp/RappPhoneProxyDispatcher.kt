@@ -54,7 +54,6 @@ import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
 import uniffi.refineid_rapp.rappRandomByteCounts
 import uniffi.refineid_rapp.rappSessionRecord
-import uniffi.refineid_rapp.rappStreamProfileName
 import uniffi.refineid_rapp.rappWithdrawnRecord
 import java.io.IOException
 import java.security.SecureRandom
@@ -63,12 +62,20 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The custodian side of RAPP v26.10.22: serves the paired computers' sessions
- * over the stream transport, asks the holder for PINs on this phone, and
- * runs the card commands through the card services.
+ * over the stream transport and over Bluetooth (`fi.refineid.rapp.ble`,
+ * section 5), asks the holder for PINs on this phone, and runs the card
+ * commands through the card services.
  *
- * The listener holds one session at a time. Operations take the card one at a
- * time, in the order they arrived, across that session and any earlier one
- * whose card command is still finishing (section 8.2 item 2).
+ * The phone serves one session at a time whichever transport carries it
+ * (STPA CC-67): a dial on either transport opens a session only as
+ * [RappSessionAdmission] allows, and a busy session is never displaced.
+ * Operations take the card one at a time, in the order they arrived, across
+ * that session and any earlier one whose card command is still finishing
+ * (section 8.2 item 2).
+ *
+ * Session state changes, and every frame sent, under one lock, so frames
+ * leave in the order their bridge sealed them and a frame of one session
+ * never goes out on another's transport.
  */
 internal class RappPhoneProxyDispatcher(
     private val context: Context,
@@ -85,6 +92,7 @@ internal class RappPhoneProxyDispatcher(
     private val onAuthenticationVerified: ((ByteArray, Pin1Retention, Long) -> Boolean)? = null,
 ) : AutoCloseable {
     private var activeListener: StreamRelayListener? = null
+    private var bleServer: RappBleGattServer? = null
     private var sessionRouting: RappSessionRouting? = null
     private var withdrawalJob: Job? = null
     private var hintRefreshJob: Job? = null
@@ -95,6 +103,23 @@ internal class RappPhoneProxyDispatcher(
 
     @Volatile
     private var isClosed = false
+
+    /** Whether the holder switched Remote Access off and the withdrawal is under way (section 4.5). */
+    private var withdrawing = false
+
+    /** The connection that carries the session; null while none is routed. */
+    @Volatile
+    private var served: RappServedTransport? = null
+
+    /** Ends a Bluetooth session whose handshake has not completed in time. */
+    private var handshakeDeadlineJob: Job? = null
+
+    /** Monotonic milliseconds when the session was established. */
+    private var establishedAtMs = 0L
+
+    /** Monotonic milliseconds when the session's last operation ended. */
+    @Volatile
+    private var lastOperationEndedMs = 0L
 
     /** The instance name the session record is published under, as the responder last confirmed it. */
     @Volatile
@@ -118,8 +143,8 @@ internal class RappPhoneProxyDispatcher(
     private var livenessJob: Job? = null
     private var operationJob: Job? = null
 
-    /** Frames leave in the order their bridge sealed them. */
-    private val sendLock = Any()
+    /** Guards the session's state and its transport; frames leave in the order their bridge sealed them. */
+    private val sessionLock = Any()
 
     /** The card serves one operation at a time (section 8.2 item 2). */
     private val card = Mutex()
@@ -192,6 +217,9 @@ internal class RappPhoneProxyDispatcher(
         /** How long the withdrawn record stays advertised (RAPP section 4.5: 2 to 10 seconds). */
         private const val WITHDRAWN_ANNOUNCEMENT_MS = 3_000L
 
+        /** How long a routed Bluetooth link has to complete `Noise_KK`, the stream listener's bound. */
+        private const val BLUETOOTH_HANDSHAKE_DEADLINE_MS = StreamRelayListener.DEFAULT_HANDSHAKE_TIMEOUT_MS
+
         private val RANDOM_BYTE_COUNTS = rappRandomByteCounts()
 
         /** The value random material is overwritten with once used. */
@@ -206,7 +234,8 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Starts the one session listener for every stored pairing (RAPP
-     * discovery hierarchy section 4.2-4.3).
+     * discovery hierarchy section 4.2-4.3), and the Bluetooth server beside
+     * it when the holder allows it.
      *
      * It is published under a fresh random instance name with TXT `v=1`,
      * `mode=session` and the rotating hints of the most recently used
@@ -214,14 +243,25 @@ internal class RappPhoneProxyDispatcher(
      * tag in its preamble.
      */
     fun startListening(vault: AndroidRappVault) {
-        if (isClosed) return
-        withdrawalJob?.cancel()
-        withdrawalJob = null
-        this.vault = vault
-        endSession()
-        activeListener?.close()
-        sessionRouting?.close()
-        sessionRouting = RappSessionRouting()
+        synchronized(sessionLock) {
+            if (isClosed) return
+            withdrawalJob?.cancel()
+            withdrawalJob = null
+            // A withdrawal stopped the advertisement for good; serving again starts a fresh server.
+            if (withdrawing) stopBluetooth()
+            withdrawing = false
+            this.vault = vault
+            // The new listener ends the stream's connection; a Bluetooth session keeps its link.
+            if (served == RappServedTransport.Stream) dropConnection()
+            activeListener?.close()
+            sessionRouting?.close()
+            sessionRouting = RappSessionRouting()
+            listen(vault)
+            serveBluetooth()
+        }
+    }
+
+    private fun listen(vault: AndroidRappVault) {
         val listener =
             StreamRelayListener(context, scope) { event ->
                 handleRelayEvent(event)
@@ -268,9 +308,9 @@ internal class RappPhoneProxyDispatcher(
      */
     fun pairingsChanged() {
         val vlt = vault ?: return
-        val served = RappStoredPairs.served(catalog, vlt)
-        val serves = served.any { it.pairing.role == RappEndpointRole.PROXY }
-        served.forEach { it.record.close() }
+        val pairs = RappStoredPairs.served(catalog, vlt)
+        val serves = pairs.any { it.pairing.role == RappEndpointRole.PROXY }
+        pairs.forEach { it.record.close() }
         if (serves) refreshAnnouncement() else stopListening()
     }
 
@@ -318,15 +358,17 @@ internal class RappPhoneProxyDispatcher(
      * delivers the close.
      */
     fun closePairingRevoked(pairId: RappPairId): Boolean {
-        if (routed?.pairing?.id != pairId) return false
-        val bridge = operationBridge
-        if (bridge == null) {
+        synchronized(sessionLock) {
+            if (routed?.pairing?.id != pairId) return false
+            val bridge = operationBridge
+            if (bridge == null) {
+                dropConnection()
+                return false
+            }
+            val closed = act(bridge) { it.closeWithReason(RappCloseReason.PAIRING_REVOKED) } != null
             dropConnection()
-            return false
+            return closed
         }
-        val closed = act(bridge) { it.closeWithReason(RappCloseReason.PAIRING_REVOKED) } != null
-        dropConnection()
-        return closed
     }
 
     /**
@@ -367,95 +409,237 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Withdraws the service the user switched off (RAPP v26.10.22 section
-     * 4.5): the open session is closed as withdrawn, the listener stops
-     * accepting, the instance is advertised as withdrawn for a few seconds,
-     * and then everything stops.
+     * 4.5): the open session, on either transport, is closed as withdrawn;
+     * the listener and the Bluetooth server stop accepting and the
+     * advertisement stops; the instance is advertised as withdrawn for a few
+     * seconds, and then everything stops. The Bluetooth advertisement carries
+     * no withdrawal (section 4.5 item 5).
      */
     fun withdraw() {
-        val listener = activeListener
-        val vlt = vault
-        val instance = listener?.registeredName
-        if (listener == null || vlt == null || instance == null) {
-            stopListening()
-            return
-        }
-        hintRefreshJob?.cancel()
-        hintRefreshJob = null
-        operationBridge?.let { bridge -> act(bridge) { it.closeWithReason(RappCloseReason.SERVICE_WITHDRAWN) } }
-        val now = StreamRendezvousName.nowUnixSeconds().toULong()
-        val withdrawn =
-            try {
-                StreamRendezvousName.attributes(
-                    rappWithdrawnRecord(announcementCandidates(vlt) { it.withdrawalHint(instance, now) }),
-                )
-            } catch (_: Exception) {
-                null
+        synchronized(sessionLock) {
+            hintRefreshJob?.cancel()
+            hintRefreshJob = null
+            operationBridge?.let { bridge -> act(bridge) { it.closeWithReason(RappCloseReason.SERVICE_WITHDRAWN) } }
+            dropConnection()
+            withdrawing = true
+            bleServer?.stopAdvertising()
+            val listener = activeListener
+            val vlt = vault
+            val instance = listener?.registeredName
+            if (listener == null || vlt == null || instance == null) {
+                stopListening()
+                return
             }
-        dropConnection()
-        if (withdrawn == null) {
-            stopListening()
-            return
-        }
-        listener.withdraw(withdrawn)
-        withdrawalJob?.cancel()
-        withdrawalJob =
-            scope.launch {
-                delay(WITHDRAWN_ANNOUNCEMENT_MS)
-                if (activeListener === listener) stopListening()
+            val now = StreamRendezvousName.nowUnixSeconds().toULong()
+            val withdrawn =
+                try {
+                    StreamRendezvousName.attributes(
+                        rappWithdrawnRecord(announcementCandidates(vlt) { it.withdrawalHint(instance, now) }),
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+            if (withdrawn == null) {
+                stopListening()
+                return
             }
+            listener.withdraw(withdrawn)
+            withdrawalJob?.cancel()
+            withdrawalJob =
+                scope.launch {
+                    delay(WITHDRAWN_ANNOUNCEMENT_MS)
+                    synchronized(sessionLock) { if (activeListener === listener) stopListening() }
+                }
+        }
     }
 
     fun stopListening() {
-        RappCustodianService.stop(context)
-        sessionRouting?.close()
-        sessionRouting = null
-        hintRefreshJob?.cancel()
-        hintRefreshJob = null
-        endSession()
-        activeListener?.close()
-        activeListener = null
-        announcedInstance = null
-        vault = null
+        synchronized(sessionLock) {
+            RappCustodianService.stop(context)
+            sessionRouting?.close()
+            sessionRouting = null
+            hintRefreshJob?.cancel()
+            hintRefreshJob = null
+            dropConnection()
+            stopBluetooth()
+            activeListener?.close()
+            activeListener = null
+            announcedInstance = null
+            vault = null
+            withdrawing = false
+        }
     }
 
     /** Drops the connected computer and publishes the listener afresh. */
     fun disconnectClient() {
-        endSession()
-        activeListener?.close()
-        val vlt = vault
-        if (vlt != null && !isClosed) {
-            startListening(vlt)
+        synchronized(sessionLock) {
+            dropConnection()
+            activeListener?.close()
+            val vlt = vault
+            if (vlt != null && !isClosed) {
+                startListening(vlt)
+            }
         }
     }
 
+    /**
+     * Serves over Bluetooth beside the listener, once the holder allowed it
+     * (`BLUETOOTH_ADVERTISE`, `BLUETOOTH_CONNECT`); without the permission
+     * the phone serves over the stream alone. The server publishes the RAPP
+     * service once and advertises while the phone serves, and follows the
+     * Bluetooth radio on and off by itself.
+     */
+    fun serveBluetooth() {
+        synchronized(sessionLock) {
+            if (isClosed || withdrawing || activeListener == null || bleServer != null) return
+            if (!RappBleGattServer.permitted(context)) {
+                AppTrace.rappBleServer(RappBleServerStep.PERMISSION_MISSING)
+                return
+            }
+            lateinit var server: RappBleGattServer
+            server =
+                RappBleGattServer(
+                    context,
+                    admits = { preamble, link -> admitBluetooth(server, preamble, link) },
+                    onEvent = { event -> bluetoothEvent(server, event) },
+                )
+            bleServer = server
+            server.start()
+        }
+    }
+
+    /**
+     * The holder answered the permissions turning Remote Access on asked for
+     * ([answers] maps each asked permission to whether it was granted). With
+     * nearby devices granted the phone serves over Bluetooth too; declined, it
+     * serves over the stream alone, and the debug trace says so.
+     */
+    fun bluetoothPermissionsAnswered(answers: Map<String, Boolean>) {
+        if (RappBleGattServer.PERMISSIONS.any { answers[it] == false }) {
+            AppTrace.rappBleServer(RappBleServerStep.PERMISSION_DENIED)
+        }
+        serveBluetooth()
+    }
+
+    private fun stopBluetooth() {
+        bleServer?.cancel()
+        bleServer = null
+    }
+
+    /**
+     * Admits the routing preamble of [link] on [server]'s lane: a session
+     * preamble routed to a pairing this phone serves (section 2.2.1), within
+     * the pre-authentication bound (section 3.3 item 8) and the one-session
+     * rule (CC-67). The session opens here; its handshake must complete
+     * within [BLUETOOTH_HANDSHAKE_DEADLINE_MS].
+     */
+    private fun admitBluetooth(
+        server: RappBleGattServer,
+        preamble: ByteArray,
+        link: RappBleLink,
+    ): Boolean {
+        synchronized(sessionLock) {
+            val vlt = vault
+            val transport = RappServedTransport.Bluetooth(link)
+            val refusal =
+                when {
+                    bleServer !== server || vlt == null || withdrawing || isClosed -> RappDialRefusal.NOT_SERVING
+                    !preAuthenticationLimiter.admit(RappClock.monotonicMs()) -> RappDialRefusal.RATE_LIMITED
+                    else -> null
+                }
+            if (refusal != null || vlt == null) {
+                AppTrace.rappDialRefused(transport.profile, refusal ?: RappDialRefusal.NOT_SERVING)
+                return false
+            }
+            val pair = routeServed(vlt, transport.profile, preamble) ?: return false
+            if (!admit(pair, transport)) {
+                pair.record.close()
+                return false
+            }
+            if (!open(vlt, pair, transport)) return false
+            handshakeDeadlineJob =
+                scope.launch {
+                    delay(BLUETOOTH_HANDSHAKE_DEADLINE_MS)
+                    synchronized(sessionLock) {
+                        if (served == transport && operationBridge == null) {
+                            AppTrace.rappDialRefused(transport.profile, RappDialRefusal.HANDSHAKE_DEADLINE)
+                            dropConnection()
+                        }
+                    }
+                }
+            return true
+        }
+    }
+
+    /** One event of [server]'s links, on its lane. */
+    private fun bluetoothEvent(
+        server: RappBleGattServer,
+        event: RappBleGattEvent,
+    ) {
+        AppTrace.rappBleLink(event)
+        synchronized(sessionLock) {
+            if (bleServer !== server) return
+            when (event) {
+                is RappBleGattEvent.Frame -> {
+                    if (served ==
+                        RappServedTransport.Bluetooth(event.link)
+                    ) {
+                        vault?.let { sessionFrame(it, event.frame) }
+                    }
+                }
+
+                is RappBleGattEvent.Closed -> {
+                    if (served == RappServedTransport.Bluetooth(event.link)) endSession()
+                }
+
+                is RappBleGattEvent.Subscribed, is RappBleGattEvent.Routed, is RappBleGattEvent.Unsubscribed -> {}
+            }
+        }
+    }
+
+    /**
+     * One event of the stream listener, which holds one connection at a
+     * time. A connection that comes or goes ends only a session the stream
+     * carries; a session on Bluetooth is not the stream's to end.
+     */
     private fun handleRelayEvent(event: StreamRelayEvent) {
-        when (event) {
-            is StreamRelayEvent.Connected -> {
-                endSession()
-                if (!preAuthenticationLimiter.admit(RappClock.monotonicMs())) {
-                    activeListener?.disconnectClient()
+        synchronized(sessionLock) {
+            when (event) {
+                is StreamRelayEvent.Connected -> {
+                    if (served == RappServedTransport.Stream) endSession()
+                    if (!preAuthenticationLimiter.admit(RappClock.monotonicMs())) {
+                        AppTrace.rappDialRefused(RappTransportProfile.STREAM, RappDialRefusal.RATE_LIMITED)
+                        activeListener?.disconnectClient()
+                    }
+                }
+
+                is StreamRelayEvent.Frame -> {
+                    val vlt = vault ?: return
+                    when (served) {
+                        RappServedTransport.Stream -> sessionFrame(vlt, event.data)
+                        else -> routeStream(vlt, event.data)
+                    }
+                }
+
+                is StreamRelayEvent.Disconnected, is StreamRelayEvent.Error -> {
+                    AppTrace.rappConnectionDropped(
+                        if (event is StreamRelayEvent.Error) {
+                            event.cause.javaClass.simpleName
+                        } else {
+                            "stream disconnected"
+                        },
+                    )
+                    if (served == RappServedTransport.Stream) endSession()
                 }
             }
-
-            is StreamRelayEvent.Frame -> {
-                handleRelayFrame(event.data)
-            }
-
-            is StreamRelayEvent.Disconnected, is StreamRelayEvent.Error -> {
-                AppTrace.rappConnectionDropped(
-                    if (event is StreamRelayEvent.Error) {
-                        event.cause.javaClass.simpleName
-                    } else {
-                        "stream disconnected"
-                    },
-                )
-                endSession()
-            }
         }
     }
 
-    private fun handleRelayFrame(data: ByteArray) {
-        val vlt = vault ?: return
+    /** One frame of the session [served] carries: the handshake first, then the established session. */
+    private fun sessionFrame(
+        vault: AndroidRappVault,
+        data: ByteArray,
+    ) {
         val bridge = operationBridge
         if (bridge != null) {
             receive(bridge, data)
@@ -464,39 +648,109 @@ internal class RappPhoneProxyDispatcher(
         val session = sessionBridge
         val pair = routed
         if (session == null || pair == null) {
-            route(vlt, data)
+            dropConnection()
         } else {
-            handshake(vlt, session, pair, data)
+            handshake(vault, session, pair, data)
         }
     }
 
     /**
-     * The first frame must be the session preamble of a served pairing;
-     * anything else closes the connection and changes no stored state
-     * (RAPP v26.10.22 section 2.2.1).
+     * The stream connection's first frame must be the session preamble of a
+     * served pairing, and the session this phone serves must admit it;
+     * anything else closes the connection and changes no stored state (RAPP
+     * v26.10.22 section 2.2.1).
      */
-    private fun route(
+    private fun routeStream(
         vault: AndroidRappVault,
         preamble: ByteArray,
     ) {
-        val served = RappStoredPairs.served(catalog, vault)
-        val record =
-            try {
-                sessionRouting?.route(preamble, served.map { it.record })
-            } catch (_: Exception) {
-                null
-            }
-        val pair = served.firstOrNull { it.record === record }
-        served.filter { it !== pair }.forEach { it.record.close() }
+        val transport = RappServedTransport.Stream
+        val pair = routeServed(vault, transport.profile, preamble)
         if (pair == null) {
             activeListener?.disconnectClient()
             return
         }
+        if (!admit(pair, transport)) {
+            pair.record.close()
+            activeListener?.disconnectClient()
+            return
+        }
+        open(vault, pair, transport)
+    }
+
+    /** The served pairing [preamble] routes to on [profile], or null when it routes to none. */
+    private fun routeServed(
+        vault: AndroidRappVault,
+        profile: RappTransportProfile,
+        preamble: ByteArray,
+    ): RappStoredPair? {
+        val pairs = RappStoredPairs.served(catalog, vault)
+        val record =
+            try {
+                sessionRouting?.route(profile, preamble, pairs.map { it.record })
+            } catch (_: Exception) {
+                null
+            }
+        val pair = pairs.firstOrNull { it.record === record }
+        pairs.filter { it !== pair }.forEach { it.record.close() }
+        if (pair == null) AppTrace.rappDialRefused(profile, RappDialRefusal.NO_PAIRING)
+        return pair
+    }
+
+    /**
+     * Whether a dial routed to [pair] on [transport] gets the session (CC-67).
+     * An idle session it may take is ended and its transport closed; a busy
+     * one is never displaced (UCA-66).
+     */
+    private fun admit(
+        pair: RappStoredPair,
+        transport: RappServedTransport,
+    ): Boolean {
+        val verdict =
+            RappSessionAdmission.decide(
+                incoming = pair.pairing.id,
+                serving = routed?.pairing?.id,
+                idleSinceMs = idleSinceMs(),
+                nowMs = RappClock.monotonicMs().toLong(),
+            )
+        when (verdict) {
+            RappSessionAdmission.ADMIT -> {}
+
+            RappSessionAdmission.REFUSE_BUSY -> {
+                AppTrace.rappDialRefused(transport.profile, RappDialRefusal.BUSY)
+            }
+
+            RappSessionAdmission.REFUSE_HELD -> {
+                AppTrace.rappDialRefused(transport.profile, RappDialRefusal.HELD)
+            }
+        }
+        if (!verdict.admits) return false
+        if (served != null) dropConnection()
+        return true
+    }
+
+    /** When the open session went idle; null while none is established or it carries an operation. */
+    private fun idleSinceMs(): Long? =
+        if (operationBridge == null || operationJob?.isCompleted == false) {
+            null
+        } else {
+            maxOf(establishedAtMs, lastOperationEndedMs)
+        }
+
+    /** Opens the session [pair] routed on [transport]; false when the bridge could not begin. */
+    private fun open(
+        vault: AndroidRappVault,
+        pair: RappStoredPair,
+        transport: RappServedTransport,
+    ): Boolean {
+        served = transport
         routed = pair
-        try {
-            sessionBridge = RappSessionBridge.beginProxy(pair.record, vault, rappStreamProfileName())
+        return try {
+            sessionBridge = RappSessionBridge.beginProxy(pair.record, vault, transport.profile.profileName)
+            true
         } catch (_: Exception) {
             dropConnection()
+            false
         }
     }
 
@@ -556,7 +810,10 @@ internal class RappPhoneProxyDispatcher(
         session: RappSessionBridge,
         pair: RappStoredPair,
     ) {
-        activeListener?.clearSocketTimeout()
+        if (served == RappServedTransport.Stream) activeListener?.clearSocketTimeout()
+        handshakeDeadlineJob?.cancel()
+        handshakeDeadlineJob = null
+        establishedAtMs = RappClock.monotonicMs().toLong()
         val bridge = RappOperationBridge.beginProxy(session, MAXIMUM_OPERATION_LIFETIME_MS, RappClock.monotonicMs())
         cardReported = CompletableDeferred()
         reportedCard = null
@@ -570,8 +827,39 @@ internal class RappPhoneProxyDispatcher(
 
     /** Sends one frame on the connection, before the session's bridge exists. */
     private fun send(frame: ByteArray) {
-        synchronized(sendLock) {
-            (activeListener ?: throw IOException("listener closed")).send(frame)
+        synchronized(sessionLock) { transportSend(frame) }
+    }
+
+    /** Sends [frame] on the transport that carries the session. */
+    private fun transportSend(frame: ByteArray) {
+        when (val transport = served) {
+            RappServedTransport.Stream -> {
+                (activeListener ?: throw IOException("listener closed")).send(frame)
+            }
+
+            is RappServedTransport.Bluetooth -> {
+                val server = bleServer ?: throw IOException("server closed")
+                server.send(transport.link, frame)
+            }
+
+            null -> {
+                throw IOException("no session")
+            }
+        }
+    }
+
+    /** Closes [transport]: the stream connection, or the Bluetooth link once its queued frames are out. */
+    private fun closeTransport(transport: RappServedTransport?) {
+        when (transport) {
+            RappServedTransport.Stream -> {
+                activeListener?.disconnectClient()
+            }
+
+            is RappServedTransport.Bluetooth -> {
+                bleServer?.close(transport.link)
+            }
+
+            null -> {}
         }
     }
 
@@ -585,28 +873,26 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
         call: (RappOperationBridge) -> RappBridgeAction,
     ): RappBridgeOutcome? {
-        val outcome =
-            synchronized(sendLock) {
-                if (bridge !== operationBridge) return null
-                val outcome =
-                    try {
-                        RappBridgeOutcome.from(call(bridge))
-                    } catch (_: Exception) {
-                        return null
-                    }
-                if (outcome is RappBridgeOutcome.Send) {
-                    try {
-                        activeListener?.send(outcome.frame)
-                    } catch (_: IOException) {
-                    }
+        synchronized(sessionLock) {
+            if (bridge !== operationBridge) return null
+            val outcome =
+                try {
+                    RappBridgeOutcome.from(call(bridge))
+                } catch (_: Exception) {
+                    return null
                 }
-                outcome
+            if (outcome is RappBridgeOutcome.Send) {
+                try {
+                    transportSend(outcome.frame)
+                } catch (_: IOException) {
+                }
             }
-        when {
-            outcome is RappBridgeOutcome.Closed -> sessionClosed(outcome.reason)
-            outcome is RappBridgeOutcome.Send && outcome.closesWith != null -> dropConnection()
+            when {
+                outcome is RappBridgeOutcome.Closed -> sessionClosed(outcome.reason)
+                outcome is RappBridgeOutcome.Send && outcome.closesWith != null -> dropConnection()
+            }
+            return outcome
         }
-        return outcome
     }
 
     /**
@@ -664,7 +950,7 @@ internal class RappPhoneProxyDispatcher(
                             challenge.fill(ERASED)
                         }
                     if (polled == null) {
-                        if (bridge === operationBridge) dropConnection()
+                        synchronized(sessionLock) { if (bridge === operationBridge) dropConnection() }
                         break
                     }
                     if (act(bridge) { it.expireDue(RappClock.monotonicMs()) } is RappBridgeOutcome.Send) {
@@ -687,29 +973,37 @@ internal class RappPhoneProxyDispatcher(
      * card's answer, which nothing delivers.
      */
     private fun endSession() {
-        livenessJob?.cancel()
-        livenessJob = null
-        operationJob?.cancel()
-        operationJob = null
-        val bridge = operationBridge
-        operationBridge = null
-        bridge?.close()
-        sessionBridge?.close()
-        sessionBridge = null
-        routed?.record?.close()
-        routed = null
-        cardReported = null
-        reportedCard = null
-        lastReadAuthCertDer = null
-        _connectedPeer.value = null
-        dismissInbox()
+        synchronized(sessionLock) {
+            livenessJob?.cancel()
+            livenessJob = null
+            operationJob?.cancel()
+            operationJob = null
+            handshakeDeadlineJob?.cancel()
+            handshakeDeadlineJob = null
+            served = null
+            val bridge = operationBridge
+            operationBridge = null
+            bridge?.close()
+            sessionBridge?.close()
+            sessionBridge = null
+            routed?.record?.close()
+            routed = null
+            cardReported = null
+            reportedCard = null
+            lastReadAuthCertDer = null
+            _connectedPeer.value = null
+            dismissInbox()
+        }
     }
 
-    /** Closes the link and ends the session; the pairing stays. */
+    /** Closes the session's transport and ends the session; the pairing stays. */
     private fun dropConnection() {
-        AppTrace.rappConnectionDropped("proxy dispatcher dropConnection")
-        endSession()
-        activeListener?.disconnectClient()
+        synchronized(sessionLock) {
+            AppTrace.rappConnectionDropped("proxy dispatcher dropConnection")
+            val transport = served
+            endSession()
+            closeTransport(transport)
+        }
     }
 
     private fun requesterName(): String =
@@ -754,6 +1048,8 @@ internal class RappPhoneProxyDispatcher(
                     throw e
                 } catch (_: Exception) {
                     act(bridge) { it.operationFailed(operationId.toWire()) }
+                } finally {
+                    lastOperationEndedMs = RappClock.monotonicMs().toLong()
                 }
             }
     }
@@ -1657,17 +1953,20 @@ internal class RappPhoneProxyDispatcher(
         }
 
     override fun close() {
-        isClosed = true
-        RappCustodianService.stop(context)
-        withdrawalJob?.cancel()
-        withdrawalJob = null
-        hintRefreshJob?.cancel()
-        hintRefreshJob = null
-        endSession()
-        activeListener?.close()
-        activeListener = null
-        sessionRouting?.close()
-        sessionRouting = null
+        synchronized(sessionLock) {
+            isClosed = true
+            RappCustodianService.stop(context)
+            withdrawalJob?.cancel()
+            withdrawalJob = null
+            hintRefreshJob?.cancel()
+            hintRefreshJob = null
+            dropConnection()
+            stopBluetooth()
+            activeListener?.close()
+            activeListener = null
+            sessionRouting?.close()
+            sessionRouting = null
+        }
         cardStatusLane.close()
     }
 }

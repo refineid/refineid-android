@@ -59,8 +59,22 @@ class RappSessionDiscoveryTest {
         val (secondRequester, second) = RappTestOffers.pairRecords(PROFILES, NOW)
         val pairs = listOf(first, second)
         RappSessionRouting().use { routing ->
-            assertSame(second, routing.route(secondRequester.sessionPreamble(rappStreamProfileName()), pairs))
-            assertSame(first, routing.route(firstRequester.sessionPreamble(rappStreamProfileName()), pairs))
+            assertSame(
+                second,
+                routing.route(
+                    RappTransportProfile.STREAM,
+                    secondRequester.sessionPreamble(rappStreamProfileName()),
+                    pairs,
+                ),
+            )
+            assertSame(
+                first,
+                routing.route(
+                    RappTransportProfile.STREAM,
+                    firstRequester.sessionPreamble(rappStreamProfileName()),
+                    pairs,
+                ),
+            )
         }
     }
 
@@ -80,12 +94,41 @@ class RappSessionDiscoveryTest {
         val pairs = listOf(custodian, requester)
         RappSessionRouting().use { routing ->
             val preamble = requester.sessionPreamble(rappStreamProfileName())
-            assertSame(custodian, routing.route(preamble, pairs))
-            assertNull(routing.route(preamble, pairs))
-            assertNull(routing.route(stranger.sessionPreamble(rappStreamProfileName()), pairs))
-            assertNull(routing.route(rappPairingPreamble(rappStreamProfileName()), pairs))
+            assertSame(custodian, routing.route(RappTransportProfile.STREAM, preamble, pairs))
+            assertNull(routing.route(RappTransportProfile.STREAM, preamble, pairs))
+            assertNull(
+                routing.route(RappTransportProfile.STREAM, stranger.sessionPreamble(rappStreamProfileName()), pairs),
+            )
+            assertNull(routing.route(RappTransportProfile.STREAM, rappPairingPreamble(rappStreamProfileName()), pairs))
             // A requester-role record never serves a session on this phone.
-            assertNull(routing.route(requester.sessionPreamble(rappStreamProfileName()), listOf(requester)))
+            assertNull(
+                routing.route(
+                    RappTransportProfile.STREAM,
+                    requester.sessionPreamble(rappStreamProfileName()),
+                    listOf(requester),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun aBluetoothPreambleRoutesOnlyOnBluetooth() {
+        val (requester, custodian) = RappTestOffers.pairRecords(PROFILES, NOW)
+        val pairs = listOf(custodian)
+        RappSessionRouting().use { routing ->
+            val bluetooth = requester.sessionPreamble(RappBleGattProfile.PROFILE_NAME)
+            assertNull(routing.route(RappTransportProfile.STREAM, bluetooth, pairs))
+            assertSame(custodian, routing.route(RappTransportProfile.BLUETOOTH, bluetooth, pairs))
+            assertNull(routing.route(RappTransportProfile.BLUETOOTH, bluetooth, pairs))
+            val stream = requester.sessionPreamble(rappStreamProfileName())
+            assertNull(routing.route(RappTransportProfile.BLUETOOTH, stream, pairs))
+            assertNull(
+                routing.route(
+                    RappTransportProfile.BLUETOOTH,
+                    rappPairingPreamble(RappBleGattProfile.PROFILE_NAME),
+                    pairs,
+                ),
+            )
         }
     }
 }

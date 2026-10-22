@@ -16,12 +16,14 @@ import fi.refineid.android.R
 
 /**
  * Keeps the custodian process running while the RAPP session listener is
- * open, so a paired computer reaches the card without RefineID in front.
+ * open, so a paired computer reaches the card without RefineID in front,
+ * over the local network or over Bluetooth.
  *
  * A cached background process is frozen and stops accepting connections;
  * a `connectedDevice` foreground service keeps it in the foreground-service
- * process state with network access. The service owns no protocol state; it
- * only carries the ongoing notification that the platform requires.
+ * process state with network access, and keeps the GATT server's callbacks
+ * coming. The service owns no protocol state; it only carries the ongoing
+ * notification that the platform requires.
  */
 internal class RappCustodianService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null

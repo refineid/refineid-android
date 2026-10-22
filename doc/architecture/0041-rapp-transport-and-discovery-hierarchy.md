@@ -61,17 +61,16 @@ When remote reader proxying is enabled, RefineID implements a strict fallback hi
 ```
 
 ### 2.1 Tier 2: Bluetooth Low Energy Proximity (`fi.refineid.rapp.ble`)
-- **Android Underlay**: `BluetoothLeAdvertiser.startAdvertising` + `BluetoothGattServer` opened via `BluetoothManager.openGattServer`.
+- **Android Underlay**: `BluetoothManager.openGattServer` + `BluetoothLeAdvertiser.startAdvertising`, served beside the stream listener under the same gates (ADR 0043).
   - Service UUID: `7E39FD01-A6B5-4D78-9E11-37E28E9545F1`
-  - Channel Characteristic: `7E39FD02-A6B5-4D78-9E11-37E28E9545F1` (`PROPERTY_WRITE | PROPERTY_INDICATE`)
-  - Bootstrap Characteristic: `7E39FD03-A6B5-4D78-9E11-37E28E9545F1` (`PROPERTY_READ`)
-  - Framing: Mandates ATT MTU Exchange ($\ge 512$ bytes) and RAPP BLE SAR framing (6-byte header: Total Frame Length, Chunk Sequence, Flags, Reserved).
-- **Advisory Proximity Gating**: Requester monitors RSSI and enforces an advisory discovery gate ($\ge -55\text{ dBm}$ filtered median over at least 3 packets, configurable to $-85\text{ dBm}$ in isolated developer testing).
-  - *Threat Model Note*: Per RAPP v26.10.22 §4.4, RSSI is strictly an advisory filter and defense-in-depth heuristic; it does NOT prove physical proximity or defeat transparent RF relays or wormholes. Protection against unauthorized execution is provided at Layer 7 by the PINs the holder enters on the phone and the card verifies: PIN 1 once, then held in the phone's memory until the card leaves, and PIN 2 for every signature or batch.
+  - Channel Characteristic: `7E39FD02-A6B5-4D78-9E11-37E28E9545F1` (`PROPERTY_WRITE | PROPERTY_INDICATE`, with its Client Characteristic Configuration descriptor)
+  - Bootstrap Characteristic: `7E39FD03-A6B5-4D78-9E11-37E28E9545F1` (`PROPERTY_READ`; refuses reads, since pairing runs over the stream)
+  - Framing: ATT MTU of at least 512 and the RAPP BLE SAR framing of RAPP v26.10.22 §5.3, segmented and reassembled by the shared engine.
+- **No signal analysis**: Per RAPP v26.10.22 §4.4 no endpoint gates on RSSI; signal strength proves nothing against a transparent relay. Protection against unauthorized execution is provided at Layer 7 by the PINs the holder enters on the phone and the card verifies: PIN 1 once, then held in the phone's memory until the card leaves, and PIN 2 for every signature or batch.
 - **Clarification on L2CAP CoC**:
   - `BluetoothGattServer` does not manage L2CAP channels. On Android 10+ (API 29+), Bluetooth Low Energy Connection-Oriented Channels (CoC) are managed via `BluetoothAdapter.listenUsingInsecureL2capChannel` / `listenUsingL2capChannel` (returning `BluetoothServerSocket`), with dynamic PSMs discovered via `serverSocket.getPsm()`.
   - Because public user-space APIs for BLE L2CAP CoC are not supported on all client platforms (such as Windows user-space), GATT-based `fi.refineid.rapp.ble` is the canonical cross-platform Tier 2 profile. Any future credit-based CoC profile would be a separate, distinct adaptation (`fi.refineid.rapp.ble-coc.v1`).
-- **Zero OS Bonding**: No Android Bluetooth pairing dialogs or OS PIN passkeys. Security is entirely provided by application-layer Noise cryptography (`Noise_XXpsk3` for pairing, `Noise_KK` for sessions).
+- **Zero OS Bonding**: No Android Bluetooth pairing dialogs or OS PIN passkeys; no characteristic asks for link-layer encryption, and a refusal is always `writeNotPermitted` (STPA CC-54, CC-73). Security is entirely provided by application-layer Noise cryptography (`Noise_XXpsk3` for pairing, `Noise_KK` for sessions).
 
 ### 2.2 Tier 3: Local IP Stream Discovery (`fi.refineid.stream`)
 - **Discovery Service**: `_refineid-stream._tcp.` via Android `NsdManager.registerService`.

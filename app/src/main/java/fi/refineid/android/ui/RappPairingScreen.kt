@@ -1,6 +1,5 @@
 package fi.refineid.android.ui
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -49,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import fi.refineid.android.R
+import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.rapp.PairedPeer
 import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappCustodianService
@@ -73,10 +73,15 @@ internal fun RappPairingScreen(
         notificationsAllowed = rappNotificationsAllowed(context)
         if (notificationsAllowed) RappCustodianService.refreshNotification(context)
     }
-    val notificationPermissionLauncher =
+    val remoteAccessPermissionLauncher =
         rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestPermission(),
-        ) { _ -> refreshNotifications() }
+            contract = ActivityResultContracts.RequestMultiplePermissions(),
+        ) { answers ->
+            refreshNotifications()
+            (context.applicationContext as? RefineIdApplication)?.rappProxyDispatcher?.bluetoothPermissionsAnswered(
+                answers,
+            )
+        }
     val settingsLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult(),
@@ -96,13 +101,11 @@ internal fun RappPairingScreen(
             enabled = model.isRemoteAccessEnabled,
             onCheckedChange = { isChecked ->
                 if (isChecked) {
-                    if (ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.POST_NOTIFICATIONS,
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
+                    val missing =
+                        remoteAccessPermissions(RemoteAccessAction.TURN_ON) { permission ->
+                            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+                        }
+                    if (missing.isNotEmpty()) remoteAccessPermissionLauncher.launch(missing.toTypedArray())
                 } else {
                     model.reset()
                 }

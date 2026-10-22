@@ -26,6 +26,10 @@ import fi.refineid.android.keychain.ExternalKeyPinAuthorization
 import fi.refineid.android.keychain.ExternalKeySignResult
 import fi.refineid.android.network.SigningTimestampAttemptOutcome
 import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.rapp.RappBleGattEvent
+import fi.refineid.android.rapp.RappBleServerStep
+import fi.refineid.android.rapp.RappDialRefusal
+import fi.refineid.android.rapp.RappTransportProfile
 import fi.refineid.android.usb.AuthenticationStatus
 import fi.refineid.android.usb.CardPresence
 import fi.refineid.android.usb.ReaderConnectionStatus
@@ -337,6 +341,18 @@ internal object AppTrace {
     fun rappProgressReportFailed(
         stage: String,
         error: String,
+    ) = Unit
+
+    fun rappBleServer(
+        step: RappBleServerStep,
+        code: Int? = null,
+    ) = Unit
+
+    fun rappBleLink(event: RappBleGattEvent) = Unit
+
+    fun rappDialRefused(
+        transport: RappTransportProfile,
+        refusal: RappDialRefusal,
     ) = Unit
 
     fun usbPermissionRequestFailed() = Unit
