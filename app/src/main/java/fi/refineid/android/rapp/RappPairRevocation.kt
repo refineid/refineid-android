@@ -5,6 +5,7 @@ package fi.refineid.android.rapp
 import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappForgetOutcome
 import uniffi.refineid_rapp.RappPairRecord
+import uniffi.refineid_rapp.RappPairVault
 
 /**
  * Forgets and revokes stored pairings the way RAPP v26.10.21 section 4.6
@@ -17,7 +18,7 @@ internal object RappPairRevocation {
     /** Destroys the record of [pairId] in [vault] at once. */
     fun revoke(
         pairId: RappPairId,
-        vault: AndroidRappVault,
+        vault: RappPairVault,
     ) {
         val record = load(pairId, vault)
         if (record == null) {
@@ -31,7 +32,7 @@ internal object RappPairRevocation {
     fun revoke(
         pairId: RappPairId,
         record: RappPairRecord,
-        vault: AndroidRappVault,
+        vault: RappPairVault,
     ) {
         try {
             record.revoke(vault, RappClock.wallMs())
@@ -50,7 +51,7 @@ internal object RappPairRevocation {
      */
     fun forget(
         pairId: RappPairId,
-        vault: AndroidRappVault,
+        vault: RappPairVault,
     ): Boolean {
         val record = load(pairId, vault)
         if (record == null) {
@@ -69,7 +70,7 @@ internal object RappPairRevocation {
 
     private fun load(
         pairId: RappPairId,
-        vault: AndroidRappVault,
+        vault: RappPairVault,
     ): RappPairRecord? =
         try {
             RappPairRecord.loadFromVault(pairId.toWire(), vault)

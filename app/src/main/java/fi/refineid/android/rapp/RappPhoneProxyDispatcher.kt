@@ -180,8 +180,6 @@ internal class RappPhoneProxyDispatcher(
     companion object {
         private const val DEFAULT_REQUESTER_DISPLAY_NAME = "Computer"
 
-        /** Maximum time to wait for an NFC card certificate read before reporting no card. */
-        private const val CERT_READ_TIMEOUT_MS = 5_000L
         private const val NANOS_PER_MICROSECOND = 1_000L
 
         /** How often liveness and operation deadlines are checked (section 8.3). */
@@ -243,12 +241,15 @@ internal class RappPhoneProxyDispatcher(
         listener.start(instance, sessionAttributes(vault))
         RappCustodianService.ensureRunning(context)
         hintRefreshJob?.cancel()
+        // Each hint window rebuilds the served set, which also destroys a
+        // forgotten record past its notice window (RAPP v26.10.21 section 4.6
+        // item 3); the listener stops once nothing is left to serve.
         hintRefreshJob =
             scope.launch {
                 while (isActive && activeListener === listener) {
                     delay(StreamRendezvousName.millisUntilNextWindow(System.currentTimeMillis()))
                     if (activeListener === listener) {
-                        listener.updateAttributes(sessionAttributes(vault))
+                        pairingsChanged()
                     }
                 }
             }
@@ -1112,19 +1113,8 @@ internal class RappPhoneProxyDispatcher(
         catalog.updateCertificateDer(pairId, certDer)
     }
 
-    private suspend fun readAuthCertWithTimeout(): RappCertificate? {
-        val deferred = CompletableDeferred<RappCertificate?>()
-        authCardService()?.requestAuthenticationCertificate { cert ->
-            try {
-                deferred.complete(cert?.copyDer()?.let(RappCertificate::fromDer))
-            } catch (_: Exception) {
-                deferred.complete(null)
-            } finally {
-                cert?.close()
-            }
-        } ?: deferred.complete(null)
-        return withTimeoutOrNull(CERT_READ_TIMEOUT_MS) { deferred.await() }
-    }
+    private suspend fun readAuthCertWithTimeout(): RappCertificate? =
+        authCardService()?.let { service -> RappCertificateRead.authentication(service) }
 
     private suspend fun readSignatureCertificateWithTimeout(): NativeQualifiedCertificate? {
         val deferred = CompletableDeferred<NativeQualifiedCertificate?>()
@@ -1139,7 +1129,7 @@ internal class RappPhoneProxyDispatcher(
                 }
             }
         } ?: deferred.complete(null)
-        return withTimeoutOrNull(CERT_READ_TIMEOUT_MS) { deferred.await() }
+        return withTimeoutOrNull(RappCertificateRead.TIMEOUT_MS) { deferred.await() }
     }
 
     // --- Browser authentication (section 9.2) --------------------------------

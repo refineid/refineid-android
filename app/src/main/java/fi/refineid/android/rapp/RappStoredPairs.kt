@@ -4,6 +4,7 @@ package fi.refineid.android.rapp
 
 import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappPairRecord
+import uniffi.refineid_rapp.RappPairVault
 
 /** A catalogued pairing with its decoded record and the typed view of that record. */
 internal class RappStoredPair(
@@ -18,36 +19,29 @@ internal class RappStoredPair(
  * A record in a format the core does not decode, or one the vault no longer
  * holds, is removed from the catalog and the vault, so its device pairs
  * again. A record stored before its peer confirmed storage (RAPP v26.10.21
- * section 4.3 item 4), and a forgotten record that kept its key for 30 days
- * without delivering its close (section 4.6 item 3), is revoked. A storage
- * failure removes nothing.
+ * section 4.3 item 4) is revoked. A forgotten record whose close has not
+ * reached its peer within 30 days of the forgetting (section 4.6 item 3) is
+ * revoked too, by every load: the start, each routed connection, each
+ * discovery-hint window and each change of the pairings rebuild the served
+ * set, so a record past its window neither routes nor stays announced. A
+ * storage failure removes nothing.
  */
 internal object RappStoredPairs {
-    /** Every pairing the user has not forgotten, most recently used first. */
-    fun load(
-        catalog: RappPairCatalog,
-        vault: AndroidRappVault,
-    ): List<RappStoredPair> =
-        served(catalog, vault).filter { stored ->
-            val active = stored.pairing.state == RappPairState.Active
-            if (!active) stored.record.close()
-            active
-        }
-
     /**
      * Every pairing this phone routes and announces, most recently used
      * first: the active ones and the forgotten ones whose records still wait
      * to deliver the `pairing_revoked` close on their next session (section
-     * 4.6 item 2).
+     * 4.6 item 2), judged at [wallMs], milliseconds since the Unix epoch.
      */
     fun served(
         catalog: RappPairCatalog,
-        vault: AndroidRappVault,
+        vault: RappPairVault,
+        wallMs: () -> ULong = RappClock::wallMs,
     ): List<RappStoredPair> =
         catalog
             .allPairs()
             .sortedByDescending { it.lastUsedMs }
-            .mapNotNull { peer -> loadOne(peer, catalog, vault) }
+            .mapNotNull { peer -> loadOne(peer, catalog, vault, wallMs) }
 
     /**
      * Removes every catalogued pairing whose record the core no longer
@@ -80,7 +74,8 @@ internal object RappStoredPairs {
     private fun loadOne(
         peer: PairedPeer,
         catalog: RappPairCatalog,
-        vault: AndroidRappVault,
+        vault: RappPairVault,
+        wallMs: () -> ULong,
     ): RappStoredPair? {
         val pairId = RappPairId.fromKey(peer.pairIdHex)
         if (pairId == null) {
@@ -109,7 +104,7 @@ internal object RappStoredPairs {
             }
         val expired =
             try {
-                record.revocationNoticeExpired(RappClock.wallMs())
+                record.revocationNoticeExpired(wallMs())
             } catch (_: RappBindingException) {
                 false
             }

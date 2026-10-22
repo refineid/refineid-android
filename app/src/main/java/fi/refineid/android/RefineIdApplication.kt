@@ -22,7 +22,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
-import kotlin.coroutines.resume
 
 class RefineIdApplication : Application() {
     internal lateinit var readerController: UsbReaderController
@@ -348,17 +347,30 @@ class RefineIdApplication : Application() {
      * The card this phone can serve a paired computer now (RAPP v26.10.21
      * section 8.4 item 1): a card ready in the USB reader or on NFC, or a
      * primed card the holder can present, named by its authentication
-     * certificate.
+     * certificate. A reader that does not hand the certificate over in time
+     * cannot serve the card now, which is absence.
      */
     private suspend fun offeredRappCard(primedStore: PrimedCanStore?): fi.refineid.android.rapp.RappOfferedCard {
-        val der =
+        val certificate =
             when {
-                readerController.isCardReady -> readerAuthenticationCertificateDer()
-                nfcReaderController.isCardReady -> nfcReaderController.currentAuthenticationCertificateDer
-                primedStore?.isPrimed() == true -> primedStore.readAuthCertificateDer()
-                else -> null
+                readerController.isCardReady -> {
+                    fi.refineid.android.rapp.RappCertificateRead
+                        .authentication(readerController)
+                }
+
+                nfcReaderController.isCardReady -> {
+                    nfcReaderController.currentAuthenticationCertificateDer
+                        ?.let(fi.refineid.android.rapp.RappCertificate::fromDer)
+                }
+
+                primedStore?.isPrimed() == true -> {
+                    primedStore.readAuthCertificateDer()?.let(fi.refineid.android.rapp.RappCertificate::fromDer)
+                }
+
+                else -> {
+                    null
+                }
             }
-        val certificate = der?.let(fi.refineid.android.rapp.RappCertificate::fromDer)
         return if (certificate != null) {
             fi.refineid.android.rapp.RappOfferedCard
                 .Present(certificate)
@@ -366,19 +378,6 @@ class RefineIdApplication : Application() {
             fi.refineid.android.rapp.RappOfferedCard.Absent
         }
     }
-
-    private suspend fun readerAuthenticationCertificateDer(): ByteArray? =
-        kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-            readerController.requestAuthenticationCertificate { certificate ->
-                val der =
-                    try {
-                        certificate?.copyDer()
-                    } finally {
-                        certificate?.close()
-                    }
-                if (continuation.isActive) continuation.resume(der)
-            }
-        }
 
     // The CSCA trust anchors that close passive authentication's
     // DSC-to-CSCA hop. One DER certificate per file, grouped by issuing
