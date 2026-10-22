@@ -57,9 +57,6 @@ import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.rapp.RappAuthAction
 import fi.refineid.android.rapp.RappAuthRequest
 import fi.refineid.android.rapp.RappCardAnswer
-import fi.refineid.android.rapp.RappPromptLine
-import fi.refineid.android.rapp.RappPromptParty
-import fi.refineid.android.rapp.rappPromptLines
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
@@ -103,7 +100,7 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                     fontWeight = FontWeight.Bold,
                 )
 
-                RappPromptParties(rappPromptLines(request))
+                RappPromptComputer(request.requester)
 
                 if (request is RappAuthRequest.DocumentSign) {
                     RappDocumentNames(request.documentNames)
@@ -187,33 +184,25 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
     }
 }
 
-/** The computer and the program that asked, each under its label (core STPA CC-55). */
+/** The paired computer that asked, under its label (core STPA CC-55). */
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-private fun RappPromptParties(lines: List<RappPromptLine>) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        lines.forEach { line ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text =
-                        when (line.party) {
-                            RappPromptParty.COMPUTER -> stringResource(R.string.rapp_prompt_computer)
-                            RappPromptParty.PROGRAM -> stringResource(R.string.rapp_prompt_program)
-                        },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = line.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
+private fun RappPromptComputer(name: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.rapp_prompt_computer),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = name,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

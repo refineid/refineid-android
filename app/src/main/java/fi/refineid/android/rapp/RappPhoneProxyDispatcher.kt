@@ -872,8 +872,7 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Asks the holder for PIN 1 on this phone; null when the holder declines.
-     * The prompt names the computer and [program], the operation context
-     * the requester sent. Entering the PIN is the holder's consent, reported
+     * The prompt names the computer. Entering the PIN is the holder's consent, reported
      * once the operation's first prompt is on screen when [firstPrompt]
      * (section 8.2 item 3); a prompt after a wrong PIN says so to the holder
      * and reports nothing, so the Requester learns nothing of it (section
@@ -882,7 +881,6 @@ internal class RappPhoneProxyDispatcher(
     private suspend fun askPin1(
         bridge: RappOperationBridge,
         operationId: RappOperationId,
-        program: String,
         wrongPin: RappCardAnswer.WrongPin?,
         firstPrompt: Boolean,
     ): Pin1Submission? {
@@ -891,7 +889,6 @@ internal class RappPhoneProxyDispatcher(
             inbox.askBrowserAuth(
                 requestId = operationId.key,
                 requester = requesterName(),
-                program = program,
                 onApproved = { pin -> if (!answer.complete(pin)) pin.close() },
                 onDenied = { answer.complete(null) },
                 onShown = { if (firstPrompt) reportConsentShown(bridge, operationId) },
@@ -1146,7 +1143,7 @@ internal class RappPhoneProxyDispatcher(
         val card = heldCard()
         val held = card?.let(pin1Custody::held)
         var heldFor = card.takeIf { held != null }
-        val first = held ?: askPin1(bridge, operationId, request.origin, wrongPin = null, firstPrompt = true)
+        val first = held ?: askPin1(bridge, operationId, wrongPin = null, firstPrompt = true)
         if (first == null) {
             fail(bridge, operationId, RappCardFailure.USER_CANCELLED)
             return
@@ -1171,7 +1168,6 @@ internal class RappPhoneProxyDispatcher(
                             askPin1(
                                 bridge,
                                 operationId,
-                                request.origin,
                                 answer as? RappCardAnswer.WrongPin,
                                 firstPrompt = heldFor != null,
                             )
