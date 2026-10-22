@@ -3,16 +3,20 @@
 package fi.refineid.android.rapp
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import fi.refineid.android.RefineIdApplication
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import uniffi.refineid_rapp.RappBindingException
+import uniffi.refineid_rapp.RappPairVault
 import uniffi.refineid_rapp.RappPairingBackoff
 import uniffi.refineid_rapp.RappPairingBridge
 import uniffi.refineid_rapp.RappPreAuthenticationLimiter
@@ -53,9 +57,28 @@ private val DEFAULT_PAIRING_PROFILES =
         "fi.refineid.document-signing",
     )
 
+/**
+ * The Remote Access page's pairing side: the offer and its code, the
+ * ceremony a computer runs against it, and the paired devices.
+ *
+ * While Remote Access is on, the page always shows a pairing code, whatever
+ * computers are connected: on opening, on turning Remote Access on, when an
+ * offer expires, after a pairing completes or fails, and after a pairing is
+ * removed. The only gap is the lockout after three wrong codes (RAPP
+ * v26.10.22 section 3.3 item 7), which shows until it lifts and is followed
+ * by a code. The offer lives only while the page is open: leaving it calls
+ * [reset].
+ *
+ * [mainDispatcher] runs the offer's countdown and deadlines; [pairVault]
+ * stands in for the application's vault and [connectedPeers] for the
+ * custodian's open session.
+ */
 internal class RappPairingModel(
     private val context: Context,
     private val scope: CoroutineScope,
+    private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
+    private val pairVault: RappPairVault? = null,
+    connectedPeers: StateFlow<PairedPeer?>? = null,
 ) : AutoCloseable {
     private val catalog = RappPairCatalog(context)
     private var listener: StreamRelayListener? = null
@@ -86,10 +109,10 @@ internal class RappPairingModel(
         get() = _isRemoteAccessEnabled
 
     init {
-        val dispatcher = app?.rappProxyDispatcher
-        if (dispatcher != null) {
+        val peers = connectedPeers ?: app?.rappProxyDispatcher?.connectedPeer
+        if (peers != null) {
             scope.launch {
-                dispatcher.connectedPeer.collect { peer ->
+                peers.collect { peer ->
                     activeConnectedPeer = peer
                     // A peer that forgot this phone ends its session and leaves the list.
                     pairedDevices = catalog.listPairs()
@@ -104,15 +127,32 @@ internal class RappPairingModel(
         if (enabled) {
             val app = context.applicationContext as? RefineIdApplication
             app?.startRappProxyListening()
-            if (phase is PairingPhase.Idle && activeConnectedPeer == null) {
-                createOffer()
-            }
+            offerWhileOn()
         } else {
             reset()
             val app = context.applicationContext as? RefineIdApplication
             app?.rappProxyDispatcher?.withdraw()
         }
     }
+
+    /**
+     * Shows a new pairing code when Remote Access is on and none is shown,
+     * whether or not a computer is connected or paired; a code that is shown,
+     * a ceremony under way, or a failure on screen stays.
+     */
+    fun offerWhileOn() {
+        if (isRemoteAccessEnabled && phase is PairingPhase.Idle) createOffer()
+    }
+
+    /** A ceremony ended: while Remote Access is on, the next code follows, or the lockout until it lifts. */
+    private fun nextOffer() {
+        if (isRemoteAccessEnabled) createOffer()
+    }
+
+    /** The code's port on this phone's stream listener, for a test that pairs over it. */
+    @VisibleForTesting
+    internal val offerPort: Int?
+        get() = listener?.port
 
     fun createOffer() {
         reset()
@@ -125,6 +165,12 @@ internal class RappPairingModel(
         if (backoffMs > 0UL) {
             val seconds = (backoffMs.toLong() + MILLISECONDS_PER_SECOND - 1) / MILLISECONDS_PER_SECOND
             phase = PairingPhase.Failed("Too many attempts. Try again in $seconds s")
+            // The code follows once the lockout lifts.
+            timerJob =
+                scope.launch(mainDispatcher) {
+                    delay(backoffMs.toLong())
+                    if (phase is PairingPhase.Failed) nextOffer()
+                }
             return
         }
         val code = RappPairingCode.generate()
@@ -251,7 +297,7 @@ internal class RappPairingModel(
             )
     }
 
-    private fun vault(): AndroidRappVault = app?.rappVault ?: AndroidRappVault(context)
+    private fun vault(): RappPairVault = pairVault ?: app?.rappVault ?: AndroidRappVault(context)
 
     /**
      * Destroys the record a ceremony stored but the requester never
@@ -282,6 +328,7 @@ internal class RappPairingModel(
         ceremony = null
         if (pastOffer) {
             phase = PairingPhase.Failed("Peer disconnected")
+            nextOffer()
             return
         }
         val now = RappClock.monotonicMs()
@@ -299,6 +346,7 @@ internal class RappPairingModel(
             pairingBackoff.recordLockout(now)
             phase = PairingPhase.Failed("Too many attempts")
             reset(keepPhase = true)
+            nextOffer()
         }
     }
 
@@ -330,6 +378,7 @@ internal class RappPairingModel(
                 revokeUnconfirmedRecord()
                 ceremony = null
                 phase = PairingPhase.Failed("Pairing error: ${e.javaClass.simpleName}")
+                nextOffer()
             } else {
                 listener?.disconnectClient()
             }
@@ -384,13 +433,15 @@ internal class RappPairingModel(
             oldListener?.close()
         }
 
-        app?.rappProxyDispatcher?.startListening(vault)
+        app?.let { it.rappProxyDispatcher.startListening(it.rappVault) }
+        // The next computer pairs with the next code.
+        offerWhileOn()
     }
 
     private fun startHandshakeDeadline() {
         handshakeDeadlineJob?.cancel()
         handshakeDeadlineJob =
-            scope.launch(Dispatchers.Main) {
+            scope.launch(mainDispatcher) {
                 delay(HANDSHAKE_DEADLINE_MS)
                 if (phase is PairingPhase.Connecting) {
                     listener?.disconnectClient()
@@ -411,7 +462,7 @@ internal class RappPairingModel(
     private fun startCountdown() {
         timerJob?.cancel()
         timerJob =
-            scope.launch(Dispatchers.Main) {
+            scope.launch(mainDispatcher) {
                 for (sec in offerSeconds downTo NO_SECONDS_REMAINING) {
                     secondsRemaining = sec
                     val current = phase
@@ -420,22 +471,33 @@ internal class RappPairingModel(
                     }
                     delay(1000L)
                 }
-                if (phase is PairingPhase.Offering) {
-                    scope.launch(Dispatchers.Main) {
-                        if (phase is PairingPhase.Offering) createOffer()
-                    }
-                } else if (phase is PairingPhase.Connecting) {
-                    phase = PairingPhase.Failed("Pairing timed out")
-                    reset()
-                }
+                offerExpired()
             }
     }
 
-    /** Forgets one pairing (RAPP v26.10.22 section 4.6) and updates what this phone serves. */
+    /**
+     * The offer's lifetime ran out (RAPP v26.10.22 section 3.3 item 7) and
+     * the next code follows: an unused offer and an attempt still in its
+     * offer phase end with it. A ceremony past CPace is exempt from the
+     * offer's lifetime; it runs to its own deadlines, and the next code
+     * follows its end.
+     */
+    @VisibleForTesting
+    internal fun offerExpired() {
+        if (ceremony?.isPastOfferPhase == true) return
+        if (phase is PairingPhase.Offering || phase is PairingPhase.Connecting) nextOffer()
+    }
+
+    /**
+     * Forgets one pairing (RAPP v26.10.22 section 4.6), updates what this
+     * phone serves, and shows a code while Remote Access stays on, the last
+     * pairing's removal included.
+     */
     fun removePair(pairIdHex: String) {
         forgetPairing(pairIdHex)
         pairedDevices = catalog.listPairs()
         app?.rappProxyDispatcher?.pairingsChanged()
+        offerWhileOn()
     }
 
     /**

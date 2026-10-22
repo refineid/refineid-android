@@ -82,14 +82,10 @@ internal fun RappPairingScreen(
             contract = ActivityResultContracts.StartActivityForResult(),
         ) { _ -> refreshNotifications() }
 
-    // A pairing offer needs neither the card nor a PIN: the page offers its
-    // code whenever Remote Access is on and no computer is connected.
-    LaunchedEffect(model.isRemoteAccessEnabled) {
-        if (model.isRemoteAccessEnabled && phase is PairingPhase.Idle &&
-            model.activeConnectedPeer == null
-        ) {
-            model.createOffer()
-        }
+    // A pairing offer needs neither the card nor a PIN: the page shows a code
+    // whenever Remote Access is on, and a new one whenever it has none.
+    LaunchedEffect(model.isRemoteAccessEnabled, phase is PairingPhase.Idle) {
+        model.offerWhileOn()
     }
 
     Column(
