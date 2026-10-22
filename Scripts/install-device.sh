@@ -3,7 +3,7 @@
 
 # Build, install, and launch the latest diagnostic debug build on one connected Android device.
 #
-# The calendar version and ten-minute build number are dynamically passed as command-line
+# The calendar version and HHMM build number are dynamically passed as command-line
 # Gradle overrides, matching RefineID-Apple's install-ios-development.sh.
 #
 # Usage:
@@ -25,7 +25,7 @@ fi
 
 read -r yy mm dd hh mn <<<"$(date -u '+%y %m %d %H %M')"
 version="${yy}.$((10#$mm)).$((10#$dd))"
-build=$((10#$hh * 10 + 10#$mn / 10))
+build=$((10#$hh * 100 + 10#$mn))
 
 target_msg="connected device"
 if [[ -n "$device" ]]; then

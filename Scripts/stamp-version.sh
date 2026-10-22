@@ -4,18 +4,18 @@
 # Stamp the same release pair used by RefineID-Apple:
 #
 #   versionName = YY.M.D
-#   buildNumber = H * 10 + M / 10
+#   buildNumber = HHMM
 #
 # Every component is UTC and the date has no zero padding. Gradle derives the
-# globally increasing Android versionCode as YYMMDD000 + buildNumber.
+# globally increasing Android versionCode as YYMMDD000 + H * 10 + M / 10.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 read -r yy mm dd hh mn <<<"$(date -u '+%y %m %d %H %M')"
 version="${yy}.$((10#$mm)).$((10#$dd))"
-build=$((10#$hh * 10 + 10#$mn / 10))
-version_code=$((10#$yy * 10000000 + 10#$mm * 100000 + 10#$dd * 1000 + build))
+build=$((10#$hh * 100 + 10#$mn))
+version_code=$((10#$yy * 10000000 + 10#$mm * 100000 + 10#$dd * 1000 + 10#$hh * 10 + 10#$mn / 10))
 
 case "${1:-}" in
   --dry-run)
