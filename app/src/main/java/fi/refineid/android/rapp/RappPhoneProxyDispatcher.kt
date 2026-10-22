@@ -869,13 +869,16 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Asks the holder for PIN 1 on this phone; null when the holder declines.
-     * Entering the PIN is the holder's consent, reported once the prompt is
-     * on screen (section 8.2 item 3); a prompt after a wrong PIN says so.
+     * Entering the PIN is the holder's consent, reported once the operation's
+     * first prompt is on screen when [firstPrompt] (section 8.2 item 3); a
+     * prompt after a wrong PIN says so to the holder and reports nothing, so
+     * the Requester learns nothing of it (section 10.2).
      */
     private suspend fun askPin1(
         bridge: RappOperationBridge,
         operationId: RappOperationId,
         wrongPin: RappCardAnswer.WrongPin?,
+        firstPrompt: Boolean,
     ): Pin1Submission? {
         val answer = CompletableDeferred<Pin1Submission?>()
         withContext(Dispatchers.Main) {
@@ -884,7 +887,7 @@ internal class RappPhoneProxyDispatcher(
                 requester = requesterName(),
                 onApproved = { pin -> if (!answer.complete(pin)) pin.close() },
                 onDenied = { answer.complete(null) },
-                onShown = { reportConsentShown(bridge, operationId) },
+                onShown = { if (firstPrompt) reportConsentShown(bridge, operationId) },
                 wrongPin = wrongPin,
             )
         }
@@ -897,6 +900,7 @@ internal class RappPhoneProxyDispatcher(
         operationId: RappOperationId,
         names: List<String>,
         wrongPin: RappCardAnswer.WrongPin?,
+        firstPrompt: Boolean,
     ): Pin2Submission? {
         val answer = CompletableDeferred<Pin2Submission?>()
         withContext(Dispatchers.Main) {
@@ -906,7 +910,7 @@ internal class RappPhoneProxyDispatcher(
                 documentNames = names,
                 onApproved = { pin -> if (!answer.complete(pin)) pin.close() },
                 onDenied = { answer.complete(null) },
-                onShown = { reportConsentShown(bridge, operationId) },
+                onShown = { if (firstPrompt) reportConsentShown(bridge, operationId) },
                 wrongPin = wrongPin,
             )
         }
@@ -1151,7 +1155,7 @@ internal class RappPhoneProxyDispatcher(
         val card = heldCard()
         val held = card?.let(::heldPin1)
         var heldFor = card.takeIf { held != null }
-        val first = held ?: askPin1(bridge, operationId, wrongPin = null)
+        val first = held ?: askPin1(bridge, operationId, wrongPin = null, firstPrompt = true)
         if (first == null) {
             fail(bridge, operationId, RappCardFailure.USER_CANCELLED)
             return
@@ -1171,7 +1175,14 @@ internal class RappPhoneProxyDispatcher(
                     }
 
                     is RappCardAnswer.WrongPin, RappCardAnswer.NotHeld -> {
-                        val next = askPin1(bridge, operationId, answer as? RappCardAnswer.WrongPin)
+                        // Only a held PIN can come before the operation's first prompt.
+                        val next =
+                            askPin1(
+                                bridge,
+                                operationId,
+                                answer as? RappCardAnswer.WrongPin,
+                                firstPrompt = heldFor != null,
+                            )
                         if (next == null) {
                             fail(bridge, operationId, RappCardFailure.USER_CANCELLED)
                             return
@@ -1447,7 +1458,7 @@ internal class RappPhoneProxyDispatcher(
             fail(bridge, operationId, RappCardFailure.UNSUPPORTED)
             return
         }
-        val first = askPin2(bridge, operationId, names, wrongPin = null)
+        val first = askPin2(bridge, operationId, names, wrongPin = null, firstPrompt = true)
         if (first == null) {
             fail(bridge, operationId, RappCardFailure.USER_CANCELLED)
             return
@@ -1567,7 +1578,7 @@ internal class RappPhoneProxyDispatcher(
             when (val answer = RappCardAnswer.of(failure.kind, failure.remainingRetries)) {
                 is RappCardAnswer.WrongPin -> {
                     val next =
-                        askPin2(bridge, operationId, names, answer)
+                        askPin2(bridge, operationId, names, answer, firstPrompt = false)
                             ?: return RappBatchSignatureRun.Step.Failed(RappCardFailure.USER_CANCELLED)
                     pin.replace(next)
                 }
@@ -1585,10 +1596,10 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * One qualified signature over [digest]. A card that left the field
-     * before answering is waited for, and the command repeated with the
-     * certificate read afresh from it only when the PIN 2 attempts show the
-     * card did not count the PIN (section 10.2); [waitFailure] receives why a
-     * wait ended without a card.
+     * before answering is waited for, and the command repeated only when the
+     * card back holds [certificate], so the PIN 2 typed for it reaches no
+     * other card, and the PIN 2 attempts show the card did not count the PIN
+     * (section 10.2); [waitFailure] receives why a wait ended without a card.
      */
     private suspend fun qualifiedSignature(
         bridge: RappOperationBridge,
@@ -1616,7 +1627,7 @@ internal class RappPhoneProxyDispatcher(
                 val failure = awaitCard(bridge, operationId, RappAuthAction.DOCUMENT_SIGN, forcePrompt = true)
                 if (failure != null) waitFailure(failure)
                 fresh = if (failure == null) readSignatureCertificateWithTimeout() else null
-                fresh != null
+                fresh?.copyDer()?.contentEquals(certificate.copyDer()) == true
             }
         } finally {
             fresh?.close()
