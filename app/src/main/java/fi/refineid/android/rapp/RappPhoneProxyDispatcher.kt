@@ -4,6 +4,8 @@ package fi.refineid.android.rapp
 
 import android.content.Context
 import fi.refineid.android.R
+import fi.refineid.android.core.AuthenticationCardIdentity
+import fi.refineid.android.core.AuthenticationCardReads
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationSignFailure
@@ -12,6 +14,7 @@ import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.CertificateIdentity
 import fi.refineid.android.core.NativeCertificateReadResult
 import fi.refineid.android.core.NativeQualifiedCertificate
+import fi.refineid.android.core.Pin1Retention
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin2Submission
 import fi.refineid.android.core.QualifiedCardService
@@ -58,9 +61,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The custodian side of RAPP v26.10.21: serves the paired computers' sessions
- * over the stream transport, asks the holder for consent and PINs on this
- * phone, and runs the card commands through the card services.
+ * The custodian side of RAPP v26.10.22: serves the paired computers' sessions
+ * over the stream transport, asks the holder for PINs on this phone, and
+ * runs the card commands through the card services.
  *
  * The listener holds one session at a time. Operations take the card one at a
  * time, in the order they arrived, across that session and any earlier one
@@ -77,7 +80,7 @@ internal class RappPhoneProxyDispatcher(
     private val isCardReady: () -> Boolean = { false },
     private val awaitCardReady: suspend () -> Boolean = { false },
     private val offeredCard: suspend () -> RappOfferedCard = { RappOfferedCard.Absent },
-    private val onAuthenticationVerified: ((ByteArray, Long) -> Boolean)? = null,
+    private val onAuthenticationVerified: ((ByteArray, Pin1Retention, Long) -> Boolean)? = null,
 ) : AutoCloseable {
     private var activeListener: StreamRelayListener? = null
     private var sessionRouting: RappSessionRouting? = null
@@ -128,13 +131,6 @@ internal class RappPhoneProxyDispatcher(
     /** The card last reported on the open session; null before the first report. */
     @Volatile
     private var reportedCard: RappOfferedCard? = null
-
-    /**
-     * An operation ended without the card answering, so no card is offered
-     * until the holder couples or primes one again (section 8.4 item 1).
-     */
-    @Volatile
-    private var cardLost = false
 
     @Volatile
     private var lastReadAuthCertDer: ByteArray? = null
@@ -242,7 +238,7 @@ internal class RappPhoneProxyDispatcher(
         RappCustodianService.ensureRunning(context)
         hintRefreshJob?.cancel()
         // Each hint window rebuilds the served set, which also destroys a
-        // forgotten record past its notice window (RAPP v26.10.21 section 4.6
+        // forgotten record past its notice window (RAPP v26.10.22 section 4.6
         // item 3); the listener stops once nothing is left to serve.
         hintRefreshJob =
             scope.launch {
@@ -279,7 +275,7 @@ internal class RappPhoneProxyDispatcher(
      * Session-mode TXT attributes carrying the current rotating discovery
      * hints of the most recently used custodian pairings (discovery
      * hierarchy section 4.3), forgotten ones included: their peers keep
-     * dialing until the close reaches them (RAPP v26.10.21 section 4.6 item
+     * dialing until the close reaches them (RAPP v26.10.22 section 4.6 item
      * 2).
      */
     private fun sessionAttributes(vault: AndroidRappVault): Map<String, String> {
@@ -312,7 +308,7 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Ends the session to [pairId] because the local user forgot the pairing
-     * (RAPP v26.10.21 section 4.6 item 1). Returns true when the session was
+     * (RAPP v26.10.22 section 4.6 item 1). Returns true when the session was
      * established and carried the `pairing_revoked` close, so the caller
      * destroys the record at once; false when no session to the pairing was
      * open. A session still in its handshake is dropped, and the next one
@@ -331,10 +327,11 @@ internal class RappPhoneProxyDispatcher(
     }
 
     /**
-     * The card this phone can serve may have changed: reports it on the open
-     * session (RAPP v26.10.21 section 8.4). Present is a card coupled in a
-     * reader or a primed card the holder can present; a card busy with an
-     * operation stays present.
+     * The card this phone holds may have changed: reports it on the open
+     * session (RAPP v26.10.22 section 8.4 item 1). Present is a card in the
+     * reader, from insertion until removal, or an NFC card the holder added
+     * to the phone, until the holder removes it; a card busy with an
+     * operation, or one that did not answer an operation, stays present.
      */
     fun cardChanged() {
         if (isClosed) return
@@ -346,7 +343,6 @@ internal class RappPhoneProxyDispatcher(
         val bridge = operationBridge ?: return
         val reported = cardReported
         try {
-            if (isCardReady()) cardLost = false
             val card = currentCard()
             if (card == reportedCard) return
             val certificate = (card as? RappOfferedCard.Present)?.certificate?.toWire()
@@ -358,26 +354,16 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
-    /** The card this phone offers now; absence after a lost card until one is coupled again. */
+    /** The card this phone holds now. */
     private suspend fun currentCard(): RappOfferedCard =
-        if (cardLost) {
+        try {
+            offeredCard()
+        } catch (_: Exception) {
             RappOfferedCard.Absent
-        } else {
-            try {
-                offeredCard()
-            } catch (_: Exception) {
-                RappOfferedCard.Absent
-            }
         }
 
-    /** No card answered an operation: absence is reported at once (section 8.4 item 1). */
-    private fun markCardLost() {
-        cardLost = true
-        cardChanged()
-    }
-
     /**
-     * Withdraws the service the user switched off (RAPP v26.10.21 section
+     * Withdraws the service the user switched off (RAPP v26.10.22 section
      * 4.5): the open session is closed as withdrawn, the listener stops
      * accepting, the instance is advertised as withdrawn for a few seconds,
      * and then everything stops.
@@ -484,7 +470,7 @@ internal class RappPhoneProxyDispatcher(
     /**
      * The first frame must be the session preamble of a served pairing;
      * anything else closes the connection and changes no stored state
-     * (RAPP v26.10.21 section 2.2.1).
+     * (RAPP v26.10.22 section 2.2.1).
      */
     private fun route(
         vault: AndroidRappVault,
@@ -548,7 +534,7 @@ internal class RappPhoneProxyDispatcher(
     /**
      * The first and only message of a session to a forgotten pairing: the
      * `pairing_revoked` close, after which the record's key is destroyed
-     * (RAPP v26.10.21 section 4.6 items 2 and 3).
+     * (RAPP v26.10.22 section 4.6 items 2 and 3).
      */
     private fun deliverRevocationNotice(
         vault: AndroidRappVault,
@@ -623,7 +609,7 @@ internal class RappPhoneProxyDispatcher(
     /**
      * The session closed. A requester that forgot this phone closes it with
      * `pairing_revoked`, and the pairing is revoked here at once (RAPP
-     * v26.10.21 section 4.6 item 4).
+     * v26.10.22 section 4.6 item 4).
      */
     private fun sessionClosed(reason: RappCloseReason?) {
         val pair = routed.takeIf { reason == RappCloseReason.PAIRING_REVOKED }
@@ -733,8 +719,8 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Runs one operation once the session carried its first `card.status`:
-     * it takes the card in its turn, then goes to the holder's consent or,
-     * for a read, straight to the card (section 8.2).
+     * it takes the card in its turn, then asks for the PIN it needs or, for a
+     * read, goes straight to the card (section 8.2).
      */
     private fun startOperation(
         bridge: RappOperationBridge,
@@ -750,7 +736,7 @@ internal class RappPhoneProxyDispatcher(
                             val next =
                                 act(bridge) { it.prerequisitesComplete(operationId.toWire(), RappClock.monotonicMs()) }
                         ) {
-                            is RappBridgeOutcome.AwaitConsent -> {
+                            is RappBridgeOutcome.AwaitApproval -> {
                                 authorize(bridge, operationId, next.request)
                             }
 
@@ -840,11 +826,11 @@ internal class RappPhoneProxyDispatcher(
                 scope.launch(Dispatchers.Main) { inbox.tell(R.string.rapp_retry_floor) }
             }
 
-            RappCardFailure.CARD_ERROR -> {
-                markCardLost()
-            }
-
-            RappCardFailure.USER_CANCELLED, RappCardFailure.UNSUPPORTED, RappCardFailure.OPERATION_FAILED -> {}
+            RappCardFailure.USER_CANCELLED,
+            RappCardFailure.CARD_ERROR,
+            RappCardFailure.UNSUPPORTED,
+            RappCardFailure.OPERATION_FAILED,
+            -> {}
         }
         val wire = operationId.toWire()
         act(bridge) {
@@ -883,8 +869,8 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Asks the holder for PIN 1 on this phone; null when the holder declines.
-     * The first prompt of an operation is its consent view, reported once it
-     * is on screen (section 8.2 item 3); a prompt after a wrong PIN says so.
+     * Entering the PIN is the holder's consent, reported once the prompt is
+     * on screen (section 8.2 item 3); a prompt after a wrong PIN says so.
      */
     private suspend fun askPin1(
         bridge: RappOperationBridge,
@@ -898,7 +884,7 @@ internal class RappPhoneProxyDispatcher(
                 requester = requesterName(),
                 onApproved = { pin -> if (!answer.complete(pin)) pin.close() },
                 onDenied = { answer.complete(null) },
-                onShown = { if (wrongPin == null) reportConsentShown(bridge, operationId) },
+                onShown = { reportConsentShown(bridge, operationId) },
                 wrongPin = wrongPin,
             )
         }
@@ -920,7 +906,7 @@ internal class RappPhoneProxyDispatcher(
                 documentNames = names,
                 onApproved = { pin -> if (!answer.complete(pin)) pin.close() },
                 onDenied = { answer.complete(null) },
-                onShown = { if (wrongPin == null) reportConsentShown(bridge, operationId) },
+                onShown = { reportConsentShown(bridge, operationId) },
                 wrongPin = wrongPin,
             )
         }
@@ -977,29 +963,27 @@ internal class RappPhoneProxyDispatcher(
     }
 
     /**
-     * Runs one blocking card [command]; when [cardLeft] says the card was not
-     * in the field for it, waits for the card once more and runs it again.
+     * Runs one card [command] that presents a PIN; when [cardLeft] says the
+     * card did not answer, waits for the card and runs it again only when
+     * [attemptsLeft] reads [before] again, showing the card did not count the
+     * PIN (section 10.2). [waitFailure] receives why a wait ended without a
+     * card.
      */
-    private suspend fun <T> onCard(
+    private suspend fun <T> withPin(
         bridge: RappOperationBridge,
         operationId: RappOperationId,
         action: RappAuthAction,
-        command: () -> T,
+        before: Int?,
+        attemptsLeft: suspend () -> Int?,
+        command: suspend () -> T,
         cardLeft: (T) -> Boolean,
-    ): CardRun<T> {
-        var waitFailure: RappCardFailure? = null
-        val result =
-            RappCardRetry.run(command, cardLeft) {
-                awaitCard(bridge, operationId, action, forcePrompt = true).also { waitFailure = it } == null
-            }
-        return if (result !=
-            null
-        ) {
-            CardRun.Answered(result)
-        } else {
-            CardRun.Missing(waitFailure ?: RappCardFailure.CARD_ERROR)
+        waitFailure: (RappCardFailure) -> Unit,
+    ): RappCardRetry.Run<T> =
+        RappCardRetry.run(before, attemptsLeft, command, cardLeft) {
+            val failure = awaitCard(bridge, operationId, action, forcePrompt = true)
+            if (failure != null) waitFailure(failure)
+            failure == null
         }
-    }
 
     // --- Reads (section 8.2 item 6) -------------------------------------------
 
@@ -1114,7 +1098,7 @@ internal class RappPhoneProxyDispatcher(
     }
 
     private suspend fun readAuthCertWithTimeout(): RappCertificate? =
-        authCardService()?.let { service -> RappCertificateRead.authentication(service) }
+        authCardService()?.let { service -> RappCardRead.authenticationCertificate(service) }
 
     private suspend fun readSignatureCertificateWithTimeout(): NativeQualifiedCertificate? {
         val deferred = CompletableDeferred<NativeQualifiedCertificate?>()
@@ -1129,27 +1113,30 @@ internal class RappPhoneProxyDispatcher(
                 }
             }
         } ?: deferred.complete(null)
-        return withTimeoutOrNull(RappCertificateRead.TIMEOUT_MS) { deferred.await() }
+        return withTimeoutOrNull(RappCardRead.TIMEOUT_MS) { deferred.await() }
     }
 
     // --- Browser authentication (section 9.2) --------------------------------
 
     /**
-     * A PIN 1 this phone keeps by its own policy (section 11 item 2): a cached
-     * PIN the card accepted, or the one stored with a primed card. A PIN the
-     * card already rejected is not offered.
+     * The PIN 1 this phone holds in memory for [card] (section 11 item 2):
+     * asked once, kept until the card leaves, the card rejects it, the holder
+     * clears it or the process ends. A PIN held for another card, or one the
+     * card already rejected, is not offered.
      */
-    private fun cachedPin1(): Pin1Submission? {
-        val cached =
-            pinCache?.take()?.let { held -> held.consume { bytes -> Pin1Submission.fromOwnedBytes(bytes.copyOf()) } }
-                ?: primedCanStore?.readPin1()?.let(Pin1Submission::fromOwnedBytes)
-                ?: return null
-        if (pinCache?.isRejected(cached) == true) {
-            cached.close()
+    private fun heldPin1(card: AuthenticationCardIdentity): Pin1Submission? {
+        val cache = pinCache ?: return null
+        val held = cache.take(card) ?: return null
+        if (cache.isRejected(held)) {
+            held.close()
             return null
         }
-        return cached
+        return held
     }
+
+    /** The card this phone holds now, named by its authentication certificate. */
+    private suspend fun heldCard(): AuthenticationCardIdentity? =
+        (currentCard() as? RappOfferedCard.Present)?.certificate?.toWire()?.let(AuthenticationCardIdentity::of)
 
     private suspend fun authenticate(
         bridge: RappOperationBridge,
@@ -1161,7 +1148,10 @@ internal class RappPhoneProxyDispatcher(
             fail(bridge, operationId, RappCardFailure.UNSUPPORTED)
             return
         }
-        val first = cachedPin1() ?: askPin1(bridge, operationId, wrongPin = null)
+        val card = heldCard()
+        val held = card?.let(::heldPin1)
+        var heldFor = card.takeIf { held != null }
+        val first = held ?: askPin1(bridge, operationId, wrongPin = null)
         if (first == null) {
             fail(bridge, operationId, RappCardFailure.USER_CANCELLED)
             return
@@ -1169,7 +1159,8 @@ internal class RappPhoneProxyDispatcher(
         HeldPin(first).use { pin ->
             val command = approve(bridge, operationId) as? RappRequest.BrowserAuthenticate ?: return
             while (true) {
-                when (val answer = signAuthentication(bridge, operationId, algorithm, command.digest, pin.submission)) {
+                val answer = signAuthentication(bridge, operationId, algorithm, command.digest, pin.submission, heldFor)
+                when (answer) {
                     RappCardAnswer.Done -> {
                         return
                     }
@@ -1179,13 +1170,14 @@ internal class RappPhoneProxyDispatcher(
                         return
                     }
 
-                    is RappCardAnswer.WrongPin -> {
-                        val next = askPin1(bridge, operationId, answer)
+                    is RappCardAnswer.WrongPin, RappCardAnswer.NotHeld -> {
+                        val next = askPin1(bridge, operationId, answer as? RappCardAnswer.WrongPin)
                         if (next == null) {
                             fail(bridge, operationId, RappCardFailure.USER_CANCELLED)
                             return
                         }
                         pin.replace(next)
+                        heldFor = null
                     }
                 }
             }
@@ -1195,6 +1187,10 @@ internal class RappPhoneProxyDispatcher(
     /**
      * Verifies [pin] on the card unless this phone already holds it as the
      * card's verified PIN, then signs [digest] and completes the operation.
+     * [pin] goes only to the card it was asked for: a PIN held for [heldFor]
+     * is not sent to another card, nor once that card's PIN 1 counter reads
+     * below pristine, and every resend reads the counter from the same card
+     * (credential custody).
      */
     private suspend fun signAuthentication(
         bridge: RappOperationBridge,
@@ -1202,50 +1198,65 @@ internal class RappPhoneProxyDispatcher(
         algorithm: AuthenticationSigningAlgorithm,
         digest: ByteArray,
         pin: Pin1Submission,
+        heldFor: AuthenticationCardIdentity?,
     ): RappCardAnswer {
         if (pinCache?.isRejected(pin) == true) return RappCardAnswer.WrongPin.ALREADY_REJECTED
         awaitCard(bridge, operationId, RappAuthAction.BROWSER_AUTH)?.let { return RappCardAnswer.Ends(it) }
         val startedNs = System.nanoTime()
-        val cacheGeneration = pinCache?.generation
         var service =
             authCardService()
                 ?: awaitCard(bridge, operationId, RappAuthAction.BROWSER_AUTH, forcePrompt = true)?.let {
                     return RappCardAnswer.Ends(it)
                 } ?: authCardService()
                 ?: return RappCardAnswer.Ends(RappCardFailure.CARD_ERROR)
-        if (pinCache?.isVerified(pin) != true) {
+        val card =
+            AuthenticationCardReads.identity(service) ?: return RappCardAnswer.Ends(RappCardFailure.CARD_ERROR)
+        val attemptsLeft: suspend () -> Int? = { pin1AttemptsLeft(card) }
+        val before = attemptsLeft()
+        val retention = Pin1Retention.of(card, before)
+        if (!custodyContinues(card, heldFor, retention)) return RappCardAnswer.NotHeld
+        val cacheGeneration = pinCache?.generation
+        var waitFailure = RappCardFailure.CARD_ERROR
+        var signBefore = before
+        if (pinCache?.isVerified(pin, card) != true) {
             val verifying = service
             val verification =
                 when (
                     val run =
-                        onCard(
+                        withPin(
                             bridge,
                             operationId,
                             RappAuthAction.BROWSER_AUTH,
+                            before,
+                            attemptsLeft,
                             command = {
                                 (authCardService() ?: verifying).verifyAuthenticationPin(
                                     Pin1Submission.fromOwnedBytes(pin.copyBytes()),
                                 )
                             },
                             cardLeft = { it.result.authenticationFailure()?.meansCardLeft() == true },
+                            waitFailure = { waitFailure = it },
                         )
                 ) {
-                    is CardRun.Answered -> run.result
-                    is CardRun.Missing -> return RappCardAnswer.Ends(run.failure)
+                    is RappCardRetry.Run.Answered -> run.result
+                    else -> return unanswered(run, waitFailure, pin)
                 }
             verification.result.authenticationFailure()?.let { failure ->
                 return authenticationAnswer(failure, verification.remainingRetries, pin)
             }
             service = authCardService() ?: service
+            signBefore = attemptsLeft()
         }
         var signing = service
         val result =
             when (
                 val run =
-                    onCard(
+                    withPin(
                         bridge,
                         operationId,
                         RappAuthAction.BROWSER_AUTH,
+                        signBefore,
+                        attemptsLeft,
                         command = {
                             signing = authCardService() ?: signing
                             signing.signAuthenticationDigest(
@@ -1255,20 +1266,41 @@ internal class RappPhoneProxyDispatcher(
                             )
                         },
                         cardLeft = { it is AuthenticationSignResult.Failure && it.kind.meansCardLeft() },
+                        waitFailure = { waitFailure = it },
                     )
             ) {
-                is CardRun.Answered -> run.result
-                is CardRun.Missing -> return RappCardAnswer.Ends(run.failure)
+                is RappCardRetry.Run.Answered -> run.result
+                else -> return unanswered(run, waitFailure, pin)
             }
         return when (result) {
             is AuthenticationSignResult.Success -> {
-                authenticated(bridge, operationId, startedNs, cacheGeneration, pin, signing, result)
+                authenticated(bridge, operationId, startedNs, Custody(retention, cacheGeneration), pin, signing, result)
             }
 
             is AuthenticationSignResult.Failure -> {
                 authenticationAnswer(result.kind, result.remainingRetries, pin)
             }
         }
+    }
+
+    /** The PIN 1 attempts [card] allows when it is the card served now; null otherwise. */
+    private suspend fun pin1AttemptsLeft(card: AuthenticationCardIdentity): Int? =
+        authCardService()?.let { service -> AuthenticationCardReads.pin1AttemptsLeft(service, card) }
+
+    /**
+     * Ends what custody may not keep on [card]: without [retention], its
+     * counter read below pristine or not at all, and a PIN held for another
+     * card, leave nothing held. True when the PIN in hand, held for
+     * [heldFor] or entered when that is null, may go to [card].
+     */
+    private fun custodyContinues(
+        card: AuthenticationCardIdentity,
+        heldFor: AuthenticationCardIdentity?,
+        retention: Pin1Retention?,
+    ): Boolean {
+        val heldElsewhere = heldFor != null && heldFor != card
+        if (retention == null || heldElsewhere) pinCache?.clear()
+        return heldFor == null || (!heldElsewhere && retention != null)
     }
 
     /** What a refused authentication command means; a wrong PIN is remembered so it is never sent again. */
@@ -1280,31 +1312,67 @@ internal class RappPhoneProxyDispatcher(
         if (failure == AuthenticationSignFailure.WRONG_PIN) {
             pinCache?.recordRejected(pin.copyBytes())
         }
-        if (failure == AuthenticationSignFailure.WRONG_PIN || failure == AuthenticationSignFailure.PIN_LOCKED) {
-            primedCanStore?.forgetPin1()
-        }
         return RappCardAnswer.of(failure, remainingRetries)
     }
 
-    /** Keeps the accepted PIN 1 by this phone's policy and completes the operation with the signature. */
+    /**
+     * A PIN 1 command the card did not answer. When the attempts fell, the
+     * card counted the PIN wrong: it is forgotten and the holder asked again,
+     * subject to the floor. Without a count that shows otherwise it is not
+     * sent again; a held PIN outlives the failure (credential custody).
+     */
+    private fun unanswered(
+        run: RappCardRetry.Run<*>,
+        waitFailure: RappCardFailure,
+        pin: Pin1Submission,
+    ): RappCardAnswer =
+        when (run) {
+            is RappCardRetry.Run.Counted -> {
+                authenticationAnswer(
+                    AuthenticationSignFailure.WRONG_PIN,
+                    run.attemptsLeft,
+                    pin,
+                )
+            }
+
+            RappCardRetry.Run.CardMissing -> {
+                RappCardAnswer.Ends(waitFailure)
+            }
+
+            RappCardRetry.Run.Unproven, is RappCardRetry.Run.Answered -> {
+                RappCardAnswer.Ends(RappCardFailure.CARD_ERROR)
+            }
+        }
+
+    /** The leave to hold an accepted PIN 1, if any, and the custody generation it was read under. */
+    private class Custody(
+        val retention: Pin1Retention?,
+        val generation: Long?,
+    )
+
+    /**
+     * Holds the accepted PIN 1 in memory when [custody] gives leave, and
+     * completes the operation with the signature; without leave the PIN
+     * served this operation only.
+     */
     private fun authenticated(
         bridge: RappOperationBridge,
         operationId: RappOperationId,
         startedNs: Long,
-        cacheGeneration: Long?,
+        custody: Custody,
         pin: Pin1Submission,
         service: AuthenticationCardService,
         result: AuthenticationSignResult.Success,
     ): RappCardAnswer {
         try {
-            if (onAuthenticationVerified != null && cacheGeneration != null) {
-                if (!onAuthenticationVerified.invoke(pin.copyBytes(), cacheGeneration)) {
+            val retention = custody.retention
+            val generation = custody.generation
+            if (retention != null && onAuthenticationVerified != null && generation != null) {
+                if (!onAuthenticationVerified.invoke(pin.copyBytes(), retention, generation)) {
                     return RappCardAnswer.Ends(RappCardFailure.CARD_ERROR)
                 }
-            } else if (pinCache?.recordVerified(pin.copyBytes(), cacheGeneration) == true &&
-                primedCanStore?.isPrimed() == true
-            ) {
-                primedCanStore.writePin1(pin.copyBytes())
+            } else if (retention != null) {
+                pinCache?.recordVerified(pin.copyBytes(), retention, generation)
             }
             ensureAuthCertCached(service)
             val rawSignature = result.signature.copyBytes()
@@ -1458,20 +1526,29 @@ internal class RappPhoneProxyDispatcher(
         pin: HeldPin<Pin2Submission>,
     ): RappBatchSignatureRun.Step {
         while (true) {
+            var waitFailure = RappCardFailure.CARD_ERROR
             val result =
                 when (
                     val run =
-                        qualifiedSignature(
-                            bridge,
-                            operationId,
-                            algorithm,
-                            certificate,
-                            digest,
-                            pin.submission,
-                        )
+                        qualifiedSignature(bridge, operationId, algorithm, certificate, digest, pin.submission) {
+                            waitFailure = it
+                        }
                 ) {
-                    is CardRun.Answered -> run.result
-                    is CardRun.Missing -> return RappBatchSignatureRun.Step.Failed(run.failure)
+                    is RappCardRetry.Run.Answered -> {
+                        run.result
+                    }
+
+                    is RappCardRetry.Run.Counted -> {
+                        QualifiedSignResult.Failure(QualifiedSignFailure.WRONG_PIN, run.attemptsLeft)
+                    }
+
+                    RappCardRetry.Run.CardMissing -> {
+                        return RappBatchSignatureRun.Step.Failed(waitFailure)
+                    }
+
+                    RappCardRetry.Run.Unproven -> {
+                        return RappBatchSignatureRun.Step.Failed(RappCardFailure.CARD_ERROR)
+                    }
                 }
             val failure =
                 when (result) {
@@ -1499,7 +1576,7 @@ internal class RappPhoneProxyDispatcher(
                     return RappBatchSignatureRun.Step.Failed(answer.failure)
                 }
 
-                RappCardAnswer.Done -> {
+                RappCardAnswer.Done, RappCardAnswer.NotHeld -> {
                     return RappBatchSignatureRun.Step.Failed(RappCardFailure.OPERATION_FAILED)
                 }
             }
@@ -1507,9 +1584,11 @@ internal class RappPhoneProxyDispatcher(
     }
 
     /**
-     * One qualified signature over [digest]; a card that left the field
-     * before the command is waited for once, and the command repeated with
-     * the certificate read afresh from it.
+     * One qualified signature over [digest]. A card that left the field
+     * before answering is waited for, and the command repeated with the
+     * certificate read afresh from it only when the PIN 2 attempts show the
+     * card did not count the PIN (section 10.2); [waitFailure] receives why a
+     * wait ended without a card.
      */
     private suspend fun qualifiedSignature(
         bridge: RappOperationBridge,
@@ -1518,22 +1597,29 @@ internal class RappPhoneProxyDispatcher(
         certificate: NativeQualifiedCertificate,
         digest: ByteArray,
         pin: Pin2Submission,
-    ): CardRun<QualifiedSignResult> {
-        val first =
-            requestQualifiedSignature(algorithm, certificate, digest, pin)
-                ?: return CardRun.Missing(RappCardFailure.CARD_ERROR)
-        if (first !is QualifiedSignResult.Failure || first.kind != QualifiedSignFailure.CARD_UNAVAILABLE) {
-            return CardRun.Answered(first)
+        waitFailure: (RappCardFailure) -> Unit,
+    ): RappCardRetry.Run<QualifiedSignResult> {
+        var fresh: NativeQualifiedCertificate? = null
+        val attemptsLeft: suspend () -> Int? = {
+            qualifiedCardService()?.let { service -> RappCardRead.pin2AttemptsLeft(service) }
         }
-        awaitCard(bridge, operationId, RappAuthAction.DOCUMENT_SIGN, forcePrompt = true)?.let {
-            return CardRun.Missing(it)
-        }
-        val fresh = readSignatureCertificateWithTimeout() ?: return CardRun.Missing(RappCardFailure.CARD_ERROR)
         return try {
-            requestQualifiedSignature(algorithm, fresh, digest, pin)?.let { CardRun.Answered(it) }
-                ?: CardRun.Missing(RappCardFailure.CARD_ERROR)
+            RappCardRetry.run(
+                before = attemptsLeft(),
+                attemptsLeft = attemptsLeft,
+                command = {
+                    requestQualifiedSignature(algorithm, fresh ?: certificate, digest, pin)
+                        ?: QualifiedSignResult.Failure(QualifiedSignFailure.CARD_UNAVAILABLE)
+                },
+                cardLeft = { it is QualifiedSignResult.Failure && it.kind == QualifiedSignFailure.CARD_UNAVAILABLE },
+            ) {
+                val failure = awaitCard(bridge, operationId, RappAuthAction.DOCUMENT_SIGN, forcePrompt = true)
+                if (failure != null) waitFailure(failure)
+                fresh = if (failure == null) readSignatureCertificateWithTimeout() else null
+                fresh != null
+            }
         } finally {
-            fresh.close()
+            fresh?.close()
         }
     }
 

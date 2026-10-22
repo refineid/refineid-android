@@ -26,6 +26,16 @@ internal class TransportSelectingCardSession(
         return null
     }
 
+    /** The identity the transport holding [providerGeneration] publishes; null when none holds it. */
+    fun copyIdentity(providerGeneration: ExternalKeyProviderGeneration): ExternalKeyCardIdentity? {
+        for (session in sessions) {
+            val identity = session.copyActiveIdentity() ?: continue
+            if (identity.providerGeneration == providerGeneration) return identity
+            identity.close()
+        }
+        return null
+    }
+
     override fun signAuthenticationDigest(
         providerGeneration: ExternalKeyProviderGeneration,
         algorithm: AuthenticationSigningAlgorithm,

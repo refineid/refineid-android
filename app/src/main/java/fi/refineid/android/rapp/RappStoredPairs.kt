@@ -18,7 +18,7 @@ internal class RappStoredPair(
  *
  * A record in a format the core does not decode, or one the vault no longer
  * holds, is removed from the catalog and the vault, so its device pairs
- * again. A record stored before its peer confirmed storage (RAPP v26.10.21
+ * again. A record stored before its peer confirmed storage (RAPP v26.10.22
  * section 4.3 item 4) is revoked. A forgotten record whose close has not
  * reached its peer within 30 days of the forgetting (section 4.6 item 3) is
  * revoked too, by every load: the start, each routed connection, each

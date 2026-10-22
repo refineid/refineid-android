@@ -9,7 +9,7 @@ import uniffi.refineid_rapp.RappSessionRouter
 import uniffi.refineid_rapp.rappStreamProfileName
 
 /**
- * Routes a session connection by its routing preamble (RAPP v26.10.21
+ * Routes a session connection by its routing preamble (RAPP v26.10.22
  * section 2.2.1).
  *
  * The one session listener serves every stored custodian pairing. A

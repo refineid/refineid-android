@@ -77,6 +77,23 @@ class TransportSelectingCardSessionTest {
     }
 
     @Test
+    fun namesTheIdentityOfTheTransportHoldingAGeneration() {
+        val selector =
+            TransportSelectingCardSession(
+                listOf(
+                    ScriptedSession(generation = PRIMARY_GENERATION),
+                    ScriptedSession(generation = SECONDARY_GENERATION),
+                ),
+            )
+
+        val identity = selector.copyIdentity(ExternalKeyProviderGeneration(SECONDARY_GENERATION))
+
+        assertEquals(ExternalKeyProviderGeneration(SECONDARY_GENERATION), identity?.providerGeneration)
+        identity?.close()
+        assertNull(selector.copyIdentity(ExternalKeyProviderGeneration(UNKNOWN_GENERATION)))
+    }
+
+    @Test
     fun routesSigningByProviderGeneration() {
         val primary = ScriptedSession(generation = PRIMARY_GENERATION)
         val secondary = ScriptedSession(generation = SECONDARY_GENERATION)

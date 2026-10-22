@@ -3,8 +3,10 @@
 package fi.refineid.android
 
 import android.app.Application
+import fi.refineid.android.core.AuthenticationCardIdentity
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.NativeCardCa
+import fi.refineid.android.core.Pin1Retention
 import fi.refineid.android.keychain.AndroidExternalKeyCallerLabelResolver
 import fi.refineid.android.keychain.ExternalKeyPinPromptBroker
 import fi.refineid.android.keychain.ExternalKeyProviderRuntime
@@ -46,13 +48,13 @@ class RefineIdApplication : Application() {
 
     internal fun retainAuthenticationPin(
         pin: ByteArray,
+        retention: Pin1Retention,
         expectedGeneration: Long,
     ): Boolean {
         try {
             synchronized(authenticationCustodyLock) {
                 if (authenticationPinCache.generation != expectedGeneration) return false
-                if (primedCanStore.isPrimed()) primedCanStore.writePin1(pin.copyOf())
-                return authenticationPinCache.recordVerified(pin.copyOf(), expectedGeneration)
+                return authenticationPinCache.recordVerified(pin.copyOf(), retention, expectedGeneration)
             }
         } finally {
             pin.fill(0)
@@ -60,20 +62,12 @@ class RefineIdApplication : Application() {
     }
 
     /**
-     * Forgets the PIN1 accepted while a card sat in the USB reader, once
-     * that card is removed or the reader disconnects. A primed contactless
-     * identity keeps the PIN1 its holder chose to store with it.
+     * Forgets the held PIN1 once the card in the USB reader is removed or the
+     * reader disconnects (RAPP v26.10.22 section 11 item 2).
      */
     private fun forgetReaderPin1() {
         synchronized(authenticationCustodyLock) {
             authenticationPinCache.clear()
-        }
-        authenticationScope.launch {
-            if (!primedCanStore.isPrimed()) return@launch
-            val stored = primedCanStore.readPin1() ?: return@launch
-            synchronized(authenticationCustodyLock) {
-                authenticationPinCache.recordVerified(stored)
-            }
         }
     }
 
@@ -143,9 +137,6 @@ class RefineIdApplication : Application() {
         val primedStore = PrimedCanStore(this)
         primedCanStore = primedStore
         try {
-            primedStore.readPin1()?.let { storedPin ->
-                authenticationPinCache.recordVerified(storedPin)
-            }
             primedStore.read()?.let { storedCan ->
                 fi.refineid.android.core.CanSessionStore
                     .remember(String(storedCan, Charsets.US_ASCII))
@@ -216,21 +207,27 @@ class RefineIdApplication : Application() {
                 vault = rappVault,
                 catalog = rappPairCatalog,
             )
+        val externalKeyCardSession =
+            TransportSelectingCardSession(
+                listOf(
+                    readerController.externalKeyCardSession,
+                    nfcReaderController.externalKeyCardSession,
+                ),
+            )
         pinPromptBroker =
             ExternalKeyPinPromptBroker(
                 context = this,
                 callerLabelResolver = AndroidExternalKeyCallerLabelResolver(packageManager),
                 pinCache = authenticationPinCache,
+                cardFor = { generation ->
+                    externalKeyCardSession.copyIdentity(generation)?.use { identity ->
+                        AuthenticationCardIdentity.of(identity.certificate)
+                    }
+                },
             )
         externalKeyProviderRuntime =
             ExternalKeyProviderRuntime(
-                cardSession =
-                    TransportSelectingCardSession(
-                        listOf(
-                            readerController.externalKeyCardSession,
-                            nfcReaderController.externalKeyCardSession,
-                        ),
-                    ),
+                cardSession = externalKeyCardSession,
                 pinAuthorizer = pinPromptBroker,
                 issuerCertificateSource = caStore,
             )
@@ -241,7 +238,7 @@ class RefineIdApplication : Application() {
         readerController.start()
         rappProxyDispatcher = createRappProxyDispatcher(primedStore)
         // Either reader's card arriving or leaving is reported on the open
-        // RAPP session (RAPP v26.10.21 section 8.4).
+        // RAPP session (RAPP v26.10.22 section 8.4).
         readerController.addStateListener { rappProxyDispatcher.cardChanged() }
         nfcReaderController.addStateListener { rappProxyDispatcher.cardChanged() }
         startRappProxyListening()
@@ -258,7 +255,7 @@ class RefineIdApplication : Application() {
             return
         }
         // Forgotten pairings are served too, until their close reaches the
-        // peer (RAPP v26.10.21 section 4.6 item 2).
+        // peer (RAPP v26.10.22 section 4.6 item 2).
         val served =
             fi.refineid.android.rapp.RappStoredPairs
                 .served(rappPairCatalog, rappVault)
@@ -344,18 +341,18 @@ class RefineIdApplication : Application() {
         )
 
     /**
-     * The card this phone can serve a paired computer now (RAPP v26.10.21
-     * section 8.4 item 1): a card ready in the USB reader or on NFC, or a
-     * primed card the holder can present, named by its authentication
-     * certificate. A reader that does not hand the certificate over in time
-     * cannot serve the card now, which is absence.
+     * The card this phone holds for a paired computer (RAPP v26.10.22
+     * section 8.4 item 1): a card ready in the USB reader, a card open on NFC,
+     * or an NFC card the holder added to the phone and has not removed,
+     * named by its authentication certificate. A reader that does not hand
+     * the certificate over in time reports no card.
      */
     private suspend fun offeredRappCard(primedStore: PrimedCanStore?): fi.refineid.android.rapp.RappOfferedCard {
         val certificate =
             when {
                 readerController.isCardReady -> {
-                    fi.refineid.android.rapp.RappCertificateRead
-                        .authentication(readerController)
+                    fi.refineid.android.rapp.RappCardRead
+                        .authenticationCertificate(readerController)
                 }
 
                 nfcReaderController.isCardReady -> {

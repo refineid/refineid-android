@@ -1291,7 +1291,7 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
-    if ((lib.uniffi_refineid_rapp_checksum_func_rapp_ble_sar_payload_capacity() and 0xFFFF) != 50472) {
+    if ((lib.uniffi_refineid_rapp_checksum_func_rapp_ble_sar_payload_capacity() and 0xFFFF) != 55625) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_func_rapp_ble_sar_segment() and 0xFFFF) != 20401) {
@@ -1360,7 +1360,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairvault_load_device_only() and 0xFFFF) != 30784) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairvault_replace_device_only() and 0xFFFF) != 56515) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairvault_replace_device_only() and 0xFFFF) != 63598) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairvault_revoke_device_only() and 0xFFFF) != 42176) {
@@ -1474,7 +1474,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rappsessionrouter_route() and 0xFFFF) != 20399) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_approve() and 0xFFFF) != 65051) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_approve() and 0xFFFF) != 11054) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_begin_batch_sign_documents() and 0xFFFF) != 62777) {
@@ -1561,10 +1561,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbackoff_new() and 0xFFFF) != 21801) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_create_custodian_offer() and 0xFFFF) != 6643) {
+    if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_create_custodian_offer() and 0xFFFF) != 49539) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_from_bootstrap() and 0xFFFF) != 9771) {
+    if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppairingbridge_from_bootstrap() and 0xFFFF) != 2315) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_constructor_rapppreauthenticationlimiter_new() and 0xFFFF) != 61721) {
@@ -2016,7 +2016,7 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
 
 /**
  * The BLE segmentation and reassembly receiver for one connection and one
- * direction (RAPP v26.10.21 §5.3).
+ * direction (RAPP v26.10.22 §5.3).
  *
  * Any refused fragment zeroizes the partial frame; the caller then drops
  * the connection.
@@ -2055,7 +2055,7 @@ public interface RappBleSarReassemblerInterface {
 
 /**
  * The BLE segmentation and reassembly receiver for one connection and one
- * direction (RAPP v26.10.21 §5.3).
+ * direction (RAPP v26.10.22 §5.3).
  *
  * Any refused fragment zeroizes the partial frame; the caller then drops
  * the connection.
@@ -2377,7 +2377,8 @@ public object FfiConverterTypeRappBleSarReassembler: FfiConverter<RappBleSarReas
 public interface RappOperationBridgeInterface {
     
     /**
-     * Approve exactly the request the consent view rendered.
+     * Approve exactly the admitted request: the holder entered the PIN
+     * on the prompt it rendered, or the custodian holds PIN 1.
      *
      * # Errors
      * [`RappBindingError`] on invalid input or the wrong protocol phase.
@@ -2731,7 +2732,8 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
 
     
     /**
-     * Approve exactly the request the consent view rendered.
+     * Approve exactly the admitted request: the holder entered the PIN
+     * on the prompt it rendered, or the custodian holds PIN 1.
      *
      * # Errors
      * [`RappBindingError`] on invalid input or the wrong protocol phase.
@@ -4224,7 +4226,7 @@ public interface RappPairVault {
     /**
      * Atomically replace the record stored under an existing identifier:
      * the confirmed form of a record inserted before the peer confirmed
-     * its storage (RAPP v26.10.21 §4.3 item 4).
+     * its storage (RAPP v26.10.22 §4.3 item 4).
      *
      * # Errors
      * [`RappVaultError`] on an absent pair or unavailable storage.
@@ -4404,7 +4406,7 @@ open class RappPairVaultImpl: Disposable, AutoCloseable, RappPairVault
     /**
      * Atomically replace the record stored under an existing identifier:
      * the confirmed form of a record inserted before the peer confirmed
-     * its storage (RAPP v26.10.21 §4.3 item 4).
+     * its storage (RAPP v26.10.22 §4.3 item 4).
      *
      * # Errors
      * [`RappVaultError`] on an absent pair or unavailable storage.
@@ -4737,7 +4739,7 @@ public object FfiConverterTypeRappPairVault: FfiConverter<RappPairVault, Long> {
 
 /**
  * The custodian's process-wide backoff after locked-out offers
- * (RAPP v26.10.21 §3.3.7), driven by platform monotonic milliseconds.
+ * (RAPP v26.10.22 §3.3.7), driven by platform monotonic milliseconds.
  */
 public interface RappPairingBackoffInterface {
     
@@ -4771,7 +4773,7 @@ public interface RappPairingBackoffInterface {
 
 /**
  * The custodian's process-wide backoff after locked-out offers
- * (RAPP v26.10.21 §3.3.7), driven by platform monotonic milliseconds.
+ * (RAPP v26.10.22 §3.3.7), driven by platform monotonic milliseconds.
  */
 open class RappPairingBackoff: Disposable, AutoCloseable, RappPairingBackoffInterface
 {
@@ -5856,7 +5858,7 @@ open class RappPairingBridge: Disposable, AutoCloseable, RappPairingBridgeInterf
     companion object {
         
     /**
-     * Create the custodian's offer (RAPP v26.10.21 §4.2) from a fresh
+     * Create the custodian's offer (RAPP v26.10.22 §4.2) from a fresh
      * platform-CSPRNG `offer_id`, the offered credential profiles, and the
      * transport profiles the offer is served on.
      *
@@ -5882,7 +5884,7 @@ open class RappPairingBridge: Disposable, AutoCloseable, RappPairingBridgeInterf
         
     /**
      * Accept the offer bootstrap the requester received over the
-     * transport `transport_profile` (RAPP v26.10.21 §4.2): the Bootstrap
+     * transport `transport_profile` (RAPP v26.10.22 §4.2): the Bootstrap
      * Characteristic value on BLE, or the custodian's first frame after the
      * pairing preamble on the stream transport.
      *
@@ -7603,7 +7605,7 @@ data class RappPairMetadata (
     var `createdAtMs`: kotlin.ULong
     , 
     /**
-     * Whether the peer confirmed storing its record (RAPP v26.10.21 §4.3
+     * Whether the peer confirmed storing its record (RAPP v26.10.22 §4.3
      * item 4). A record loaded unconfirmed survived a crash inside the
      * confirmation window: it opens no session, routes nothing, and the
      * caller revokes it.
@@ -7871,7 +7873,7 @@ sealed class RappBindingException: kotlin.Exception() {
     }
     
     /**
-     * The peer never confirmed that it stored the pairing (RAPP v26.10.21
+     * The peer never confirmed that it stored the pairing (RAPP v26.10.22
      * §4.3 item 4): the post-PAKE deadline passed in the storage phase, or
      * a record loaded from the vault is unconfirmed. Such a record opens
      * no session, routes nothing and is announced nowhere; the caller
@@ -7921,7 +7923,7 @@ sealed class RappBindingException: kotlin.Exception() {
     
     /**
      * Three pairing attempts failed against one offer; the offer is
-     * destroyed (RAPP v26.10.21 §3.3).
+     * destroyed (RAPP v26.10.22 §3.3).
      */
     class AttemptsExhausted(
         ) : RappBindingException() {
@@ -7931,7 +7933,7 @@ sealed class RappBindingException: kotlin.Exception() {
     
     /**
      * A pre-authentication attempt came within 500 ms of the previous one
-     * (RAPP v26.10.21 §3.3.8); the caller refuses it and changes nothing.
+     * (RAPP v26.10.22 §3.3.8); the caller refuses it and changes nothing.
      */
     class RateLimited(
         ) : RappBindingException() {
@@ -8078,7 +8080,7 @@ enum class RappBridgeActionKind {
     SEND_FRAME,
     /**
      * Take the card in the order operations arrived, perform the reads
-     * that precede consent, then call `prerequisites_complete`.
+     * that precede the PIN, then call `prerequisites_complete`.
      */
     INSPECT_PREREQUISITES,
     /**
@@ -8430,7 +8432,7 @@ public object FfiConverterTypeRappOperationKind: FfiConverterRustBuffer<RappOper
 
 
 /**
- * Progress events exposed to platform callers (RAPP v26.10.21 section 8.2).
+ * Progress events exposed to platform callers (RAPP v26.10.22 section 8.2).
  */
 
 enum class RappProgressEvent {
@@ -8440,7 +8442,7 @@ enum class RappProgressEvent {
      */
     QUEUED,
     /**
-     * The consent view is on the custodian's screen.
+     * A PIN prompt is on the custodian's screen.
      */
     CONSENT_SHOWN,
     /**
@@ -9493,7 +9495,7 @@ public object FfiConverterSequenceTypeRappTxtEntry: FfiConverterRustBuffer<List<
 }
         /**
          * The uniform SAR fragment payload capacity for a negotiated ATT MTU and
-         * any smaller value limit the platform reports (RAPP v26.10.21 §5.3).
+         * any smaller value limit the platform reports (RAPP v26.10.22 §5.3).
          *
          * # Errors
          * [`RappBindingError::InvalidInput`] below an MTU of 512 or when the limit

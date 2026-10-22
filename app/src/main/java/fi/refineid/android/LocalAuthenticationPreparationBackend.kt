@@ -1,11 +1,14 @@
 package fi.refineid.android
 
+import fi.refineid.android.core.AuthenticationCardIdentity
+import fi.refineid.android.core.AuthenticationCardReads
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.AuthenticationPreparationBackend
 import fi.refineid.android.core.AuthenticationReadiness
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.CardConnection
+import fi.refineid.android.core.Pin1Retention
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationOutcome
 import fi.refineid.android.core.Pin1VerificationResult
@@ -74,15 +77,17 @@ internal class LocalAuthenticationPreparationBackend(
         return CardConnection.READY
     }
 
-    override suspend fun pin1AttemptsLeft(): Int? {
+    override suspend fun connectedCard(): AuthenticationCardIdentity? =
+        connectedService()?.let { service -> AuthenticationCardReads.identity(service) }
+
+    override suspend fun pin1AttemptsLeft(): Int? =
+        connectedService()?.let { service -> AuthenticationCardReads.pin1AttemptsLeft(service) }
+
+    /** The card service of the session [connect] proved ready, while it is still the one served. */
+    private fun connectedService(): AuthenticationCardService? {
         val expected = stamp ?: return null
         if (expected != currentStamp()) return null
-        val service = if (expected.wired) app.readerController else app.nfcReaderController.authenticationCardService
-        return suspendCancellableCoroutine { continuation ->
-            service.requestPin1AttemptsLeft { attempts ->
-                if (continuation.isActive) continuation.resume(attempts)
-            }
-        }
+        return if (expected.wired) app.readerController else app.nfcReaderController.authenticationCardService
     }
 
     /**
@@ -121,15 +126,17 @@ internal class LocalAuthenticationPreparationBackend(
         }
     }
 
-    override suspend fun retainVerified(pin: ByteArray): Boolean =
+    override suspend fun retainVerified(
+        pin: ByteArray,
+        retention: Pin1Retention,
+    ): Boolean =
         withContext(Dispatchers.IO) {
             try {
                 synchronized(app.authenticationCustodyLock) {
                     if (stamp != currentStamp()) {
                         false
                     } else {
-                        if (app.primedCanStore.isPrimed()) app.primedCanStore.writePin1(pin.copyOf())
-                        app.authenticationPinCache.recordVerified(pin.copyOf())
+                        app.authenticationPinCache.recordVerified(pin.copyOf(), retention)
                         true
                     }
                 }

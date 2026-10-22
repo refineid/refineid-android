@@ -4,61 +4,61 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * Process-lifetime PIN1 custody for repeated authentication.
+ * Process-lifetime PIN1 custody for repeated authentication (credential
+ * custody; RAPP v26.10.22 section 11 item 2).
  *
- * A positively verified PIN1 is held only in scrubbed memory for an
- * configurable idle-session window (refreshed on each use), so a running app signs
- * repeatedly without re-prompting; the value never touches storage and
- * is zeroized on expiry, replacement, or clear. A card-rejected PIN1 is
- * remembered as a keyed fingerprint under fresh process-local random
- * material and refused locally thereafter, so a known-bad value can
- * never burn a second card retry. Raw rejected bytes are never kept.
- *
- * The default retains accepted PIN1 for the process lifetime. Consumers can
- * configure an idle window; the rejected-value cache lasts for the process.
- * Time is injected so expiry is testable without a clock.
+ * A positively verified PIN1 is held only in scrubbed memory, bound to the
+ * card that accepted it, and only when that card's PIN 1 counter read
+ * pristine before the verification; it never touches storage and is
+ * zeroized on replacement, rejection, clear, or a request for another card.
+ * A PIN 1 held for one card is never handed out for another: that card
+ * simply has no held PIN. A card-rejected PIN1 is remembered as a keyed
+ * fingerprint under fresh process-local random material and refused locally
+ * thereafter, so a known-bad value can never burn a second card retry. Raw
+ * rejected bytes are never kept.
  */
-internal class AuthenticationPinCache(
-    private val lifetimeMillis: Long? = null,
-    private val clock: () -> Long = System::currentTimeMillis,
-) {
+internal class AuthenticationPinCache {
     private val lock = Any()
     private val fingerprintKey = ByteArray(FINGERPRINT_KEY_BYTES).also { SecureRandom().nextBytes(it) }
     private val rejected = HashSet<String>()
 
     private var heldPin: ByteArray? = null
     private var heldFingerprint: String? = null
-    private var expiresAtMillis: Long = 0
+    private var heldCard: AuthenticationCardIdentity? = null
     private var custodyGeneration = 0L
     val generation: Long get() = synchronized(lock) { custodyGeneration }
 
-    fun isVerified(submission: Pin1Submission): Boolean =
+    /** Whether [submission] is the PIN 1 held for [card]. */
+    fun isVerified(
+        submission: Pin1Submission,
+        card: AuthenticationCardIdentity,
+    ): Boolean =
         submission.peekBytes { bytes ->
             val fingerprint = fingerprintOf(bytes)
             synchronized(lock) {
-                expireHeldLocked()
-                heldPin != null && heldFingerprint == fingerprint
+                heldPin != null && heldFingerprint == fingerprint && heldCard == card
             }
         }
 
-    /** True when a valid PIN1 is currently held in cache. */
+    /** True when a PIN1 is held for some card. */
     val hasPin: Boolean
-        get() =
-            synchronized(lock) {
-                expireHeldLocked()
-                heldPin != null
-            }
+        get() = synchronized(lock) { heldPin != null }
 
-    /** A cached, unexpired PIN1 as a fresh submission, or null. */
-    fun take(): Pin1Submission? =
+    /** True when a PIN1 is held for [card]. */
+    fun holds(card: AuthenticationCardIdentity): Boolean = synchronized(lock) { heldPin != null && heldCard == card }
+
+    /**
+     * The PIN1 held for [card] as a fresh submission, or null when none is
+     * held for it. A PIN1 held for another card is destroyed: the card in
+     * use is not the one it was verified on.
+     */
+    fun take(card: AuthenticationCardIdentity): Pin1Submission? =
         synchronized(lock) {
             val held = heldPin ?: return null
-            if (lifetimeMillis != null) {
-                if (clock() >= expiresAtMillis) {
-                    clearHeldLocked()
-                    return null
-                }
-                expiresAtMillis = clock() + lifetimeMillis
+            if (heldCard != card) {
+                custodyGeneration += 1
+                clearHeldLocked()
+                return null
             }
             Pin1Submission.fromOwnedBytes(held.copyOf())
         }
@@ -72,23 +72,26 @@ internal class AuthenticationPinCache(
     /** True when this submission's digits were already card-rejected this process. */
     fun isRejected(submission: Pin1Submission): Boolean = submission.peekBytes { isRejected(it) }
 
-    /** Retain PIN1 digits the card accepted, taking ownership of them. */
+    /**
+     * Holds PIN1 digits the card named by [retention] accepted, taking
+     * ownership of them. False, with the digits zeroed, when custody changed
+     * since [expectedGeneration].
+     */
     fun recordVerified(
         pinBytes: ByteArray,
+        retention: Pin1Retention,
         expectedGeneration: Long? = null,
     ): Boolean {
         val fingerprint = fingerprintOf(pinBytes)
         synchronized(lock) {
             if (expectedGeneration != null && expectedGeneration != custodyGeneration) {
-                pinBytes.fill(0)
+                pinBytes.fill(CLEARED_BYTE)
                 return false
             }
             clearHeldLocked()
             heldPin = pinBytes
             heldFingerprint = fingerprint
-            if (lifetimeMillis != null) {
-                expiresAtMillis = clock() + lifetimeMillis
-            }
+            heldCard = retention.card
             rejected.remove(fingerprint)
             return true
         }
@@ -97,7 +100,7 @@ internal class AuthenticationPinCache(
     /** Remember PIN1 digits the card rejected, taking ownership of them. */
     fun recordRejected(pinBytes: ByteArray) {
         val fingerprint = fingerprintOf(pinBytes)
-        pinBytes.fill(0)
+        pinBytes.fill(CLEARED_BYTE)
         synchronized(lock) {
             rejected.add(fingerprint)
             if (heldFingerprint == fingerprint) {
@@ -113,15 +116,11 @@ internal class AuthenticationPinCache(
         }
     }
 
-    private fun expireHeldLocked() {
-        if (lifetimeMillis != null && heldPin != null && clock() >= expiresAtMillis) clearHeldLocked()
-    }
-
     private fun clearHeldLocked() {
-        heldPin?.fill(0)
+        heldPin?.fill(CLEARED_BYTE)
         heldPin = null
         heldFingerprint = null
-        expiresAtMillis = 0
+        heldCard = null
     }
 
     private fun fingerprintOf(bytes: ByteArray): String {
@@ -139,5 +138,6 @@ internal class AuthenticationPinCache(
         const val UNSIGNED_BYTE_MASK = 0xFF
         const val HEX_RADIX = 16
         const val HEX_WIDTH = 2
+        const val CLEARED_BYTE: Byte = 0
     }
 }

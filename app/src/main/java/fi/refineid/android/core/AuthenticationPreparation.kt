@@ -36,6 +36,9 @@ internal interface AuthenticationPreparationBackend {
     /** Arms the reader with the holder's access number, when one is needed, and waits for the card. */
     suspend fun connect(can: CanSubmission?): CardConnection
 
+    /** The card [connect] proved ready, named by its authentication certificate; null when it cannot be read. */
+    suspend fun connectedCard(): AuthenticationCardIdentity?
+
     /** PIN 1 attempts the ready card allows, read without a VERIFY; null when it cannot be read. */
     suspend fun pin1AttemptsLeft(): Int?
 
@@ -45,7 +48,15 @@ internal interface AuthenticationPreparationBackend {
         outcome: Pin1VerificationOutcome,
     ): Pin1VerificationResult
 
-    suspend fun retainVerified(pin: ByteArray): Boolean
+    /**
+     * Holds [pin], which the ready card accepted, for the card [retention]
+     * names; takes ownership of [pin]. False when the ready card is no
+     * longer the one served.
+     */
+    suspend fun retainVerified(
+        pin: ByteArray,
+        retention: Pin1Retention,
+    ): Boolean
 
     fun invalidate()
 
@@ -86,6 +97,12 @@ internal sealed interface AuthenticationPreparationState {
  * contact is waited for again. A VERIFY whose answer was lost may have
  * spent an attempt, so the held PIN goes to the card again only after the
  * attempts the card allows are read back unchanged.
+ *
+ * A PIN 1 goes only to one card: a held one to the card it was verified
+ * on, while that card's counter reads pristine, and an entered one to the
+ * card it was first sent to; otherwise the holder is asked. An accepted
+ * PIN 1 is held for the card only when its counter read pristine before
+ * the VERIFY (credential custody).
  */
 internal class AuthenticationPreparation(
     private val scope: CoroutineScope,
@@ -101,6 +118,12 @@ internal class AuthenticationPreparation(
     private var continuation: (() -> Unit)? = null
     private var cancellation: (() -> Unit)? = null
     private var heldPin: Pin1Submission? = null
+
+    /**
+     * The card [heldPin] belongs to: the one custody held it for, or the one
+     * it was first sent to; null before either is known.
+     */
+    private var heldFor: AuthenticationCardIdentity? = null
     private var heldCan: CanSubmission? = null
 
     /** Attempts the card allowed before the last VERIFY left, or null when unread. */
@@ -163,18 +186,13 @@ internal class AuthenticationPreparation(
         job =
             scope.launch {
                 try {
-                    val held = heldPin ?: pinCache.take()?.also { heldPin = it }
-                    if (held == null) {
-                        fail(Pin1VerificationResult.INVALID_PIN)
-                        return@launch
-                    }
-                    if (pinCache.isRejected(held)) {
+                    if (heldPin?.let(pinCache::isRejected) == true) {
                         backend.invalidate()
                         fail(Pin1VerificationResult.WRONG_PIN)
                         return@launch
                     }
                     withTimeout(preparationTimeoutMs) {
-                        while (attempt(held)) {
+                        while (attempt()) {
                             delay(REARM_PAUSE_MS)
                         }
                     }
@@ -195,7 +213,7 @@ internal class AuthenticationPreparation(
      * when no card answered, so the wait starts over; false when the
      * preparation ended, completed or failed, or asks for the PIN again.
      */
-    private suspend fun attempt(held: Pin1Submission): Boolean {
+    private suspend fun attempt(): Boolean {
         mutableState.value = AuthenticationPreparationState.WaitingForCard
         when (backend.connect(heldCan?.copy())) {
             CardConnection.ABSENT -> {
@@ -215,11 +233,18 @@ internal class AuthenticationPreparation(
 
             CardConnection.READY -> {}
         }
+        val card = backend.connectedCard()
         val attempts = backend.pin1AttemptsLeft()
         if (attempts == 0) {
-            lockedOut(held)
+            lockedOut()
             return false
         }
+        val held = pinFor(card, attempts)
+        if (held == null) {
+            mutableState.value = AuthenticationPreparationState.Credentials(false, true)
+            return false
+        }
+        if (heldFor == null) heldFor = card
         if (answerLost && !pinMayGoAgain(held, attempts)) return false
         attemptsBeforeVerify = attempts
         mutableState.value = AuthenticationPreparationState.Verifying
@@ -233,10 +258,16 @@ internal class AuthenticationPreparation(
 
             Pin1VerificationResult.VERIFIED -> {
                 answerLost = false
+                val retention = Pin1Retention.of(card, attempts)
+                if (retention == null) {
+                    // The PIN served this preparation only.
+                    complete()
+                    return false
+                }
                 val retained = held.copyBytes()
                 val kept =
                     try {
-                        backend.retainVerified(retained)
+                        backend.retainVerified(retained, retention)
                     } finally {
                         retained.fill(0)
                     }
@@ -249,6 +280,34 @@ internal class AuthenticationPreparation(
             }
         }
         return false
+    }
+
+    /**
+     * The PIN to verify on [card]: the one in hand, or the one custody holds
+     * for [card] while its counter reads pristine. A PIN in hand that belongs
+     * to another card is dropped unsent; a counter below pristine or unread
+     * leaves nothing held.
+     */
+    private fun pinFor(
+        card: AuthenticationCardIdentity?,
+        attempts: Int?,
+    ): Pin1Submission? {
+        val bound = heldFor
+        if (bound != null && bound != card) releasePin()
+        heldPin?.let { return it }
+        val retention = Pin1Retention.of(card, attempts)
+        if (retention == null) {
+            pinCache.clear()
+            return null
+        }
+        val taken = pinCache.take(retention.card) ?: return null
+        if (pinCache.isRejected(taken)) {
+            taken.close()
+            return null
+        }
+        heldPin = taken
+        heldFor = retention.card
+        return taken
     }
 
     /** Sends the held PIN once; the copies the verifier takes are zeroed here on every path. */
@@ -288,11 +347,9 @@ internal class AuthenticationPreparation(
         return false
     }
 
-    /** The card allows no PIN 1 attempt: nothing is sent, the holder is told. */
-    private fun lockedOut(held: Pin1Submission) {
-        Pin1VerificationOutcome(held.copyBytes(), pinCache, backend::invalidate).use {
-            it.report(Pin1VerificationResult.PIN_LOCKED)
-        }
+    /** The card allows no PIN 1 attempt: nothing is sent, custody is cleared, the holder is told. */
+    private fun lockedOut() {
+        backend.invalidate()
         releasePin()
         fail(Pin1VerificationResult.PIN_LOCKED)
     }
@@ -339,6 +396,7 @@ internal class AuthenticationPreparation(
     private fun releasePin() {
         heldPin?.close()
         heldPin = null
+        heldFor = null
         attemptsBeforeVerify = null
         answerLost = false
     }

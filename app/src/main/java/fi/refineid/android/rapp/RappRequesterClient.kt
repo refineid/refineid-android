@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Dials a paired custodian over the stream transport and runs one operation
- * on its card per session (RAPP v26.10.21 sections 6.3 and 8). A pairing the
+ * on its card per session (RAPP v26.10.22 sections 6.3 and 8). A pairing the
  * local user forgot delivers its `pairing_revoked` close instead (section
  * 4.6 item 2), and a custodian that forgot this pairing revokes it here
  * (section 4.6 item 4) and calls [onPairingRevoked].
@@ -336,7 +336,7 @@ internal class RappRequesterClient(
                 RappBridgeOutcome.Idle,
                 is RappBridgeOutcome.Progress,
                 is RappBridgeOutcome.Admitted,
-                is RappBridgeOutcome.AwaitConsent,
+                is RappBridgeOutcome.AwaitApproval,
                 is RappBridgeOutcome.ExecuteRead,
                 is RappBridgeOutcome.ExecuteCommand,
                 -> {}

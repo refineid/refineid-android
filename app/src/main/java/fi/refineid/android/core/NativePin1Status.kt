@@ -7,6 +7,14 @@ internal enum class NativePinReferenceScheme {
     ORGANIZATIONAL,
 }
 
+/**
+ * The PIN Try Limit FINEID cards are issued with: the attempts a PIN allows
+ * before any wrong entry, to which RESET RETRY COUNTER sets the try counter
+ * (FINEID S1 v4.2 section 3.12); refineid-auth names the same count its
+ * pristine retry state.
+ */
+internal const val FINEID_PIN_TRY_LIMIT = 5
+
 internal sealed interface NativePin1State {
     data object Verified : NativePin1State
 
@@ -182,7 +190,7 @@ internal object NativePin1PreflightReply {
 
             is NativePin1State.Remaining -> {
                 state.attempts == EXHAUSTED_RETRY_COUNT ||
-                    state.attempts in MINIMUM_SAFE_RETRY_COUNT..MAXIMUM_FINEID_RETRY_COUNT
+                    state.attempts in MINIMUM_SAFE_RETRY_COUNT..FINEID_PIN_TRY_LIMIT
             }
 
             NativePin1State.Locked,
@@ -227,5 +235,4 @@ internal object NativePin1PreflightReply {
     private const val NO_RETRY_COUNT = 0xFF
     private const val EXHAUSTED_RETRY_COUNT = 0
     private const val MINIMUM_SAFE_RETRY_COUNT = 3
-    private const val MAXIMUM_FINEID_RETRY_COUNT = 5
 }

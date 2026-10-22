@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import fi.refineid.android.core.AuthenticationCardIdentity
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationPreparation
@@ -20,6 +21,7 @@ import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.CardConnection
 import fi.refineid.android.core.NativeAuthenticationCertificate
+import fi.refineid.android.core.Pin1Retention
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationOutcome
 import fi.refineid.android.core.Pin1VerificationResult
@@ -145,6 +147,8 @@ internal class AuthenticationPreparationDialogTest {
 
         override suspend fun connect(can: CanSubmission?): CardConnection = error("no card operation expected")
 
+        override suspend fun connectedCard(): AuthenticationCardIdentity? = error("no card operation expected")
+
         override suspend fun pin1AttemptsLeft(): Int? = error("no card operation expected")
 
         override suspend fun verify(
@@ -152,7 +156,10 @@ internal class AuthenticationPreparationDialogTest {
             outcome: Pin1VerificationOutcome,
         ): Pin1VerificationResult = error("no card operation expected")
 
-        override suspend fun retainVerified(pin: ByteArray): Boolean = error("no card operation expected")
+        override suspend fun retainVerified(
+            pin: ByteArray,
+            retention: Pin1Retention,
+        ): Boolean = error("no card operation expected")
 
         override fun invalidate() = Unit
     }

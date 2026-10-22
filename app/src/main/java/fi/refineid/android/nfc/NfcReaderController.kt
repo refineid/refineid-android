@@ -562,7 +562,7 @@ internal class NfcReaderController(
                         canBytes = storedCan,
                         generation = generation,
                         mintOnSuccess = true,
-                        pin1 = pinCache.take(),
+                        pin1 = null,
                         isoDepTarget = isoDep,
                     )
                 }
@@ -707,6 +707,12 @@ internal class NfcReaderController(
             rememberedDetails = cardDetails
         }
         val certDer = opened.certificate.copyDer()
+        val previous = currentAuthCertDer ?: primedCanStore.readAuthCertificateDer()
+        if (previous != null && !previous.contentEquals(certDer)) {
+            // Another card replaced the one a held PIN 1 belongs to (RAPP
+            // v26.10.22 section 11 item 2).
+            pinCache.clear()
+        }
         currentAuthCertDer = certDer.copyOf()
         val app = applicationContext as? RefineIdApplication
         val rootCa = NativeCardCa.readRootCaCertificate()
@@ -1036,18 +1042,10 @@ internal class NfcReaderController(
         }
     }
 
-    /** Forget the cached PIN 1 so subsequent operations require PIN entry again. */
+    /** Forget the held PIN 1 so subsequent operations require PIN entry again. */
     fun forgetPin1() {
         checkMainThread()
         pinCache.clear()
-        try {
-            probeExecutor.execute {
-                primedCanStore.forgetPin1()
-                pinCache.clear()
-            }
-        } catch (_: RejectedExecutionException) {
-            // The executor only stops when the process is terminating.
-        }
     }
 
     /**

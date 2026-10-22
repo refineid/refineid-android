@@ -16,7 +16,7 @@ import java.security.SecureRandom
 
 /**
  * Drives [RappCustodianPairingCeremony] against a requester bridge in the
- * order RAPP v26.10.21 section 6.1.3 fixes, after the requester decoded the
+ * order RAPP v26.10.22 section 6.1.3 fixes, after the requester decoded the
  * custodian's offer bootstrap (section 4.2).
  */
 class RappCustodianPairingCeremonyTest {

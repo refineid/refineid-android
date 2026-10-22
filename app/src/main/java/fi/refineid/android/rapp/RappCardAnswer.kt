@@ -5,7 +5,7 @@ package fi.refineid.android.rapp
 import fi.refineid.android.core.AuthenticationSignFailure
 import fi.refineid.android.core.QualifiedSignFailure
 
-/** Why a remote operation ends without a result (RAPP v26.10.21 section 10.3). */
+/** Why a remote operation ends without a result (RAPP v26.10.22 section 10.3). */
 internal enum class RappCardFailure {
     /** The holder declined or cancelled on the phone: `user_cancelled`. */
     USER_CANCELLED,
@@ -25,7 +25,7 @@ internal enum class RappCardFailure {
 
 /**
  * What a PIN-consuming card command means for the remote operation that ran
- * it (RAPP v26.10.21 section 10.2).
+ * it (RAPP v26.10.22 section 10.2).
  *
  * The native card session reads the PIN status with a header-only VERIFY
  * before every verification and, without sending one, refuses one or two
@@ -57,6 +57,14 @@ internal sealed interface RappCardAnswer {
                 if (remainingRetries >= MINIMUM_REMAINING_ATTEMPTS) WrongPin(remainingRetries) else null
         }
     }
+
+    /**
+     * The PIN 1 this phone held is not this card's to use: it was held for
+     * another card, or this card's PIN 1 counter no longer reads pristine.
+     * It was not sent and is no longer held; the holder is asked for the PIN
+     * with no wrong-PIN notice (credential custody).
+     */
+    data object NotHeld : RappCardAnswer
 
     /** The operation ends with [failure]. */
     data class Ends(

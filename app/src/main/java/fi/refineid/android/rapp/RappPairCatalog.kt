@@ -18,7 +18,7 @@ internal data class PairedPeer(
     /**
      * When the local user forgot the pairing while no session to its peer
      * was open; the record then only waits to deliver the `pairing_revoked`
-     * close (RAPP v26.10.21 section 4.6 item 2).
+     * close (RAPP v26.10.22 section 4.6 item 2).
      */
     val forgottenAtMs: Long? = null,
 )

@@ -5,10 +5,6 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import androidx.core.content.edit
 import fi.refineid.android.core.CanSubmission
-import fi.refineid.android.core.DIGIT_NINE_BYTE
-import fi.refineid.android.core.DIGIT_ZERO_BYTE
-import fi.refineid.android.core.PIN1_MAXIMUM_LENGTH
-import fi.refineid.android.core.PIN1_MINIMUM_LENGTH
 import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
@@ -19,13 +15,13 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Blocking custody of the primed card's access number and verified PIN1,
- * mirroring the Apple reference: priming once lets every later tap reopen
- * the card without re-entry, and allows unattended browser authentication
- * via remote RAPP. Digits rest only as app-private ciphertext under one
- * non-exportable Android Keystore key, and a read that fails to decrypt
- * clears the prime instead of surfacing broken state. Every call must run
- * away from the main thread.
+ * Blocking custody of the primed card's access number, mirroring the Apple
+ * reference: priming once lets every later tap reopen the card without
+ * re-entry. PIN 1 is never stored; it is held only in memory (RAPP
+ * v26.10.22 section 11 item 2). Digits rest only as app-private ciphertext
+ * under one non-exportable Android Keystore key, and a read that fails to
+ * decrypt clears the prime instead of surfacing broken state. Every call
+ * must run away from the main thread.
  */
 internal class PrimedCanStore(
     context: Context,
@@ -166,120 +162,6 @@ internal class PrimedCanStore(
         }
     }
 
-    /** Whether PIN 1 digits are stored, without decrypting them. */
-    @Synchronized
-    fun hasPin1(): Boolean =
-        preferences.contains(ENTRY_PIN1 + IV_SUFFIX) &&
-            preferences.contains(ENTRY_PIN1 + CIPHERTEXT_SUFFIX)
-
-    /** Decrypted PIN 1 digits owned by the caller, or null when absent/corrupt. */
-    @Synchronized
-    fun readPin1(): ByteArray? {
-        var iv: ByteArray? = null
-        var ciphertext: ByteArray? = null
-        try {
-            val encodedIv = preferences.getString(ENTRY_PIN1 + IV_SUFFIX, null)
-            val encodedCiphertext = preferences.getString(ENTRY_PIN1 + CIPHERTEXT_SUFFIX, null)
-            if (encodedIv == null || encodedCiphertext == null) {
-                return null
-            }
-            iv = decodeBase64(encodedIv)
-            ciphertext = decodeBase64(encodedCiphertext)
-            if (iv == null || ciphertext == null) {
-                forgetPin1()
-                return null
-            }
-            if (
-                iv.size != GCM_IV_LENGTH_BYTES ||
-                ciphertext.size !in PIN1_MIN_CIPHERTEXT_BYTES..PIN1_MAX_CIPHERTEXT_BYTES
-            ) {
-                forgetPin1()
-                return null
-            }
-            val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
-            cipher.init(
-                Cipher.DECRYPT_MODE,
-                existingKey() ?: run {
-                    forgetPin1()
-                    return null
-                },
-                // nosemgrep: kotlin.lang.security.gcm-detection.gcm-detection
-                GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv),
-            )
-            cipher.updateAAD(ENTRY_PIN1.encodeToByteArray())
-            val plaintext = cipher.doFinal(ciphertext)
-            if (
-                plaintext.size !in PIN1_MINIMUM_LENGTH..PIN1_MAXIMUM_LENGTH ||
-                plaintext.any { it !in DIGIT_ZERO_BYTE..DIGIT_NINE_BYTE }
-            ) {
-                plaintext.fill(CLEARED_BYTE)
-                forgetPin1()
-                return null
-            }
-            return plaintext
-        } catch (_: GeneralSecurityException) {
-            forgetPin1()
-            return null
-        } catch (_: IOException) {
-            return null
-        } catch (_: RuntimeException) {
-            return null
-        } finally {
-            iv?.fill(CLEARED_BYTE)
-            ciphertext?.fill(CLEARED_BYTE)
-        }
-    }
-
-    /** Encrypt and persist PIN 1 digits, taking ownership of the input. */
-    @Synchronized
-    fun writePin1(pin1: ByteArray) {
-        var iv: ByteArray? = null
-        var ciphertext: ByteArray? = null
-        try {
-            if (
-                pin1.size !in PIN1_MINIMUM_LENGTH..PIN1_MAXIMUM_LENGTH ||
-                pin1.any { it !in DIGIT_ZERO_BYTE..DIGIT_NINE_BYTE }
-            ) {
-                return
-            }
-            val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
-            cipher.init(Cipher.ENCRYPT_MODE, existingKey() ?: generateKey())
-            cipher.updateAAD(ENTRY_PIN1.encodeToByteArray())
-            ciphertext = cipher.doFinal(pin1)
-            iv = cipher.iv
-            val committed =
-                preferences
-                    .edit()
-                    .putString(ENTRY_PIN1 + IV_SUFFIX, Base64.getEncoder().encodeToString(iv))
-                    .putString(
-                        ENTRY_PIN1 + CIPHERTEXT_SUFFIX,
-                        Base64.getEncoder().encodeToString(ciphertext),
-                    ).commit()
-            if (!committed) {
-                // An unstored PIN is the safe failure mode.
-            }
-        } catch (_: GeneralSecurityException) {
-            // An unstored PIN is the safe failure mode.
-        } catch (_: IOException) {
-            // An unstored PIN is the safe failure mode.
-        } catch (_: RuntimeException) {
-            // An unstored PIN is the safe failure mode.
-        } finally {
-            pin1.fill(CLEARED_BYTE)
-            iv?.fill(CLEARED_BYTE)
-            ciphertext?.fill(CLEARED_BYTE)
-        }
-    }
-
-    /** Remove stored PIN 1 ciphertext without clearing CAN. */
-    @Synchronized
-    fun forgetPin1() {
-        preferences.edit {
-            remove(ENTRY_PIN1 + IV_SUFFIX)
-            remove(ENTRY_PIN1 + CIPHERTEXT_SUFFIX)
-        }
-    }
-
     @Synchronized
     fun clear() {
         val cleared = preferences.edit().clear().commit()
@@ -327,7 +209,6 @@ internal class PrimedCanStore(
         const val ANDROID_KEYSTORE_PROVIDER = "AndroidKeyStore"
         const val CIPHER_TRANSFORMATION = "AES/GCM/NoPadding"
         const val ENTRY_NAME = "can"
-        const val ENTRY_PIN1 = "pin1"
         const val ENTRY_HOLDER_NAME = "holder_name"
         const val ENTRY_AUTH_CERT = "auth_cert_der"
         const val IV_SUFFIX = ".iv"
@@ -338,8 +219,6 @@ internal class PrimedCanStore(
         const val GCM_TAG_LENGTH_BYTES = GCM_TAG_LENGTH_BITS / BITS_PER_BYTE
         const val GCM_IV_LENGTH_BYTES = 12
         const val PRIMED_CIPHERTEXT_BYTES = CanSubmission.CAN_DIGITS + GCM_TAG_LENGTH_BYTES
-        const val PIN1_MIN_CIPHERTEXT_BYTES = PIN1_MINIMUM_LENGTH + GCM_TAG_LENGTH_BYTES
-        const val PIN1_MAX_CIPHERTEXT_BYTES = PIN1_MAXIMUM_LENGTH + GCM_TAG_LENGTH_BYTES
         const val CLEARED_BYTE: Byte = 0
     }
 }

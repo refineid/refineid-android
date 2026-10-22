@@ -144,7 +144,7 @@ class RappBatchSignatureRunTest {
             assertTrue(admitted is RappBridgeOutcome.Admitted)
             val consent =
                 RappBridgeOutcome.from(custodian.prerequisitesComplete(operationId.toWire(), NOW)) as
-                    RappBridgeOutcome.AwaitConsent
+                    RappBridgeOutcome.AwaitApproval
             val batch = consent.request as RappRequest.BatchSignDocuments
             assertEquals(DOCUMENT_NAMES, batch.documents.map { it.name })
             val command = RappBridgeOutcome.from(custodian.approve(operationId.toWire(), NOW))
