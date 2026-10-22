@@ -43,6 +43,16 @@
   for RAPP (local-network TCP stream relay to paired requesters) and the user-directed
   in-app browser authentication harness. Keep tracing sinks in variant source sets
   and inspect release artifacts for trace literals.
+- Debug builds make every error visible: every failure path (refusal, transport
+  close, card or NFC error, failed operation) reports through one debug-only error
+  sink, an interface the protocol layers call and the debug source set implements.
+  It writes the event and its cause to logcat under one tag and to an on-screen
+  error list with copy and clear-list. An error message carries type and case
+  names only, never a value read from the card, the network, the device or the
+  user: no PIN or PUK data (RULE #2), card access numbers, names, identity codes,
+  certificate content, APDUs, addresses, or device or card serials. Debug tracing
+  stays separate from this list. Release builds contain no error sink and no
+  logging code; inspect the release artifact for it as for trace literals.
 - Do not deliberately consume a PIN retry unless the recovery procedure and
   retry count are known.
 - Disable application backup and screen capture wherever sensitive data can
