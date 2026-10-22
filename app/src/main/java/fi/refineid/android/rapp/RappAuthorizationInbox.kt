@@ -30,6 +30,8 @@ internal sealed interface RappAuthRequest {
     data class BrowserAuth(
         override val requestId: String,
         override val requester: String,
+        /** The program on the computer that asked, as the requester's operation context names it. */
+        val program: String,
         val onApproved: (Pin1Submission) -> Unit,
         override val onDenied: () -> Unit,
         override val onShown: () -> Unit,
@@ -96,6 +98,7 @@ internal class RappAuthorizationInbox(
     fun askBrowserAuth(
         requestId: String,
         requester: String,
+        program: String,
         onApproved: (Pin1Submission) -> Unit,
         onDenied: () -> Unit,
         onShown: () -> Unit = {},
@@ -105,6 +108,7 @@ internal class RappAuthorizationInbox(
             RappAuthRequest.BrowserAuth(
                 requestId = requestId,
                 requester = requester,
+                program = program,
                 wrongPin = wrongPin,
                 onApproved = { pin1 ->
                     notificationManager.dismissNotification()
@@ -235,6 +239,32 @@ internal class RappAuthorizationInbox(
         notificationManager.dismissNotification()
     }
 }
+
+/** Whom a PIN prompt names: the paired computer, or the program on it that asked. */
+internal enum class RappPromptParty {
+    COMPUTER,
+    PROGRAM,
+}
+
+/** One party a PIN prompt names, shown under its [party] label. */
+internal data class RappPromptLine(
+    val party: RappPromptParty,
+    val name: String,
+)
+
+/**
+ * The parties [request]'s prompt names, each labelled as what it is: the
+ * computer, and for a login the program that asked, as the operation
+ * context names it. The phone cannot know the site behind a login, so no
+ * line names one.
+ */
+internal fun rappPromptLines(request: RappAuthRequest): List<RappPromptLine> =
+    buildList {
+        add(RappPromptLine(RappPromptParty.COMPUTER, request.requester))
+        if (request is RappAuthRequest.BrowserAuth && request.program.isNotBlank()) {
+            add(RappPromptLine(RappPromptParty.PROGRAM, request.program))
+        }
+    }
 
 /** What a request asks of the holder, independent of the card reader in use. */
 internal fun rappRequestText(

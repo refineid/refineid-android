@@ -2,7 +2,11 @@
 
 package fi.refineid.android.rapp
 
+import fi.refineid.android.usb.CardPresence
+import fi.refineid.android.usb.ReaderConnectionStatus
+import fi.refineid.android.usb.UsbReaderSnapshot
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -11,6 +15,7 @@ import org.junit.Before
 import org.junit.Test
 import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappCardKeyProfile
+import uniffi.refineid_rapp.RappCardReader
 import uniffi.refineid_rapp.RappCloseReason
 import uniffi.refineid_rapp.RappForgetOutcome
 import uniffi.refineid_rapp.RappOperationBridge
@@ -39,6 +44,9 @@ class RappSessionFlowTest {
         const val PING_AFTER_SILENCE_MS = 5_000UL
         const val SESSION_SILENCE_LIMIT_MS = 30_000UL
         const val ORIGIN = "https://login.example.fi"
+
+        /** Sessions opened one after another, each told the card and the reader afresh. */
+        const val SESSIONS = 2
         const val CHALLENGE_TEXT = "synthetic login challenge"
         const val DIGEST_ALGORITHM = "SHA-384"
         val PROFILES = listOf("fi.refineid.card-status", "fi.refineid.authentication", "fi.refineid.document-signing")
@@ -136,13 +144,63 @@ class RappSessionFlowTest {
         val certificate = checkNotNull(RappCertificate.fromDer(checkNotNull(der)))
         val (requester, custodian) = establish()
 
-        val present = send { custodian.reportCardStatus(certificate.toWire()) }.deliverTo(requester)
+        val present =
+            send { custodian.reportCardStatus(certificate.toWire(), RappCardReader.ABSENT) }.deliverTo(requester)
         val status = (present as RappBridgeOutcome.CardStatus).status as RappCardStatus.Present
         assertEquals(RappCertificateFingerprint.of(certificate), status.fingerprint)
 
-        val absent = send { custodian.reportCardStatus(null) }.deliverTo(requester)
+        val absent = send { custodian.reportCardStatus(null, RappCardReader.ABSENT) }.deliverTo(requester)
         assertSame(RappCardStatus.Absent, (absent as RappBridgeOutcome.CardStatus).status)
     }
+
+    @Test
+    fun aDetachedReaderIsReportedOnEverySessionWithItsCardGone() {
+        val der = RappTestCertificate.der
+        assumeTrue("OpenSSL makes the synthetic certificate", der != null)
+        val certificate = checkNotNull(RappCertificate.fromDer(checkNotNull(der)))
+        val inReader =
+            RappCardReport(
+                RappOfferedCard.Present(certificate),
+                RappCardReport.readerOf(UsbReaderSnapshot(ReaderConnectionStatus.READY, CardPresence.PRESENT)),
+            )
+        // Detaching the reader publishes the controller's empty snapshot and
+        // takes the card in it; this phone holds no NFC card.
+        val detached = RappCardReport(RappOfferedCard.Absent, RappCardReport.readerOf(UsbReaderSnapshot()))
+        assertNotEquals("a detachment is a change to report", inReader, detached)
+
+        repeat(SESSIONS) {
+            val (requester, custodian) = establish()
+            val before = report(custodian, inReader).deliverTo(requester) as RappBridgeOutcome.CardStatus
+            assertTrue(before.status is RappCardStatus.Present)
+            assertEquals(RappCardReader.ATTACHED, before.reader)
+
+            val after = report(custodian, detached).deliverTo(requester) as RappBridgeOutcome.CardStatus
+            assertSame(RappCardStatus.Absent, after.status)
+            assertEquals(RappCardReader.ABSENT, after.reader)
+        }
+    }
+
+    @Test
+    fun anNfcCardTheHolderAddedStaysPresentWhenTheReaderLeaves() {
+        val der = RappTestCertificate.der
+        assumeTrue("OpenSSL makes the synthetic certificate", der != null)
+        val certificate = checkNotNull(RappCertificate.fromDer(checkNotNull(der)))
+        val (requester, custodian) = establish()
+        val added = RappCardReport(RappOfferedCard.Present(certificate), RappCardReport.readerOf(UsbReaderSnapshot()))
+
+        val status = report(custodian, added).deliverTo(requester) as RappBridgeOutcome.CardStatus
+        assertEquals(
+            RappCertificateFingerprint.of(certificate),
+            (status.status as RappCardStatus.Present).fingerprint,
+        )
+        assertEquals(RappCardReader.ABSENT, status.reader)
+    }
+
+    /** Sends [report] as the dispatcher does: the certificate it names and the reader. */
+    private fun report(
+        custodian: RappOperationBridge,
+        report: RappCardReport,
+    ): RappBridgeOutcome = send { custodian.reportCardStatus(report.certificateWire(), report.reader) }
 
     @Test
     fun aReadSkipsConsentAndAnswersWithTheCertificate() {

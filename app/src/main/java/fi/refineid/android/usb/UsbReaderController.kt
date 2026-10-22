@@ -124,6 +124,9 @@ internal class UsbReaderController(
     @Volatile
     private var probeGeneration = 0
 
+    /** The reader whose permission request from this app is on screen; null while none is. */
+    private var permissionRequestDeviceId: Int? = null
+
     private val cardPresencePollRunnable: Runnable =
         Runnable {
             if (isStarted) {
@@ -200,14 +203,17 @@ internal class UsbReaderController(
                 intent: Intent?,
             ) {
                 if (intent?.action == permissionAction) {
+                    // The request's PendingIntent is immutable, so the system
+                    // adds no grant extra; the manager answers for the reader.
+                    val requested = permissionRequestDeviceId
+                    permissionRequestDeviceId = null
                     AppTrace.usbPermissionResult(
                         isGranted =
-                            intent.getBooleanExtra(
-                                UsbManager.EXTRA_PERMISSION_GRANTED,
-                                false,
-                            ),
+                            usbManager.deviceList.values.any { device ->
+                                device.deviceId == requested && usbManager.hasPermission(device)
+                            },
                     )
-                    refresh()
+                    refresh(ReaderRefreshCause.PERMISSION_ANSWERED)
                 }
             }
         }
@@ -221,12 +227,12 @@ internal class UsbReaderController(
                 when (intent?.action) {
                     UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
                         AppTrace.usbDeviceAttached()
-                        refresh()
+                        refresh(ReaderRefreshCause.DEVICE_ATTACHED)
                     }
 
                     UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                         AppTrace.usbDeviceDetached()
-                        refresh()
+                        refresh(ReaderRefreshCause.DEVICE_DETACHED)
                     }
                 }
             }
@@ -257,7 +263,7 @@ internal class UsbReaderController(
 
         isStarted = true
         AppTrace.usbControllerStarted()
-        refresh()
+        refresh(ReaderRefreshCause.CONTROLLER_STARTED)
     }
 
     fun addStateListener(listener: (UsbReaderSnapshot) -> Unit) {
@@ -342,7 +348,7 @@ internal class UsbReaderController(
             return
         }
         preferredDeviceId = deviceId
-        refresh()
+        refresh(ReaderRefreshCause.READER_SELECTED)
     }
 
     fun invalidateAuthenticationSession() {
@@ -363,7 +369,13 @@ internal class UsbReaderController(
         )
     }
 
-    fun refresh() {
+    /**
+     * Looks at the attached readers again and opens the selected one's card
+     * session. A reader the app may not use yet is published as needing
+     * permission; the app asks for it only when [cause] allows
+     * ([shouldRequestReaderPermission]).
+     */
+    fun refresh(cause: ReaderRefreshCause) {
         if (!isStarted) {
             AppTrace.usbRefreshIgnored()
             return
@@ -375,9 +387,13 @@ internal class UsbReaderController(
         val ccidDevices = devices.filter { dev -> allMatches.any { it.deviceId == dev.deviceId } }
         val match = CcidReaderClassifier.selectPreferred(descriptors, preferredDeviceId)
         selectedDevice = ccidDevices.firstOrNull { it.deviceId == match?.deviceId }
+        if (ccidDevices.none { it.deviceId == permissionRequestDeviceId }) {
+            permissionRequestDeviceId = null
+        }
 
         val device = selectedDevice
         AppTrace.usbReadersRefreshed(
+            cause = cause,
             deviceCount = devices.size,
             hasCcidReader = match != null && device != null,
             hasPermission = device?.let(usbManager::hasPermission),
@@ -412,7 +428,14 @@ internal class UsbReaderController(
 
                 else -> {
                     closeActiveSessionAsync()
-                    requestPermission(device)
+                    if (
+                        shouldRequestReaderPermission(
+                            cause = cause,
+                            requestOutstanding = permissionRequestDeviceId == device.deviceId,
+                        )
+                    ) {
+                        askPermission(device)
+                    }
                     UsbReaderSnapshot(
                         status = ReaderConnectionStatus.PERMISSION_REQUIRED,
                     )
@@ -421,24 +444,28 @@ internal class UsbReaderController(
         )
     }
 
-    fun requestPermission(targetDevice: UsbDevice? = null) {
+    /** Asks the holder for access to the selected reader, at the holder's request. */
+    fun requestPermission() {
         val device =
-            targetDevice
-                ?: selectedDevice
+            selectedDevice
                 ?: run {
                     AppTrace.usbPermissionRequestWithoutReader()
                     return
                 }
         if (usbManager.hasPermission(device)) {
             AppTrace.usbPermissionAlreadyGranted()
-            if (targetDevice != null && targetDevice.deviceId != selectedDevice?.deviceId) {
-                selectDevice(targetDevice.deviceId)
-            } else {
-                refresh()
-            }
+            refresh(ReaderRefreshCause.READER_SELECTED)
             return
         }
+        if (permissionRequestDeviceId == device.deviceId) {
+            AppTrace.usbPermissionRequestOutstanding()
+            return
+        }
+        askPermission(device)
+    }
 
+    /** Puts the system's permission dialog for [device] on screen; its answer arrives at [permissionReceiver]. */
+    private fun askPermission(device: UsbDevice) {
         val permissionIntent =
             Intent(permissionAction).setPackage(applicationContext.packageName)
         val pendingIntent =
@@ -452,6 +479,7 @@ internal class UsbReaderController(
         try {
             AppTrace.usbPermissionRequested()
             usbManager.requestPermission(device, pendingIntent)
+            permissionRequestDeviceId = device.deviceId
         } catch (_: SecurityException) {
             AppTrace.usbPermissionRequestFailed()
             publish(

@@ -31,6 +31,7 @@ import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.usb.AuthenticationStatus
 import fi.refineid.android.usb.CardPresence
 import fi.refineid.android.usb.ReaderConnectionStatus
+import fi.refineid.android.usb.ReaderRefreshCause
 import fi.refineid.android.usb.ccid.CcidBlockFailureKind
 import fi.refineid.android.usb.ccid.CcidCardStatus
 import fi.refineid.android.usb.ccid.CcidDescriptorErrorKind
@@ -709,12 +710,14 @@ internal object AppTrace {
     }
 
     fun usbReadersRefreshed(
+        cause: ReaderRefreshCause,
         deviceCount: Int,
         hasCcidReader: Boolean,
         hasPermission: Boolean?,
     ) {
         debug(
-            "usb:refresh devices=" + deviceCount +
+            "usb:refresh cause=" + cause +
+                " devices=" + deviceCount +
                 " ccid=" + hasCcidReader +
                 " permission=" + (hasPermission ?: "none"),
         )
@@ -730,6 +733,10 @@ internal object AppTrace {
 
     fun usbPermissionRequested() {
         debug("usb:permission-requested")
+    }
+
+    fun usbPermissionRequestOutstanding() {
+        debug("usb:permission-request ignored=already-on-screen")
     }
 
     fun usbPermissionRequestFailed() {

@@ -35,7 +35,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -58,7 +57,9 @@ import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.rapp.RappAuthAction
 import fi.refineid.android.rapp.RappAuthRequest
 import fi.refineid.android.rapp.RappCardAnswer
-import fi.refineid.android.rapp.rappRequestText
+import fi.refineid.android.rapp.RappPromptLine
+import fi.refineid.android.rapp.RappPromptParty
+import fi.refineid.android.rapp.rappPromptLines
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
@@ -95,18 +96,14 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                 Text(
                     text =
                         when (request.action) {
-                            RappAuthAction.BROWSER_AUTH -> stringResource(R.string.enter_pin1)
+                            RappAuthAction.BROWSER_AUTH -> stringResource(R.string.authentication)
                             RappAuthAction.DOCUMENT_SIGN -> stringResource(R.string.sign_document)
                         },
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
 
-                Text(
-                    text = rappRequestText(LocalResources.current, request),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                RappPromptParties(rappPromptLines(request))
 
                 if (request is RappAuthRequest.DocumentSign) {
                     RappDocumentNames(request.documentNames)
@@ -185,6 +182,36 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/** The computer and the program that asked, each under its label (core STPA CC-55). */
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Composable
+private fun RappPromptParties(lines: List<RappPromptLine>) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        lines.forEach { line ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text =
+                        when (line.party) {
+                            RappPromptParty.COMPUTER -> stringResource(R.string.rapp_prompt_computer)
+                            RappPromptParty.PROGRAM -> stringResource(R.string.rapp_prompt_program)
+                        },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = line.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }

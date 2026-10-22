@@ -47,16 +47,24 @@ transport.
   at a time through one lock; an operation that finds it held by another
   session's operation is reported `queued` once (section 8.2 item 2).
 - `card.status` follows `session.ready` before any operation runs, and again
-  on every reader change. Presence is the card the phone holds: a card in
-  the USB reader from insertion until removal, and an NFC card from the
-  holder adding it to the phone until the holder removes it there, named by
-  its authentication certificate. An operation the card did not answer ends
-  with `card_error` and leaves presence unchanged; the next operation asks
-  the holder to present the card again (section 8.4 item 1).
+  whenever the card or the USB card reader changes. Presence is the card the
+  phone holds: a card in the USB reader from insertion until removal or the
+  reader's detachment, and an NFC card from the holder adding it to the phone
+  until the holder removes it there, named by its authentication
+  certificate. `reader_attached` is true while a CCID reader is connected to
+  the phone, with or without a card or the app's permission, and false
+  otherwise, including while the phone serves an NFC card; detaching the
+  reader leaves an added NFC card present. An operation the card did not
+  answer ends with `card_error` and leaves presence unchanged; the next
+  operation asks the holder to present the card again (section 8.4 item 1;
+  core STPA CC-81).
 - Reads ask the holder nothing. Authentication and document signing ask for
   their PIN on the phone, and entering it is the holder's consent; every PIN
   prompt on screen reports `consent_shown`. There is no other consent view
-  (section 8.2 item 3).
+  (section 8.2 item 3). The prompt names the paired computer and, for an
+  authentication, the program the operation context names, each under its
+  own label. It never names a site: the phone cannot know one (core STPA
+  CC-55).
 - PIN 1 is asked once and held only in memory, never in storage, bound to
   the card that accepted it, named by its authentication certificate. It is
   held only when that card's PIN 1 counter read pristine before the VERIFY;
@@ -66,8 +74,12 @@ transport.
   phone or another card replaces it, the card rejects it, the card's counter
   reads below pristine or cannot be read, the holder clears it, or the
   process ends; while it is held a browser authentication runs with no
-  prompt. PIN 2 is asked for every signature or batch and never held
-  (section 11 item 2; credential custody).
+  prompt. A card in the reader whose status reads "verified" from the last
+  VERIFY is at its try limit (FINEID S1 v4.2 section 3.5), so it keeps the
+  hold. Opening Remote Access or starting to serve never asks for PIN 1; the
+  first authentication a computer requests does. PIN 2 is asked for every
+  signature or batch and never held (section 11 item 2; credential
+  custody).
 - The native card session reads the PIN status with a header-only VERIFY
   before every verification and, without sending one, refuses one or two
   remaining attempts, a blocked PIN, and a status that carries no count and

@@ -5,6 +5,7 @@ package fi.refineid.android.rapp
 import uniffi.refineid_rapp.RappBridgeAction
 import uniffi.refineid_rapp.RappBridgeActionKind
 import uniffi.refineid_rapp.RappCardKeyProfile
+import uniffi.refineid_rapp.RappCardReader
 import uniffi.refineid_rapp.RappCloseReason
 import uniffi.refineid_rapp.RappOperationDescriptor
 import uniffi.refineid_rapp.RappOperationKind
@@ -329,9 +330,10 @@ internal sealed interface RappBridgeOutcome {
         val event: RappProgressEvent,
     ) : RappBridgeOutcome
 
-    /** The custodian reported its card. */
+    /** The custodian reported its card and whether a card reader is connected to it. */
     class CardStatus(
         val status: RappCardStatus,
+        val reader: RappCardReader,
     ) : RappBridgeOutcome
 
     /** The session closed; [reason] is the authenticated close's, when one was sent or received. */
@@ -386,7 +388,7 @@ internal sealed interface RappBridgeOutcome {
                 }
 
                 RappBridgeActionKind.CARD_STATUS -> {
-                    CardStatus(cardStatus(action))
+                    CardStatus(cardStatus(action), checkNotNull(action.cardReader))
                 }
 
                 RappBridgeActionKind.SESSION_CLOSED -> {

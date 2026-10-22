@@ -63,7 +63,6 @@ private val OFFERING_CODE_LETTER_SPACING = 2.sp
 internal fun RappPairingScreen(
     model: RappPairingModel,
     modifier: Modifier = Modifier,
-    authenticationReady: Boolean = true,
     onEnableRemoteAccess: () -> Unit = { model.setRemoteAccessEnabled(true) },
 ) {
     val context = LocalContext.current
@@ -83,8 +82,10 @@ internal fun RappPairingScreen(
             contract = ActivityResultContracts.StartActivityForResult(),
         ) { _ -> refreshNotifications() }
 
-    LaunchedEffect(model.isRemoteAccessEnabled, authenticationReady) {
-        if (authenticationReady && model.isRemoteAccessEnabled && phase is PairingPhase.Idle &&
+    // A pairing offer needs neither the card nor a PIN: the page offers its
+    // code whenever Remote Access is on and no computer is connected.
+    LaunchedEffect(model.isRemoteAccessEnabled) {
+        if (model.isRemoteAccessEnabled && phase is PairingPhase.Idle &&
             model.activeConnectedPeer == null
         ) {
             model.createOffer()

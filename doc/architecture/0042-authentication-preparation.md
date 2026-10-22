@@ -5,17 +5,25 @@ Status: Active
 ## Entry behavior
 
 Browser is actionable on an NFC-capable phone before identity priming. Opening
-it prepares local authentication before creating the WebView. Creating a Remote
-Access offer or enabling Remote Access uses the same preparation. Cancelling
-preparation leaves pairing management accessible; disabling sharing and deleting
-pairings do not need card credentials.
+it prepares local authentication before creating the WebView. Opening Remote
+Access asks nothing: the page shows the switch, the pairing code while Remote
+Access is on, and the paired computers. Turning Remote Access on prepares the
+card the phone serves, with no PIN. Cancelling preparation leaves the switch off
+and pairing management accessible; disabling sharing and deleting pairings do
+not need card credentials.
 
 A connected USB reader with a present card takes priority. Otherwise preparation
-uses NFC. It collects only missing CAN and PIN1, opens the card, reads the
-public authentication certificate, and verifies PIN1 before continuing. A primed
-certificate and previously accepted local PIN1 allow immediate continuation.
-Reader availability, rather than the colour of a feature icon, determines whether
-an action can start.
+uses NFC. For Browser it collects only missing CAN and PIN1, opens the card,
+reads the public authentication certificate, and verifies PIN1 before
+continuing; a primed certificate and previously accepted local PIN1 allow
+immediate continuation. For Remote Access it collects only a missing CAN and
+opens the card: a card ready in the reader, or a primed certificate, continues
+at once, and a phone with no reader that can reach a card serves at once.
+Remote Access never asks for, verifies, or holds PIN1 when the page opens or
+serving starts; PIN1 is asked at the first authentication a computer requests
+and held from then on (RAPP v26.10.22 section 11 item 2). Reader
+availability, rather than the colour of a feature icon, determines whether an
+action can start.
 
 ## Proof and custody
 
@@ -28,9 +36,9 @@ FINEID S1 v4.2 section 3.5 distinguishes header-only status checks from VERIFY
 with verification data. Successful credential verification resets the retry
 counter and establishes the validated state.
 
-Accepted PIN1 stays on the phone in owned, zeroizable memory. For a primed NFC
-identity it also uses the existing Android Keystore ciphertext store. RAPP never
-transports PIN1; remote callers receive public certificates and signature results.
+Accepted PIN1 stays on the phone in owned, zeroizable memory, never in storage.
+RAPP never transports PIN1; remote callers receive public certificates and
+signature results.
 Fresh browser or RAPP candidates require standalone verification before they can
 be retained, even if an open card session was already validated.
 
@@ -44,11 +52,17 @@ remains active. A new card session must establish its own validated state.
 A PIN1 accepted while the card sits in the USB reader lives only as long as
 that card's presence: removing the card or disconnecting the reader forgets it,
 and the card's next use asks for PIN1 again, over the reader or over NFC. A
-primed contactless identity keeps the PIN1 its holder chose to store with it.
+primed contactless identity keeps its held PIN1 until the holder removes it.
+
+A card that stays in the reader keeps PIN1 verified between operations, so its
+status check answers "verified" rather than a count. A successful VERIFY sets
+the try counter to the PIN Try Limit, and every command that lowers the counter
+also clears the verified state (FINEID S1 v4.2 sections 3.5 and 3.11). A
+verified status therefore reads as the try limit, and the held PIN1 stays held.
 
 Removing a card from the reader is the holder saying they are done with it.
 A contactless card has no such act: lifting it off the phone is part of every
-tap, so NFC keeps the stored PIN1 rather than asking for it on each request.
+tap, so NFC keeps the held PIN1 rather than asking for it on each request.
 
 ## Failure and lifecycle
 

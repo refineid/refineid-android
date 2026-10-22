@@ -35,12 +35,22 @@ internal sealed interface NativePin1State {
     data object Unrecognized : NativePin1State
 }
 
-/** The attempts the card still allows, or null when the card did not say. */
+/**
+ * The attempts the card still allows, or null when the card did not say.
+ *
+ * A PIN 1 the card holds as verified allows its PIN Try Limit: a
+ * successful VERIFY sets the try counter to the limit, and every command
+ * that lowers the counter also clears the verified flag (FINEID S1 v4.2
+ * sections 3.5 and 3.11). A card in a contact reader keeps the flag from
+ * one operation to the next, so its status reads verified rather than as
+ * a count.
+ */
 internal fun NativePin1State.attemptsLeft(): Int? =
     when (this) {
         is NativePin1State.Remaining -> attempts
+        NativePin1State.Verified -> FINEID_PIN_TRY_LIMIT
         NativePin1State.Locked -> 0
-        NativePin1State.Verified, NativePin1State.NoInformation, NativePin1State.Unrecognized -> null
+        NativePin1State.NoInformation, NativePin1State.Unrecognized -> null
     }
 
 internal data class NativePin1Preflight(

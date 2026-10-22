@@ -237,8 +237,9 @@ class RefineIdApplication : Application() {
         }
         readerController.start()
         rappProxyDispatcher = createRappProxyDispatcher(primedStore)
-        // Either reader's card arriving or leaving is reported on the open
-        // RAPP session (RAPP v26.10.22 section 8.4).
+        // Either reader's card arriving or leaving, and the USB reader's
+        // attachment or detachment, are reported on the open RAPP session
+        // (RAPP v26.10.22 section 8.4 item 1).
         readerController.addStateListener { rappProxyDispatcher.cardChanged() }
         nfcReaderController.addStateListener { rappProxyDispatcher.cardChanged() }
         startRappProxyListening()
@@ -288,6 +289,10 @@ class RefineIdApplication : Application() {
             primedCanStore = primedStore,
             onAuthenticationVerified = ::retainAuthenticationPin,
             offeredCard = { offeredRappCard(primedStore) },
+            cardReader = {
+                fi.refineid.android.rapp.RappCardReport
+                    .readerOf(readerController.snapshot)
+            },
             authCardService = {
                 if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
                     readerController
