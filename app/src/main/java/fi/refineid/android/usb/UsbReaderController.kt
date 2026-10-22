@@ -22,7 +22,6 @@ import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.NativeCertificateReadFailure
 import fi.refineid.android.core.NativeContactlessOpenResult
 import fi.refineid.android.core.NativeCore
-import fi.refineid.android.core.NativeVerification
 import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationResult
@@ -601,7 +600,6 @@ internal class UsbReaderController(
             }
             val photoBytes = activeSession?.readFacePhoto()
             val documentNumber = NativeCore.readCardDocumentNumber()
-            val tamperProofVerified = NativeVerification.readCardVerificationPassed()
             val certificate =
                 when (result) {
                     is NativeContactlessOpenResult.Success -> result.certificate
@@ -618,7 +616,6 @@ internal class UsbReaderController(
                                 certificate.copyDer(),
                                 photoBytes,
                                 documentNumber,
-                                tamperProofVerified,
                             )
                         cardDetails?.holderName ?: holderNameFromCert
                     } catch (_: Exception) {

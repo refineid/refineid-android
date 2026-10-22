@@ -123,8 +123,6 @@ class RefineIdApplication : Application() {
         }
         fi.refineid.android.core.CardPhotoStore
             .initialize(java.io.File(filesDir, CARD_PHOTO_CACHE_DIRECTORY))
-        fi.refineid.android.core.NativeVerification
-            .installCscaAnchors(loadCscaAnchorAssets())
         readerController = UsbReaderController(this)
         val caStore = CaCertificateStore(this)
         caStore.load()
@@ -381,39 +379,7 @@ class RefineIdApplication : Application() {
         }
     }
 
-    // The CSCA trust anchors that close passive authentication's
-    // DSC-to-CSCA hop. One DER certificate per file, grouped by issuing
-    // state (csca/fi, later csca/ee); anchors ship with the app because
-    // a card can never vouch for itself.
-    private fun loadCscaAnchorAssets(): List<ByteArray> {
-        val anchors = mutableListOf<ByteArray>()
-
-        fun walk(path: String) {
-            val children =
-                try {
-                    assets.list(path).orEmpty()
-                } catch (_: java.io.IOException) {
-                    return
-                }
-            if (children.isEmpty()) {
-                try {
-                    anchors.add(assets.open(path).use { stream -> stream.readBytes() })
-                } catch (_: java.io.IOException) {
-                    // A missing or unreadable anchor file surfaces as an
-                    // unverified read, never as a crash.
-                }
-            } else {
-                for (child in children) {
-                    walk("$path/$child")
-                }
-            }
-        }
-        walk(CSCA_ANCHOR_ASSET_DIRECTORY)
-        return anchors
-    }
-
     private companion object {
         const val CARD_PHOTO_CACHE_DIRECTORY = "card-photos"
-        const val CSCA_ANCHOR_ASSET_DIRECTORY = "csca"
     }
 }

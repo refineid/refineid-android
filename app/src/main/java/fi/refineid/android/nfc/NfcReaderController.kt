@@ -27,7 +27,6 @@ import fi.refineid.android.core.NativeContactlessCore
 import fi.refineid.android.core.NativeContactlessOpenResult
 import fi.refineid.android.core.NativeContactlessSession
 import fi.refineid.android.core.NativeCore
-import fi.refineid.android.core.NativeVerification
 import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.diagnostics.AppTrace
@@ -909,7 +908,6 @@ internal class NfcReaderController(
         val holderNameFromCert = certificate?.let(CertificateHolderName::fromCertificate)
         val photoBytes = CardPhotoStore.getPhoto(holderNameFromCert) ?: NativeCore.readCardFacePhoto()
         val documentNumber = NativeCore.readCardDocumentNumber()
-        val tamperProofVerified = NativeVerification.readCardVerificationPassed()
         val cardDetails: PersonCardDetails? =
             certificate?.let { cert ->
                 try {
@@ -917,7 +915,6 @@ internal class NfcReaderController(
                         cert.copyDer(),
                         photoBytes = photoBytes,
                         documentNumber = documentNumber,
-                        tamperProofVerified = tamperProofVerified,
                     )
                 } catch (_: Exception) {
                     null
@@ -949,12 +946,7 @@ internal class NfcReaderController(
                 if (photo != null && holderName != null) {
                     CardPhotoStore.savePhoto(photo, holderName, docNum)
                 }
-                val tamperProofVerified = NativeVerification.readCardVerificationPassed()
-                val updatedDetails =
-                    latestSnapshot.cardDetails?.copy(
-                        photoBytes = photo,
-                        isTamperProofVerified = tamperProofVerified,
-                    )
+                val updatedDetails = latestSnapshot.cardDetails?.copy(photoBytes = photo)
                 mainHandler.post {
                     if (updatedDetails != null) {
                         publish(latestSnapshot.copy(cardDetails = updatedDetails))
@@ -984,12 +976,7 @@ internal class NfcReaderController(
                 if (photo != null && holderName != null) {
                     CardPhotoStore.savePhoto(photo, holderName, docNum)
                 }
-                val tamperProofVerified = NativeVerification.readCardVerificationPassed()
-                val updatedDetails =
-                    latestSnapshot.cardDetails?.copy(
-                        photoBytes = photo,
-                        isTamperProofVerified = tamperProofVerified,
-                    )
+                val updatedDetails = latestSnapshot.cardDetails?.copy(photoBytes = photo)
                 mainHandler.post {
                     if (updatedDetails != null) {
                         publish(latestSnapshot.copy(cardDetails = updatedDetails))

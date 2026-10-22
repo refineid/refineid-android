@@ -152,12 +152,6 @@ internal data class PersonCardDetails(
     val expiryDate: String? = null,
     val issuer: String? = null,
     val signatureAlgorithm: String? = null,
-    /**
-     * True only when ICAO 9303 passive authentication actually ran and
-     * passed for this read; the authenticity badge is gated on it and
-     * never shown for an unverified read.
-     */
-    val isTamperProofVerified: Boolean = false,
     val photoBytes: ByteArray? = null,
     /**
      * The MRZ document number: the card's printed, human-visible number.
@@ -187,7 +181,6 @@ internal data class PersonCardDetails(
             expiryDate == other.expiryDate &&
             issuer == other.issuer &&
             signatureAlgorithm == other.signatureAlgorithm &&
-            isTamperProofVerified == other.isTamperProofVerified &&
             (photoBytes contentEquals other.photoBytes) &&
             documentNumber == other.documentNumber
     }
@@ -202,7 +195,6 @@ internal data class PersonCardDetails(
         result = 31 * result + (expiryDate?.hashCode() ?: 0)
         result = 31 * result + (issuer?.hashCode() ?: 0)
         result = 31 * result + (signatureAlgorithm?.hashCode() ?: 0)
-        result = 31 * result + isTamperProofVerified.hashCode()
         result = 31 * result + (photoBytes?.contentHashCode() ?: 0)
         result = 31 * result + (documentNumber?.hashCode() ?: 0)
         return result
@@ -213,7 +205,6 @@ internal data class PersonCardDetails(
             der: ByteArray,
             photoBytes: ByteArray? = null,
             documentNumber: String? = null,
-            tamperProofVerified: Boolean = false,
         ): PersonCardDetails? =
             try {
                 val factory = CertificateFactory.getInstance("X.509")
@@ -289,7 +280,6 @@ internal data class PersonCardDetails(
                     expiryDate = expires,
                     issuer = cleanIssuer,
                     signatureAlgorithm = x509.sigAlgName,
-                    isTamperProofVerified = tamperProofVerified,
                     photoBytes = effectivePhoto,
                     documentNumber = documentNumber,
                 )
@@ -322,7 +312,6 @@ internal data class PersonCardDetails(
                 expiryDate = null,
                 issuer = "Digi- ja väestötietovirasto (DVV)",
                 signatureAlgorithm = "ECDSA_P384 / SHA-384",
-                isTamperProofVerified = false,
                 photoBytes = effectivePhoto,
             )
         }

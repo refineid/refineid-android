@@ -293,21 +293,6 @@ const _: NativeMethod = jni::native_method! {
 };
 
 const _: NativeMethod = jni::native_method! {
-    java_type = "fi.refineid.android.core.NativeVerification",
-    static extern fn read_card_verification_native() -> jint,
-};
-
-const _: NativeMethod = jni::native_method! {
-    java_type = "fi.refineid.android.core.NativeVerification",
-    static extern fn add_csca_anchor_native(anchor_der: [jbyte]) -> jint,
-};
-
-const _: NativeMethod = jni::native_method! {
-    java_type = "fi.refineid.android.core.NativeVerification",
-    static extern fn clear_csca_anchors_native() -> jint,
-};
-
-const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeContactlessCore",
     static extern fn probe_card_access_native(
         exchange_level: jint,
@@ -892,37 +877,6 @@ fn set_cached_ca_certificates_native<'local>(
         contactless::set_last_read_intermediate_ca(None);
     }
     Ok(CARD_OPERATION_SUCCEEDED)
-}
-
-fn read_card_verification_native<'local>(
-    _env: &mut Env<'local>,
-    _class: JClass<'local>,
-) -> Result<jint, jni::errors::Error> {
-    Ok(contactless::get_last_read_verification())
-}
-
-/// Installed count is returned so the platform can assert its anchor
-/// assets actually arrived.
-fn add_csca_anchor_native<'local>(
-    env: &mut Env<'local>,
-    _class: JClass<'local>,
-    anchor_der: JByteArray<'local>,
-) -> Result<jint, jni::errors::Error> {
-    let bytes = env.convert_byte_array(&anchor_der)?;
-    if let Ok(der) = CertificateDer::try_from_bytes(bytes) {
-        contactless::add_csca_anchor(der);
-        Ok(1)
-    } else {
-        Ok(0)
-    }
-}
-
-fn clear_csca_anchors_native<'local>(
-    _env: &mut Env<'local>,
-    _class: JClass<'local>,
-) -> Result<jint, jni::errors::Error> {
-    contactless::clear_csca_anchors();
-    Ok(0)
 }
 
 fn contactless_authenticate_and_sign_native<'local>(

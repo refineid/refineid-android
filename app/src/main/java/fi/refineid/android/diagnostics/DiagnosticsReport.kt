@@ -128,7 +128,6 @@ internal fun cardStatusText(cardDetails: PersonCardDetails?): String =
         appendLine("Issuer: ${cardDetails?.issuer ?: "(none)"}")
         appendLine("Generation: ${cardGenerationLabel(cardDetails?.issuedDate)}")
         appendLine("Signature Algorithm: ${cardDetails?.signatureAlgorithm ?: "(unknown)"}")
-        appendLine("Tamper-Proof Verified: ${cardDetails?.isTamperProofVerified ?: false}")
     }.trimEnd()
 
 /**
