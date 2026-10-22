@@ -38,7 +38,7 @@ physical cards reach their 5-year expiration cycle.
 3. **Deterministic Release Naming**:
    \`Scripts/build-release-apk.sh\` derives the canonical package name from the
    stamped release pair in \`version.properties\`:
-   \`refineid-\${versionName}.\${buildNumber}.apk\` (e.g. \`refineid-26.8.22.165.apk\`).
+   \`refineid-\${versionName}.\${buildNumber}.apk\` (e.g. \`refineid-26.8.22.1650.apk\`).
 
 4. **Automated Verification**:
    The script invokes \`apksigner sign\` with JVM module exports for

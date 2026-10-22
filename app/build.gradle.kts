@@ -21,10 +21,10 @@ val abiTargetArgs = androidAbis.flatMap { abi -> listOf("-t", abi) }
 val javaToolchainVersion = 25
 val calendarYearBase = 2000
 val maximumUtcHour = 23
-val buildNumberHourScale = 10
-val maximumTenMinuteBucket = 5
-val maximumBuildNumber =
-    maximumUtcHour * buildNumberHourScale + maximumTenMinuteBucket
+val minutesPerHour = 60
+val buildNumberHourScale = 100
+val versionCodeHourScale = 10
+val minutesPerVersionCodeBucket = 10
 val versionCodeYearScale = 10_000_000
 val versionCodeMonthScale = 100_000
 val versionCodeDayScale = 1_000
@@ -59,7 +59,7 @@ val liveUtcDate = ZonedDateTime.now(ZoneOffset.UTC)
 val defaultLiveVersionName =
     "${liveUtcDate.year % 100}.${liveUtcDate.monthValue}.${liveUtcDate.dayOfMonth}"
 val defaultLiveBuildNumber =
-    (liveUtcDate.hour * buildNumberHourScale + liveUtcDate.minute / 10).toString()
+    (liveUtcDate.hour * buildNumberHourScale + liveUtcDate.minute).toString()
 
 val refineIdVersionName =
     (
@@ -89,18 +89,19 @@ val refineIdBuildNumber =
     rawBuildNumber.trim().toIntOrNull()
         ?: error("buildNumber must be an integer (got '$rawBuildNumber')")
 
-require(
-    refineIdBuildNumber in 0..maximumBuildNumber &&
-        refineIdBuildNumber % buildNumberHourScale in 0..maximumTenMinuteBucket,
-) {
-    "buildNumber must be a UTC ten-minute bucket (H * 10 + M / 10) (got $refineIdBuildNumber)"
+val buildHour = refineIdBuildNumber / buildNumberHourScale
+val buildMinute = refineIdBuildNumber % buildNumberHourScale
+
+require(refineIdBuildNumber >= 0 && buildHour <= maximumUtcHour && buildMinute < minutesPerHour) {
+    "buildNumber must be the UTC time as HHMM (got $refineIdBuildNumber)"
 }
 
 val refineIdVersionCode =
     versionYear * versionCodeYearScale +
         calendarVersionDate.monthValue * versionCodeMonthScale +
         calendarVersionDate.dayOfMonth * versionCodeDayScale +
-        refineIdBuildNumber
+        buildHour * versionCodeHourScale +
+        buildMinute / minutesPerVersionCodeBucket
 
 require(refineIdVersionCode in minimumGooglePlayVersionCode..maximumGooglePlayVersionCode) {
     "derived versionCode is outside the Google Play range"
