@@ -1150,7 +1150,7 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_record_batch_signature(`ptr`: Long,`operationId`: RustBuffer.ByValue,`signature`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_report_card_status(`ptr`: Long,`authenticationCertificate`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_report_card_status(`ptr`: Long,`authenticationCertificate`: RustBuffer.ByValue,`cardReader`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rappoperationbridge_report_progress(`ptr`: Long,`operationId`: RustBuffer.ByValue,`event`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1540,7 +1540,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_record_batch_signature() and 0xFFFF) != 8047) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_report_card_status() and 0xFFFF) != 35102) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_report_card_status() and 0xFFFF) != 8116) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_report_progress() and 0xFFFF) != 55554) {
@@ -2585,17 +2585,20 @@ public interface RappOperationBridgeInterface {
     fun `recordBatchSignature`(`operationId`: kotlin.ByteArray, `signature`: kotlin.ByteArray)
     
     /**
-     * Tell the requester which card can answer now (RAPP section 8.4): the
-     * DER authentication certificate of a present card, or `None` when no
-     * card can answer. Call it once right after `begin_proxy` and again
-     * whenever the card or its presence changes; a card busy with another
-     * session's operation is present.
+     * Tell the requester which card the custodian holds and whether a
+     * contact card reader is connected to it (RAPP section 8.4): the DER
+     * authentication certificate of a present card, or `None` when the
+     * custodian holds no card, and the reader's attachment. Call it once
+     * right after `begin_proxy` and again whenever the card, its presence
+     * or the reader's attachment changes; a card busy with another
+     * session's operation is present, and detaching a reader removes the
+     * card in it.
      *
      * # Errors
      * [`RappBindingError`] on an empty certificate, the wrong protocol
      * phase, or a poisoned local state.
      */
-    fun `reportCardStatus`(`authenticationCertificate`: kotlin.ByteArray?): RappBridgeAction
+    fun `reportCardStatus`(`authenticationCertificate`: kotlin.ByteArray?, `cardReader`: RappCardReader): RappBridgeAction
     
     /**
      * Report a change of the live operation's state.
@@ -3262,24 +3265,28 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
 
     
     /**
-     * Tell the requester which card can answer now (RAPP section 8.4): the
-     * DER authentication certificate of a present card, or `None` when no
-     * card can answer. Call it once right after `begin_proxy` and again
-     * whenever the card or its presence changes; a card busy with another
-     * session's operation is present.
+     * Tell the requester which card the custodian holds and whether a
+     * contact card reader is connected to it (RAPP section 8.4): the DER
+     * authentication certificate of a present card, or `None` when the
+     * custodian holds no card, and the reader's attachment. Call it once
+     * right after `begin_proxy` and again whenever the card, its presence
+     * or the reader's attachment changes; a card busy with another
+     * session's operation is present, and detaching a reader removes the
+     * card in it.
      *
      * # Errors
      * [`RappBindingError`] on an empty certificate, the wrong protocol
      * phase, or a poisoned local state.
      */
-    @Throws(RappBindingException::class)override fun `reportCardStatus`(`authenticationCertificate`: kotlin.ByteArray?): RappBridgeAction {
+    @Throws(RappBindingException::class)override fun `reportCardStatus`(`authenticationCertificate`: kotlin.ByteArray?, `cardReader`: RappCardReader): RappBridgeAction {
             return FfiConverterTypeRappBridgeAction.lift(
     callWithHandle {
     uniffiRustCallWithError(RappBindingException) { _status ->
     UniffiLib.uniffi_refineid_rapp_fn_method_rappoperationbridge_report_card_status(
         it,
         
-        FfiConverterOptionalByteArray.lower(`authenticationCertificate`),_status)
+        FfiConverterOptionalByteArray.lower(`authenticationCertificate`),
+        FfiConverterTypeRappCardReader.lower(`cardReader`),_status)
 }
     }
     )
@@ -7262,6 +7269,14 @@ data class RappBridgeAction (
     var `certificateFingerprint`: kotlin.ByteArray?
     , 
     /**
+     * Whether a contact card reader is connected to the custodian, on a
+     * card-status action. While the card is absent, the requester names
+     * the custodian's reader to its user only when this is `Attached`
+     * (RAPP section 8.4 item 6).
+     */
+    var `cardReader`: RappCardReader?
+    , 
+    /**
      * The session must close after this frame is delivered.
      */
     var `closeSessionAfterSend`: kotlin.Boolean
@@ -7303,6 +7318,7 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalTypeRappProgressEvent.read(buf),
             FfiConverterOptionalBoolean.read(buf),
             FfiConverterOptionalByteArray.read(buf),
+            FfiConverterOptionalTypeRappCardReader.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalTypeRappCloseReason.read(buf),
             FfiConverterBoolean.read(buf),
@@ -7319,6 +7335,7 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalTypeRappProgressEvent.allocationSize(value.`progressEvent`) +
             FfiConverterOptionalBoolean.allocationSize(value.`cardPresent`) +
             FfiConverterOptionalByteArray.allocationSize(value.`certificateFingerprint`) +
+            FfiConverterOptionalTypeRappCardReader.allocationSize(value.`cardReader`) +
             FfiConverterBoolean.allocationSize(value.`closeSessionAfterSend`) +
             FfiConverterOptionalTypeRappCloseReason.allocationSize(value.`closeReason`) +
             FfiConverterBoolean.allocationSize(value.`cardExchangeContinues`)
@@ -7334,6 +7351,7 @@ public object FfiConverterTypeRappBridgeAction: FfiConverterRustBuffer<RappBridg
             FfiConverterOptionalTypeRappProgressEvent.write(value.`progressEvent`, buf)
             FfiConverterOptionalBoolean.write(value.`cardPresent`, buf)
             FfiConverterOptionalByteArray.write(value.`certificateFingerprint`, buf)
+            FfiConverterOptionalTypeRappCardReader.write(value.`cardReader`, buf)
             FfiConverterBoolean.write(value.`closeSessionAfterSend`, buf)
             FfiConverterOptionalTypeRappCloseReason.write(value.`closeReason`, buf)
             FfiConverterBoolean.write(value.`cardExchangeContinues`, buf)
@@ -8109,8 +8127,9 @@ enum class RappBridgeActionKind {
      */
     PROGRESS,
     /**
-     * The custodian reported its card: present with a fingerprint, or
-     * absent (RAPP section 8.4).
+     * The custodian reported its card, present with a fingerprint or
+     * absent, and whether a card reader is connected to it (RAPP section
+     * 8.4).
      */
     CARD_STATUS,
     /**
@@ -8199,6 +8218,51 @@ public object FfiConverterTypeRappCardKeyProfile: FfiConverterRustBuffer<RappCar
     override fun allocationSize(value: RappCardKeyProfile) = 4UL
 
     override fun write(value: RappCardKeyProfile, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * Whether a contact card reader is connected to the custodian (RAPP
+ * v26.10.22 section 8.4 item 1).
+ */
+
+enum class RappCardReader {
+    
+    /**
+     * A contact card reader is connected: built in, or attached to a port.
+     */
+    ATTACHED,
+    /**
+     * No contact card reader is connected, as on a custodian that reads
+     * cards only over NFC.
+     */
+    ABSENT;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRappCardReader: FfiConverterRustBuffer<RappCardReader> {
+    override fun read(buf: ByteBuffer) = try {
+        RappCardReader.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RappCardReader) = 4UL
+
+    override fun write(value: RappCardReader, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -9162,6 +9226,38 @@ public object FfiConverterOptionalTypeRappCardKeyProfile: FfiConverterRustBuffer
         } else {
             buf.put(1)
             FfiConverterTypeRappCardKeyProfile.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeRappCardReader: FfiConverterRustBuffer<RappCardReader?> {
+    override fun read(buf: ByteBuffer): RappCardReader? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeRappCardReader.read(buf)
+    }
+
+    override fun allocationSize(value: RappCardReader?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeRappCardReader.allocationSize(value)
+        }
+    }
+
+    override fun write(value: RappCardReader?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeRappCardReader.write(value, buf)
         }
     }
 }

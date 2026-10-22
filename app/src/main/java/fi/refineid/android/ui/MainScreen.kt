@@ -446,6 +446,22 @@ internal fun MainScreen(
         destination = MainDestination.PERSON
     }
 
+    // Remote Access prepares the card only when the holder turns it on, and
+    // never asks for PIN 1 (remoteAccessPreparation).
+    val readyRemoteAccess: (RemoteAccessAction, () -> Unit) -> Unit = { action, onReady ->
+        val purpose =
+            remoteAccessPreparation(
+                action = action,
+                cardReachable = hasNfc || snapshot.cardPresence == CardPresence.PRESENT,
+            )
+        val preparation = authenticationPreparation
+        if (purpose != null && preparation != null) {
+            preparation.start(purpose, onReady = onReady)
+        } else {
+            onReady()
+        }
+    }
+
     val browserAvailable =
         (
             snapshot.cardPresence == CardPresence.PRESENT || effectiveHolderName != null ||
@@ -506,18 +522,7 @@ internal fun MainScreen(
                 onOpenPairing = { destination = MainDestination.PAIRING },
                 onOpenRemoteAccess = {
                     destination = MainDestination.PAIRING
-                    rappPairingModel?.takeIf { hasNfc || snapshot.cardPresence == CardPresence.PRESENT }?.let { model ->
-                        val offer = {
-                            model.setRemoteAccessEnabled(true)
-                            if (model.phase is fi.refineid.android.rapp.PairingPhase.Idle &&
-                                model.activeConnectedPeer == null
-                            ) {
-                                model.createOffer()
-                            }
-                        }
-                        authenticationPreparation?.start(AuthenticationPurpose.REMOTE_ACCESS, onReady = offer)
-                            ?: offer()
-                    }
+                    readyRemoteAccess(RemoteAccessAction.OPEN_PAGE) {}
                 },
                 onOpenCardManagement = { destination = MainDestination.CARD_MANAGEMENT },
                 onRequestUsbCan =
@@ -595,11 +600,8 @@ internal fun MainScreen(
                 rappPairingModel?.let { model ->
                     RappPairingScreen(
                         model = model,
-                        authenticationReady = pinCache?.hasPin == true && (usbCardReady || nfcSnapshot.isPrimed),
                         onEnableRemoteAccess = {
-                            val enable = { model.setRemoteAccessEnabled(true) }
-                            authenticationPreparation?.start(AuthenticationPurpose.REMOTE_ACCESS, onReady = enable)
-                                ?: enable()
+                            readyRemoteAccess(RemoteAccessAction.TURN_ON) { model.setRemoteAccessEnabled(true) }
                         },
                     )
                 }

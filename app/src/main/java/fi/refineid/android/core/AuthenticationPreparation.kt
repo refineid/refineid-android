@@ -64,9 +64,19 @@ internal interface AuthenticationPreparationBackend {
 }
 
 /** What the holder is readying the card for; the prompt names it. */
-internal enum class AuthenticationPurpose {
-    SIGN_IN,
-    REMOTE_ACCESS,
+internal enum class AuthenticationPurpose(
+    /** Whether readying for it verifies PIN 1 on the card. */
+    val needsPin1: Boolean,
+) {
+    /** A login in this phone's browser: the card is read and PIN 1 verified before the site is opened. */
+    SIGN_IN(needsPin1 = true),
+
+    /**
+     * Serving paired computers: the card is held, read with its access
+     * number when it needs one, and PIN 1 waits for the first
+     * authentication a computer asks for (RAPP v26.10.22 section 11 item 2).
+     */
+    REMOTE_ACCESS(needsPin1 = false),
 }
 
 internal sealed interface AuthenticationPreparationState {
@@ -91,9 +101,10 @@ internal sealed interface AuthenticationPreparationState {
 
 /**
  * Owns preparation and continuation; no Android types or credentials in
- * published state. The access number and PIN 1 are asked once per
- * preparation and held in memory until the card accepts them, answers
- * about them, or the preparation ends; a card that was not seen or lost
+ * published state. The access number, and PIN 1 for a purpose that
+ * [AuthenticationPurpose.needsPin1], are asked once per preparation and
+ * held in memory until the card accepts them, answers about them, or the
+ * preparation ends; a card that was not seen or lost
  * contact is waited for again. A VERIFY whose answer was lost may have
  * spent an attempt, so the held PIN goes to the card again only after the
  * attempts the card allows are read back unchanged.
@@ -146,13 +157,13 @@ internal class AuthenticationPreparation(
         cancellation = onCancelled
         mutablePurpose.value = purpose
         val ready = backend.readiness()
-        val needsPin = heldPin == null && !pinCache.hasPin
+        val needsPin = purpose.needsPin1 && heldPin == null && !pinCache.hasPin
         when {
             !ready.available -> {
                 fail(Pin1VerificationResult.CARD_UNAVAILABLE)
             }
 
-            ready.hasCertificate && pinCache.hasPin -> {
+            ready.hasCertificate && (pinCache.hasPin || !purpose.needsPin1) -> {
                 complete()
             }
 
@@ -232,6 +243,10 @@ internal class AuthenticationPreparation(
             }
 
             CardConnection.READY -> {}
+        }
+        if (!mutablePurpose.value.needsPin1) {
+            complete()
+            return false
         }
         val card = backend.connectedCard()
         val attempts = backend.pin1AttemptsLeft()

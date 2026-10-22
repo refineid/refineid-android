@@ -35,7 +35,6 @@
     <string name="timestamp_authorities">Aikaleimapalvelut</string>
     <string name="authenticate">Tunnistaudu</string>
     <string name="cancel">Peruuta</string>
-    <string name="enter_pin1">Syötä PIN 1</string>
     <string name="sign_document">Allekirjoita asiakirja</string>
     <string name="deny">Hylkää</string>
     <string name="approve_and_sign">Hyväksy ja allekirjoita</string>
@@ -123,6 +122,8 @@
     <string name="remote_authentication_request">%1$s pyytää tunnistautumista henkilökortilla.</string>
     <string name="remote_signature_request">%1$s pyytää allekirjoitusta.</string>
     <string name="remote_card_needed">%1$s tarvitsee henkilökorttia.</string>
+    <string name="rapp_prompt_computer">Tietokone</string>
+    <string name="rapp_prompt_program">Ohjelma</string>
     <string name="insert_card_into_reader">Aseta henkilökortti lukijaan.</string>
     <string name="card_reading_hold_still">Luetaan korttia. Pidä kortti paikallaan.</string>
     <string name="card_contact_lost">Yhteys korttiin katkesi. Pidä kortti taas puhelinta vasten.</string>

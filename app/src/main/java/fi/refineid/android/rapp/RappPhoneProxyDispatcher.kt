@@ -43,6 +43,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.refineid_rapp.RappAnnouncementCandidate
 import uniffi.refineid_rapp.RappBridgeAction
 import uniffi.refineid_rapp.RappCardKeyProfile
+import uniffi.refineid_rapp.RappCardReader
 import uniffi.refineid_rapp.RappCloseReason
 import uniffi.refineid_rapp.RappEndpointRole
 import uniffi.refineid_rapp.RappOperationBridge
@@ -73,13 +74,14 @@ internal class RappPhoneProxyDispatcher(
     private val context: Context,
     private val scope: CoroutineScope,
     private val inbox: RappAuthorizationInbox,
-    private val pinCache: AuthenticationPinCache? = null,
+    pinCache: AuthenticationPinCache? = null,
     private val primedCanStore: PrimedCanStore? = null,
     private val authCardService: () -> AuthenticationCardService?,
     private val qualifiedCardService: () -> QualifiedCardService?,
     private val isCardReady: () -> Boolean = { false },
     private val awaitCardReady: suspend () -> Boolean = { false },
     private val offeredCard: suspend () -> RappOfferedCard = { RappOfferedCard.Absent },
+    private val cardReader: () -> RappCardReader = { RappCardReader.ABSENT },
     private val onAuthenticationVerified: ((ByteArray, Pin1Retention, Long) -> Boolean)? = null,
 ) : AutoCloseable {
     private var activeListener: StreamRelayListener? = null
@@ -89,6 +91,7 @@ internal class RappPhoneProxyDispatcher(
     private var vault: AndroidRappVault? = null
     private val catalog = RappPairCatalog(context)
     private val preAuthenticationLimiter = RappPreAuthenticationLimiter()
+    private val pin1Custody = RappPin1Custody(pinCache)
 
     @Volatile
     private var isClosed = false
@@ -128,9 +131,9 @@ internal class RappPhoneProxyDispatcher(
     /** One lane for card reports: the two readers' listeners call in on their own threads. */
     private val cardStatusLane = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 
-    /** The card last reported on the open session; null before the first report. */
+    /** The card and reader last reported on the open session; null before the first report. */
     @Volatile
-    private var reportedCard: RappOfferedCard? = null
+    private var reportedCard: RappCardReport? = null
 
     @Volatile
     private var lastReadAuthCertDer: ByteArray? = null
@@ -327,11 +330,12 @@ internal class RappPhoneProxyDispatcher(
     }
 
     /**
-     * The card this phone holds may have changed: reports it on the open
-     * session (RAPP v26.10.22 section 8.4 item 1). Present is a card in the
-     * reader, from insertion until removal, or an NFC card the holder added
-     * to the phone, until the holder removes it; a card busy with an
-     * operation, or one that did not answer an operation, stays present.
+     * The card this phone holds, or its card reader, may have changed:
+     * reports both on the open session (RAPP v26.10.22 section 8.4 item 1).
+     * Present is a card in the reader, from insertion until removal or the
+     * reader's detachment, or an NFC card the holder added to the phone,
+     * until the holder removes it; a card busy with an operation, or one
+     * that did not answer an operation, stays present.
      */
     fun cardChanged() {
         if (isClosed) return
@@ -343,11 +347,10 @@ internal class RappPhoneProxyDispatcher(
         val bridge = operationBridge ?: return
         val reported = cardReported
         try {
-            val card = currentCard()
-            if (card == reportedCard) return
-            val certificate = (card as? RappOfferedCard.Present)?.certificate?.toWire()
-            if (act(bridge) { it.reportCardStatus(certificate) } != null) {
-                reportedCard = card
+            val report = RappCardReport(currentCard(), cardReader())
+            if (report == reportedCard) return
+            if (act(bridge) { it.reportCardStatus(report.certificateWire(), report.reader) } != null) {
+                reportedCard = report
             }
         } finally {
             reported?.complete(Unit)
@@ -869,14 +872,17 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Asks the holder for PIN 1 on this phone; null when the holder declines.
-     * Entering the PIN is the holder's consent, reported once the operation's
-     * first prompt is on screen when [firstPrompt] (section 8.2 item 3); a
-     * prompt after a wrong PIN says so to the holder and reports nothing, so
-     * the Requester learns nothing of it (section 10.2).
+     * The prompt names the computer and [program], the operation context
+     * the requester sent. Entering the PIN is the holder's consent, reported
+     * once the operation's first prompt is on screen when [firstPrompt]
+     * (section 8.2 item 3); a prompt after a wrong PIN says so to the holder
+     * and reports nothing, so the Requester learns nothing of it (section
+     * 10.2).
      */
     private suspend fun askPin1(
         bridge: RappOperationBridge,
         operationId: RappOperationId,
+        program: String,
         wrongPin: RappCardAnswer.WrongPin?,
         firstPrompt: Boolean,
     ): Pin1Submission? {
@@ -885,6 +891,7 @@ internal class RappPhoneProxyDispatcher(
             inbox.askBrowserAuth(
                 requestId = operationId.key,
                 requester = requesterName(),
+                program = program,
                 onApproved = { pin -> if (!answer.complete(pin)) pin.close() },
                 onDenied = { answer.complete(null) },
                 onShown = { if (firstPrompt) reportConsentShown(bridge, operationId) },
@@ -1122,22 +1129,6 @@ internal class RappPhoneProxyDispatcher(
 
     // --- Browser authentication (section 9.2) --------------------------------
 
-    /**
-     * The PIN 1 this phone holds in memory for [card] (section 11 item 2):
-     * asked once, kept until the card leaves, the card rejects it, the holder
-     * clears it or the process ends. A PIN held for another card, or one the
-     * card already rejected, is not offered.
-     */
-    private fun heldPin1(card: AuthenticationCardIdentity): Pin1Submission? {
-        val cache = pinCache ?: return null
-        val held = cache.take(card) ?: return null
-        if (cache.isRejected(held)) {
-            held.close()
-            return null
-        }
-        return held
-    }
-
     /** The card this phone holds now, named by its authentication certificate. */
     private suspend fun heldCard(): AuthenticationCardIdentity? =
         (currentCard() as? RappOfferedCard.Present)?.certificate?.toWire()?.let(AuthenticationCardIdentity::of)
@@ -1153,9 +1144,9 @@ internal class RappPhoneProxyDispatcher(
             return
         }
         val card = heldCard()
-        val held = card?.let(::heldPin1)
+        val held = card?.let(pin1Custody::held)
         var heldFor = card.takeIf { held != null }
-        val first = held ?: askPin1(bridge, operationId, wrongPin = null, firstPrompt = true)
+        val first = held ?: askPin1(bridge, operationId, request.origin, wrongPin = null, firstPrompt = true)
         if (first == null) {
             fail(bridge, operationId, RappCardFailure.USER_CANCELLED)
             return
@@ -1180,6 +1171,7 @@ internal class RappPhoneProxyDispatcher(
                             askPin1(
                                 bridge,
                                 operationId,
+                                request.origin,
                                 answer as? RappCardAnswer.WrongPin,
                                 firstPrompt = heldFor != null,
                             )
@@ -1211,7 +1203,7 @@ internal class RappPhoneProxyDispatcher(
         pin: Pin1Submission,
         heldFor: AuthenticationCardIdentity?,
     ): RappCardAnswer {
-        if (pinCache?.isRejected(pin) == true) return RappCardAnswer.WrongPin.ALREADY_REJECTED
+        if (pin1Custody.refused(pin)) return RappCardAnswer.WrongPin.ALREADY_REJECTED
         awaitCard(bridge, operationId, RappAuthAction.BROWSER_AUTH)?.let { return RappCardAnswer.Ends(it) }
         val startedNs = System.nanoTime()
         var service =
@@ -1225,11 +1217,11 @@ internal class RappPhoneProxyDispatcher(
         val attemptsLeft: suspend () -> Int? = { pin1AttemptsLeft(card) }
         val before = attemptsLeft()
         val retention = Pin1Retention.of(card, before)
-        if (!custodyContinues(card, heldFor, retention)) return RappCardAnswer.NotHeld
-        val cacheGeneration = pinCache?.generation
+        if (!pin1Custody.admits(card, heldFor, retention)) return RappCardAnswer.NotHeld
+        val cacheGeneration = pin1Custody.generation
         var waitFailure = RappCardFailure.CARD_ERROR
         var signBefore = before
-        if (pinCache?.isVerified(pin, card) != true) {
+        if (!pin1Custody.holds(pin, card)) {
             val verifying = service
             val verification =
                 when (
@@ -1298,22 +1290,6 @@ internal class RappPhoneProxyDispatcher(
     private suspend fun pin1AttemptsLeft(card: AuthenticationCardIdentity): Int? =
         authCardService()?.let { service -> AuthenticationCardReads.pin1AttemptsLeft(service, card) }
 
-    /**
-     * Ends what custody may not keep on [card]: without [retention], its
-     * counter read below pristine or not at all, and a PIN held for another
-     * card, leave nothing held. True when the PIN in hand, held for
-     * [heldFor] or entered when that is null, may go to [card].
-     */
-    private fun custodyContinues(
-        card: AuthenticationCardIdentity,
-        heldFor: AuthenticationCardIdentity?,
-        retention: Pin1Retention?,
-    ): Boolean {
-        val heldElsewhere = heldFor != null && heldFor != card
-        if (retention == null || heldElsewhere) pinCache?.clear()
-        return heldFor == null || (!heldElsewhere && retention != null)
-    }
-
     /** What a refused authentication command means; a wrong PIN is remembered so it is never sent again. */
     private fun authenticationAnswer(
         failure: AuthenticationSignFailure,
@@ -1321,7 +1297,7 @@ internal class RappPhoneProxyDispatcher(
         pin: Pin1Submission,
     ): RappCardAnswer {
         if (failure == AuthenticationSignFailure.WRONG_PIN) {
-            pinCache?.recordRejected(pin.copyBytes())
+            pin1Custody.refuse(pin)
         }
         return RappCardAnswer.of(failure, remainingRetries)
     }
@@ -1383,7 +1359,7 @@ internal class RappPhoneProxyDispatcher(
                     return RappCardAnswer.Ends(RappCardFailure.CARD_ERROR)
                 }
             } else if (retention != null) {
-                pinCache?.recordVerified(pin.copyBytes(), retention, generation)
+                pin1Custody.hold(pin, retention, generation)
             }
             ensureAuthCertCached(service)
             val rawSignature = result.signature.copyBytes()

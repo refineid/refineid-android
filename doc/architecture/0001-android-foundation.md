@@ -48,6 +48,19 @@ targets version 17 independently of the build runtime. API 33 is the initial
 minimum because it matches the physical development device; lowering it is a
 separate compatibility decision.
 
+## Reader permission
+
+The manifest associates the main activity with CCID-class readers. When a
+reader is attached, Android shows its own dialog offering RefineID for it;
+accepting grants the app access to that reader, and choosing to always open
+RefineID for it grants access on every later attach with no dialog (Android
+USB host guide). That dialog is the attach's only prompt: the app adds no
+request of its own on an attach, a detach, a start in the background, or
+after the holder answered. The app asks for access itself only when the
+holder opens it, picks another reader, or starts a card operation with a
+reader it may not use, and never while its earlier request for that reader is
+still on screen.
+
 ## Source relationship
 
 Protocol decisions come from fineid-spec. Shipped reusable Rust should come

@@ -12,6 +12,7 @@ import org.junit.Test
 import uniffi.refineid_rapp.RappBridgeAction
 import uniffi.refineid_rapp.RappBridgeActionKind
 import uniffi.refineid_rapp.RappCardKeyProfile
+import uniffi.refineid_rapp.RappCardReader
 import uniffi.refineid_rapp.RappCloseReason
 import uniffi.refineid_rapp.RappOperationDescriptor
 import uniffi.refineid_rapp.RappOperationKind
@@ -44,6 +45,7 @@ class RappBridgeOutcomeTest {
         frame: ByteArray? = null,
         cardPresent: Boolean? = null,
         certificateFingerprint: ByteArray? = null,
+        cardReader: RappCardReader? = null,
         closeSessionAfterSend: Boolean = false,
         closeReason: RappCloseReason? = null,
     ) = RappBridgeAction(
@@ -56,6 +58,7 @@ class RappBridgeOutcomeTest {
         progressEvent = null,
         cardPresent = cardPresent,
         certificateFingerprint = certificateFingerprint,
+        cardReader = cardReader,
         closeSessionAfterSend = closeSessionAfterSend,
         closeReason = closeReason,
         cardExchangeContinues = false,
@@ -151,17 +154,29 @@ class RappBridgeOutcomeTest {
         val fingerprint = digest(FINGERPRINT_ALGORITHM)
         val present =
             RappBridgeOutcome.from(
-                action(RappBridgeActionKind.CARD_STATUS, cardPresent = true, certificateFingerprint = fingerprint),
+                action(
+                    RappBridgeActionKind.CARD_STATUS,
+                    cardPresent = true,
+                    certificateFingerprint = fingerprint,
+                    cardReader = RappCardReader.ATTACHED,
+                ),
             )
         assertEquals(
             RappCertificateFingerprint.fromWire(fingerprint),
             ((present as RappBridgeOutcome.CardStatus).status as RappCardStatus.Present).fingerprint,
         )
-        val absent = RappBridgeOutcome.from(action(RappBridgeActionKind.CARD_STATUS, cardPresent = false))
+        assertEquals(RappCardReader.ATTACHED, present.reader)
+        val absent =
+            RappBridgeOutcome.from(
+                action(RappBridgeActionKind.CARD_STATUS, cardPresent = false, cardReader = RappCardReader.ABSENT),
+            )
         assertSame(RappCardStatus.Absent, (absent as RappBridgeOutcome.CardStatus).status)
+        assertEquals(RappCardReader.ABSENT, absent.reader)
 
         assertThrows(IllegalStateException::class.java) {
-            RappBridgeOutcome.from(action(RappBridgeActionKind.CARD_STATUS, cardPresent = true))
+            RappBridgeOutcome.from(
+                action(RappBridgeActionKind.CARD_STATUS, cardPresent = true, cardReader = RappCardReader.ATTACHED),
+            )
         }
         assertThrows(IllegalStateException::class.java) {
             RappBridgeOutcome.from(
@@ -169,13 +184,26 @@ class RappBridgeOutcomeTest {
                     RappBridgeActionKind.CARD_STATUS,
                     cardPresent = true,
                     certificateFingerprint = SHORT_TEXT.encodeToByteArray(),
+                    cardReader = RappCardReader.ATTACHED,
                 ),
             )
         }
         assertThrows(IllegalStateException::class.java) {
             RappBridgeOutcome.from(
-                action(RappBridgeActionKind.CARD_STATUS, cardPresent = false, certificateFingerprint = fingerprint),
+                action(
+                    RappBridgeActionKind.CARD_STATUS,
+                    cardPresent = false,
+                    certificateFingerprint = fingerprint,
+                    cardReader = RappCardReader.ABSENT,
+                ),
             )
+        }
+    }
+
+    @Test
+    fun aCardStatusWithoutTheReaderIsRefused() {
+        assertThrows(IllegalStateException::class.java) {
+            RappBridgeOutcome.from(action(RappBridgeActionKind.CARD_STATUS, cardPresent = false))
         }
     }
 

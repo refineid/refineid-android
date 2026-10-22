@@ -17,6 +17,7 @@ import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.usb.CardPresence
 import fi.refineid.android.usb.ReaderConnectionStatus
+import fi.refineid.android.usb.ReaderRefreshCause
 import fi.refineid.android.usb.UsbReaderSnapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -61,7 +62,11 @@ internal class LocalAuthenticationPreparationBackend(
         selected = if (wired) app.readerController else app.nfcReaderController.authenticationCardService
         if (wired) {
             if (!app.readerController.isCardReady) {
-                if (can != null) app.readerController.connect(can.copy(), null) else app.readerController.refresh()
+                if (can != null) {
+                    app.readerController.connect(can.copy(), null)
+                } else {
+                    app.readerController.refresh(ReaderRefreshCause.CARD_WANTED)
+                }
             }
         } else if (can != null || !app.nfcReaderController.snapshot.awaitingCard) {
             // A controller already waiting re-polls a lost card on its own;

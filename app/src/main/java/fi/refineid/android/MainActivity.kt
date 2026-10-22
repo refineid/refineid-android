@@ -19,6 +19,7 @@ import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.ui.MainScreen
 import fi.refineid.android.ui.RefineIdTheme
 import fi.refineid.android.usb.CardPresence
+import fi.refineid.android.usb.ReaderRefreshCause
 import fi.refineid.android.usb.UsbReaderController
 import fi.refineid.android.usb.UsbReaderSnapshot
 import kotlinx.coroutines.CoroutineScope
@@ -121,7 +122,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         nfcReaderController.attach(this)
-        readerController.refresh()
+        readerController.refresh(ReaderRefreshCause.APP_FOREGROUND)
         (application as RefineIdApplication).remoteCardModel.refresh()
     }
 
@@ -134,7 +135,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         AppTrace.activityReceivedIntent()
-        readerController.refresh()
+        readerController.refresh(ReaderRefreshCause.ACTIVITY_INTENT)
     }
 
     override fun onDestroy() {
