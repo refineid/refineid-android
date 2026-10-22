@@ -43,7 +43,9 @@ held against it unless the card is on the contactless interface.
   foreground-service state with network access, the listener keeps answering,
   and the platform shows an ongoing, silent "Remote Access" notification on a
   low-importance channel. The service starts and stops with the listener in
-  `RappPhoneProxyDispatcher`. It holds no protocol state.
+  `RappPhoneProxyDispatcher`. It holds no protocol state. The Bluetooth GATT
+  server and its advertisement (ADR 0043) run in the same process under the
+  same gate, so they keep serving in the background too.
 - **Restart.** `RappCustodianRestartReceiver` handles `BOOT_COMPLETED` and
   `MY_PACKAGE_REPLACED`, so the listener and service return after a reboot or
   an update without the holder opening the app. If the platform refuses a

@@ -28,6 +28,12 @@ import fi.refineid.android.keychain.ExternalKeyPinAuthorization
 import fi.refineid.android.keychain.ExternalKeySignResult
 import fi.refineid.android.network.SigningTimestampAttemptOutcome
 import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.rapp.RappBleGattEvent
+import fi.refineid.android.rapp.RappBleGattProfile
+import fi.refineid.android.rapp.RappBleLinkFailure
+import fi.refineid.android.rapp.RappBleServerStep
+import fi.refineid.android.rapp.RappDialRefusal
+import fi.refineid.android.rapp.RappTransportProfile
 import fi.refineid.android.usb.AuthenticationStatus
 import fi.refineid.android.usb.CardPresence
 import fi.refineid.android.usb.ReaderConnectionStatus
@@ -611,6 +617,56 @@ internal object AppTrace {
         error: String,
     ) {
         debug("rapp:progress-failed stage=" + stage + " error=" + error)
+    }
+
+    /** A step of the Bluetooth server; a failure is written as an error line. */
+    fun rappBleServer(
+        step: RappBleServerStep,
+        code: Int? = null,
+    ) {
+        val line = "ble-server=" + step + (if (code != null) " code=" + code else "")
+        debug(if (step.isFailure) "rapp:error " + line else "rapp:ble " + line)
+    }
+
+    /** A link event; a refused or broken link is written as an error line with its cause. */
+    fun rappBleLink(event: RappBleGattEvent) {
+        when (event) {
+            is RappBleGattEvent.Subscribed -> {
+                val line = "ble-link=" + event.link.serial + " subscribed att-mtu=" + event.attMtu
+                debug(
+                    if (event.accepted) {
+                        "rapp:ble " + line
+                    } else {
+                        "rapp:error " + line + " below=" + RappBleGattProfile.MINIMUM_ATT_MTU
+                    },
+                )
+            }
+
+            is RappBleGattEvent.Routed -> {
+                debug("rapp:ble ble-link=" + event.link.serial + " routed")
+            }
+
+            is RappBleGattEvent.Frame -> {
+                debug("rapp:ble ble-link=" + event.link.serial + " frame bytes=" + event.frame.size)
+            }
+
+            is RappBleGattEvent.Closed -> {
+                val line = "ble-link=" + event.link.serial + " closed=" + event.failure
+                debug(if (event.failure in ORDERLY_LINK_ENDS) "rapp:ble " + line else "rapp:error " + line)
+            }
+
+            is RappBleGattEvent.Unsubscribed -> {
+                debug("rapp:ble ble-link=" + event.link.serial + " unsubscribed")
+            }
+        }
+    }
+
+    /** A dial that got no session, with why. */
+    fun rappDialRefused(
+        transport: RappTransportProfile,
+        refusal: RappDialRefusal,
+    ) {
+        debug("rapp:error dial-refused transport=" + transport + " refusal=" + refusal)
     }
 
     fun browserOpened() {
@@ -1307,6 +1363,9 @@ internal object AppTrace {
 
     private const val MAX_TRACE_LINES = 500
     private const val READER_NAME_TRACE_LIMIT = 48
+
+    /** Link ends nobody needs to act on: the central left, or this phone closed the link. */
+    private val ORDERLY_LINK_ENDS = setOf(RappBleLinkFailure.DISCONNECTED, RappBleLinkFailure.CANCELLED)
     private val traceLogBuffer = ArrayDeque<String>(MAX_TRACE_LINES)
 
     fun getTraceLog(): List<String> =
