@@ -22,6 +22,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
+import kotlin.coroutines.resume
 
 class RefineIdApplication : Application() {
     internal lateinit var readerController: UsbReaderController
@@ -241,9 +242,9 @@ class RefineIdApplication : Application() {
         readerController.start()
         rappProxyDispatcher = createRappProxyDispatcher(primedStore)
         // Either reader's card arriving or leaving is reported on the open
-        // RAPP session (RAPP v26.10.18 section 8.4).
-        readerController.addStateListener { rappProxyDispatcher.cardPresenceChanged(isAnyCardReady()) }
-        nfcReaderController.addStateListener { rappProxyDispatcher.cardPresenceChanged(isAnyCardReady()) }
+        // RAPP session (RAPP v26.10.21 section 8.4).
+        readerController.addStateListener { rappProxyDispatcher.cardChanged() }
+        nfcReaderController.addStateListener { rappProxyDispatcher.cardChanged() }
         startRappProxyListening()
     }
 
@@ -257,30 +258,18 @@ class RefineIdApplication : Application() {
         if (!settings.isCardRemoteAccessEnabled) {
             return
         }
-        val stored =
+        // Forgotten pairings are served too, until their close reaches the
+        // peer (RAPP v26.10.21 section 4.6 item 2).
+        val served =
             fi.refineid.android.rapp.RappStoredPairs
-                .load(rappPairCatalog, rappVault)
-        val newest = stored.maxByOrNull { (peer, _) -> peer.lastUsedMs }
-        try {
-            if (newest == null) {
-                // Without a pairing the session record is still published
-                // while a revocation remains to announce (RAPP v26.10.18
-                // section 4.6 item 4).
-                val now =
-                    fi.refineid.android.rapp.StreamRendezvousName
-                        .nowUnixSeconds()
-                        .toULong()
-                if (rappVault.unexpiredRevocations(now).isNotEmpty()) {
-                    rappProxyDispatcher.startListening(rappVault)
-                }
-            } else if (newest.second.metadata().role == uniffi.refineid_rapp.RappEndpointRole.PROXY) {
-                rappProxyDispatcher.startListening(rappVault)
-            } else {
-                remoteCardModel.refresh()
-            }
-        } catch (_: Exception) {
-        } finally {
-            stored.forEach { (_, record) -> record.close() }
+                .served(rappPairCatalog, rappVault)
+        val roles = served.map { it.pairing.role }.toSet()
+        served.forEach { it.record.close() }
+        if (uniffi.refineid_rapp.RappEndpointRole.PROXY in roles) {
+            rappProxyDispatcher.startListening(rappVault)
+        }
+        if (uniffi.refineid_rapp.RappEndpointRole.REQUESTER in roles) {
+            remoteCardModel.refresh()
         }
     }
 
@@ -301,15 +290,8 @@ class RefineIdApplication : Application() {
             inbox = rappAuthorizationInbox,
             pinCache = authenticationPinCache,
             primedCanStore = primedStore,
-            onAuthenticationRejected = ::invalidateAuthentication,
             onAuthenticationVerified = ::retainAuthenticationPin,
-            activeAuthCertDer = {
-                if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
-                    null
-                } else {
-                    nfcReaderController.currentAuthenticationCertificateDer
-                }
-            },
+            offeredCard = { offeredRappCard(primedStore) },
             authCardService = {
                 if (readerController.snapshot.cardPresence == CardPresence.PRESENT) {
                     readerController
@@ -361,6 +343,42 @@ class RefineIdApplication : Application() {
                 }
             },
         )
+
+    /**
+     * The card this phone can serve a paired computer now (RAPP v26.10.21
+     * section 8.4 item 1): a card ready in the USB reader or on NFC, or a
+     * primed card the holder can present, named by its authentication
+     * certificate.
+     */
+    private suspend fun offeredRappCard(primedStore: PrimedCanStore?): fi.refineid.android.rapp.RappOfferedCard {
+        val der =
+            when {
+                readerController.isCardReady -> readerAuthenticationCertificateDer()
+                nfcReaderController.isCardReady -> nfcReaderController.currentAuthenticationCertificateDer
+                primedStore?.isPrimed() == true -> primedStore.readAuthCertificateDer()
+                else -> null
+            }
+        val certificate = der?.let(fi.refineid.android.rapp.RappCertificate::fromDer)
+        return if (certificate != null) {
+            fi.refineid.android.rapp.RappOfferedCard
+                .Present(certificate)
+        } else {
+            fi.refineid.android.rapp.RappOfferedCard.Absent
+        }
+    }
+
+    private suspend fun readerAuthenticationCertificateDer(): ByteArray? =
+        kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            readerController.requestAuthenticationCertificate { certificate ->
+                val der =
+                    try {
+                        certificate?.copyDer()
+                    } finally {
+                        certificate?.close()
+                    }
+                if (continuation.isActive) continuation.resume(der)
+            }
+        }
 
     // The CSCA trust anchors that close passive authentication's
     // DSC-to-CSCA hop. One DER certificate per file, grouped by issuing

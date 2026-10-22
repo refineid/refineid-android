@@ -27,10 +27,9 @@ class RappPairRecordStoreTest {
     private val key: SecretKey = newKey()
 
     private fun newKey(): SecretKey =
-        KeyGenerator.getInstance("AES").apply { init(AesGcmJournalSealer.KEY_BITS) }.generateKey()
+        KeyGenerator.getInstance("AES").apply { init(AesGcmSealer.KEY_BITS) }.generateKey()
 
-    private fun store(sealingKey: SecretKey = key) =
-        RappPairRecordStore(folder.root, AesGcmJournalSealer { sealingKey })
+    private fun store(sealingKey: SecretKey = key) = RappPairRecordStore(folder.root, AesGcmSealer { sealingKey })
 
     private val record = "pair record with a private key".encodeToByteArray()
 

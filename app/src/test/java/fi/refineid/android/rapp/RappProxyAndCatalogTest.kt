@@ -1,6 +1,7 @@
 // Copyright 2026 Petri Koistinen. Licensed under the Apache License, Version 2.0.
 
 @file:Suppress("MagicNumber", "EmptyFunctionBlock", "MaxLineLength")
+@file:OptIn(ExperimentalStdlibApi::class)
 
 package fi.refineid.android.rapp
 
@@ -22,105 +23,72 @@ import java.util.concurrent.TimeUnit
 
 class RappProxyAndCatalogTest {
     @Test
-    fun decodeHexOrNullReturnsNullOnEmptyString() {
-        assertNull(RappPairingModel.decodeHexOrNull(""))
-    }
-
-    @Test
-    fun decodeHexOrNullReturnsNullOnOddLength() {
-        assertNull(RappPairingModel.decodeHexOrNull("abc"))
-        assertNull(RappPairingModel.decodeHexOrNull("1"))
-    }
-
-    @Test
-    fun decodeHexOrNullReturnsNullOnInvalidCharacters() {
-        assertNull(RappPairingModel.decodeHexOrNull("zz"))
-        assertNull(RappPairingModel.decodeHexOrNull("1g"))
-        assertNull(RappPairingModel.decodeHexOrNull("deadbeefzz"))
-    }
-
-    @Test
-    fun decodeHexOrNullParsesValidHexBytes() {
-        assertArrayEquals(byteArrayOf(0x00), RappPairingModel.decodeHexOrNull("00"))
-        assertArrayEquals(byteArrayOf(0x01, 0x02, 0x0a, 0x0f), RappPairingModel.decodeHexOrNull("01020a0f"))
-        assertArrayEquals(
-            byteArrayOf(0xde.toByte(), 0xad.toByte(), 0xbe.toByte(), 0xef.toByte()),
-            RappPairingModel.decodeHexOrNull("deadbeef"),
-        )
-        assertArrayEquals(
-            byteArrayOf(0xCA.toByte(), 0xFE.toByte(), 0xBA.toByte(), 0xBE.toByte()),
-            RappPairingModel.decodeHexOrNull("CAFEBABE"),
-        )
-    }
-
-    @Test
     fun pairCatalogSavesAndRetrievesPeersWithAllFields() {
-        val prefs = FakeSharedPreferences()
-        val catalog = RappPairCatalog(prefs)
-
+        val catalog = RappPairCatalog(FakeSharedPreferences())
         assertTrue(catalog.listPairs().isEmpty())
 
-        val pairId = byteArrayOf(0x01, 0x02, 0x03, 0x04)
-        val certDer = byteArrayOf(0x30, 0x82.toByte(), 0x01, 0x00)
+        val pairId = PAIR_ID_TEXT.encodeToByteArray()
+        val pairIdHex = pairId.toHexString()
+        val certDer = CERTIFICATE_TEXT.encodeToByteArray()
         catalog.savePair(
             pairId = pairId,
-            displayName = "MacBook Pro",
-            platform = "macOS",
-            createdAtMs = 123456789L,
-            holderName = "Alice",
-            certificateDerBase64 = "MIIBAA==",
+            displayName = DISPLAY_NAME,
+            platform = PLATFORM,
+            createdAtMs = CREATED_AT_MS,
+            holderName = HOLDER_NAME,
         )
 
-        val pairs = catalog.listPairs()
-        assertEquals(1, pairs.size)
-        val peer = pairs.first()
-        assertEquals("01020304", peer.pairIdHex)
-        assertEquals("MacBook Pro", peer.displayName)
-        assertEquals("macOS", peer.platform)
-        assertEquals(123456789L, peer.createdAtMs)
-        assertEquals("Alice", peer.holderName)
-        assertEquals("MIIBAA==", peer.certificateDerBase64)
+        val peer = catalog.listPairs().single()
+        assertEquals(pairIdHex, peer.pairIdHex)
+        assertEquals(DISPLAY_NAME, peer.displayName)
+        assertEquals(PLATFORM, peer.platform)
+        assertEquals(CREATED_AT_MS, peer.createdAtMs)
+        assertEquals(HOLDER_NAME, peer.holderName)
+        assertNull(peer.forgottenAtMs)
 
-        // Update holder name
-        catalog.updateHolderName("01020304", "Alice Smith")
-        val updatedName = catalog.listPairs().first()
-        assertEquals("Alice Smith", updatedName.holderName)
+        catalog.updateHolderName(pairIdHex, OTHER_HOLDER_NAME)
+        assertEquals(OTHER_HOLDER_NAME, catalog.listPairs().single().holderName)
 
-        // Update certificate DER
-        catalog.updateCertificateDer("01020304", certDer)
-        val updatedCert = catalog.listPairs().first()
-        val expectedBase64 =
+        catalog.updateCertificateDer(pairIdHex, certDer)
+        assertEquals(
             java.util.Base64
                 .getEncoder()
-                .encodeToString(certDer)
-        assertEquals(expectedBase64, updatedCert.certificateDerBase64)
-
-        // Remove pair
-        catalog.removePair("01020304")
-        assertTrue(catalog.listPairs().isEmpty())
-
-        // Save again and clearAll
-        catalog.savePair(
-            pairId = pairId,
-            displayName = "MacBook Pro",
-            platform = "macOS",
-            createdAtMs = 123456789L,
+                .encodeToString(certDer),
+            catalog.listPairs().single().certificateDerBase64,
         )
-        assertEquals(1, catalog.listPairs().size)
-        catalog.clearAll()
+
+        catalog.removePair(pairIdHex)
+        assertTrue(catalog.allPairs().isEmpty())
+    }
+
+    @Test
+    fun aForgottenPairingLeavesTheListButStaysCatalogued() {
+        val catalog = RappPairCatalog(FakeSharedPreferences())
+        val pairId = PAIR_ID_TEXT.encodeToByteArray()
+        catalog.savePair(pairId, DISPLAY_NAME, PLATFORM, createdAtMs = CREATED_AT_MS)
+        catalog.markForgotten(pairId.toHexString(), FORGOTTEN_AT_MS)
+
         assertTrue(catalog.listPairs().isEmpty())
+        val forgotten = catalog.forgottenPairs().single()
+        assertEquals(FORGOTTEN_AT_MS, forgotten.forgottenAtMs)
+        assertEquals(CREATED_AT_MS, forgotten.lastUsedMs)
+
+        catalog.removePair(pairId.toHexString())
+        assertTrue(catalog.allPairs().isEmpty())
     }
 
     @Test
     fun aPairingsLastUseStartsAtCreationAndFollowsItsSessions() {
         val catalog = RappPairCatalog(FakeSharedPreferences())
-        catalog.savePair(byteArrayOf(1, 2), "Laptop", "macOS", createdAtMs = 1_000L)
-        catalog.savePair(byteArrayOf(3, 4), "Desktop", "Windows", createdAtMs = 2_000L)
-        assertEquals(1_000L, catalog.listPairs().first { it.pairIdHex == "0102" }.lastUsedMs)
-        catalog.markUsed("0102", 5_000L)
+        val laptop = PAIR_ID_TEXT.encodeToByteArray()
+        val desktop = OTHER_PAIR_ID_TEXT.encodeToByteArray()
+        catalog.savePair(laptop, DISPLAY_NAME, PLATFORM, createdAtMs = CREATED_AT_MS)
+        catalog.savePair(desktop, DISPLAY_NAME, PLATFORM, createdAtMs = OTHER_CREATED_AT_MS)
+        assertEquals(CREATED_AT_MS, catalog.listPairs().first { it.pairIdHex == laptop.toHexString() }.lastUsedMs)
+        catalog.markUsed(laptop.toHexString(), USED_AT_MS)
         val pairs = catalog.listPairs()
-        assertEquals(5_000L, pairs.first { it.pairIdHex == "0102" }.lastUsedMs)
-        assertEquals(2_000L, pairs.first { it.pairIdHex == "0304" }.lastUsedMs)
+        assertEquals(USED_AT_MS, pairs.first { it.pairIdHex == laptop.toHexString() }.lastUsedMs)
+        assertEquals(OTHER_CREATED_AT_MS, pairs.first { it.pairIdHex == desktop.toHexString() }.lastUsedMs)
     }
 
     @Test
@@ -512,5 +480,16 @@ class RappProxyAndCatalogTest {
 
     private companion object {
         const val OPENSSL_EXECUTABLE_NAME = "openssl"
+        const val PAIR_ID_TEXT = "pair-identifier!"
+        const val OTHER_PAIR_ID_TEXT = "other-identifier"
+        const val CERTIFICATE_TEXT = "synthetic certificate"
+        const val DISPLAY_NAME = "Laptop"
+        const val PLATFORM = "macOS"
+        const val HOLDER_NAME = "Holder"
+        const val OTHER_HOLDER_NAME = "Other Holder"
+        const val CREATED_AT_MS = 1_700_000_000_000L
+        const val OTHER_CREATED_AT_MS = 1_700_000_001_000L
+        const val USED_AT_MS = 1_700_000_005_000L
+        const val FORGOTTEN_AT_MS = 1_700_000_009_000L
     }
 }

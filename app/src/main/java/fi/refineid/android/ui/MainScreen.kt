@@ -55,6 +55,7 @@ import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -296,6 +297,16 @@ internal fun MainScreen(
 
     rappInbox?.currentRequest?.let { req ->
         RappAuthorizationDialog(request = req)
+    }
+
+    rappInbox?.currentNotice?.let { notice ->
+        AlertDialog(
+            onDismissRequest = rappInbox::dismissNotice,
+            text = { Text(stringResource(notice)) },
+            confirmButton = {
+                TextButton(onClick = rappInbox::dismissNotice) { Text(stringResource(android.R.string.ok)) }
+            },
+        )
     }
 
     rappInbox?.currentTapPrompt?.let { prompt ->

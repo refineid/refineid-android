@@ -16,7 +16,7 @@ import java.security.SecureRandom
 
 /**
  * Drives [RappCustodianPairingCeremony] against a requester bridge in the
- * order RAPP v26.10.18 section 6.1.3 fixes, after the requester decoded the
+ * order RAPP v26.10.21 section 6.1.3 fixes, after the requester decoded the
  * custodian's offer bootstrap (section 4.2).
  */
 class RappCustodianPairingCeremonyTest {
@@ -29,9 +29,9 @@ class RappCustodianPairingCeremonyTest {
         const val WALL_CLOCK_MS = 1_700_000_000_000UL
         val OFFERED_PROFILES =
             listOf(
-                "fi.refineid.card-status.v1",
-                "fi.refineid.authentication.v1",
-                "fi.refineid.document-signing.v1",
+                "fi.refineid.card-status",
+                "fi.refineid.authentication",
+                "fi.refineid.document-signing",
             )
     }
 

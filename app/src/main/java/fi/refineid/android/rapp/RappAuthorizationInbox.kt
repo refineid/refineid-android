@@ -2,6 +2,7 @@ package fi.refineid.android.rapp
 
 import android.content.Context
 import android.content.res.Resources
+import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -20,8 +21,11 @@ internal sealed interface RappAuthRequest {
     val action: RappAuthAction
     val onDenied: () -> Unit
 
-    /** Called once the consent view is on screen (RAPP v26.10.18 section 8.2 item 3). */
+    /** Called once the consent view is on screen (RAPP v26.10.21 section 8.2 item 3). */
     val onShown: () -> Unit
+
+    /** Set when this prompt asks again after a wrong PIN (RAPP v26.10.21 section 10.2). */
+    val wrongPin: RappCardAnswer.WrongPin?
 
     data class BrowserAuth(
         override val requestId: String,
@@ -29,6 +33,7 @@ internal sealed interface RappAuthRequest {
         val onApproved: (Pin1Submission) -> Unit,
         override val onDenied: () -> Unit,
         override val onShown: () -> Unit,
+        override val wrongPin: RappCardAnswer.WrongPin? = null,
     ) : RappAuthRequest {
         override val action: RappAuthAction get() = RappAuthAction.BROWSER_AUTH
     }
@@ -41,6 +46,7 @@ internal sealed interface RappAuthRequest {
         val onApproved: (Pin2Submission) -> Unit,
         override val onDenied: () -> Unit,
         override val onShown: () -> Unit,
+        override val wrongPin: RappCardAnswer.WrongPin? = null,
     ) : RappAuthRequest {
         override val action: RappAuthAction get() = RappAuthAction.DOCUMENT_SIGN
     }
@@ -70,6 +76,10 @@ internal class RappAuthorizationInbox(
     var currentTapPrompt by mutableStateOf<RappCardTapPrompt?>(null)
         private set
 
+    /** A message for the holder about a request that ended on the phone. */
+    var currentNotice by mutableStateOf<Int?>(null)
+        private set
+
     fun updateForeground(foreground: Boolean) {
         isForeground = foreground
         if (foreground) {
@@ -89,11 +99,13 @@ internal class RappAuthorizationInbox(
         onApproved: (Pin1Submission) -> Unit,
         onDenied: () -> Unit,
         onShown: () -> Unit = {},
+        wrongPin: RappCardAnswer.WrongPin? = null,
     ) {
         val req =
             RappAuthRequest.BrowserAuth(
                 requestId = requestId,
                 requester = requester,
+                wrongPin = wrongPin,
                 onApproved = { pin1 ->
                     notificationManager.dismissNotification()
                     currentRequest = null
@@ -119,11 +131,13 @@ internal class RappAuthorizationInbox(
         onApproved: (Pin2Submission) -> Unit,
         onDenied: () -> Unit,
         onShown: () -> Unit = {},
+        wrongPin: RappCardAnswer.WrongPin? = null,
     ) {
         val req =
             RappAuthRequest.DocumentSign(
                 requestId = requestId,
                 requester = requester,
+                wrongPin = wrongPin,
                 documentNames = documentNames,
                 onApproved = { pin2 ->
                     notificationManager.dismissNotification()
@@ -164,6 +178,17 @@ internal class RappAuthorizationInbox(
                 notificationManager.postAuthorizationNotification(requestId, tapPromptText(it), waitsOnCard = true)
             }
         }
+    }
+
+    /** Shows [message] to the holder until dismissed. */
+    fun tell(
+        @StringRes message: Int,
+    ) {
+        currentNotice = message
+    }
+
+    fun dismissNotice() {
+        currentNotice = null
     }
 
     fun dismissTapPrompt(requestId: String? = null) {

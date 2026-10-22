@@ -1,4 +1,4 @@
-@file:Suppress("TooGenericExceptionCaught", "SwallowedException", "MagicNumber", "MaxLineLength")
+@file:Suppress("TooGenericExceptionCaught", "SwallowedException")
 
 package fi.refineid.android.rapp
 
@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappEndpointRole
 import uniffi.refineid_rapp.RappPairRecord
 
@@ -48,116 +49,95 @@ internal class RemoteCardModel(
     private val _hasPair = MutableStateFlow(false)
     val hasPair: StateFlow<Boolean> = _hasPair.asStateFlow()
 
+    private companion object {
+        const val CERTIFICATE_READ_TIMEOUT_MS = 15_000L
+    }
+
     init {
         refreshCachedIdentity()
     }
 
     fun setCertificateDer(der: ByteArray) {
         _certificateDer.value = der
-        val pairs = catalog.listPairs()
-        if (pairs.isNotEmpty()) {
-            val newest = pairs.maxByOrNull { it.createdAtMs } ?: pairs.first()
-            catalog.updateCertificateDer(newest.pairIdHex, der)
-        }
+        val newest = newestPeer() ?: return
+        catalog.updateCertificateDer(newest.pairIdHex, der)
+    }
+
+    /** The most recently created pairing the user has not forgotten. */
+    private fun newestPeer(): PairedPeer? = catalog.listPairs().maxByOrNull { it.createdAtMs }
+
+    /** The record of [peer] when this device is its requester; null otherwise. */
+    private fun requesterRecord(peer: PairedPeer): RappPairRecord? {
+        val pairId = RappPairId.fromKey(peer.pairIdHex) ?: return null
+        val record =
+            try {
+                RappPairRecord.loadFromVault(pairId.toWire(), vault)
+            } catch (_: RappBindingException) {
+                return null
+            }
+        val requester =
+            try {
+                record.pairing().role == RappEndpointRole.REQUESTER
+            } catch (_: Exception) {
+                false
+            }
+        if (!requester) record.close()
+        return record.takeIf { requester }
     }
 
     fun createRequesterClient(): RappRequesterClient? {
-        val pairs = catalog.listPairs()
-        if (pairs.isEmpty()) return null
-        val newest = pairs.maxByOrNull { it.createdAtMs } ?: pairs.first()
-        val pairIdBytes =
-            try {
-                newest.pairIdHex
-                    .chunked(2)
-                    .map { it.toInt(16).toByte() }
-                    .toByteArray()
-            } catch (_: Exception) {
-                return null
-            }
-
-        val record =
-            try {
-                RappPairRecord.loadFromVault(pairIdBytes, vault)
-            } catch (_: Exception) {
-                return null
-            }
-
-        if (record.metadata().role != RappEndpointRole.REQUESTER) {
-            return null
-        }
-        return RappRequesterClient(context, scope, record, vault)
+        val newest = newestPeer() ?: return null
+        val record = requesterRecord(newest) ?: return null
+        return client(newest, record)
     }
+
+    private fun client(
+        peer: PairedPeer,
+        record: RappPairRecord,
+    ): RappRequesterClient =
+        RappRequesterClient(context, scope, record, vault, onPairingRevoked = { pairingRevoked(peer.pairIdHex) })
 
     fun refresh() {
         refreshCachedIdentity()
-        val pairs = catalog.listPairs()
-        if (pairs.isEmpty()) return
-        val newest = pairs.maxByOrNull { it.createdAtMs } ?: pairs.first()
-        val pairIdBytes =
-            try {
-                newest.pairIdHex
-                    .chunked(2)
-                    .map { it.toInt(16).toByte() }
-                    .toByteArray()
-            } catch (_: Exception) {
-                return
-            }
+        deliverRevocationNotices()
+        val newest = newestPeer() ?: return
+        val record = requesterRecord(newest)
+        _hasPair.value = record != null
+        if (record != null) connect(record, newest)
+    }
 
-        val record =
-            try {
-                RappPairRecord.loadFromVault(pairIdBytes, vault)
-            } catch (_: Exception) {
-                return
+    /**
+     * Dials each forgotten pairing once to deliver its `pairing_revoked`
+     * close (RAPP v26.10.21 section 4.6 item 2); one delivered is destroyed
+     * and leaves the catalog.
+     */
+    private fun deliverRevocationNotices() {
+        for (peer in catalog.forgottenPairs()) {
+            val record = requesterRecord(peer) ?: continue
+            scope.launch(Dispatchers.IO) {
+                if (RappRequesterClient(context, scope, record, vault).deliverRevocationNotice()) {
+                    catalog.removePair(peer.pairIdHex)
+                }
             }
-
-        if (record.metadata().role != RappEndpointRole.REQUESTER) {
-            _hasPair.value = false
-            return
         }
-
-        _hasPair.value = true
-        connect(record, newest.pairIdHex)
     }
 
     private fun refreshCachedIdentity() {
-        val pairs = catalog.listPairs()
-        if (pairs.isEmpty()) {
-            _hasPair.value = false
-            _holderName.value = null
-            _cardDetails.value = null
-            return
-        }
-        val newest = pairs.maxByOrNull { it.createdAtMs } ?: pairs.first()
-        val pairIdBytes =
-            try {
-                newest.pairIdHex
-                    .chunked(2)
-                    .map { it.toInt(16).toByte() }
-                    .toByteArray()
-            } catch (_: Exception) {
-                return
-            }
-
-        val record =
-            try {
-                RappPairRecord.loadFromVault(pairIdBytes, vault)
-            } catch (_: Exception) {
-                return
-            }
-
-        if (record.metadata().role != RappEndpointRole.REQUESTER) {
+        val newest = newestPeer()
+        val record = newest?.let(::requesterRecord)
+        if (newest == null || record == null) {
             _hasPair.value = false
             _holderName.value = null
             _cardDetails.value = null
             _certificateDer.value = null
             return
         }
-
+        record.close()
         _hasPair.value = true
         if (!newest.certificateDerBase64.isNullOrBlank()) {
             try {
                 _certificateDer.value = Base64.decode(newest.certificateDerBase64, Base64.NO_WRAP)
-            } catch (_: Exception) {
+            } catch (_: IllegalArgumentException) {
             }
         }
         if (!newest.holderName.isNullOrBlank()) {
@@ -169,39 +149,24 @@ internal class RemoteCardModel(
         }
     }
 
-    fun connect(
-        record: RappPairRecord? = null,
-        pairIdHex: String? = null,
+    private fun connect(
+        record: RappPairRecord,
+        peer: PairedPeer,
     ) {
         if (_isConnecting.value) return
         scope.launch(Dispatchers.IO) {
             _isConnecting.value = true
             try {
-                val currentRecord =
-                    record ?: run {
-                        val pairs = catalog.listPairs()
-                        if (pairs.isEmpty()) return@launch
-                        val newest = pairs.maxByOrNull { it.createdAtMs } ?: pairs.first()
-                        val bytes =
-                            newest.pairIdHex
-                                .chunked(2)
-                                .map { it.toInt(16).toByte() }
-                                .toByteArray()
-                        RappPairRecord.loadFromVault(bytes, vault)
-                    }
-                val currentPairIdHex =
-                    pairIdHex ?: currentRecord.metadata().pairId.joinToString("") { "%02x".format(it) }
-
-                val client = RappRequesterClient(context, scope, currentRecord, vault)
-                val certDer = client.readAuthenticationCertificate(timeoutMs = 15_000L)
-                if (certDer != null) {
+                val certificate = client(peer, record).readAuthenticationCertificate(CERTIFICATE_READ_TIMEOUT_MS)
+                if (certificate != null) {
+                    val certDer = certificate.toWire()
                     setCertificateDer(certDer)
                     val name = CertificateHolderName.fromDer(certDer)
-                    val details = PersonCardDetails.fromDer(certDer)
                     if (name != null) {
                         _holderName.value = name
-                        _cardDetails.value = details ?: PersonCardDetails.fromHolderName(name)
-                        catalog.updateHolderName(currentPairIdHex, name)
+                        _cardDetails.value =
+                            PersonCardDetails.fromDer(certDer) ?: PersonCardDetails.fromHolderName(name)
+                        catalog.updateHolderName(peer.pairIdHex, name)
                     }
                 }
             } catch (e: Exception) {
@@ -214,24 +179,32 @@ internal class RemoteCardModel(
         }
     }
 
-    fun forget() {
+    /** The custodian forgot the pairing: its identity is withdrawn at once (RAPP v26.10.21 section 4.6 item 4). */
+    private fun pairingRevoked(pairIdHex: String) {
+        catalog.removePair(pairIdHex)
+        withdrawIdentity()
+    }
+
+    private fun withdrawIdentity() {
         _certificateDer.value = null
         _holderName.value = null
         _cardDetails.value = null
         _hasPair.value = false
-        val pairs = catalog.listPairs()
-        for (p in pairs) {
-            try {
-                val bytes =
-                    p.pairIdHex
-                        .chunked(2)
-                        .map { it.toInt(16).toByte() }
-                        .toByteArray()
-                RappPairRevocation.revoke(bytes, vault)
-            } catch (_: Exception) {
+    }
+
+    /**
+     * Forgets every pairing (RAPP v26.10.21 section 4.6): each record keeps its
+     * key only to deliver the `pairing_revoked` close on its next session.
+     */
+    fun forget() {
+        withdrawIdentity()
+        for (peer in catalog.listPairs()) {
+            val pairId = RappPairId.fromKey(peer.pairIdHex)
+            if (pairId != null && RappPairRevocation.forget(pairId, vault)) {
+                catalog.markForgotten(peer.pairIdHex, System.currentTimeMillis())
+            } else {
+                catalog.removePair(peer.pairIdHex)
             }
-            catalog.removePair(p.pairIdHex)
         }
-        catalog.clearAll()
     }
 }

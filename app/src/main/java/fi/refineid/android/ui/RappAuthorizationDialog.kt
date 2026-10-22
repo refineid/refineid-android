@@ -57,6 +57,7 @@ import fi.refineid.android.nfc.NfcCardWait
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.rapp.RappAuthAction
 import fi.refineid.android.rapp.RappAuthRequest
+import fi.refineid.android.rapp.RappCardAnswer
 import fi.refineid.android.rapp.rappRequestText
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
@@ -110,6 +111,8 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                 if (request is RappAuthRequest.DocumentSign) {
                     RappDocumentNames(request.documentNames)
                 }
+
+                request.wrongPin?.let { RappWrongPinNotice(it) }
 
                 OutlinedTextField(
                     value = pin,
@@ -183,6 +186,26 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** The card refused the PIN: said so, with the attempts the card still allows when it told them. */
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Composable
+private fun RappWrongPinNotice(wrongPin: RappCardAnswer.WrongPin) {
+    Column(modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+        Text(
+            text = stringResource(R.string.wrong_pin),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+        )
+        wrongPin.attemptsLeft?.let { attempts ->
+            Text(
+                text = stringResource(R.string.pin_attempts_left, attempts),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }

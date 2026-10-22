@@ -15,13 +15,13 @@ import uniffi.refineid_rapp.rappStreamProfileName
 
 /**
  * Session discovery publishes no stable value, and a connection is routed
- * only by the routing tag in its preamble (RAPP v26.10.18 section 2.2.1).
+ * only by the routing tag in its preamble (RAPP v26.10.21 section 2.2.1).
  */
 class RappSessionDiscoveryTest {
     private companion object {
         const val NOW = 1_000UL
         const val TOKEN_BYTES = 16
-        val PROFILES = listOf("fi.refineid.card-status.v1")
+        val PROFILES = listOf("fi.refineid.card-status")
     }
 
     @Before

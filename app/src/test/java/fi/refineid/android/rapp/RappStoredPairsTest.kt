@@ -7,7 +7,7 @@ import org.junit.Test
 
 /**
  * The start-up sweep revokes every vault record no catalogue entry names
- * (RAPP v26.10.18 section 4.3 item 4).
+ * (RAPP v26.10.21 section 4.3 item 4).
  */
 class RappStoredPairsTest {
     @Test

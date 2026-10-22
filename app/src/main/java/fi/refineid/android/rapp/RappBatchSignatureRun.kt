@@ -2,15 +2,13 @@
 
 package fi.refineid.android.rapp
 
-import fi.refineid.android.core.QualifiedSignResult
-
 /**
- * Signs the documents of one `batch_sign_documents` request in order
- * (RAPP v26.10.18 section 9.3).
+ * Signs the documents of one signing request in order (RAPP v26.10.21
+ * section 9.3); a single document is a batch of one.
  *
- * Each signature is recorded, and so journaled by the bridge, before the
- * next document is signed. The run stops at the first document that does not
- * sign; already signed documents are never signed again.
+ * Each signature is recorded before the next document is signed. The run
+ * stops at the first document that does not sign; already signed documents
+ * are never signed again, and a stopped run delivers none of them.
  */
 internal class RappBatchSignatureRun(
     private val digests: List<ByteArray>,
@@ -24,12 +22,9 @@ internal class RappBatchSignatureRun(
             val wireSignature: ByteArray,
         ) : Step
 
-        /**
-         * The document did not sign: [failure] when the card answered, null
-         * when the card was lost or the run was abandoned.
-         */
+        /** The document did not sign, and the operation ends with [failure]. */
         class Failed(
-            val failure: QualifiedSignResult.Failure?,
+            val failure: RappCardFailure,
         ) : Step
     }
 
@@ -41,7 +36,7 @@ internal class RappBatchSignatureRun(
         /** Signing stopped after [signedCount] recorded signatures. */
         class Stopped(
             val signedCount: Int,
-            val failure: QualifiedSignResult.Failure?,
+            val failure: RappCardFailure,
         ) : Outcome
     }
 

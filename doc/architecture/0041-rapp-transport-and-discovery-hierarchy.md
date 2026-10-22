@@ -46,7 +46,7 @@ When remote reader proxying is enabled, RefineID implements a strict fallback hi
 │         - Cross-platform proximity-gated link (Android, Linux, Win, Mac)│
 │         - Android BluetoothGattServer (API 21+) / SAR Framing           │
 │         - Advisory RSSI discovery gate (>= -55 dBm)                     │
-│         - Profile: fi.refineid.rapp.ble.v1                              │
+│         - Profile: fi.refineid.rapp.ble                                 │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      │ fallback (BLE unavailable or out-of-range)
                                      ▼
@@ -56,35 +56,35 @@ When remote reader proxying is enabled, RefineID implements a strict fallback hi
 │         - Android NsdManager registration: _refineid-stream._tcp.       │
 │         - Phone acts as mDNS responder & TCP listener (ephemeral port)  │
 │         - Workstation acts strictly as mDNS browser & outbound client   │
-│         - Profile: fi.refineid.stream.v1                                │
+│         - Profile: fi.refineid.stream                                   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.1 Tier 2: Bluetooth Low Energy Proximity (`fi.refineid.rapp.ble.v1`)
+### 2.1 Tier 2: Bluetooth Low Energy Proximity (`fi.refineid.rapp.ble`)
 - **Android Underlay**: `BluetoothLeAdvertiser.startAdvertising` + `BluetoothGattServer` opened via `BluetoothManager.openGattServer`.
   - Service UUID: `7E39FD01-A6B5-4D78-9E11-37E28E9545F1`
   - Channel Characteristic: `7E39FD02-A6B5-4D78-9E11-37E28E9545F1` (`PROPERTY_WRITE | PROPERTY_INDICATE`)
   - Bootstrap Characteristic: `7E39FD03-A6B5-4D78-9E11-37E28E9545F1` (`PROPERTY_READ`)
   - Framing: Mandates ATT MTU Exchange ($\ge 512$ bytes) and RAPP BLE SAR framing (6-byte header: Total Frame Length, Chunk Sequence, Flags, Reserved).
 - **Advisory Proximity Gating**: Requester monitors RSSI and enforces an advisory discovery gate ($\ge -55\text{ dBm}$ filtered median over at least 3 packets, configurable to $-85\text{ dBm}$ in isolated developer testing).
-  - *Threat Model Note*: Per RAPP v26.10.18 §4.4, RSSI is strictly an advisory filter and defense-in-depth heuristic; it does NOT prove physical proximity or defeat transparent RF relays or wormholes. Protection against unauthorized execution is provided at Layer 7 by explicit per-operation user consent on the phone display and PIN verification.
+  - *Threat Model Note*: Per RAPP v26.10.21 §4.4, RSSI is strictly an advisory filter and defense-in-depth heuristic; it does NOT prove physical proximity or defeat transparent RF relays or wormholes. Protection against unauthorized execution is provided at Layer 7 by explicit per-operation user consent on the phone display and PIN verification.
 - **Clarification on L2CAP CoC**:
   - `BluetoothGattServer` does not manage L2CAP channels. On Android 10+ (API 29+), Bluetooth Low Energy Connection-Oriented Channels (CoC) are managed via `BluetoothAdapter.listenUsingInsecureL2capChannel` / `listenUsingL2capChannel` (returning `BluetoothServerSocket`), with dynamic PSMs discovered via `serverSocket.getPsm()`.
-  - Because public user-space APIs for BLE L2CAP CoC are not supported on all client platforms (such as Windows user-space), GATT-based `fi.refineid.rapp.ble.v1` is the canonical cross-platform Tier 2 profile. Any future credit-based CoC profile would be a separate, distinct adaptation (`fi.refineid.rapp.ble-coc.v1`).
+  - Because public user-space APIs for BLE L2CAP CoC are not supported on all client platforms (such as Windows user-space), GATT-based `fi.refineid.rapp.ble` is the canonical cross-platform Tier 2 profile. Any future credit-based CoC profile would be a separate, distinct adaptation (`fi.refineid.rapp.ble-coc.v1`).
 - **Zero OS Bonding**: No Android Bluetooth pairing dialogs or OS PIN passkeys. Security is entirely provided by application-layer Noise cryptography (`Noise_XXpsk3` for pairing, `Noise_KK` for sessions).
 
-### 2.2 Tier 3: Local IP Stream Discovery (`fi.refineid.stream.v1`)
+### 2.2 Tier 3: Local IP Stream Discovery (`fi.refineid.stream`)
 - **Discovery Service**: `_refineid-stream._tcp.` via Android `NsdManager.registerService`.
 - **Ephemeral Port**: An ephemeral TCP `ServerSocket(0)` is bound on the local Wi-Fi interface.
 - **Privacy (RFC 8882)**:
   - The service instance name MUST be a fresh, ephemeral random string generated on each registration: `refineid-[random_8_hex]._refineid-stream._tcp.local.`, preventing long-term device tracking across networks.
   - The SRV record target MUST use an anonymized, ephemeral host label: `refineid-[random_8_hex].local.`, avoiding leakage of Android device or user names.
-  - No value that stays the same across connections is published or sent. Each session dial opens with a fresh 16-byte nonce and a routing tag keyed from the pairing's static agreement (RAPP v26.10.18 §2.2.1); the phone routes it with one `RappSessionRouter` per listener and refuses unknown or replayed tags without answering.
+  - No value that stays the same across connections is published or sent. Each session dial opens with a fresh 16-byte nonce and a routing tag keyed from the pairing's static agreement (RAPP v26.10.21 §2.2.1); the phone routes it with one `RappSessionRouter` per listener and refuses unknown or replayed tags without answering.
   - TXT records publish `mode=pairing` during pairing, `mode=session` with the rotating 15-minute discovery hints of the four most recently used pairings (built by `rappSessionRecord`) during operational reconnection, and `mode=withdrawn` when the user switches the service off.
-- **Revocation** (RAPP v26.10.18 §4.6): forgetting a pairing closes an open session to it as `pairing_revoked`, then revokes the record through the core, which returns a revocation retention. The custodian keeps every retention sealed in its no-backup directory and carries the revocation hints of the pairings revoked within the last 30 days in the `revoked` attribute of its `mode=session` record, recomputed for the instance name and the 15-minute window, so a requester that still holds the pairing learns the phone forgot it. The core reports when a retention has expired and the store drops it.
-- **Storage confirmation** (RAPP v26.10.18 §4.3 item 4): the custodian stores the unconfirmed pair record, sends `pairing.stored`, and stores the confirmed record over it only after the requester's `pairing.stored`; a record found unconfirmed at start, or left unconfirmed when the ceremony ends, is revoked and announced like any other revocation.
-- **Card presence** (RAPP v26.10.18 §8.4): on every established session the custodian sends `card.status` once and again whenever a card on the USB reader or on NFC arrives or leaves; primed material without a card is absence.
-- **Withdrawal** (RAPP v26.10.18 §4.5): switching Remote Access off closes the open session with `service_withdrawn`, stops accepting connections, re-registers the same instance with the `rappWithdrawnRecord` TXT for three seconds, and then unregisters. The system suspending the app is not a withdrawal.
+- **Revocation** (RAPP v26.10.21 §4.6): forgetting a pairing with its session open closes the session as `pairing_revoked` and destroys the record. Without an open session the core marks the record forgotten: it leaves the list of paired devices but keeps its key, its discovery hint stays in the `mode=session` record and its routing tag still routes, and the next session carries only the `pairing_revoked` close, after which the key is destroyed. A forgotten record that kept its key for 30 days is destroyed untold at start.
+- **Storage confirmation** (RAPP v26.10.21 §4.3 item 4): the custodian stores the unconfirmed pair record, sends `pairing.stored`, and stores the confirmed record over it only after the requester's `pairing.stored`; a record found unconfirmed at start, or left unconfirmed when the ceremony ends, is destroyed and nobody is told.
+- **Card presence** (RAPP v26.10.21 §8.4): on every established session the custodian sends `card.status` once before any operation runs and again whenever the card it can serve changes. A card ready on the USB reader or on NFC, or a primed card the holder can present, is present and named by the SHA-256 fingerprint of its authentication certificate; an operation that ends without the card answering reports absence until a card is coupled again.
+- **Withdrawal** (RAPP v26.10.21 §4.5): switching Remote Access off closes the open session with `service_withdrawn`, stops accepting connections, re-registers the same instance with the `rappWithdrawnRecord` TXT for three seconds, and then unregisters. The system suspending the app is not a withdrawal.
 - **Stream Lifecycle**:
   1. User toggles `Allow Remote Reader` on Android.
   2. Android app binds ephemeral `ServerSocket(0)` and registers `NsdServiceInfo` with `NsdManager`.

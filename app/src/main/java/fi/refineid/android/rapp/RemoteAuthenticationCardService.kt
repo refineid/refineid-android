@@ -52,7 +52,7 @@ internal class RemoteAuthenticationCardService(
 
         scope.launch(Dispatchers.IO) {
             val client = remoteCardModel.createRequesterClient()
-            val certDer = client?.readAuthenticationCertificate(timeoutMs = 15_000L)
+            val certDer = client?.readAuthenticationCertificate()?.toWire()
             if (certDer != null) {
                 remoteCardModel.setCertificateDer(certDer)
                 val keyProfile = determineKeyProfile(certDer)
@@ -123,7 +123,6 @@ internal class RemoteAuthenticationCardService(
                     keyProfile = rappKeyProfile,
                     algorithm = rappAlgorithm,
                     digest = digest,
-                    timeoutMs = 60_000L,
                 )
             } ?: return AuthenticationSignResult.Failure(AuthenticationSignFailure.CARD_UNAVAILABLE)
 
