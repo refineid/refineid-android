@@ -18,7 +18,7 @@ what turns a proven pair of devices into a cross-platform one.
 ## Roles
 
 Android pairs only as the custodian: the phone shows the pairing code, serves
-the RAPP v26.10.21 offer over the stream transport, and holds the card. No
+the RAPP v26.10.22 offer over the stream transport, and holds the card. No
 screen pairs the phone as a requester, so the app never calls
 `RappPairingBridge.fromBootstrap`.
 
@@ -47,27 +47,46 @@ transport.
   at a time through one lock; an operation that finds it held by another
   session's operation is reported `queued` once (section 8.2 item 2).
 - `card.status` follows `session.ready` before any operation runs, and again
-  on every reader change. A card ready in the USB reader or on NFC, or a
-  primed card the holder can present, is present and named by its
-  authentication certificate; after an operation ends without the card
-  answering, absence is reported until a card is coupled again (section
-  8.4 item 1).
-- Reads skip consent. Authentication and document signing show the consent
-  view and report `consent_shown`; a cached PIN 1 approves without a prompt,
-  as the phone's own PIN 1 policy allows (section 11 item 2).
+  on every reader change. Presence is the card the phone holds: a card in
+  the USB reader from insertion until removal, and an NFC card from the
+  holder adding it to the phone until the holder removes it there, named by
+  its authentication certificate. An operation the card did not answer ends
+  with `card_error` and leaves presence unchanged; the next operation asks
+  the holder to present the card again (section 8.4 item 1).
+- Reads ask the holder nothing. Authentication and document signing ask for
+  their PIN on the phone, and entering it is the holder's consent; every PIN
+  prompt on screen reports `consent_shown`. There is no other consent view
+  (section 8.2 item 3).
+- PIN 1 is asked once and held only in memory, never in storage, bound to
+  the card that accepted it, named by its authentication certificate. It is
+  held only when that card's PIN 1 counter read pristine before the VERIFY;
+  otherwise it serves its one operation. A PIN 1 held for one card is never
+  presented to another: that card has no held PIN and the holder is asked.
+  It ends when the reader card is removed, the NFC card is removed from the
+  phone or another card replaces it, the card rejects it, the card's counter
+  reads below pristine or cannot be read, the holder clears it, or the
+  process ends; while it is held a browser authentication runs with no
+  prompt. PIN 2 is asked for every signature or batch and never held
+  (section 11 item 2; credential custody).
 - The native card session reads the PIN status with a header-only VERIFY
   before every verification and, without sending one, refuses one or two
   remaining attempts, a blocked PIN, and a status that carries no count and
   is not "verified"; the operation then ends as `retry_floor` and the holder
-  is told the attempts are reserved for the issuer's software. A wrong PIN with at least three
-  attempts left re-prompts on the phone with the count; the requester learns
-  nothing of it (section 10.2).
+  is told the attempts are reserved for the issuer's software. A wrong PIN
+  with at least three attempts left re-prompts on the phone with the count;
+  the requester learns nothing of it (section 10.2).
+- A PIN command the card did not answer is sent again, once the card is
+  back, only when the PIN's attempts read before and after, from the same
+  card, show the card did not count it. Attempts that fell mean the card counted the PIN wrong: it is
+  forgotten and the holder asked again, subject to the floor. Without both
+  counts the PIN is not sent again and the operation ends with `card_error`;
+  a held PIN 1 outlives the failure.
 - Forgetting a pairing with its session open closes it with
   `pairing_revoked` and destroys the record. Otherwise the record is kept,
   hidden from the list, still announced and routed, and its next session
   carries only the close; a record that kept its key for 30 days is
-  destroyed at start (section 4.6). A received `pairing_revoked` close
-  destroys the record at once.
+  destroyed when the served pairings are next loaded (section 4.6). A
+  received `pairing_revoked` close destroys the record at once.
 
 ## The protocol is not implemented here
 

@@ -4,79 +4,99 @@ package fi.refineid.android.rapp
 
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** A remote card command waits for a card that left the field and runs again. */
+/**
+ * A PIN command the card did not answer runs again only when the PIN's
+ * attempts, read before and after, show the card did not count it
+ * (credential custody; RAPP v26.10.22 section 10.2).
+ */
 class RappCardRetryTest {
-    private enum class Outcome { SIGNED, CARD_LEFT }
+    private enum class Answer { SIGNED, CARD_LEFT }
+
+    private companion object {
+        /** The attempts a scripted card allows before any command. */
+        const val ATTEMPTS = 5
+
+        /** The attempts after the card counted one wrong PIN. */
+        const val ONE_COUNTED = 4
+    }
+
+    /** A scripted card: the answers its commands give, and the attempts each read reports. */
+    private class ScriptedCard(
+        answers: List<Answer>,
+        attempts: List<Int?>,
+    ) {
+        private val answers = ArrayDeque(answers)
+        private val attempts = ArrayDeque(attempts)
+
+        /** The answers the commands sent so far gave, in order. */
+        val commands = mutableListOf<Answer>()
+
+        /** Whether the card came back, for each wait so far. */
+        val waits = mutableListOf<Boolean>()
+
+        fun command(): Answer = answers.removeFirst().also(commands::add)
+
+        fun attemptsLeft(): Int? = attempts.removeFirst()
+
+        fun awaitCard(present: Boolean): Boolean = present.also(waits::add)
+    }
+
+    private suspend fun ScriptedCard.run(cardComesBack: Boolean = true): RappCardRetry.Run<Answer> =
+        RappCardRetry.run(
+            before = attemptsLeft(),
+            attemptsLeft = { attemptsLeft() },
+            command = { command() },
+            cardLeft = { it == Answer.CARD_LEFT },
+            awaitCard = { awaitCard(cardComesBack) },
+        )
 
     @Test
-    fun aRequestWhoseCardLeftCompletesOnceTheCardIsPresented() =
+    fun aCardThatAnswersIsNeverWaitedFor() =
         runBlocking {
-            val outcomes = ArrayDeque(listOf(Outcome.CARD_LEFT, Outcome.SIGNED))
-            var waited = 0
-            val result =
-                RappCardRetry.run(
-                    command = { outcomes.removeFirst() },
-                    cardLeft = { it == Outcome.CARD_LEFT },
-                    awaitCard = {
-                        waited += 1
-                        true
-                    },
-                )
-            assertEquals(Outcome.SIGNED, result)
-            assertEquals(1, waited)
+            val card = ScriptedCard(listOf(Answer.SIGNED), listOf(ATTEMPTS))
+            val run = card.run()
+            assertSame(Answer.SIGNED, (run as RappCardRetry.Run.Answered).result)
+            assertTrue(card.waits.isEmpty())
         }
 
     @Test
-    fun aCardInTheFieldNeverWaits() =
+    fun anUnchangedCountSendsThePinAgain() =
         runBlocking {
-            var waited = false
-            val result =
-                RappCardRetry.run(
-                    command = { Outcome.SIGNED },
-                    cardLeft = { it == Outcome.CARD_LEFT },
-                    awaitCard = {
-                        waited = true
-                        true
-                    },
-                )
-            assertEquals(Outcome.SIGNED, result)
-            assertEquals(false, waited)
+            val card = ScriptedCard(listOf(Answer.CARD_LEFT, Answer.SIGNED), listOf(ATTEMPTS, ATTEMPTS))
+            val run = card.run()
+            assertSame(Answer.SIGNED, (run as RappCardRetry.Run.Answered).result)
+            assertEquals(listOf(Answer.CARD_LEFT, Answer.SIGNED), card.commands)
+        }
+
+    @Test
+    fun aFallenCountMeansTheCardCountedThePinAndItIsNotSentAgain() =
+        runBlocking {
+            val card = ScriptedCard(listOf(Answer.CARD_LEFT), listOf(ATTEMPTS, ONE_COUNTED))
+            val run = card.run()
+            assertEquals(ONE_COUNTED, (run as RappCardRetry.Run.Counted).attemptsLeft)
+            assertEquals(listOf(Answer.CARD_LEFT), card.commands)
+        }
+
+    @Test
+    fun withoutBothCountsThePinIsNotSentAgain() =
+        runBlocking {
+            for (counts in listOf(listOf(null, ATTEMPTS), listOf(ATTEMPTS, null))) {
+                val card = ScriptedCard(listOf(Answer.CARD_LEFT), counts)
+                assertSame(RappCardRetry.Run.Unproven, card.run())
+                assertEquals(listOf(Answer.CARD_LEFT), card.commands)
+            }
         }
 
     @Test
     fun aWaitThatEndsWithoutACardEndsTheRequest() =
         runBlocking {
-            var runs = 0
-            val result =
-                RappCardRetry.run(
-                    command = {
-                        runs += 1
-                        Outcome.CARD_LEFT
-                    },
-                    cardLeft = { it == Outcome.CARD_LEFT },
-                    awaitCard = { false },
-                )
-            assertNull(result)
-            assertEquals(1, runs)
-        }
-
-    @Test
-    fun aSecondMissIsTheAnswer() =
-        runBlocking {
-            var runs = 0
-            val result =
-                RappCardRetry.run(
-                    command = {
-                        runs += 1
-                        Outcome.CARD_LEFT
-                    },
-                    cardLeft = { it == Outcome.CARD_LEFT },
-                    awaitCard = { true },
-                )
-            assertEquals(Outcome.CARD_LEFT, result)
-            assertEquals(2, runs)
+            val card = ScriptedCard(listOf(Answer.CARD_LEFT), listOf(ATTEMPTS))
+            assertSame(RappCardRetry.Run.CardMissing, card.run(cardComesBack = false))
+            assertEquals(listOf(false), card.waits)
+            assertEquals(listOf(Answer.CARD_LEFT), card.commands)
         }
 }

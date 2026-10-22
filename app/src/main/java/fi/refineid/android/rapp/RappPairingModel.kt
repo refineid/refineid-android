@@ -45,7 +45,7 @@ private const val OFFER_ID_BYTES = 32
 /** The countdown of an offer that has no time left, or of no offer. */
 private const val NO_SECONDS_REMAINING = 0
 
-/** The credential profiles every offer grants (RAPP v26.10.21 section 9). */
+/** The credential profiles every offer grants (RAPP v26.10.22 section 9). */
 private val DEFAULT_PAIRING_PROFILES =
     listOf(
         "fi.refineid.card-status",
@@ -195,7 +195,7 @@ internal class RappPairingModel(
 
     /**
      * A new connection must be admitted by the pre-authentication limiter
-     * (RAPP v26.10.21 section 3.3) and then open with the pairing preamble.
+     * (RAPP v26.10.22 section 3.3) and then open with the pairing preamble.
      */
     private fun handleProxyConnected() {
         ceremony = null
@@ -255,7 +255,7 @@ internal class RappPairingModel(
 
     /**
      * Destroys the record a ceremony stored but the requester never
-     * confirmed (RAPP v26.10.21 section 4.3 item 4); nobody is told.
+     * confirmed (RAPP v26.10.22 section 4.3 item 4); nobody is told.
      */
     private fun revokeUnconfirmedRecord() {
         val stored = ceremony?.storedRecord ?: return
@@ -431,7 +431,7 @@ internal class RappPairingModel(
             }
     }
 
-    /** Forgets one pairing (RAPP v26.10.21 section 4.6) and updates what this phone serves. */
+    /** Forgets one pairing (RAPP v26.10.22 section 4.6) and updates what this phone serves. */
     fun removePair(pairIdHex: String) {
         forgetPairing(pairIdHex)
         pairedDevices = catalog.listPairs()

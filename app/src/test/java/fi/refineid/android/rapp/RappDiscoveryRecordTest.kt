@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Session and withdrawn records are built and matched by the core from the
- * pairings' static agreements (RAPP v26.10.21 section 4.5, discovery
+ * pairings' static agreements (RAPP v26.10.22 section 4.5, discovery
  * hierarchy section 4.3).
  */
 class RappDiscoveryRecordTest {

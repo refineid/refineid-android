@@ -169,7 +169,7 @@ internal object NativePin2PreflightReply {
 
             is NativePin2State.Remaining -> {
                 state.attempts == EXHAUSTED_RETRY_COUNT ||
-                    state.attempts in MINIMUM_SAFE_RETRY_COUNT..MAXIMUM_FINEID_RETRY_COUNT
+                    state.attempts in MINIMUM_SAFE_RETRY_COUNT..FINEID_PIN_TRY_LIMIT
             }
 
             NativePin2State.Locked,
@@ -213,6 +213,5 @@ internal object NativePin2PreflightReply {
     private const val NO_RETRY_COUNT = 0xFF
     private const val EXHAUSTED_RETRY_COUNT = 0
     private const val MINIMUM_SAFE_RETRY_COUNT = 3
-    private const val MAXIMUM_FINEID_RETRY_COUNT = 5
     private const val ZERO_BYTE: Byte = 0
 }

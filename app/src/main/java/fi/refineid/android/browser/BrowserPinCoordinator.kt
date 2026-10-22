@@ -1,13 +1,17 @@
 package fi.refineid.android.browser
 
+import fi.refineid.android.core.AuthenticationCardIdentity
+import fi.refineid.android.core.AuthenticationCardReads
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationSignFailure
 import fi.refineid.android.core.AuthenticationSignResult
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.NativeAuthenticationSignature
+import fi.refineid.android.core.Pin1Retention
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.authenticationFailure
+import kotlinx.coroutines.runBlocking
 import java.security.SignatureException
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
@@ -50,7 +54,14 @@ internal class BrowserPinRequest {
     override fun toString(): String = "BrowserPinRequest([redacted])"
 }
 
-/** Turns Chromium's synchronous JCA call into a terse PIN prompt plus serialized card use. */
+/**
+ * Turns Chromium's synchronous JCA call into a terse PIN prompt plus
+ * serialized card use. With a [pinCache], each signature first reads which
+ * card serves it and the attempts its PIN 1 allows: a PIN 1 held for that
+ * card is used unless the counter reads below pristine, and a PIN 1 the
+ * card accepts is held for it only when the counter read pristine before
+ * (credential custody).
+ */
 internal class BrowserPinCoordinator(
     private val cardService: AuthenticationCardService,
     private val dispatchToUi: (() -> Unit) -> Unit,
@@ -83,11 +94,12 @@ internal class BrowserPinCoordinator(
                 throw SignatureException("browser card signer is closed")
             }
             if (!cardService.requiresLocalPin) {
-                return signWith(algorithm, message, Pin1Submission.from("0000"))
+                return signWith(algorithm, message, Pin1Submission.from("0000"), CardState.UNREAD)
             }
-            val cached = pinCache?.take()
-            if (cached != null) {
-                return signWith(algorithm, message, cached)
+            val cache = pinCache
+            if (cache != null) {
+                val state = readCard()
+                heldPin(cache, state)?.let { held -> return signWith(algorithm, message, held, state) }
             }
             val request = BrowserPinRequest()
             synchronized(stateLock) {
@@ -122,25 +134,65 @@ internal class BrowserPinCoordinator(
                 publishStatus(BrowserSignatureStatus.WRONG_PIN)
                 throw SignatureException("PIN1 was already rejected this session")
             }
-            return signWith(algorithm, message, pin1)
+            return signWith(algorithm, message, pin1, if (pinCache != null) readCard() else CardState.UNREAD)
         } finally {
             operationLock.unlock()
         }
+    }
+
+    /** The card serving a signature and the PIN 1 attempts it allowed before the PIN went to it. */
+    private class CardState(
+        val card: AuthenticationCardIdentity?,
+        val attemptsLeft: Int?,
+    ) {
+        val retention: Pin1Retention? get() = Pin1Retention.of(card, attemptsLeft)
+
+        companion object {
+            val UNREAD = CardState(null, null)
+        }
+    }
+
+    private fun readCard(): CardState =
+        runBlocking {
+            CardState(
+                AuthenticationCardReads.identity(cardService),
+                AuthenticationCardReads.pin1AttemptsLeft(cardService),
+            )
+        }
+
+    /**
+     * The PIN 1 held for the card in [state]. A counter that reads below
+     * pristine leaves nothing held. A contactless card may not be in the
+     * field yet, so an unread counter keeps the held PIN; the card's own
+     * count before the VERIFY still refuses fewer than three attempts.
+     */
+    private fun heldPin(
+        cache: AuthenticationPinCache,
+        state: CardState,
+    ): Pin1Submission? {
+        val card = state.card ?: return null
+        if (state.attemptsLeft != null && state.retention == null) {
+            cache.clear()
+            return null
+        }
+        return cache.take(card)
     }
 
     private fun signWith(
         algorithm: AuthenticationSigningAlgorithm,
         message: ByteArray,
         pin1: Pin1Submission,
+        state: CardState,
     ): NativeAuthenticationSignature {
         // Copy for the cache decision before the card call consumes the PIN.
         val cacheGeneration = pinCache?.generation
         val pinCopy = pin1.copyBytes()
+        val held = state.card?.let { card -> pinCache?.isVerified(pin1, card) } == true
         publishStatus(BrowserSignatureStatus.SIGNING)
         try {
             return when (
                 val result =
-                    if (cardService.requiresLocalPin && pinCache?.isVerified(pin1) != true) {
+                    if (cardService.requiresLocalPin && !held) {
                         val checked = Pin1Submission.fromOwnedBytes(pinCopy.copyOf())
                         val failure = cardService.verifyAuthenticationPin(checked).result.authenticationFailure()
                         if (failure == null) {
@@ -154,7 +206,7 @@ internal class BrowserPinCoordinator(
                     }
             ) {
                 is AuthenticationSignResult.Success -> {
-                    retainOutcome(pinCopy, PinOutcome.VERIFIED, cacheGeneration)
+                    retainOutcome(pinCopy, PinOutcome.VERIFIED, cacheGeneration, state.retention)
                     publishStatus(BrowserSignatureStatus.SUCCEEDED)
                     result.signature
                 }
@@ -185,10 +237,16 @@ internal class BrowserPinCoordinator(
 
     private enum class PinOutcome { VERIFIED, REJECTED, DISCARD }
 
+    /**
+     * Records the card's answer about [pinCopy]: an accepted PIN is held
+     * when [retention] gives leave and is otherwise dropped with this
+     * signature; a rejected one is remembered as rejected.
+     */
     private fun retainOutcome(
         pinCopy: ByteArray?,
         outcome: PinOutcome,
         expectedGeneration: Long? = null,
+        retention: Pin1Retention? = null,
     ) {
         if (pinCopy == null) {
             return
@@ -199,7 +257,7 @@ internal class BrowserPinCoordinator(
             return
         }
         when (outcome) {
-            PinOutcome.VERIFIED -> cache.recordVerified(pinCopy.copyOf(), expectedGeneration)
+            PinOutcome.VERIFIED -> retention?.let { cache.recordVerified(pinCopy.copyOf(), it, expectedGeneration) }
             PinOutcome.REJECTED -> cache.recordRejected(pinCopy)
             PinOutcome.DISCARD -> pinCopy.fill(0)
         }

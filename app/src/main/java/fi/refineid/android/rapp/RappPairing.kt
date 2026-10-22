@@ -8,7 +8,7 @@ import uniffi.refineid_rapp.RappPairRecord
 
 /**
  * A pair identifier: the first 16 bytes of the SHA-512 digest that names a
- * pairing (RAPP v26.10.21 section 4.3 item 2).
+ * pairing (RAPP v26.10.22 section 4.3 item 2).
  */
 internal class RappPairId private constructor(
     private val bytes: ByteArray,
@@ -45,7 +45,7 @@ internal class RappPairId private constructor(
     }
 }
 
-/** Where a stored pairing stands (RAPP v26.10.21 sections 4.3 and 4.6). */
+/** Where a stored pairing stands (RAPP v26.10.22 sections 4.3 and 4.6). */
 internal sealed interface RappPairState {
     /** Stored before the peer confirmed storing its own; it serves nothing (section 4.3 item 4). */
     data object Unconfirmed : RappPairState

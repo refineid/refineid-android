@@ -23,7 +23,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * One RAPP v26.10.21 session between a requester and a custodian bridge,
+ * One RAPP v26.10.22 session between a requester and a custodian bridge,
  * read through the app's typed binding border: the custodian's ready, card
  * status, consent, reads, the retry floor, deadlines, liveness and the
  * pairing_revoked close.
@@ -184,7 +184,7 @@ class RappSessionFlowTest {
                     operationId.toWire(),
                     NOW,
                 )
-            } as RappBridgeOutcome.AwaitConsent
+            } as RappBridgeOutcome.AwaitApproval
         val asked = shown.request as RappRequest.BrowserAuthenticate
         assertEquals(ORIGIN, asked.origin)
         assertTrue(asked.digest.contentEquals(challengeDigest()))

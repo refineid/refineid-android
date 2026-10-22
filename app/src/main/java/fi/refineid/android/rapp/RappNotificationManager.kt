@@ -18,7 +18,7 @@ import fi.refineid.android.nfc.NfcCardWait
  * holder while RefineID has no foreground activity.
  *
  * The channel is high importance, so the request appears as a heads-up
- * notification; tapping it opens the consent dialog. The notification stays
+ * notification; tapping it opens the PIN prompt. The notification stays
  * pinned while the request is pending; a request waiting on the card counts
  * down to the moment the phone stops waiting for it.
  */
