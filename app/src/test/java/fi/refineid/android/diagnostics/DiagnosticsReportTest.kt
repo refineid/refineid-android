@@ -49,7 +49,6 @@ class DiagnosticsReportTest {
                 expiryDate = "14.1.2031",
                 issuer = "Test Issuer",
                 signatureAlgorithm = "SHA384withECDSA",
-                isTamperProofVerified = false,
                 documentNumber = "ABC123456",
             )
 

@@ -12,7 +12,7 @@
 use std::sync::Mutex;
 
 use refineid_apdu::{CardTransport, TransportOutcome};
-use refineid_emrtd::{CardFaceImage, CscaAnchor, CscaAnchors, EmrtdOps};
+use refineid_emrtd::{CardFaceImage, EmrtdOps};
 use refineid_pace::{Can, PaceError, PaceSession, SmTransport, UnvalidatedCan, run_pace_with_can};
 use refineid_pkcs15::{CertSlot, Pkcs15Error, Pkcs15Ops};
 
@@ -21,9 +21,9 @@ use crate::authentication_signer::{
     AuthenticationSigningInput, authenticate_and_sign, verify_authentication_pin,
 };
 use crate::card_certificate::{
-    CardCertificate, CardKeyProfile, CertificateDer, CertificateReadFailure,
-    IntermediateCaCertificate, RootCaCertificate, map_pkcs15_error,
-    read_authentication_certificate, read_qualified_certificate,
+    CardCertificate, CardKeyProfile, CertificateReadFailure, IntermediateCaCertificate,
+    RootCaCertificate, map_pkcs15_error, read_authentication_certificate,
+    read_qualified_certificate,
 };
 use crate::card_management::{
     CardManagementFailure, activate_card, change_pin1, change_pin2, probe_credential_health,
@@ -97,62 +97,6 @@ static LAST_READ_FACE_PHOTO: Mutex<Option<CardFaceImage>> = Mutex::new(None);
 /// messaging; the printed card number that makes exported photo file
 /// names globally unique.
 static LAST_READ_DOCUMENT_NUMBER: Mutex<Option<String>> = Mutex::new(None);
-
-/// Passive authentication was not attempted for the last read (no
-/// eMRTD files, or no trust anchors installed).
-pub(crate) const VERIFICATION_NOT_PERFORMED: i32 = 0;
-/// Passive authentication ran and the document verified: SOD
-/// signature, DG1 and DG2 hashes, and the DSC-to-CSCA chain.
-pub(crate) const VERIFICATION_PASSED: i32 = 1;
-/// Passive authentication ran and the document did not verify.
-pub(crate) const VERIFICATION_FAILED: i32 = 2;
-
-/// The latest passive-authentication verdict, one of the
-/// `VERIFICATION_*` codes above.
-static LAST_READ_VERIFICATION: Mutex<i32> = Mutex::new(VERIFICATION_NOT_PERFORMED);
-
-/// Trusted CSCA anchor certificates (DER), installed by the platform
-/// at startup and consumed by every subsequent card read.
-static CSCA_ANCHOR_DERS: Mutex<Vec<CertificateDer>> = Mutex::new(Vec::new());
-
-pub(crate) fn get_last_read_verification() -> i32 {
-    LAST_READ_VERIFICATION
-        .lock()
-        .map_or(VERIFICATION_NOT_PERFORMED, |guard| *guard)
-}
-
-pub(crate) fn set_last_read_verification(verdict: i32) {
-    if let Ok(mut guard) = LAST_READ_VERIFICATION.lock() {
-        *guard = verdict;
-    }
-}
-
-pub(crate) fn add_csca_anchor(anchor_der: CertificateDer) {
-    if let Ok(mut guard) = CSCA_ANCHOR_DERS.lock() {
-        guard.push(anchor_der);
-    }
-}
-
-pub(crate) fn clear_csca_anchors() {
-    if let Ok(mut guard) = CSCA_ANCHOR_DERS.lock() {
-        guard.clear();
-    }
-}
-
-/// Parse the installed anchor DERs into a verification-ready set.
-/// `None` when no anchors are installed or none parse.
-fn installed_csca_anchors() -> Option<CscaAnchors> {
-    let ders = CSCA_ANCHOR_DERS.lock().ok()?;
-    let anchors: Vec<CscaAnchor> = ders
-        .iter()
-        .filter_map(|der| CscaAnchor::from_der(der.as_bytes()).ok())
-        .collect();
-    if anchors.is_empty() {
-        None
-    } else {
-        Some(CscaAnchors::new(anchors))
-    }
-}
 
 pub(crate) fn get_last_read_face_photo() -> Option<CardFaceImage> {
     LAST_READ_FACE_PHOTO
@@ -908,20 +852,20 @@ fn qualified_selection_failure<E>(error: Pkcs15Error<E>) -> QualifiedSignFailure
     }
 }
 
+/// Selects the eMRTD application and reads EF.DG1 for the document number
+/// and EF.DG2 for the face photo, then re-selects the PKCS#15 application.
+/// A file that fails to read or parse leaves its slot empty.
 fn read_emrtd_data_from_secure_channel<T: CardTransport + Pkcs15Ops + EmrtdOps>(secure: &mut T) {
     set_last_read_face_photo(None);
-    set_last_read_verification(VERIFICATION_NOT_PERFORMED);
     set_last_read_document_number(None);
 
-    let anchors = installed_csca_anchors();
-    if let Ok(profile) = secure.read_card_emrtd_profile(anchors.as_ref()) {
-        set_last_read_document_number(profile.document_number);
-        match profile.passive_authentication_passed {
-            Some(true) => set_last_read_verification(VERIFICATION_PASSED),
-            Some(false) => set_last_read_verification(VERIFICATION_FAILED),
-            None => set_last_read_verification(VERIFICATION_NOT_PERFORMED),
+    if secure.select_emrtd_application().is_ok() {
+        if let Ok(Some(mrz)) = secure.read_mrz_td1() {
+            set_last_read_document_number(Some(mrz.document_number));
         }
-        set_last_read_face_photo(profile.face_image);
+        if let Ok(Some(face)) = secure.read_face_image() {
+            set_last_read_face_photo(Some(face));
+        }
     }
 
     let _ = secure.select_pkcs15_application();

@@ -69,8 +69,5 @@ traces/
 !app/src/main/res/raw/telia_root_ca_v2.pem
 !app/src/debug/res/raw/sectigo_qualified_timestamping_root_*.pem
 
-# Public CSCA trust anchors ship with the application.
-!app/src/main/assets/csca/**/*.der
-
 WHATSUP.md
 

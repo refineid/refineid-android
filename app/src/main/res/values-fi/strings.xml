@@ -52,7 +52,6 @@
     <string name="section_identity">Identiteetti</string>
     <string name="forget_identity_title">Unohdetaanko henkilöllisyys?</string>
     <string name="forget_identity">Unohda henkilöllisyys</string>
-    <string name="card_data_authentic">Kortin tiedot ovat aidot ja muuttamattomat.</string>
     <string name="copy_photo">Kopioi kuva</string>
     <string name="share_photo">Jaa kuva</string>
     <string name="photo_copied">Kuva kopioitu leikepöydälle</string>
