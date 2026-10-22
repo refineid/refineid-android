@@ -1,15 +1,11 @@
 package fi.refineid.android.rapp
 
 import java.security.SecureRandom
-import java.text.Normalizer
 
-/** Generates, formats, and validates 6-character Crockford Base32 pairing codes for RAPP v26.10.18. */
+/** Generates, formats, and validates 6-character Crockford Base32 pairing codes for RAPP v26.10.21. */
 internal object RappPairingCode {
     const val CODE_LENGTH = 6
     const val GROUP_SIZE = 2
-
-    /** Offer lifetime both peers bind into the offer hash (RAPP v26.10.18 section 3.3). */
-    const val DEFAULT_LIFETIME_MS: Long = 60_000L
 
     /** Crockford Base32 alphabet (32 symbols, excluding I, L, O, U). */
     const val ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -23,23 +19,21 @@ internal object RappPairingCode {
         return String(chars)
     }
 
-    /** ASCII whitespace (SPACE, TAB, LF, VT, FF, CR) and the hyphen, removed by step 4. */
-    private const val STRIPPED_CHARS = " \t\n\u000B\u000C\r-"
+    /** The separators typed between the displayed groups, which entry ignores. */
+    private const val SEPARATORS = " -"
 
     /**
-     * Applies the Crockford Base32 canonicalization pipeline per RAPP v26.10.18 section 3.1.
-     *
-     * NFKC first, then ASCII-only uppercasing and removal of ASCII
-     * whitespace and hyphens. Returns the canonical string, which may be
-     * shorter or longer than a code, or an empty string when any character
-     * is outside the alphabet, the excluded letters I, L, O and U among
-     * them. [isValid] decides the exact length.
+     * Applies the entry rule of RAPP v26.10.21 section 3.1: the 32 alphabet
+     * characters, an ASCII lowercase letter folded to its uppercase form, and
+     * spaces and hyphens ignored. Returns the canonical string, which may be
+     * shorter or longer than a code, or an empty string when any other
+     * character appears, the excluded letters I, L, O and U among them.
+     * [isValid] decides the exact length.
      */
     fun normalize(input: String): String {
-        val nfkc = Normalizer.normalize(input, Normalizer.Form.NFKC)
         val sb = StringBuilder()
-        for (c in nfkc) {
-            if (c in STRIPPED_CHARS) continue
+        for (c in input) {
+            if (c in SEPARATORS) continue
             when (val upper = if (c in 'a'..'z') c - ('a' - 'A') else c) {
                 in ALPHABET -> sb.append(upper)
                 else -> return ""

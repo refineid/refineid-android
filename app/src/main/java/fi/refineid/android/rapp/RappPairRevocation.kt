@@ -3,45 +3,78 @@
 package fi.refineid.android.rapp
 
 import uniffi.refineid_rapp.RappBindingException
+import uniffi.refineid_rapp.RappForgetOutcome
 import uniffi.refineid_rapp.RappPairRecord
+import uniffi.refineid_rapp.RappPairVault
 
 /**
- * Revokes a stored pairing the way RAPP v26.10.18 section 4.6 requires: the
- * core derives and returns the revocation retention before the record's key
- * is destroyed, and the vault keeps the retention for announcement. A record
- * the core no longer decodes is revoked without a retention, since no key
- * can be derived from it.
+ * Forgets and revokes stored pairings the way RAPP v26.10.21 section 4.6
+ * requires. Forgetting with no session to the peer open keeps the record's
+ * key only to deliver the `pairing_revoked` close on the next session;
+ * revoking destroys the key at once. A record the core no longer decodes is
+ * revoked through the vault, since it can serve nothing.
  */
 internal object RappPairRevocation {
-    /** Revokes [pairId] in [vault], retaining its revocation when the record still loads. */
+    /** Destroys the record of [pairId] in [vault] at once. */
     fun revoke(
-        pairId: ByteArray,
-        vault: AndroidRappVault,
+        pairId: RappPairId,
+        vault: RappPairVault,
     ) {
-        val record =
-            try {
-                RappPairRecord.loadFromVault(pairId, vault)
-            } catch (_: RappBindingException) {
-                null
-            }
+        val record = load(pairId, vault)
         if (record == null) {
-            vault.revokeDeviceOnly(pairId, RappClock.wallMs())
+            vault.revokeDeviceOnly(pairId.toWire(), RappClock.wallMs())
             return
         }
-        revoke(record, vault)
+        revoke(pairId, record, vault)
     }
 
-    /** Revokes a loaded [record] in [vault] and retains its revocation; closes the record. */
+    /** Destroys a loaded [record] of [pairId] in [vault] at once and closes it. */
     fun revoke(
+        pairId: RappPairId,
         record: RappPairRecord,
-        vault: AndroidRappVault,
+        vault: RappPairVault,
     ) {
         try {
-            record.revoke(vault, RappClock.wallMs())?.let(vault::retainRevocation)
+            record.revoke(vault, RappClock.wallMs())
         } catch (_: RappBindingException) {
-            vault.revokeDeviceOnly(record.metadata().pairId, RappClock.wallMs())
+            vault.revokeDeviceOnly(pairId.toWire(), RappClock.wallMs())
         } finally {
             record.close()
         }
     }
+
+    /**
+     * The local user forgets [pairId] while no session to its peer is open.
+     * Returns true when the record now waits to deliver the close, and false
+     * when it was destroyed: one the peer never confirmed, or one that no
+     * longer loads.
+     */
+    fun forget(
+        pairId: RappPairId,
+        vault: RappPairVault,
+    ): Boolean {
+        val record = load(pairId, vault)
+        if (record == null) {
+            vault.revokeDeviceOnly(pairId.toWire(), RappClock.wallMs())
+            return false
+        }
+        return try {
+            record.forget(vault, RappClock.wallMs()) == RappForgetOutcome.NOTICE_PENDING
+        } catch (_: RappBindingException) {
+            vault.revokeDeviceOnly(pairId.toWire(), RappClock.wallMs())
+            false
+        } finally {
+            record.close()
+        }
+    }
+
+    private fun load(
+        pairId: RappPairId,
+        vault: RappPairVault,
+    ): RappPairRecord? =
+        try {
+            RappPairRecord.loadFromVault(pairId.toWire(), vault)
+        } catch (_: RappBindingException) {
+            null
+        }
 }

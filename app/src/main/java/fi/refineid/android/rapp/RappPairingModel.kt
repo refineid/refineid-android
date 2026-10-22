@@ -39,16 +39,18 @@ internal sealed interface PairingPhase {
 private const val LISTENER_CLOSE_DELAY_MS = 2000L
 private const val HANDSHAKE_DEADLINE_MS = 10_000L
 private const val MILLISECONDS_PER_SECOND = 1_000L
-private const val DEFAULT_PAIRING_COUNTDOWN_SECONDS =
-    (RappPairingCode.DEFAULT_LIFETIME_MS / MILLISECONDS_PER_SECOND).toInt()
 private const val CPACE_RANDOM_BYTES = 64
 private const val OFFER_ID_BYTES = 32
-private const val STREAM_CANDIDATE_ID = "stream-1"
+
+/** The countdown of an offer that has no time left, or of no offer. */
+private const val NO_SECONDS_REMAINING = 0
+
+/** The credential profiles every offer grants (RAPP v26.10.21 section 9). */
 private val DEFAULT_PAIRING_PROFILES =
     listOf(
-        "fi.refineid.card-status.v1",
-        "fi.refineid.authentication.v1",
-        "fi.refineid.document-signing.v1",
+        "fi.refineid.card-status",
+        "fi.refineid.authentication",
+        "fi.refineid.document-signing",
     )
 
 internal class RappPairingModel(
@@ -61,7 +63,8 @@ internal class RappPairingModel(
     private var timerJob: Job? = null
     private var handshakeDeadlineJob: Job? = null
     private var activeOfferingCode: String? = null
-    private var secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
+    private var offerSeconds = NO_SECONDS_REMAINING
+    private var secondsRemaining = NO_SECONDS_REMAINING
     private var ceremony: RappCustodianPairingCeremony? = null
     private var awaitingPreamble = false
     private val preAuthenticationLimiter = RappPreAuthenticationLimiter()
@@ -88,6 +91,8 @@ internal class RappPairingModel(
             scope.launch {
                 dispatcher.connectedPeer.collect { peer ->
                     activeConnectedPeer = peer
+                    // A peer that forgot this phone ends its session and leaves the list.
+                    pairedDevices = catalog.listPairs()
                 }
             }
         }
@@ -98,9 +103,7 @@ internal class RappPairingModel(
         _isRemoteAccessEnabled = enabled
         if (enabled) {
             val app = context.applicationContext as? RefineIdApplication
-            if (pairedDevices.isNotEmpty()) {
-                app?.startRappProxyListening()
-            }
+            app?.startRappProxyListening()
             if (phase is PairingPhase.Idle && activeConnectedPeer == null) {
                 createOffer()
             }
@@ -126,7 +129,6 @@ internal class RappPairingModel(
         }
         val code = RappPairingCode.generate()
         activeOfferingCode = code
-        secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
         val offerId = ByteArray(OFFER_ID_BYTES).also { java.security.SecureRandom().nextBytes(it) }
 
         try {
@@ -139,6 +141,8 @@ internal class RappPairingModel(
                 )
             pairingBridge = proxyBridge
             ceremony = null
+            offerSeconds = (proxyBridge.offerTtlMs().toLong() / MILLISECONDS_PER_SECOND).toInt()
+            secondsRemaining = offerSeconds
 
             val relayListener =
                 StreamRelayListener(
@@ -154,7 +158,7 @@ internal class RappPairingModel(
                 StreamRendezvousName.attributes(StreamRendezvousName.MODE_PAIRING),
             )
 
-            phase = PairingPhase.Offering(code = code, secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS)
+            phase = PairingPhase.Offering(code = code, secondsRemaining = offerSeconds)
             startCountdown()
         } catch (_: Throwable) {
             phase = PairingPhase.Failed("Failed to initialize remote pairing offer")
@@ -191,7 +195,7 @@ internal class RappPairingModel(
 
     /**
      * A new connection must be admitted by the pre-authentication limiter
-     * (RAPP v26.10.18 section 3.3) and then open with the pairing preamble.
+     * (RAPP v26.10.21 section 3.3) and then open with the pairing preamble.
      */
     private fun handleProxyConnected() {
         ceremony = null
@@ -221,11 +225,12 @@ internal class RappPairingModel(
             return
         }
         val now = RappClock.monotonicMs()
+        val candidateId = bridge.offerCandidates().first { it.profile == rappStreamProfileName() }.candidateId
         listener?.send(bridge.bootstrapBytes(now))
         val random64 = ByteArray(CPACE_RANDOM_BYTES).apply { java.security.SecureRandom().nextBytes(this) }
         try {
             bridge.beginCpace(
-                candidateId = STREAM_CANDIDATE_ID,
+                candidateId = candidateId,
                 pairingCode = code,
                 randomBytes64 = random64,
                 nowMonotonicMs = now,
@@ -249,19 +254,13 @@ internal class RappPairingModel(
     private fun vault(): AndroidRappVault = app?.rappVault ?: AndroidRappVault(context)
 
     /**
-     * Revokes the record a ceremony stored but the requester never confirmed
-     * (RAPP v26.10.18 section 4.3 item 4), retaining its revocation.
+     * Destroys the record a ceremony stored but the requester never
+     * confirmed (RAPP v26.10.21 section 4.3 item 4); nobody is told.
      */
     private fun revokeUnconfirmedRecord() {
         val stored = ceremony?.storedRecord ?: return
-        RappPairRevocation.revoke(stored, vault())
-        val app = context.applicationContext as? RefineIdApplication
-        app?.rappProxyDispatcher?.refreshAnnouncement()
+        RappPairRevocation.revoke(stored.pairing().id, stored, vault())
     }
-
-    /** Whether the session record still has a revocation to announce (RAPP v26.10.18 section 4.6 item 4). */
-    private fun announcesRevocations(vault: AndroidRappVault): Boolean =
-        vault.unexpiredRevocations(StreamRendezvousName.nowUnixSeconds().toULong()).isNotEmpty()
 
     private fun handleProxyDisconnected(bridge: RappPairingBridge) {
         handshakeDeadlineJob?.cancel()
@@ -344,9 +343,10 @@ internal class RappPairingModel(
         handshakeDeadlineJob?.cancel()
         handshakeDeadlineJob = null
         listener?.clearSocketTimeout()
+        val pairing = record.pairing()
         val peer =
             PairedPeer(
-                pairIdHex = record.metadata().pairId.joinToString("") { "%02x".format(it) },
+                pairIdHex = pairing.id.key,
                 displayName = hello.displayName.takeIf { it.isNotBlank() } ?: "Computer",
                 platform = hello.platform.takeIf { it.isNotBlank() } ?: "Unknown",
                 createdAtMs = System.currentTimeMillis(),
@@ -366,7 +366,7 @@ internal class RappPairingModel(
         }
 
         catalog.savePair(
-            pairId = record.metadata().pairId,
+            pairId = pairing.id.toWire(),
             displayName = peer.displayName,
             platform = peer.platform,
             createdAtMs = peer.createdAtMs,
@@ -412,7 +412,7 @@ internal class RappPairingModel(
         timerJob?.cancel()
         timerJob =
             scope.launch(Dispatchers.Main) {
-                for (sec in DEFAULT_PAIRING_COUNTDOWN_SECONDS downTo 0) {
+                for (sec in offerSeconds downTo NO_SECONDS_REMAINING) {
                     secondsRemaining = sec
                     val current = phase
                     if (current is PairingPhase.Offering) {
@@ -431,28 +431,42 @@ internal class RappPairingModel(
             }
     }
 
-    /**
-     * Forgets one pairing (RAPP v26.10.18 section 4.6): an open session to
-     * it is closed as revoked first, then the record is revoked and its
-     * revocation retained for the session record to announce.
-     */
+    /** Forgets one pairing (RAPP v26.10.21 section 4.6) and updates what this phone serves. */
     fun removePair(pairIdHex: String) {
-        val app = context.applicationContext as? RefineIdApplication
+        forgetPairing(pairIdHex)
+        pairedDevices = catalog.listPairs()
+        app?.rappProxyDispatcher?.pairingsChanged()
+    }
+
+    /**
+     * Forgets one pairing (section 4.6). An open session to it is closed
+     * with `pairing_revoked` and the record destroyed at once; otherwise the
+     * record keeps its key only to deliver that close on the next session,
+     * and leaves the list of paired devices.
+     */
+    private fun forgetPairing(pairIdHex: String) {
         val vault = vault()
         if (activeConnectedPeer?.pairIdHex == pairIdHex) {
-            app?.rappProxyDispatcher?.closePairingRevoked(pairIdHex)
             activeConnectedPeer = null
         }
-        val pairIdBytes = decodeHexOrNull(pairIdHex)
-        if (pairIdBytes != null) {
-            RappPairRevocation.revoke(pairIdBytes, vault)
-        }
-        catalog.removePair(pairIdHex)
-        pairedDevices = catalog.listPairs()
-        if (pairedDevices.isEmpty() && !announcesRevocations(vault)) {
-            app?.rappProxyDispatcher?.stopListening()
-        } else {
-            app?.rappProxyDispatcher?.refreshAnnouncement()
+        val pairId = RappPairId.fromKey(pairIdHex)
+        when {
+            pairId == null -> {
+                catalog.removePair(pairIdHex)
+            }
+
+            app?.rappProxyDispatcher?.closePairingRevoked(pairId) == true -> {
+                RappPairRevocation.revoke(pairId, vault)
+                catalog.removePair(pairIdHex)
+            }
+
+            RappPairRevocation.forget(pairId, vault) -> {
+                catalog.markForgotten(pairIdHex, System.currentTimeMillis())
+            }
+
+            else -> {
+                catalog.removePair(pairIdHex)
+            }
         }
     }
 
@@ -466,7 +480,7 @@ internal class RappPairingModel(
         timerJob?.cancel()
         timerJob = null
         activeOfferingCode = null
-        secondsRemaining = DEFAULT_PAIRING_COUNTDOWN_SECONDS
+        secondsRemaining = NO_SECONDS_REMAINING
         listener?.close()
         listener = null
         try {
@@ -483,43 +497,20 @@ internal class RappPairingModel(
         pairedDevices = catalog.listPairs()
     }
 
+    /** Forgets every pairing, each as [removePair] does. */
     fun terminate() {
         reset()
-        val app = context.applicationContext as? RefineIdApplication
-        app?.rappProxyDispatcher?.disconnectClient()
-        val vault = vault()
         for (pair in catalog.listPairs()) {
-            try {
-                val pairIdBytes = decodeHexOrNull(pair.pairIdHex)
-                if (pairIdBytes != null) {
-                    RappPairRevocation.revoke(pairIdBytes, vault)
-                }
-            } catch (_: Exception) {
-            }
+            forgetPairing(pair.pairIdHex)
         }
-        catalog.clearAll()
-        pairedDevices = emptyList()
+        pairedDevices = catalog.listPairs()
         activeConnectedPeer = null
-        if (announcesRevocations(vault)) {
-            app?.rappProxyDispatcher?.refreshAnnouncement()
-        } else {
-            app?.rappProxyDispatcher?.stopListening()
-        }
+        app?.rappProxyDispatcher?.pairingsChanged()
     }
 
     companion object {
         /** Post-lockout backoff shared by every offer this process creates. */
         private val pairingBackoff = RappPairingBackoff()
-
-        internal fun decodeHexOrNull(hex: String): ByteArray? {
-            if (hex.isEmpty() || hex.length % 2 != 0) return null
-            val result = ByteArray(hex.length / 2)
-            for (i in result.indices) {
-                val byte = hex.substring(i * 2, i * 2 + 2).toIntOrNull(16) ?: return null
-                result[i] = byte.toByte()
-            }
-            return result
-        }
     }
 
     private fun localDeviceDisplayName(): String {

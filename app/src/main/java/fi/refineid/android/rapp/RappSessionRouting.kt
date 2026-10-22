@@ -9,7 +9,7 @@ import uniffi.refineid_rapp.RappSessionRouter
 import uniffi.refineid_rapp.rappStreamProfileName
 
 /**
- * Routes a session connection by its routing preamble (RAPP v26.10.18
+ * Routes a session connection by its routing preamble (RAPP v26.10.21
  * section 2.2.1).
  *
  * The one session listener serves every stored custodian pairing. A
@@ -34,7 +34,7 @@ internal class RappSessionRouting(
         pairs: List<RappPairRecord>,
     ): RappPairRecord? {
         if (isClosed) return null
-        val custodianPairs = pairs.filter { it.metadata().role == RappEndpointRole.PROXY }
+        val custodianPairs = pairs.filter { it.pairing().role == RappEndpointRole.PROXY }
         return when (val route = router.route(rappStreamProfileName(), preamble, custodianPairs)) {
             is RappRoute.Session -> custodianPairs.getOrNull(route.index.toInt())
             RappRoute.Pairing, RappRoute.Refuse -> null

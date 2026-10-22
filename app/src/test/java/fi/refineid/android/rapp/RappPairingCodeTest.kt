@@ -71,9 +71,11 @@ class RappPairingCodeTest {
     }
 
     @Test
-    fun testStripsAsciiWhitespaceOnly() {
-        assertTrue(RappPairingCode.isValid("7K\tX4\nM9"))
-        // Ogham space mark is Unicode whitespace that NFKC keeps and step 4 does not strip.
+    fun testIgnoresSpacesAndHyphensOnly() {
+        assertTrue(RappPairingCode.isValid("7K X4-M9"))
+        assertFalse(RappPairingCode.isValid("7K\tX4\nM9"))
         assertFalse(RappPairingCode.isValid("7K\u1680X4M9"))
+        // A fullwidth digit is not folded to its ASCII form.
+        assertFalse(RappPairingCode.isValid("7KX4M\uFF19"))
     }
 }

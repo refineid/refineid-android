@@ -4,42 +4,60 @@ package fi.refineid.android.rapp
 
 import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappPairRecord
+import uniffi.refineid_rapp.RappPairVault
+
+/** A catalogued pairing with its decoded record and the typed view of that record. */
+internal class RappStoredPair(
+    val peer: PairedPeer,
+    val record: RappPairRecord,
+    val pairing: RappPairing,
+)
 
 /**
  * The catalogued pairings whose records the core decodes and confirms.
  *
  * A record in a format the core does not decode, or one the vault no longer
  * holds, is removed from the catalog and the vault, so its device pairs
- * again. A record stored before its peer confirmed storage (RAPP v26.10.18
- * section 4.3 item 4) is revoked and its revocation retained for
- * announcement. A storage failure removes nothing.
+ * again. A record stored before its peer confirmed storage (RAPP v26.10.21
+ * section 4.3 item 4) is revoked. A forgotten record whose close has not
+ * reached its peer within 30 days of the forgetting (section 4.6 item 3) is
+ * revoked too, by every load: the start, each routed connection, each
+ * discovery-hint window and each change of the pairings rebuild the served
+ * set, so a record past its window neither routes nor stays announced. A
+ * storage failure removes nothing.
  */
 internal object RappStoredPairs {
-    /** Every catalogued pairing with its decoded record, most recently used first. */
-    fun load(
+    /**
+     * Every pairing this phone routes and announces, most recently used
+     * first: the active ones and the forgotten ones whose records still wait
+     * to deliver the `pairing_revoked` close on their next session (section
+     * 4.6 item 2), judged at [wallMs], milliseconds since the Unix epoch.
+     */
+    fun served(
         catalog: RappPairCatalog,
-        vault: AndroidRappVault,
-    ): List<Pair<PairedPeer, RappPairRecord>> =
+        vault: RappPairVault,
+        wallMs: () -> ULong = RappClock::wallMs,
+    ): List<RappStoredPair> =
         catalog
-            .listPairs()
+            .allPairs()
             .sortedByDescending { it.lastUsedMs }
-            .mapNotNull { peer -> loadOne(peer, catalog, vault)?.let { peer to it } }
+            .mapNotNull { peer -> loadOne(peer, catalog, vault, wallMs) }
 
     /**
      * Removes every catalogued pairing whose record the core no longer
-     * decodes, revokes catalogued records left unconfirmed, and revokes every
-     * vault record no catalogue entry names: a ceremony interrupted after it
-     * stored its record leaves one behind (RAPP v26.10.18 section 4.3 item
-     * 4), and its revocation is retained for announcement.
+     * decodes, revokes catalogued records left unconfirmed or past their
+     * notice window, and revokes every vault record no catalogue entry
+     * names: a ceremony interrupted after it stored its record leaves one
+     * behind (section 4.3 item 4).
      */
     fun cleanAtStartup(
         catalog: RappPairCatalog,
         vault: AndroidRappVault,
     ) {
-        catalog.listPairs().forEach { peer -> loadOne(peer, catalog, vault)?.close() }
-        val catalogued = catalog.listPairs().map { it.pairIdHex }
+        served(catalog, vault).forEach { it.record.close() }
+        val catalogued = catalog.allPairs().map { it.pairIdHex }
         for (pairIdHex in orphanPairIds(vault.storedPairIds, catalogued)) {
-            val pairId = RappPairingModel.decodeHexOrNull(pairIdHex) ?: continue
+            val pairId = RappPairId.fromKey(pairIdHex) ?: continue
             RappPairRevocation.revoke(pairId, vault)
         }
     }
@@ -53,49 +71,52 @@ internal object RappStoredPairs {
         return stored.filterNot { it.lowercase() in named }
     }
 
-    /** Revokes a record whose peer never confirmed storage; the retention is kept to announce it. */
-    private fun revokeUnconfirmed(
-        record: RappPairRecord,
-        peer: PairedPeer,
-        catalog: RappPairCatalog,
-        vault: AndroidRappVault,
-    ) {
-        try {
-            record.revoke(vault, RappClock.wallMs())?.let(vault::retainRevocation)
-        } catch (_: RappBindingException) {
-        } finally {
-            record.close()
-        }
-        catalog.removePair(peer.pairIdHex)
-    }
-
     private fun loadOne(
         peer: PairedPeer,
         catalog: RappPairCatalog,
-        vault: AndroidRappVault,
-    ): RappPairRecord? {
-        val pairId = RappPairingModel.decodeHexOrNull(peer.pairIdHex)
+        vault: RappPairVault,
+        wallMs: () -> ULong,
+    ): RappStoredPair? {
+        val pairId = RappPairId.fromKey(peer.pairIdHex)
         if (pairId == null) {
             catalog.removePair(peer.pairIdHex)
             return null
         }
-        return try {
-            val record = RappPairRecord.loadFromVault(pairId, vault)
-            if (record.metadata().storageConfirmed) {
-                record
-            } else {
-                revokeUnconfirmed(record, peer, catalog, vault)
-                null
+        val record =
+            try {
+                RappPairRecord.loadFromVault(pairId.toWire(), vault)
+            } catch (_: RappBindingException.InvalidInput) {
+                vault.revokeDeviceOnly(pairId.toWire(), RappClock.wallMs())
+                catalog.removePair(peer.pairIdHex)
+                return null
+            } catch (_: RappBindingException.PairNotFound) {
+                catalog.removePair(peer.pairIdHex)
+                return null
+            } catch (_: RappBindingException) {
+                return null
             }
-        } catch (_: RappBindingException.InvalidInput) {
-            vault.revokeDeviceOnly(pairId, RappClock.wallMs())
+        val pairing =
+            try {
+                record.pairing()
+            } catch (_: Exception) {
+                record.close()
+                return null
+            }
+        val expired =
+            try {
+                record.revocationNoticeExpired(wallMs())
+            } catch (_: RappBindingException) {
+                false
+            }
+        val state = pairing.state
+        if (state == RappPairState.Unconfirmed || expired) {
+            RappPairRevocation.revoke(pairing.id, record, vault)
             catalog.removePair(peer.pairIdHex)
-            null
-        } catch (_: RappBindingException.PairNotFound) {
-            catalog.removePair(peer.pairIdHex)
-            null
-        } catch (_: RappBindingException) {
-            null
+            return null
         }
+        if (state is RappPairState.Forgotten && peer.forgottenAtMs == null) {
+            catalog.markForgotten(peer.pairIdHex, state.atMs)
+        }
+        return RappStoredPair(peer, record, pairing)
     }
 }

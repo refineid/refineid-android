@@ -1,10 +1,9 @@
-@file:Suppress("UnusedParameter", "TooGenericExceptionCaught", "TooManyFunctions", "LargeClass")
+@file:Suppress("TooGenericExceptionCaught", "TooManyFunctions", "LargeClass")
 
 package fi.refineid.android.rapp
 
 import android.content.Context
-import android.util.Base64
-import fi.refineid.android.BuildConfig
+import fi.refineid.android.R
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationSignFailure
@@ -22,10 +21,12 @@ import fi.refineid.android.core.QualifiedSigningAlgorithm
 import fi.refineid.android.core.authenticationFailure
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.prime.PrimedCanStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,28 +34,37 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.refineid_rapp.RappAnnouncementCandidate
-import uniffi.refineid_rapp.RappBridgeActionKind
+import uniffi.refineid_rapp.RappBridgeAction
+import uniffi.refineid_rapp.RappCardKeyProfile
 import uniffi.refineid_rapp.RappCloseReason
 import uniffi.refineid_rapp.RappEndpointRole
-import uniffi.refineid_rapp.RappLivenessConfiguration
 import uniffi.refineid_rapp.RappOperationBridge
-import uniffi.refineid_rapp.RappOperationDescriptor
-import uniffi.refineid_rapp.RappOperationKind
 import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappPreAuthenticationLimiter
+import uniffi.refineid_rapp.RappProgressEvent
 import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
+import uniffi.refineid_rapp.rappRandomByteCounts
 import uniffi.refineid_rapp.rappSessionRecord
 import uniffi.refineid_rapp.rappStreamProfileName
 import uniffi.refineid_rapp.rappWithdrawnRecord
+import java.io.IOException
 import java.security.SecureRandom
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Handles incoming RAPP protocol requests from a paired Mac, coordinates user approvals,
- * and executes card signing operations via physical card services.
+ * The custodian side of RAPP v26.10.21: serves the paired computers' sessions
+ * over the stream transport, asks the holder for consent and PINs on this
+ * phone, and runs the card commands through the card services.
+ *
+ * The listener holds one session at a time. Operations take the card one at a
+ * time, in the order they arrived, across that session and any earlier one
+ * whose card command is still finishing (section 8.2 item 2).
  */
 internal class RappPhoneProxyDispatcher(
     private val context: Context,
@@ -66,21 +76,65 @@ internal class RappPhoneProxyDispatcher(
     private val qualifiedCardService: () -> QualifiedCardService?,
     private val isCardReady: () -> Boolean = { false },
     private val awaitCardReady: suspend () -> Boolean = { false },
-    private val onAuthenticationRejected: () -> Unit = {},
+    private val offeredCard: suspend () -> RappOfferedCard = { RappOfferedCard.Absent },
     private val onAuthenticationVerified: ((ByteArray, Long) -> Boolean)? = null,
-    private val activeAuthCertDer: () -> ByteArray? = { null },
 ) : AutoCloseable {
     private var activeListener: StreamRelayListener? = null
     private var sessionRouting: RappSessionRouting? = null
     private var withdrawalJob: Job? = null
-    private var sessionBridge: RappSessionBridge? = null
-    private var sessionHandshakeDone = false
-    private var operationBridge: RappOperationBridge? = null
-    private var pairRecord: RappPairRecord? = null
+    private var hintRefreshJob: Job? = null
     private var vault: AndroidRappVault? = null
     private val catalog = RappPairCatalog(context)
     private val preAuthenticationLimiter = RappPreAuthenticationLimiter()
+
+    @Volatile
     private var isClosed = false
+
+    /** The instance name the session record is published under, as the responder last confirmed it. */
+    @Volatile
+    private var announcedInstance: String? = null
+
+    /** The routed pairing of the session being served. */
+    @Volatile
+    private var routed: RappStoredPair? = null
+
+    @Volatile
+    private var sessionBridge: RappSessionBridge? = null
+
+    /** The established session; null while none is. */
+    @Volatile
+    private var operationBridge: RappOperationBridge? = null
+
+    /** Completes once the established session carried its first `card.status` (section 8.4 item 1). */
+    @Volatile
+    private var cardReported: CompletableDeferred<Unit>? = null
+
+    private var livenessJob: Job? = null
+    private var operationJob: Job? = null
+
+    /** Frames leave in the order their bridge sealed them. */
+    private val sendLock = Any()
+
+    /** The card serves one operation at a time (section 8.2 item 2). */
+    private val card = Mutex()
+
+    /** The session whose operation holds [card]; null while the card is free. */
+    @Volatile
+    private var cardHolder: RappOperationBridge? = null
+
+    /** One lane for card reports: the two readers' listeners call in on their own threads. */
+    private val cardStatusLane = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+
+    /** The card last reported on the open session; null before the first report. */
+    @Volatile
+    private var reportedCard: RappOfferedCard? = null
+
+    /**
+     * An operation ended without the card answering, so no card is offered
+     * until the holder couples or primes one again (section 8.4 item 1).
+     */
+    @Volatile
+    private var cardLost = false
 
     @Volatile
     private var lastReadAuthCertDer: ByteArray? = null
@@ -94,31 +148,61 @@ internal class RappPhoneProxyDispatcher(
     val listeningPort: Int?
         get() = activeListener?.port
 
+    val cachedAuthCertDer: ByteArray?
+        get() = lastReadAuthCertDer?.copyOf()
+
+    /** A card command's result, or why the command never answered. */
+    private sealed interface CardRun<out T> {
+        class Answered<T>(
+            val result: T,
+        ) : CardRun<T>
+
+        class Missing(
+            val failure: RappCardFailure,
+        ) : CardRun<Nothing>
+    }
+
+    /** The PIN the holder entered last for one operation; replaced, and the old one closed, after a wrong PIN. */
+    private class HeldPin<P : AutoCloseable>(
+        submission: P,
+    ) : AutoCloseable {
+        var submission: P = submission
+            private set
+
+        fun replace(next: P) {
+            submission.close()
+            submission = next
+        }
+
+        override fun close() = submission.close()
+    }
+
     companion object {
         private const val DEFAULT_REQUESTER_DISPLAY_NAME = "Computer"
 
-        /** Maximum time to wait for an NFC card certificate read before reporting card-removed. */
-        private const val CERT_READ_TIMEOUT_MS = 5_000L
         private const val NANOS_PER_MICROSECOND = 1_000L
+
+        /** How often liveness and operation deadlines are checked (section 8.3). */
         private const val LIVENESS_POLL_INTERVAL_MS = 1_000L
-        private const val LIVENESS_CHALLENGE_BYTES = 32
-        private const val LIVENESS_JITTER_MS = 0L
-        private const val SESSION_NONCE_BYTES = 32
         private const val SHA256_DIGEST_LENGTH = 32
         private const val SHA384_DIGEST_LENGTH = 48
 
+        /** The longest deadline a requester may set, its default when it sets none (section 8.1 item 2). */
+        private const val MAXIMUM_OPERATION_LIFETIME_MS = 300_000UL
+
         /** How long the withdrawn record stays advertised (RAPP section 4.5: 2 to 10 seconds). */
         private const val WITHDRAWN_ANNOUNCEMENT_MS = 3_000L
+
+        private val RANDOM_BYTE_COUNTS = rappRandomByteCounts()
+
+        /** The value random material is overwritten with once used. */
+        private const val ERASED: Byte = 0
+
+        private fun elapsedMicros(startedNs: Long): Long = (System.nanoTime() - startedNs) / NANOS_PER_MICROSECOND
     }
 
-    private fun dismissInbox(opIdHex: String? = null) {
-        scope.launch(Dispatchers.Main) {
-            if (opIdHex != null) {
-                inbox.dismiss(opIdHex)
-            } else {
-                inbox.dismissAll()
-            }
-        }
+    private fun dismissInbox() {
+        scope.launch(Dispatchers.Main) { inbox.dismissAll() }
     }
 
     /**
@@ -135,7 +219,7 @@ internal class RappPhoneProxyDispatcher(
         withdrawalJob?.cancel()
         withdrawalJob = null
         this.vault = vault
-        releasePairRecord()
+        endSession()
         activeListener?.close()
         sessionRouting?.close()
         sessionRouting = RappSessionRouting()
@@ -151,147 +235,164 @@ internal class RappPhoneProxyDispatcher(
             // changed to resolve a conflict gets its own record.
             if (activeListener === listener && registered != announcedInstance) {
                 announcedInstance = registered
-                listener.updateAttributes(sessionAttributes(vault, registered))
+                listener.updateAttributes(sessionAttributes(vault))
             }
         }
-        listener.start(instance, sessionAttributes(vault, instance))
+        listener.start(instance, sessionAttributes(vault))
         RappCustodianService.ensureRunning(context)
         hintRefreshJob?.cancel()
+        // Each hint window rebuilds the served set, which also destroys a
+        // forgotten record past its notice window (RAPP v26.10.21 section 4.6
+        // item 3); the listener stops once nothing is left to serve.
         hintRefreshJob =
             scope.launch {
                 while (isActive && activeListener === listener) {
                     delay(StreamRendezvousName.millisUntilNextWindow(System.currentTimeMillis()))
                     if (activeListener === listener) {
-                        listener.updateAttributes(sessionAttributes(vault, listener.registeredName ?: instance))
+                        pairingsChanged()
                     }
                 }
             }
     }
 
-    /**
-     * Republishes the session record, after the set of pairings or
-     * revocations changed. Before the responder has confirmed the
-     * registration the record is republished under the name it was
-     * requested with.
-     */
+    /** Republishes the session record after the set of served pairings changed. */
     fun refreshAnnouncement() {
         val listener = activeListener ?: return
         val vlt = vault ?: return
-        val instance = listener.registeredName ?: announcedInstance ?: return
-        listener.updateAttributes(sessionAttributes(vlt, instance))
+        listener.updateAttributes(sessionAttributes(vlt))
     }
 
     /**
-     * Session-mode TXT attributes carrying the current rotating hints of
-     * the most recently used custodian pairings (discovery hierarchy
-     * section 4.3) and the revocation hints of the pairings revoked within
-     * the announcement window, bound to [instance] (RAPP v26.10.18
-     * section 4.6 item 4).
+     * The pairings changed: the session record is republished, or the
+     * listener stops once no custodian pairing is left to serve, forgotten
+     * ones that still owe their `pairing_revoked` close included.
      */
-    private fun sessionAttributes(
-        vault: AndroidRappVault,
-        instance: String,
-    ): Map<String, String> {
+    fun pairingsChanged() {
+        val vlt = vault ?: return
+        val served = RappStoredPairs.served(catalog, vlt)
+        val serves = served.any { it.pairing.role == RappEndpointRole.PROXY }
+        served.forEach { it.record.close() }
+        if (serves) refreshAnnouncement() else stopListening()
+    }
+
+    /**
+     * Session-mode TXT attributes carrying the current rotating discovery
+     * hints of the most recently used custodian pairings (discovery
+     * hierarchy section 4.3), forgotten ones included: their peers keep
+     * dialing until the close reaches them (RAPP v26.10.21 section 4.6 item
+     * 2).
+     */
+    private fun sessionAttributes(vault: AndroidRappVault): Map<String, String> {
         val now = StreamRendezvousName.nowUnixSeconds().toULong()
-        val candidates =
-            announcementCandidates(vault) { record -> record.discoveryHint(now) }
         return try {
-            StreamRendezvousName.attributes(
-                rappSessionRecord(candidates, vault.unexpiredRevocations(now), instance, now),
-            )
+            StreamRendezvousName.attributes(rappSessionRecord(announcementCandidates(vault) { it.discoveryHint(now) }))
         } catch (_: Exception) {
             StreamRendezvousName.attributes(StreamRendezvousName.MODE_SESSION)
         }
     }
 
-    /**
-     * Closes the open session to [pairIdHex] as revoked (RAPP v26.10.18
-     * section 4.6 item 1), so the requester learns of the revocation before
-     * this side destroys the key. A session to another pairing is left alone.
-     */
-    fun closePairingRevoked(pairIdHex: String) {
-        val currentPair = pairRecord ?: return
-        val currentHex = currentPair.metadata().pairId.joinToString("") { "%02x".format(it) }
-        if (currentHex != pairIdHex) return
-        operationBridge?.let { bridge ->
-            try {
-                val action = bridge.closeWithReason(RappCloseReason.PAIRING_REVOKED)
-                for (frame in listOfNotNull(action.frame) + action.additionalFrames) {
-                    activeListener?.send(frame)
-                }
-            } catch (_: Exception) {
-            }
-        }
-        dropConnection()
-    }
-
-    /**
-     * Reports to the requester whether a card this custodian can serve is
-     * present (RAPP v26.10.18 section 8.4): once right after the session is
-     * established, and on every change while it is open. Primed or cached
-     * material without a card is absence.
-     */
-    fun cardPresenceChanged(present: Boolean) {
-        if (isClosed) return
-        scope.launch(cardStatusLane) { reportCardPresence(present) }
-    }
-
-    /** Runs on [cardStatusLane], so reports from the two readers are ordered. */
-    private fun reportCardPresence(present: Boolean) {
-        val bridge = operationBridge ?: return
-        if (lastReportedCardPresent == present) return
-        lastReportedCardPresent = present
-        try {
-            handleBridgeAction(bridge.reportCardStatus(present), bridge)
-        } catch (e: Exception) {
-            AppTrace.rappProgressReportFailed("card_status", e.javaClass.simpleName)
-        }
-    }
-
-    /** One announcement candidate per stored custodian pairing, with its last use. */
+    /** One announcement candidate per served custodian pairing, with its last use. */
     private fun announcementCandidates(
         vault: AndroidRappVault,
         hint: (RappPairRecord) -> ByteArray,
     ): List<RappAnnouncementCandidate> =
-        RappStoredPairs.load(catalog, vault).mapNotNull { (peer, record) ->
+        RappStoredPairs.served(catalog, vault).mapNotNull { stored ->
             try {
-                if (record.metadata().role != RappEndpointRole.PROXY) {
+                if (stored.pairing.role != RappEndpointRole.PROXY) {
                     null
                 } else {
-                    RappAnnouncementCandidate(hint(record), peer.lastUsedMs.toULong())
+                    RappAnnouncementCandidate(hint(stored.record), stored.peer.lastUsedMs.toULong())
                 }
             } catch (_: Exception) {
                 null
             } finally {
-                record.close()
+                stored.record.close()
             }
         }
 
     /**
-     * Withdraws the service the user switched off (RAPP section 4.5): the
-     * open session is closed as withdrawn, the listener stops accepting,
-     * the instance is advertised as withdrawn for a few seconds, and then
-     * everything stops.
+     * Ends the session to [pairId] because the local user forgot the pairing
+     * (RAPP v26.10.21 section 4.6 item 1). Returns true when the session was
+     * established and carried the `pairing_revoked` close, so the caller
+     * destroys the record at once; false when no session to the pairing was
+     * open. A session still in its handshake is dropped, and the next one
+     * delivers the close.
+     */
+    fun closePairingRevoked(pairId: RappPairId): Boolean {
+        if (routed?.pairing?.id != pairId) return false
+        val bridge = operationBridge
+        if (bridge == null) {
+            dropConnection()
+            return false
+        }
+        val closed = act(bridge) { it.closeWithReason(RappCloseReason.PAIRING_REVOKED) } != null
+        dropConnection()
+        return closed
+    }
+
+    /**
+     * The card this phone can serve may have changed: reports it on the open
+     * session (RAPP v26.10.21 section 8.4). Present is a card coupled in a
+     * reader or a primed card the holder can present; a card busy with an
+     * operation stays present.
+     */
+    fun cardChanged() {
+        if (isClosed) return
+        scope.launch(cardStatusLane) { reportCard() }
+    }
+
+    /** Runs on [cardStatusLane], so reports leave in the order the card changed. */
+    private suspend fun reportCard() {
+        val bridge = operationBridge ?: return
+        val reported = cardReported
+        try {
+            if (isCardReady()) cardLost = false
+            val card = currentCard()
+            if (card == reportedCard) return
+            val certificate = (card as? RappOfferedCard.Present)?.certificate?.toWire()
+            if (act(bridge) { it.reportCardStatus(certificate) } != null) {
+                reportedCard = card
+            }
+        } finally {
+            reported?.complete(Unit)
+        }
+    }
+
+    /** The card this phone offers now; absence after a lost card until one is coupled again. */
+    private suspend fun currentCard(): RappOfferedCard =
+        if (cardLost) {
+            RappOfferedCard.Absent
+        } else {
+            try {
+                offeredCard()
+            } catch (_: Exception) {
+                RappOfferedCard.Absent
+            }
+        }
+
+    /** No card answered an operation: absence is reported at once (section 8.4 item 1). */
+    private fun markCardLost() {
+        cardLost = true
+        cardChanged()
+    }
+
+    /**
+     * Withdraws the service the user switched off (RAPP v26.10.21 section
+     * 4.5): the open session is closed as withdrawn, the listener stops
+     * accepting, the instance is advertised as withdrawn for a few seconds,
+     * and then everything stops.
      */
     fun withdraw() {
         val listener = activeListener
         val vlt = vault
         val instance = listener?.registeredName
         if (listener == null || vlt == null || instance == null) {
-            disconnectClient()
             stopListening()
             return
         }
         hintRefreshJob?.cancel()
         hintRefreshJob = null
-        operationBridge?.let { bridge ->
-            try {
-                for (frame in listOfNotNull(bridge.closeWithReason(RappCloseReason.SERVICE_WITHDRAWN).frame)) {
-                    listener.send(frame)
-                }
-            } catch (_: Exception) {
-            }
-        }
+        operationBridge?.let { bridge -> act(bridge) { it.closeWithReason(RappCloseReason.SERVICE_WITHDRAWN) } }
         val now = StreamRendezvousName.nowUnixSeconds().toULong()
         val withdrawn =
             try {
@@ -321,36 +422,17 @@ internal class RappPhoneProxyDispatcher(
         sessionRouting = null
         hintRefreshJob?.cancel()
         hintRefreshJob = null
+        endSession()
         activeListener?.close()
         activeListener = null
         announcedInstance = null
-        operationBridge?.close()
-        livenessJob?.cancel()
-        livenessJob = null
-        operationBridge = null
-        sessionBridge?.close()
-        sessionBridge = null
-        releasePairRecord()
         vault = null
-        _connectedPeer.value = null
-        lastReadAuthCertDer = null
-        clearPendingPins()
-        dismissInbox()
     }
 
+    /** Drops the connected computer and publishes the listener afresh. */
     fun disconnectClient() {
-        livenessJob?.cancel()
-        livenessJob = null
+        endSession()
         activeListener?.close()
-        sessionBridge?.close()
-        sessionBridge = null
-        sessionHandshakeDone = false
-        operationBridge?.close()
-        operationBridge = null
-        _connectedPeer.value = null
-        lastReadAuthCertDer = null
-        clearPendingPins()
-        dismissInbox()
         val vlt = vault
         if (vlt != null && !isClosed) {
             startListening(vlt)
@@ -360,19 +442,14 @@ internal class RappPhoneProxyDispatcher(
     private fun handleRelayEvent(event: StreamRelayEvent) {
         when (event) {
             is StreamRelayEvent.Connected -> {
-                sessionBridge?.close()
-                sessionBridge = null
-                sessionHandshakeDone = false
-                operationBridge?.close()
-                operationBridge = null
-                releasePairRecord()
+                endSession()
                 if (!preAuthenticationLimiter.admit(RappClock.monotonicMs())) {
                     activeListener?.disconnectClient()
                 }
             }
 
             is StreamRelayEvent.Frame -> {
-                handleRelayFrame(event)
+                handleRelayFrame(event.data)
             }
 
             is StreamRelayEvent.Disconnected, is StreamRelayEvent.Error -> {
@@ -383,649 +460,650 @@ internal class RappPhoneProxyDispatcher(
                         "stream disconnected"
                     },
                 )
-                livenessJob?.cancel()
-                livenessJob = null
-                activeOperationJob?.cancel()
-                activeOperationJob = null
-                sessionBridge?.close()
-                sessionBridge = null
-                sessionHandshakeDone = false
-                operationBridge?.close()
-                operationBridge = null
-                releasePairRecord()
-                _connectedPeer.value = null
-                lastReadAuthCertDer = null
-                clearPendingPins()
-                dismissInbox()
+                endSession()
             }
         }
     }
 
-    /** Every stored pairing this phone can load from the vault. */
-    private fun storedPairs(vault: AndroidRappVault): List<RappPairRecord> =
-        RappStoredPairs.load(catalog, vault).map { (_, record) -> record }
-
-    private fun handleRelayFrame(event: StreamRelayEvent.Frame) {
+    private fun handleRelayFrame(data: ByteArray) {
         val vlt = vault ?: return
-
-        val opBridge = operationBridge
-        if (opBridge != null) {
-            try {
-                val action = opBridge.receiveFrame(event.data, RappClock.monotonicMs())
-                handleBridgeAction(action, opBridge)
-            } catch (_: Exception) {
-            }
+        val bridge = operationBridge
+        if (bridge != null) {
+            receive(bridge, data)
             return
         }
+        val session = sessionBridge
+        val pair = routed
+        if (session == null || pair == null) {
+            route(vlt, data)
+        } else {
+            handshake(vlt, session, pair, data)
+        }
+    }
 
-        val currentSession = sessionBridge
-        if (currentSession == null) {
-            // The first frame must be the session preamble of a stored
-            // pairing; anything else closes the connection and changes no
-            // stored state.
-            val pairs = storedPairs(vlt)
-            var pair: RappPairRecord? = null
+    /**
+     * The first frame must be the session preamble of a served pairing;
+     * anything else closes the connection and changes no stored state
+     * (RAPP v26.10.21 section 2.2.1).
+     */
+    private fun route(
+        vault: AndroidRappVault,
+        preamble: ByteArray,
+    ) {
+        val served = RappStoredPairs.served(catalog, vault)
+        val record =
             try {
-                pair = sessionRouting?.route(event.data, pairs)
+                sessionRouting?.route(preamble, served.map { it.record })
             } catch (_: Exception) {
-            } finally {
-                pairs.filter { it !== pair }.forEach(RappPairRecord::close)
+                null
             }
-            if (pair == null) {
-                activeListener?.disconnectClient()
+        val pair = served.firstOrNull { it.record === record }
+        served.filter { it !== pair }.forEach { it.record.close() }
+        if (pair == null) {
+            activeListener?.disconnectClient()
+            return
+        }
+        routed = pair
+        try {
+            sessionBridge = RappSessionBridge.beginProxy(pair.record, vault, rappStreamProfileName())
+        } catch (_: Exception) {
+            dropConnection()
+        }
+    }
+
+    /**
+     * Answers the requester's `Noise_KK` message and opens the session with
+     * `session.ready` (section 6.3, section 7.1 item 5); a forgotten pairing
+     * gets its `pairing_revoked` close instead. Any failure before
+     * authentication closes the connection and changes nothing stored.
+     */
+    private fun handshake(
+        vault: AndroidRappVault,
+        session: RappSessionBridge,
+        pair: RappStoredPair,
+        data: ByteArray,
+    ) {
+        try {
+            session.readHandshakeFrame(data)
+            send(session.writeHandshakeFrame())
+            if (!session.handshakeComplete()) return
+            session.enterAuthentication()
+            if (pair.pairing.state is RappPairState.Forgotten) {
+                deliverRevocationNotice(vault, session, pair)
                 return
             }
+            val nonce = ByteArray(RANDOM_BYTE_COUNTS.sessionReadyNonce.toInt()).also(SecureRandom()::nextBytes)
             try {
-                pairRecord = pair
-                sessionBridge =
-                    RappSessionBridge.beginProxy(
-                        pair = pair,
-                        vault = vlt,
-                        transportProfile = rappStreamProfileName(),
-                    )
-            } catch (_: Exception) {
-                activeListener?.disconnectClient()
+                send(session.sendReady(nonce))
+            } finally {
+                nonce.fill(ERASED)
             }
-            return
+            session.enterEstablished()
+            establish(session, pair)
+        } catch (_: Exception) {
+            dropConnection()
         }
+    }
 
-        if (!sessionHandshakeDone) {
-            try {
-                currentSession.readHandshakeFrame(event.data)
-                val reply = currentSession.writeHandshakeFrame()
-                activeListener?.send(reply)
-                if (currentSession.handshakeComplete()) {
-                    sessionHandshakeDone = true
-                    currentSession.enterAuthentication()
-                    val nonce = ByteArray(SESSION_NONCE_BYTES).also { SecureRandom().nextBytes(it) }
+    /**
+     * The first and only message of a session to a forgotten pairing: the
+     * `pairing_revoked` close, after which the record's key is destroyed
+     * (RAPP v26.10.21 section 4.6 items 2 and 3).
+     */
+    private fun deliverRevocationNotice(
+        vault: AndroidRappVault,
+        session: RappSessionBridge,
+        pair: RappStoredPair,
+    ) {
+        send(session.deliverRevocationNotice())
+        routed = null
+        RappPairRevocation.revoke(pair.pairing.id, pair.record, vault)
+        catalog.removePair(pair.peer.pairIdHex)
+        dropConnection()
+        pairingsChanged()
+    }
+
+    private fun establish(
+        session: RappSessionBridge,
+        pair: RappStoredPair,
+    ) {
+        activeListener?.clearSocketTimeout()
+        val bridge = RappOperationBridge.beginProxy(session, MAXIMUM_OPERATION_LIFETIME_MS, RappClock.monotonicMs())
+        cardReported = CompletableDeferred()
+        reportedCard = null
+        operationBridge = bridge
+        startLivenessLoop(bridge)
+        cardChanged()
+        catalog.markUsed(pair.peer.pairIdHex, System.currentTimeMillis())
+        _connectedPeer.value = pair.peer
+        AppTrace.rappPairingCompleted(pair.peer.displayName)
+    }
+
+    /** Sends one frame on the connection, before the session's bridge exists. */
+    private fun send(frame: ByteArray) {
+        synchronized(sendLock) {
+            (activeListener ?: throw IOException("listener closed")).send(frame)
+        }
+    }
+
+    /**
+     * Runs one call on the session's bridge, types its action at the binding
+     * border, and sends the frame it sealed, so frames leave in the order the
+     * bridge sealed them; a closing session ends here. Null when [bridge] no
+     * longer serves the session or the call failed.
+     */
+    private fun act(
+        bridge: RappOperationBridge,
+        call: (RappOperationBridge) -> RappBridgeAction,
+    ): RappBridgeOutcome? {
+        val outcome =
+            synchronized(sendLock) {
+                if (bridge !== operationBridge) return null
+                val outcome =
                     try {
-                        val ready = currentSession.sendReady(nonce)
-                        activeListener?.send(ready)
-                    } finally {
-                        nonce.fill(0)
+                        RappBridgeOutcome.from(call(bridge))
+                    } catch (_: Exception) {
+                        return null
+                    }
+                if (outcome is RappBridgeOutcome.Send) {
+                    try {
+                        activeListener?.send(outcome.frame)
+                    } catch (_: IOException) {
                     }
                 }
-            } catch (_: Exception) {
+                outcome
             }
-            return
+        when {
+            outcome is RappBridgeOutcome.Closed -> sessionClosed(outcome.reason)
+            outcome is RappBridgeOutcome.Send && outcome.closesWith != null -> dropConnection()
         }
+        return outcome
+    }
 
-        // Bilateral ready confirmation
-        try {
-            currentSession.receiveReady(event.data, RappClock.wallMs())
-            currentSession.enterEstablished()
-            activeListener?.clearSocketTimeout()
-
-            val liveness =
-                RappLivenessConfiguration(
-                    baseIntervalMs = 5_000UL,
-                    responseTimeoutMs = 10_000UL,
-                    maximumIntervalMs = 60_000UL,
-                    maximumJitterMs = 500UL,
-                    maximumMisses = 3.toUByte(),
-                )
-            val newOpBridge =
-                RappOperationBridge.beginProxy(
-                    session = currentSession,
-                    vault = vlt,
-                    maximumLifetimeMs = 120_000UL,
-                    liveness = liveness,
-                    nowMs = RappClock.monotonicMs(),
-                )
-            operationBridge = newOpBridge
-            startLivenessLoop(newOpBridge)
-            lastReportedCardPresent = null
-            cardPresenceChanged(isCardReady())
-            val currentPair = pairRecord
-            if (currentPair != null) {
-                val hex = currentPair.metadata().pairId.joinToString("") { "%02x".format(it) }
-                val peer =
-                    catalog.listPairs().firstOrNull { it.pairIdHex == hex }
-                        ?: PairedPeer(
-                            pairIdHex = hex,
-                            displayName = DEFAULT_REQUESTER_DISPLAY_NAME,
-                            platform = "macOS",
-                            createdAtMs = System.currentTimeMillis(),
-                        )
-                catalog.markUsed(hex, System.currentTimeMillis())
-                _connectedPeer.value = peer
-                AppTrace.rappPairingCompleted(peer.displayName)
-            }
-        } catch (_: Exception) {
+    /**
+     * The session closed. A requester that forgot this phone closes it with
+     * `pairing_revoked`, and the pairing is revoked here at once (RAPP
+     * v26.10.21 section 4.6 item 4).
+     */
+    private fun sessionClosed(reason: RappCloseReason?) {
+        val pair = routed.takeIf { reason == RappCloseReason.PAIRING_REVOKED }
+        if (pair != null) routed = null
+        dropConnection()
+        val vlt = vault ?: return
+        if (pair != null) {
+            catalog.removePair(pair.peer.pairIdHex)
+            RappPairRevocation.revoke(pair.pairing.id, pair.record, vlt)
+            pairingsChanged()
         }
     }
 
-    private val pendingPin1 = java.util.concurrent.ConcurrentHashMap<String, Pin1Submission>()
-    private val pendingPin2 = java.util.concurrent.ConcurrentHashMap<String, Pin2Submission>()
-    private var activeOperationJob: Job? = null
-    private var livenessJob: Job? = null
-    private var hintRefreshJob: Job? = null
+    /**
+     * Decrypts one frame of the established session. A frame that does not
+     * authenticate closes the session; the pairing stays (section 10.1 item
+     * 2).
+     */
+    private fun receive(
+        bridge: RappOperationBridge,
+        data: ByteArray,
+    ) {
+        when (val outcome = act(bridge) { it.receiveFrame(data, RappClock.monotonicMs()) }) {
+            null -> {
+                if (bridge === operationBridge) dropConnection()
+            }
 
-    /** The card presence last sent on the open session; null before the first report. */
-    @Volatile
-    private var lastReportedCardPresent: Boolean? = null
+            is RappBridgeOutcome.Admitted -> {
+                startOperation(bridge, outcome.operationId)
+            }
 
-    /** One lane for card presence reports: the two readers' listeners call in on their own threads. */
-    private val cardStatusLane = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
-
-    /** The instance name the session record is published under, as the responder last confirmed it. */
-    @Volatile
-    private var announcedInstance: String? = null
-
-    private fun clearPendingPins() {
-        pendingPin1.values.forEach { it.close() }
-        pendingPin1.clear()
-        pendingPin2.values.forEach { it.close() }
-        pendingPin2.clear()
+            else -> {}
+        }
     }
 
+    /** Pings after 5 seconds of silence, ends the session after 30, and cancels operations past their deadline. */
     private fun startLivenessLoop(bridge: RappOperationBridge) {
         livenessJob?.cancel()
         livenessJob =
             scope.launch(Dispatchers.IO) {
-                val challenge = ByteArray(LIVENESS_CHALLENGE_BYTES)
-                val secureRandom = SecureRandom()
-                try {
-                    while (isActive) {
-                        delay(LIVENESS_POLL_INTERVAL_MS)
+                val random = SecureRandom()
+                while (isActive && bridge === operationBridge) {
+                    delay(LIVENESS_POLL_INTERVAL_MS)
+                    val challenge = ByteArray(RANDOM_BYTE_COUNTS.livenessChallenge.toInt()).also(random::nextBytes)
+                    val polled =
                         try {
-                            secureRandom.nextBytes(challenge)
-                            val challengeCopy = challenge.copyOf()
-                            try {
-                                val action =
-                                    bridge.pollLiveness(
-                                        nowMs = RappClock.monotonicMs(),
-                                        challenge = challengeCopy,
-                                        jitterMs = LIVENESS_JITTER_MS,
-                                    )
-                                handleBridgeAction(action, bridge)
-                            } finally {
-                                challengeCopy.fill(0)
-                            }
-                        } catch (_: Exception) {
-                            break
+                            act(bridge) { it.pollLiveness(RappClock.monotonicMs(), challenge) }
+                        } finally {
+                            challenge.fill(ERASED)
                         }
+                    if (polled == null) {
+                        if (bridge === operationBridge) dropConnection()
+                        break
                     }
-                } finally {
-                    challenge.fill(0)
+                    if (act(bridge) { it.expireDue(RappClock.monotonicMs()) } is RappBridgeOutcome.Send) {
+                        operationExpired()
+                    }
                 }
             }
     }
 
-    private fun handleBridgeAction(
-        action: uniffi.refineid_rapp.RappBridgeAction,
-        bridge: RappOperationBridge,
-    ) {
-        // A status report travels with the result it re-delivers, in order.
-        for (frame in listOfNotNull(action.frame) + action.additionalFrames) {
-            try {
-                activeListener?.send(frame)
-            } catch (_: Exception) {
-            }
-        }
-
-        if (action.closeSessionAfterSend) {
-            dropConnection()
-            return
-        }
-
-        if (action.kind == RappBridgeActionKind.SEND_FRAME) {
-            return
-        }
-
-        val opId = action.operationId
-        val opIdHex = opId?.joinToString("") { "%02x".format(it) }
-
-        if (handleLifecycleAction(action, opIdHex)) {
-            return
-        }
-
-        handleOperationAction(action, opId, opIdHex, bridge)
+    /** The live operation passed its deadline before the card was commanded; its result already went out. */
+    private fun operationExpired() {
+        operationJob?.cancel()
+        operationJob = null
+        dismissInbox()
     }
 
-    private fun handleLifecycleAction(
-        action: uniffi.refineid_rapp.RappBridgeAction,
-        opIdHex: String?,
-    ): Boolean {
-        when (action.kind) {
-            RappBridgeActionKind.SESSION_CLOSED -> {
-                dropConnection()
-                return true
-            }
-
-            RappBridgeActionKind.PAIR_REVOKED -> {
-                val currentPair = pairRecord
-                val vlt = vault
-                if (currentPair != null) {
-                    val hex = currentPair.metadata().pairId.joinToString("") { "%02x".format(it) }
-                    catalog.removePair(hex)
-                    if (vlt != null) {
-                        // The core revoked the pairing; what remains of it
-                        // yields the retention that announces the revocation.
-                        pairRecord = null
-                        RappPairRevocation.revoke(currentPair, vlt)
-                    }
-                }
-                dropConnection()
-                refreshAnnouncement()
-                return true
-            }
-
-            RappBridgeActionKind.TERMINAL -> {
-                if (opIdHex != null) {
-                    dismissInbox(opIdHex)
-                    pendingPin1.remove(opIdHex)?.close()
-                    pendingPin2.remove(opIdHex)?.close()
-                }
-                return true
-            }
-
-            else -> {
-                return false
-            }
-        }
-    }
-
-    private fun handleOperationAction(
-        action: uniffi.refineid_rapp.RappBridgeAction,
-        opId: ByteArray?,
-        opIdHex: String?,
-        bridge: RappOperationBridge,
-    ) {
-        when (action.kind) {
-            RappBridgeActionKind.INSPECT_PREREQUISITES -> {
-                if (opId == null) return
-                try {
-                    val resp = bridge.prerequisitesComplete(opId)
-                    handleBridgeAction(resp, bridge)
-                } catch (_: Exception) {
-                }
-            }
-
-            RappBridgeActionKind.EXECUTE_SAFE_READ -> {
-                if (opId != null) {
-                    handleSafeRead(action, opId, bridge)
-                }
-            }
-
-            RappBridgeActionKind.AWAIT_USER_APPROVAL -> {
-                if (opId != null && opIdHex != null) {
-                    action.operation?.let { desc ->
-                        handleApproval(desc, opId, opIdHex, bridge)
-                    }
-                }
-            }
-
-            RappBridgeActionKind.EXECUTE_CARD_COMMAND -> {
-                if (opId != null && opIdHex != null) {
-                    action.operation?.let { desc ->
-                        handleExecute(desc, opId, opIdHex, bridge)
-                    }
-                }
-            }
-
-            RappBridgeActionKind.RESULT_ACKNOWLEDGMENT -> {
-                if (opId != null) {
-                    try {
-                        bridge.acknowledgmentReleased(opId)
-                    } catch (_: Exception) {
-                    }
-                }
-            }
-
-            else -> {
-            }
-        }
-    }
-
-    private fun handleApproval(
-        desc: uniffi.refineid_rapp.RappOperationDescriptor,
-        opId: ByteArray,
-        opIdHex: String,
-        bridge: RappOperationBridge,
-    ) {
-        AppTrace.rappOperationReceived(desc.kind.name, opIdHex)
-        when (desc.kind) {
-            RappOperationKind.BROWSER_AUTHENTICATE -> {
-                val cachedPin = pinCache?.take()
-                val candidatePin: Pin1Submission? =
-                    if (cachedPin != null) {
-                        val sub =
-                            cachedPin.consume { pinBytes ->
-                                Pin1Submission.fromOwnedBytes(pinBytes.copyOf())
-                            }
-                        if (pinCache.isRejected(sub)) {
-                            sub.close()
-                            null
-                        } else {
-                            sub
-                        }
-                    } else {
-                        val stored = primedCanStore?.readPin1()
-                        if (stored != null) {
-                            val sub = Pin1Submission.fromOwnedBytes(stored)
-                            if (pinCache?.isRejected(sub) == true) {
-                                sub.close()
-                                null
-                            } else {
-                                sub
-                            }
-                        } else {
-                            null
-                        }
-                    }
-
-                if (candidatePin != null) {
-                    pendingPin1.remove(opIdHex)?.close()
-                    pendingPin1[opIdHex] = candidatePin
-                    approve(opId, bridge)
-                } else {
-                    val requesterName =
-                        catalog
-                            .listPairs()
-                            .firstOrNull()
-                            ?.displayName
-                            ?.takeIf { it.isNotBlank() }
-                            ?: DEFAULT_REQUESTER_DISPLAY_NAME
-                    scope.launch(Dispatchers.Main) {
-                        inbox.askBrowserAuth(
-                            requestId = opIdHex,
-                            requester = requesterName,
-                            onApproved = { pin1Submission ->
-                                if (pinCache?.isRejected(pin1Submission) == true) {
-                                    pin1Submission.close()
-                                    respondKnownRejectedPin(opId, bridge)
-                                } else {
-                                    pendingPin1.remove(opIdHex)?.close()
-                                    pendingPin1[opIdHex] = pin1Submission
-                                    approve(opId, bridge)
-                                }
-                            },
-                            onDenied = { deny(opId, bridge) },
-                            onShown = { scope.launch(Dispatchers.IO) { reportConsentShown(opId, bridge) } },
-                        )
-                    }
-                }
-            }
-
-            RappOperationKind.SIGN_DOCUMENT, RappOperationKind.BATCH_SIGN_DOCUMENTS -> {
-                val requesterName =
-                    catalog
-                        .listPairs()
-                        .firstOrNull()
-                        ?.displayName
-                        ?.takeIf { it.isNotBlank() }
-                        ?: DEFAULT_REQUESTER_DISPLAY_NAME
-                val documentNames =
-                    if (desc.kind == RappOperationKind.BATCH_SIGN_DOCUMENTS) {
-                        desc.documentNames
-                    } else {
-                        listOfNotNull(desc.displayContext)
-                    }
-                scope.launch(Dispatchers.Main) {
-                    inbox.askDocumentSign(
-                        requestId = opIdHex,
-                        requester = requesterName,
-                        documentNames = documentNames,
-                        onApproved = { pin2Submission ->
-                            pendingPin2.remove(opIdHex)?.close()
-                            pendingPin2[opIdHex] = pin2Submission
-                            approve(opId, bridge)
-                        },
-                        onDenied = { deny(opId, bridge) },
-                        onShown = { scope.launch(Dispatchers.IO) { reportConsentShown(opId, bridge) } },
-                    )
-                }
-            }
-
-            else -> {
-                approve(opId, bridge)
-            }
-        }
-    }
-
-    private fun approve(
-        opId: ByteArray,
-        bridge: RappOperationBridge,
-    ) {
-        val opIdHex = opId.joinToString("") { "%02x".format(it) }
-        AppTrace.rappOperationApproved(opIdHex)
-        activeOperationJob?.cancel()
-        activeOperationJob =
-            scope.launch(Dispatchers.IO) {
-                try {
-                    val resp = bridge.approve(opId, RappClock.monotonicMs())
-                    handleBridgeAction(resp, bridge)
-                } catch (_: Exception) {
-                    AppTrace.rappOperationApproveFailed("approve_failed")
-                }
-            }
-    }
-
-    /** Closes the routed pairing's record handle; the session keeps its own. */
-    private fun releasePairRecord() {
-        pairRecord?.close()
-        pairRecord = null
-    }
-
-    /** Tears down the active stream so Mac must reconnect for the next request. */
-    private fun dropConnection() {
-        AppTrace.rappConnectionDropped("proxy dispatcher dropConnection")
+    /**
+     * Forgets the session: every operation of it is over (section 8.1 item
+     * 3). A card command in flight is never interrupted; it runs to the
+     * card's answer, which nothing delivers.
+     */
+    private fun endSession() {
         livenessJob?.cancel()
         livenessJob = null
-        activeOperationJob?.cancel()
-        activeOperationJob = null
-        lastReadAuthCertDer = null
-        activeListener?.disconnectClient()
-        operationBridge?.close()
+        operationJob?.cancel()
+        operationJob = null
+        val bridge = operationBridge
         operationBridge = null
+        bridge?.close()
         sessionBridge?.close()
         sessionBridge = null
-        sessionHandshakeDone = false
-        lastReportedCardPresent = null
-        releasePairRecord()
-        clearPendingPins()
+        routed?.record?.close()
+        routed = null
+        cardReported = null
+        reportedCard = null
+        lastReadAuthCertDer = null
         _connectedPeer.value = null
         dismissInbox()
     }
 
-    /** Tells the requester the consent view is on screen (RAPP v26.10.18 section 8.2 item 3). */
-    private fun reportConsentShown(
-        opId: ByteArray,
-        bridge: RappOperationBridge,
-    ) {
-        try {
-            handleBridgeAction(
-                bridge.reportProgress(opId, uniffi.refineid_rapp.RappProgressEvent.CONSENT_SHOWN),
-                bridge,
-            )
-        } catch (e: Exception) {
-            AppTrace.rappProgressReportFailed("consent_shown", e.javaClass.simpleName)
-        }
+    /** Closes the link and ends the session; the pairing stays. */
+    private fun dropConnection() {
+        AppTrace.rappConnectionDropped("proxy dispatcher dropConnection")
+        endSession()
+        activeListener?.disconnectClient()
     }
 
-    private fun deny(
-        opId: ByteArray,
+    private fun requesterName(): String =
+        _connectedPeer.value
+            ?.displayName
+            ?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_REQUESTER_DISPLAY_NAME
+
+    // --- Operations ---------------------------------------------------------
+
+    /**
+     * Runs one operation once the session carried its first `card.status`:
+     * it takes the card in its turn, then goes to the holder's consent or,
+     * for a read, straight to the card (section 8.2).
+     */
+    private fun startOperation(
         bridge: RappOperationBridge,
+        operationId: RappOperationId,
     ) {
-        val opIdHex = opId.joinToString("") { "%02x".format(it) }
-        AppTrace.rappOperationDenied(opIdHex, "user_denied")
-        activeOperationJob?.cancel()
-        activeOperationJob =
+        val reported = cardReported
+        operationJob =
             scope.launch(Dispatchers.IO) {
                 try {
-                    val resp = bridge.deny(opId)
-                    handleBridgeAction(resp, bridge)
+                    reported?.await()
+                    holdCard(bridge, operationId) {
+                        when (
+                            val next =
+                                act(bridge) { it.prerequisitesComplete(operationId.toWire(), RappClock.monotonicMs()) }
+                        ) {
+                            is RappBridgeOutcome.AwaitConsent -> {
+                                authorize(bridge, operationId, next.request)
+                            }
+
+                            is RappBridgeOutcome.ExecuteRead -> {
+                                read(bridge, operationId, next.request)
+                            }
+
+                            else -> {}
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: Exception) {
-                    AppTrace.rappOperationDenyFailed("deny_failed")
+                    act(bridge) { it.operationFailed(operationId.toWire()) }
                 }
-                // Drop the client stream so Mac cannot immediately re-request on the same session.
-                dropConnection()
             }
     }
 
-    private fun handleExecute(
-        desc: uniffi.refineid_rapp.RappOperationDescriptor,
-        opId: ByteArray,
-        opIdHex: String,
+    /**
+     * Runs [block] while the operation holds the card. An operation that
+     * finds the card held by another session's operation is told it is
+     * queued, once, and waits its turn (section 8.2 item 2); one that waits
+     * only for its own session's previous operation to finish is not.
+     */
+    private suspend fun holdCard(
         bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        block: suspend () -> Unit,
     ) {
-        when (desc.kind) {
-            RappOperationKind.BROWSER_AUTHENTICATE -> {
-                val pin1Submission = pendingPin1.remove(opIdHex)
-                if (pin1Submission == null) {
-                    AppTrace.rappOperationDenied(opIdHex, "pin1_missing")
-                    respondBridgeDeny(opId, bridge)
-                    return
-                }
-                executeBrowserAuth(opId, desc, pin1Submission, bridge)
+        if (!card.tryLock()) {
+            if (cardHolder !== bridge) {
+                act(bridge) { it.reportProgress(operationId.toWire(), RappProgressEvent.QUEUED) }
             }
-
-            RappOperationKind.SIGN_DOCUMENT -> {
-                val pin2Submission = pendingPin2.remove(opIdHex)
-                if (pin2Submission == null) {
-                    AppTrace.rappOperationDenied(opIdHex, "pin2_missing")
-                    respondBridgeDeny(opId, bridge)
-                    return
-                }
-                executeDocumentSign(opId, desc, pin2Submission, bridge)
-            }
-
-            RappOperationKind.BATCH_SIGN_DOCUMENTS -> {
-                val pin2Submission = pendingPin2.remove(opIdHex)
-                if (pin2Submission == null) {
-                    AppTrace.rappOperationDenied(opIdHex, "pin2_missing")
-                    respondBridgeDeny(opId, bridge)
-                    return
-                }
-                executeBatchDocumentSign(opId, desc, pin2Submission, bridge)
-            }
-
-            else -> {
-            }
+            card.lock()
         }
-    }
-
-    private enum class CardReadyOutcome {
-        READY,
-        CANCELLED,
-        TIMEOUT,
-    }
-
-    private suspend fun ensureCardReady(
-        opId: ByteArray,
-        opIdHex: String,
-        action: RappAuthAction,
-        bridge: RappOperationBridge,
-        forcePrompt: Boolean = false,
-    ): CardReadyOutcome {
-        if (!forcePrompt && isCardReady()) return CardReadyOutcome.READY
-        val requesterName =
-            catalog
-                .listPairs()
-                .firstOrNull()
-                ?.displayName
-                ?.takeIf { it.isNotBlank() }
-                ?: DEFAULT_REQUESTER_DISPLAY_NAME
-        var cancelled = false
-        AppTrace.rappCardPromptShown(opIdHex, action.name)
+        cardHolder = bridge
         try {
-            val progressAction =
-                bridge.reportProgress(opId, uniffi.refineid_rapp.RappProgressEvent.WAITING_FOR_CARD)
-            handleBridgeAction(progressAction, bridge)
-        } catch (e: Exception) {
-            AppTrace.rappProgressReportFailed("waiting_for_card", e.javaClass.simpleName)
+            block()
+        } finally {
+            cardHolder = null
+            card.unlock()
         }
-        scope.launch(Dispatchers.Main) {
+    }
+
+    private suspend fun authorize(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        request: RappRequest,
+    ) {
+        AppTrace.rappOperationReceived(request.javaClass.simpleName, operationId.key)
+        when (request) {
+            is RappRequest.BrowserAuthenticate -> {
+                authenticate(bridge, operationId, request)
+            }
+
+            is RappRequest.SignDocument -> {
+                signDocuments(bridge, operationId, request.keyProfile, request.algorithm, listOf(request.document)) {
+                    it.completeSignature(operationId.toWire(), single())
+                }
+            }
+
+            is RappRequest.BatchSignDocuments -> {
+                signDocuments(bridge, operationId, request.keyProfile, request.algorithm, request.documents) {
+                    it.completeBatch(operationId.toWire())
+                }
+            }
+
+            RappRequest.InspectCard,
+            RappRequest.ReadIdentity,
+            RappRequest.ReadAuthenticationCertificate,
+            RappRequest.ReadSignatureCertificate,
+            -> {
+                fail(bridge, operationId, RappCardFailure.OPERATION_FAILED)
+            }
+        }
+    }
+
+    /** Ends the operation with [failure], telling the holder when the retry floor refused (section 10.2). */
+    private fun fail(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        failure: RappCardFailure,
+    ) {
+        AppTrace.rappOperationFailed("remote_operation", operationId.key, failure.name)
+        when (failure) {
+            RappCardFailure.RETRY_FLOOR -> {
+                scope.launch(Dispatchers.Main) { inbox.tell(R.string.rapp_retry_floor) }
+            }
+
+            RappCardFailure.CARD_ERROR -> {
+                markCardLost()
+            }
+
+            RappCardFailure.USER_CANCELLED, RappCardFailure.UNSUPPORTED, RappCardFailure.OPERATION_FAILED -> {}
+        }
+        val wire = operationId.toWire()
+        act(bridge) {
+            when (failure) {
+                RappCardFailure.USER_CANCELLED -> it.deny(wire)
+                RappCardFailure.RETRY_FLOOR -> it.retryFloor(wire)
+                RappCardFailure.CARD_ERROR -> it.cardError(wire)
+                RappCardFailure.UNSUPPORTED -> it.requestInvalidOrUnsupported(wire)
+                RappCardFailure.OPERATION_FAILED -> it.operationFailed(wire)
+            }
+        }
+    }
+
+    /**
+     * Applies the holder's approval and returns the one card command it
+     * releases; null when the operation expired and its result already went
+     * out.
+     */
+    private fun approve(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+    ): RappRequest? {
+        AppTrace.rappOperationApproved(operationId.key)
+        val command = act(bridge) { it.approve(operationId.toWire(), RappClock.monotonicMs()) }
+        return (command as? RappBridgeOutcome.ExecuteCommand)?.request
+    }
+
+    private fun reportConsentShown(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+    ) {
+        scope.launch(Dispatchers.IO) {
+            act(bridge) { it.reportProgress(operationId.toWire(), RappProgressEvent.CONSENT_SHOWN) }
+        }
+    }
+
+    /**
+     * Asks the holder for PIN 1 on this phone; null when the holder declines.
+     * The first prompt of an operation is its consent view, reported once it
+     * is on screen (section 8.2 item 3); a prompt after a wrong PIN says so.
+     */
+    private suspend fun askPin1(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        wrongPin: RappCardAnswer.WrongPin?,
+    ): Pin1Submission? {
+        val answer = CompletableDeferred<Pin1Submission?>()
+        withContext(Dispatchers.Main) {
+            inbox.askBrowserAuth(
+                requestId = operationId.key,
+                requester = requesterName(),
+                onApproved = { pin -> if (!answer.complete(pin)) pin.close() },
+                onDenied = { answer.complete(null) },
+                onShown = { if (wrongPin == null) reportConsentShown(bridge, operationId) },
+                wrongPin = wrongPin,
+            )
+        }
+        return awaitHolder(answer, operationId)
+    }
+
+    /** Asks the holder for PIN 2 over the documents [names] on this phone; see [askPin1]. */
+    private suspend fun askPin2(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        names: List<String>,
+        wrongPin: RappCardAnswer.WrongPin?,
+    ): Pin2Submission? {
+        val answer = CompletableDeferred<Pin2Submission?>()
+        withContext(Dispatchers.Main) {
+            inbox.askDocumentSign(
+                requestId = operationId.key,
+                requester = requesterName(),
+                documentNames = names,
+                onApproved = { pin -> if (!answer.complete(pin)) pin.close() },
+                onDenied = { answer.complete(null) },
+                onShown = { if (wrongPin == null) reportConsentShown(bridge, operationId) },
+                wrongPin = wrongPin,
+            )
+        }
+        return awaitHolder(answer, operationId)
+    }
+
+    private suspend fun <T> awaitHolder(
+        answer: CompletableDeferred<T?>,
+        operationId: RappOperationId,
+    ): T? =
+        try {
+            answer.await()
+        } finally {
+            answer.cancel()
+            withContext(NonCancellable + Dispatchers.Main) { inbox.dismiss(operationId.key) }
+        }
+
+    /**
+     * Waits for the holder to present the card when none is ready, telling the
+     * requester while it waits (section 8.2 item 4). Null when the card is
+     * ready; otherwise why the wait ended without one.
+     */
+    private suspend fun awaitCard(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        action: RappAuthAction,
+        forcePrompt: Boolean = false,
+    ): RappCardFailure? {
+        if (!forcePrompt && isCardReady()) return null
+        val cancelled = AtomicBoolean(false)
+        AppTrace.rappCardPromptShown(operationId.key, action.name)
+        act(bridge) { it.reportProgress(operationId.toWire(), RappProgressEvent.WAITING_FOR_CARD) }
+        withContext(Dispatchers.Main) {
             inbox.showTapPrompt(
-                requestId = opIdHex,
-                requester = requesterName,
+                requestId = operationId.key,
+                requester = requesterName(),
                 action = action,
-                onCancel = { cancelled = true },
+                onCancel = { cancelled.set(true) },
             )
         }
         val ready =
             try {
                 awaitCardReady()
             } finally {
-                AppTrace.rappCardPromptDismissed(opIdHex)
-                scope.launch(Dispatchers.Main) {
-                    inbox.dismissTapPrompt(opIdHex)
-                }
-                try {
-                    val progressAction =
-                        bridge.reportProgress(opId, uniffi.refineid_rapp.RappProgressEvent.CARD_WAIT_ENDED)
-                    handleBridgeAction(progressAction, bridge)
-                } catch (e: Exception) {
-                    AppTrace.rappProgressReportFailed("card_wait_ended", e.javaClass.simpleName)
-                }
+                AppTrace.rappCardPromptDismissed(operationId.key)
+                withContext(NonCancellable + Dispatchers.Main) { inbox.dismissTapPrompt(operationId.key) }
+                act(bridge) { it.reportProgress(operationId.toWire(), RappProgressEvent.CARD_WAIT_ENDED) }
             }
         return when {
-            cancelled -> CardReadyOutcome.CANCELLED
-            ready && scope.isActive && sessionBridge != null -> CardReadyOutcome.READY
-            else -> CardReadyOutcome.TIMEOUT
+            cancelled.get() -> RappCardFailure.USER_CANCELLED
+            ready && bridge === operationBridge -> null
+            else -> RappCardFailure.CARD_ERROR
         }
     }
 
-    private suspend fun ensureCardOrAbort(
-        opId: ByteArray,
-        opIdHex: String,
-        action: RappAuthAction,
+    /**
+     * Runs one blocking card [command]; when [cardLeft] says the card was not
+     * in the field for it, waits for the card once more and runs it again.
+     */
+    private suspend fun <T> onCard(
         bridge: RappOperationBridge,
-        forcePrompt: Boolean = false,
-    ): Boolean =
-        when (ensureCardReady(opId, opIdHex, action, bridge, forcePrompt = forcePrompt)) {
-            CardReadyOutcome.CANCELLED -> {
-                AppTrace.rappOperationDenied(opIdHex, "user_cancelled")
-                respondBridgeDeny(opId, bridge)
-                dropConnection()
-                false
+        operationId: RappOperationId,
+        action: RappAuthAction,
+        command: () -> T,
+        cardLeft: (T) -> Boolean,
+    ): CardRun<T> {
+        var waitFailure: RappCardFailure? = null
+        val result =
+            RappCardRetry.run(command, cardLeft) {
+                awaitCard(bridge, operationId, action, forcePrompt = true).also { waitFailure = it } == null
             }
-
-            CardReadyOutcome.TIMEOUT -> {
-                val actionTag =
-                    when (action) {
-                        RappAuthAction.BROWSER_AUTH -> "browser_auth"
-                        RappAuthAction.DOCUMENT_SIGN -> "document_sign"
-                    }
-                AppTrace.rappOperationFailed(actionTag, opIdHex, "card_not_ready_timeout")
-                respondCardRemoved(opId, bridge)
-                false
-            }
-
-            CardReadyOutcome.READY -> {
-                true
-            }
+        return if (result !=
+            null
+        ) {
+            CardRun.Answered(result)
+        } else {
+            CardRun.Missing(waitFailure ?: RappCardFailure.CARD_ERROR)
         }
+    }
 
-    val cachedAuthCertDer: ByteArray?
-        get() = lastReadAuthCertDer?.copyOf()
+    // --- Reads (section 8.2 item 6) -------------------------------------------
 
-    private fun resolveCachedAuthCertificate(): ByteArray? {
-        if (!isCardReady()) return null
-        lastReadAuthCertDer?.let { return it.copyOf() }
-        activeAuthCertDer()?.let { return it.copyOf() }
-        return null
+    private suspend fun read(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        request: RappRequest,
+    ) {
+        val startedNs = System.nanoTime()
+        val name = request.javaClass.simpleName
+        AppTrace.rappOperationReceived(name, operationId.key)
+        val completed =
+            when (request) {
+                // The card services expose neither the answer to reset nor its
+                // historical bytes, so the inspection carries none (section 9.1).
+                RappRequest.InspectCard -> {
+                    act(bridge) { it.completeInspection(operationId.toWire(), byteArrayOf()) }
+                }
+
+                RappRequest.ReadIdentity -> {
+                    val certificate = authenticationCertificate(bridge, operationId) ?: return
+                    val identity = CertificateIdentity.fromDer(certificate.toWire())
+                    if (identity == null) {
+                        fail(bridge, operationId, RappCardFailure.OPERATION_FAILED)
+                        return
+                    }
+                    act(bridge) {
+                        it.completeIdentity(
+                            operationId.toWire(),
+                            identity.holderName,
+                            identity.cardId,
+                            identity.issuanceDate,
+                            identity.expirationDate,
+                            listOf(certificate.toWire()),
+                        )
+                    }
+                }
+
+                RappRequest.ReadAuthenticationCertificate -> {
+                    val certificate = authenticationCertificate(bridge, operationId) ?: return
+                    act(bridge) { it.completeCertificate(operationId.toWire(), certificate.toWire()) }
+                }
+
+                RappRequest.ReadSignatureCertificate -> {
+                    val certificate =
+                        when (val read = signatureCertificate(bridge, operationId)) {
+                            is CardRun.Answered -> read.result
+                            is CardRun.Missing -> return fail(bridge, operationId, read.failure)
+                        }
+                    act(bridge) { it.completeCertificate(operationId.toWire(), certificate.toWire()) }
+                }
+
+                is RappRequest.BrowserAuthenticate, is RappRequest.SignDocument, is RappRequest.BatchSignDocuments -> {
+                    fail(bridge, operationId, RappCardFailure.OPERATION_FAILED)
+                    return
+                }
+            }
+        if (completed != null) AppTrace.rappOperationCompleted(name, operationId.key, elapsedMicros(startedNs))
+    }
+
+    /**
+     * The authentication certificate of the card this phone offers, the one
+     * `card.status` names; read from the card when only the card can tell.
+     * Null when the operation already ended.
+     */
+    private suspend fun authenticationCertificate(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+    ): RappCertificate? {
+        val certificate =
+            (currentCard() as? RappOfferedCard.Present)?.certificate
+                ?: run {
+                    awaitCard(bridge, operationId, RappAuthAction.BROWSER_AUTH)?.let {
+                        fail(bridge, operationId, it)
+                        return null
+                    }
+                    readAuthCertWithTimeout()
+                }
+        if (certificate == null) {
+            fail(bridge, operationId, RappCardFailure.CARD_ERROR)
+            return null
+        }
+        storeReadAuthCertificate(certificate.toWire())
+        return certificate
+    }
+
+    /** The signature certificate, read from the card, which a read of it needs present. */
+    private suspend fun signatureCertificate(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+    ): CardRun<RappCertificate> {
+        val read =
+            when (val certificate = signingCertificate(bridge, operationId)) {
+                is CardRun.Answered -> certificate.result
+                is CardRun.Missing -> return certificate
+            }
+        val der =
+            try {
+                read.copyDer()
+            } finally {
+                read.close()
+            }
+        return RappCertificate.fromDer(der)?.let { CardRun.Answered(it) }
+            ?: CardRun.Missing(RappCardFailure.OPERATION_FAILED)
     }
 
     internal fun storeReadAuthCertificate(certDer: ByteArray) {
@@ -1035,254 +1113,15 @@ internal class RappPhoneProxyDispatcher(
         catalog.updateCertificateDer(pairId, certDer)
     }
 
-    private fun respondCardRemoved(
-        opId: ByteArray,
-        bridge: RappOperationBridge,
-    ) {
-        lastReadAuthCertDer = null
-        try {
-            val resp = bridge.cardRemovedBeforeTransmit(opId)
-            handleBridgeAction(resp, bridge)
-        } catch (_: Exception) {
-        }
-    }
+    private suspend fun readAuthCertWithTimeout(): RappCertificate? =
+        authCardService()?.let { service -> RappCertificateRead.authentication(service) }
 
-    private fun respondBridgeDeny(
-        opId: ByteArray,
-        bridge: RappOperationBridge,
-    ) {
-        try {
-            val resp = bridge.deny(opId)
-            handleBridgeAction(resp, bridge)
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun respondBridgeInvalid(
-        opId: ByteArray,
-        bridge: RappOperationBridge,
-    ) {
-        try {
-            val resp = bridge.requestInvalidOrUnsupported(opId)
-            handleBridgeAction(resp, bridge)
-        } catch (_: Exception) {
-        }
-    }
-
-    /**
-     * Reports a credential the card refused (RAPP v26.10.18 section 10.2). A
-     * wrong PIN with attempts left keeps the pairing; a blocked counter, or a
-     * refusal whose count is unknown, revokes it.
-     */
-    private fun respondRejectedCredential(
-        opId: ByteArray,
-        remainingRetries: Int?,
-        bridge: RappOperationBridge,
-    ) {
-        try {
-            val resp =
-                when (val action = RappCredentialRejection.of(remainingRetries)) {
-                    is RappCredentialRejection.AttemptsRemain -> {
-                        bridge.invalidCredential(opId, action.remainingRetries)
-                    }
-
-                    RappCredentialRejection.Blocked -> {
-                        bridge.credentialRejected(opId, RappClock.monotonicMs())
-                    }
-                }
-            handleBridgeAction(resp, bridge)
-        } catch (_: Exception) {
-        }
-    }
-
-    /**
-     * Refuses a PIN this phone already saw the card reject. No card command
-     * runs and no attempt is spent, so the session and pairing stay; the
-     * requester learns the holder's submission was not usable.
-     */
-    private fun respondKnownRejectedPin(
-        opId: ByteArray,
-        bridge: RappOperationBridge,
-    ) {
-        respondBridgeDeny(opId, bridge)
-    }
-
-    private fun respondBridgeCertificate(
-        opId: ByteArray,
-        certDer: ByteArray,
-        bridge: RappOperationBridge,
-    ) {
-        try {
-            val resp = bridge.completeCertificate(opId, certDer)
-            handleBridgeAction(resp, bridge)
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun tryCompleteFromCachedAuthCert(
-        opId: ByteArray,
-        opIdHex: String,
-        opKindName: String,
-        isAuth: Boolean,
-        bridge: RappOperationBridge,
-    ): Boolean {
-        if (!isAuth) return false
-        val cached = resolveCachedAuthCertificate() ?: return false
-        storeReadAuthCertificate(cached)
-        AppTrace.rappOperationCompleted(opKindName, opIdHex, 0L)
-        respondBridgeCertificate(opId, cached, bridge)
-        return true
-    }
-
-    private fun handleSafeRead(
-        action: uniffi.refineid_rapp.RappBridgeAction,
-        opId: ByteArray,
-        bridge: RappOperationBridge,
-    ) {
-        val desc = action.operation ?: return
-        val opIdHex = opId.joinToString("") { "%02x".format(it) }
-        AppTrace.rappOperationReceived(desc.kind.name, opIdHex)
-        if (desc.kind == RappOperationKind.READ_IDENTITY) {
-            handleReadIdentity(opId, opIdHex, desc.kind.name, bridge)
-            return
-        }
-        val isAuth =
-            when (desc.kind) {
-                RappOperationKind.READ_AUTHENTICATION_CERTIFICATE -> true
-                RappOperationKind.READ_SIGNATURE_CERTIFICATE -> false
-                else -> return
-            }
-        activeOperationJob?.cancel()
-        activeOperationJob =
-            scope.launch(Dispatchers.IO) {
-                if (sessionBridge == null || activeListener == null) {
-                    respondCardRemoved(opId, bridge)
-                    return@launch
-                }
-                val authAction =
-                    if (isAuth) RappAuthAction.BROWSER_AUTH else RappAuthAction.DOCUMENT_SIGN
-                if (!ensureCardOrAbort(opId, opIdHex, authAction, bridge)) return@launch
-                if (tryCompleteFromCachedAuthCert(opId, opIdHex, desc.kind.name, isAuth, bridge)) {
-                    return@launch
-                }
-                var certDer =
-                    if (isAuth) {
-                        readAuthCertWithTimeout()
-                    } else {
-                        readSignatureCertWithTimeout()
-                    }
-                if (certDer == null) {
-                    when (ensureCardReady(opId, opIdHex, authAction, bridge, forcePrompt = true)) {
-                        CardReadyOutcome.CANCELLED, CardReadyOutcome.TIMEOUT -> {}
-
-                        CardReadyOutcome.READY -> {
-                            certDer = if (isAuth) readAuthCertWithTimeout() else readSignatureCertWithTimeout()
-                        }
-                    }
-                }
-                if (certDer != null) {
-                    if (isAuth) {
-                        storeReadAuthCertificate(certDer)
-                    }
-                    AppTrace.rappOperationCompleted(desc.kind.name, opIdHex, 0L)
-                    respondBridgeCertificate(opId, certDer, bridge)
-                } else {
-                    AppTrace.rappOperationFailed(desc.kind.name, opIdHex, "certificate_read_timeout")
-                    respondCardRemoved(opId, bridge)
-                }
-            }
-    }
-
-    /**
-     * The identity is read off the authentication certificate, which the
-     * phone holds once the card has been read; only a phone that has never
-     * read the card asks for it.
-     */
-    private fun handleReadIdentity(
-        opId: ByteArray,
-        opIdHex: String,
-        opKindName: String,
-        bridge: RappOperationBridge,
-    ) {
-        activeOperationJob?.cancel()
-        activeOperationJob =
-            scope.launch(Dispatchers.IO) {
-                if (sessionBridge == null || activeListener == null) {
-                    respondCardRemoved(opId, bridge)
-                    return@launch
-                }
-                val certDer =
-                    heldAuthCertificate()
-                        ?: run {
-                            if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.BROWSER_AUTH, bridge)) return@launch
-                            readAuthCertWithTimeout()
-                        }
-                if (certDer == null) {
-                    AppTrace.rappOperationFailed(opKindName, opIdHex, "certificate_read_timeout")
-                    respondCardRemoved(opId, bridge)
-                    return@launch
-                }
-                storeReadAuthCertificate(certDer)
-                val identity = CertificateIdentity.fromDer(certDer)
-                if (identity == null) {
-                    AppTrace.rappOperationFailed(opKindName, opIdHex, "certificate_unreadable")
-                    respondBridgeInvalid(opId, bridge)
-                    return@launch
-                }
-                AppTrace.rappOperationCompleted(opKindName, opIdHex, 0L)
-                try {
-                    val resp =
-                        bridge.completeIdentity(
-                            opId,
-                            identity.holderName,
-                            identity.cardId,
-                            identity.issuanceDate,
-                            identity.expirationDate,
-                            listOf(certDer),
-                        )
-                    handleBridgeAction(resp, bridge)
-                } catch (_: Exception) {
-                }
-            }
-    }
-
-    /** The authentication certificate from any read this phone has kept. */
-    private fun heldAuthCertificate(): ByteArray? =
-        lastReadAuthCertDer?.copyOf()
-            ?: activeAuthCertDer()?.copyOf()
-            ?: primedCanStore?.readAuthCertificateDer()
-
-    private suspend fun readAuthCertWithTimeout(): ByteArray? {
-        val deferred = CompletableDeferred<ByteArray?>()
-        authCardService()?.requestAuthenticationCertificate { cert ->
-            try {
-                deferred.complete(cert?.copyDer())
-            } catch (_: Exception) {
-                deferred.complete(null)
-            } finally {
-                cert?.close()
-            }
-        } ?: deferred.complete(null)
-        return try {
-            withTimeoutOrNull(CERT_READ_TIMEOUT_MS) { deferred.await() }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private suspend fun readSignatureCertWithTimeout(): ByteArray? {
-        val deferred = CompletableDeferred<ByteArray?>()
+    private suspend fun readSignatureCertificateWithTimeout(): NativeQualifiedCertificate? {
+        val deferred = CompletableDeferred<NativeQualifiedCertificate?>()
         qualifiedCardService()?.requestQualifiedCertificate { certResult ->
             when (certResult) {
                 is NativeCertificateReadResult.Success -> {
-                    val der =
-                        try {
-                            certResult.certificate.copyDer()
-                        } catch (_: Exception) {
-                            null
-                        }
-                    certResult.certificate.close()
-                    deferred.complete(der)
+                    if (!deferred.complete(certResult.certificate)) certResult.certificate.close()
                 }
 
                 else -> {
@@ -1290,240 +1129,195 @@ internal class RappPhoneProxyDispatcher(
                 }
             }
         } ?: deferred.complete(null)
-        return try {
-            withTimeoutOrNull(CERT_READ_TIMEOUT_MS) { deferred.await() }
-        } catch (_: Exception) {
-            null
-        }
+        return withTimeoutOrNull(RappCertificateRead.TIMEOUT_MS) { deferred.await() }
     }
 
-    private suspend fun readSignatureCertificateWithTimeout(): NativeQualifiedCertificate? {
-        val deferred = CompletableDeferred<NativeQualifiedCertificate?>()
-        qualifiedCardService()?.requestQualifiedCertificate { certResult ->
-            when (certResult) {
-                is NativeCertificateReadResult.Success -> deferred.complete(certResult.certificate)
-                else -> deferred.complete(null)
-            }
-        } ?: deferred.complete(null)
-        return try {
-            withTimeoutOrNull(CERT_READ_TIMEOUT_MS) { deferred.await() }
-        } catch (_: Exception) {
-            null
+    // --- Browser authentication (section 9.2) --------------------------------
+
+    /**
+     * A PIN 1 this phone keeps by its own policy (section 11 item 2): a cached
+     * PIN the card accepted, or the one stored with a primed card. A PIN the
+     * card already rejected is not offered.
+     */
+    private fun cachedPin1(): Pin1Submission? {
+        val cached =
+            pinCache?.take()?.let { held -> held.consume { bytes -> Pin1Submission.fromOwnedBytes(bytes.copyOf()) } }
+                ?: primedCanStore?.readPin1()?.let(Pin1Submission::fromOwnedBytes)
+                ?: return null
+        if (pinCache?.isRejected(cached) == true) {
+            cached.close()
+            return null
         }
+        return cached
     }
 
-    private fun executeBrowserAuth(
-        opId: ByteArray,
-        desc: RappOperationDescriptor,
-        pin1Submission: Pin1Submission,
+    private suspend fun authenticate(
         bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        request: RappRequest.BrowserAuthenticate,
     ) {
-        activeOperationJob?.cancel()
-        activeOperationJob =
-            scope.launch(Dispatchers.IO) {
-                try {
-                    if (sessionBridge == null || activeListener == null) {
-                        respondCardRemoved(opId, bridge)
-                        return@launch
-                    }
-                    val cacheGeneration = pinCache?.generation
-                    val startedNs = System.nanoTime()
-                    val opIdHex = opId.joinToString("") { "%02x".format(it) }
-                    val algorithm = resolveSignAlgorithm(desc)
-                    if (algorithm == null) {
-                        AppTrace.rappOperationFailed("browser_auth", opIdHex, "unsupported_algorithm")
-                        respondBridgeInvalid(opId, bridge)
-                        return@launch
-                    }
-
-                    // Check if candidate PIN was already rejected
-                    if (pinCache?.isRejected(pin1Submission) == true) {
-                        AppTrace.rappOperationDenied(opIdHex, "known_rejected_pin")
-                        respondKnownRejectedPin(opId, bridge)
-                        return@launch
+        val algorithm = resolveSignAlgorithm(request.algorithm, request.digest)
+        if (algorithm == null) {
+            fail(bridge, operationId, RappCardFailure.UNSUPPORTED)
+            return
+        }
+        val first = cachedPin1() ?: askPin1(bridge, operationId, wrongPin = null)
+        if (first == null) {
+            fail(bridge, operationId, RappCardFailure.USER_CANCELLED)
+            return
+        }
+        HeldPin(first).use { pin ->
+            val command = approve(bridge, operationId) as? RappRequest.BrowserAuthenticate ?: return
+            while (true) {
+                when (val answer = signAuthentication(bridge, operationId, algorithm, command.digest, pin.submission)) {
+                    RappCardAnswer.Done -> {
+                        return
                     }
 
-                    if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.BROWSER_AUTH, bridge)) {
-                        return@launch
-                    }
-                    var service = authCardService()
-                    if (service == null) {
-                        val cardReady =
-                            ensureCardOrAbort(
-                                opId = opId,
-                                opIdHex = opIdHex,
-                                action = RappAuthAction.BROWSER_AUTH,
-                                bridge = bridge,
-                                forcePrompt = true,
-                            )
-                        if (!cardReady) {
-                            return@launch
-                        }
-                        service = authCardService()
-                    }
-                    if (service == null) {
-                        AppTrace.rappOperationFailed("browser_auth", opIdHex, "service_unavailable")
-                        respondCardRemoved(opId, bridge)
-                        return@launch
+                    is RappCardAnswer.Ends -> {
+                        fail(bridge, operationId, answer.failure)
+                        return
                     }
 
-                    if (pinCache?.isVerified(pin1Submission) != true) {
-                        val readyService: AuthenticationCardService = service
-                        val verification =
-                            RappCardRetry.run(
-                                command = {
-                                    (authCardService() ?: readyService)
-                                        .verifyAuthenticationPin(
-                                            Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes()),
-                                        )
-                                },
-                                cardLeft = { it.result.authenticationFailure()?.meansCardLeft() == true },
-                                awaitCard = {
-                                    ensureCardOrAbort(
-                                        opId,
-                                        opIdHex,
-                                        RappAuthAction.BROWSER_AUTH,
-                                        bridge,
-                                        forcePrompt = true,
-                                    )
-                                },
-                            ) ?: return@launch
-                        service = authCardService() ?: service
-                        val failure = verification.result.authenticationFailure()
-                        if (failure != null) {
-                            handleBrowserAuthFailure(
-                                opId,
-                                opIdHex,
-                                pin1Submission,
-                                AuthenticationSignResult.Failure(failure, verification.remainingRetries),
-                                bridge,
-                            )
-                            return@launch
+                    is RappCardAnswer.WrongPin -> {
+                        val next = askPin1(bridge, operationId, answer)
+                        if (next == null) {
+                            fail(bridge, operationId, RappCardFailure.USER_CANCELLED)
+                            return
                         }
+                        pin.replace(next)
                     }
-                    val authResult =
-                        performBrowserAuthWithRetry(
-                            opId = opId,
-                            opIdHex = opIdHex,
-                            algorithm = algorithm,
-                            pin1Submission = pin1Submission,
-                            digest = desc.digest,
-                            initialService = service,
-                            bridge = bridge,
-                        ) ?: return@launch
-                    service = authResult.first
-                    when (val result = authResult.second) {
-                        is AuthenticationSignResult.Success -> {
-                            handleBrowserAuthSuccess(
-                                opId = opId,
-                                opIdHex = opIdHex,
-                                startedNs = startedNs,
-                                cacheGeneration = cacheGeneration,
-                                pin1Submission = pin1Submission,
-                                service = service,
-                                result = result,
-                                bridge = bridge,
-                            )
-                        }
-
-                        is AuthenticationSignResult.Failure -> {
-                            handleBrowserAuthFailure(
-                                opId = opId,
-                                opIdHex = opIdHex,
-                                pin1Submission = pin1Submission,
-                                result = result,
-                                bridge = bridge,
-                            )
-                        }
-                    }
-                } finally {
-                    pin1Submission.close()
                 }
             }
-    }
-
-    private suspend fun performBrowserAuthWithRetry(
-        opId: ByteArray,
-        opIdHex: String,
-        algorithm: AuthenticationSigningAlgorithm,
-        pin1Submission: Pin1Submission,
-        digest: ByteArray,
-        initialService: AuthenticationCardService,
-        bridge: RappOperationBridge,
-    ): Pair<AuthenticationCardService, AuthenticationSignResult>? {
-        var service = initialService
-        return try {
-            RappCardRetry.run(
-                command = {
-                    service = authCardService() ?: service
-                    service to
-                        service.signAuthenticationDigest(
-                            algorithm = algorithm,
-                            pin1 = Pin1Submission.fromOwnedBytes(pin1Submission.copyBytes()),
-                            digest = digest,
-                        )
-                },
-                cardLeft = { (_, result) ->
-                    result is AuthenticationSignResult.Failure && result.kind.meansCardLeft()
-                },
-                awaitCard = {
-                    ensureCardOrAbort(
-                        opId = opId,
-                        opIdHex = opIdHex,
-                        action = RappAuthAction.BROWSER_AUTH,
-                        bridge = bridge,
-                        forcePrompt = true,
-                    )
-                },
-            )
-        } catch (_: IllegalStateException) {
-            null
         }
     }
 
-    private fun handleBrowserAuthSuccess(
-        opId: ByteArray,
-        opIdHex: String,
+    /**
+     * Verifies [pin] on the card unless this phone already holds it as the
+     * card's verified PIN, then signs [digest] and completes the operation.
+     */
+    private suspend fun signAuthentication(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        algorithm: AuthenticationSigningAlgorithm,
+        digest: ByteArray,
+        pin: Pin1Submission,
+    ): RappCardAnswer {
+        if (pinCache?.isRejected(pin) == true) return RappCardAnswer.WrongPin.ALREADY_REJECTED
+        awaitCard(bridge, operationId, RappAuthAction.BROWSER_AUTH)?.let { return RappCardAnswer.Ends(it) }
+        val startedNs = System.nanoTime()
+        val cacheGeneration = pinCache?.generation
+        var service =
+            authCardService()
+                ?: awaitCard(bridge, operationId, RappAuthAction.BROWSER_AUTH, forcePrompt = true)?.let {
+                    return RappCardAnswer.Ends(it)
+                } ?: authCardService()
+                ?: return RappCardAnswer.Ends(RappCardFailure.CARD_ERROR)
+        if (pinCache?.isVerified(pin) != true) {
+            val verifying = service
+            val verification =
+                when (
+                    val run =
+                        onCard(
+                            bridge,
+                            operationId,
+                            RappAuthAction.BROWSER_AUTH,
+                            command = {
+                                (authCardService() ?: verifying).verifyAuthenticationPin(
+                                    Pin1Submission.fromOwnedBytes(pin.copyBytes()),
+                                )
+                            },
+                            cardLeft = { it.result.authenticationFailure()?.meansCardLeft() == true },
+                        )
+                ) {
+                    is CardRun.Answered -> run.result
+                    is CardRun.Missing -> return RappCardAnswer.Ends(run.failure)
+                }
+            verification.result.authenticationFailure()?.let { failure ->
+                return authenticationAnswer(failure, verification.remainingRetries, pin)
+            }
+            service = authCardService() ?: service
+        }
+        var signing = service
+        val result =
+            when (
+                val run =
+                    onCard(
+                        bridge,
+                        operationId,
+                        RappAuthAction.BROWSER_AUTH,
+                        command = {
+                            signing = authCardService() ?: signing
+                            signing.signAuthenticationDigest(
+                                algorithm = algorithm,
+                                pin1 = Pin1Submission.fromOwnedBytes(pin.copyBytes()),
+                                digest = digest,
+                            )
+                        },
+                        cardLeft = { it is AuthenticationSignResult.Failure && it.kind.meansCardLeft() },
+                    )
+            ) {
+                is CardRun.Answered -> run.result
+                is CardRun.Missing -> return RappCardAnswer.Ends(run.failure)
+            }
+        return when (result) {
+            is AuthenticationSignResult.Success -> {
+                authenticated(bridge, operationId, startedNs, cacheGeneration, pin, signing, result)
+            }
+
+            is AuthenticationSignResult.Failure -> {
+                authenticationAnswer(result.kind, result.remainingRetries, pin)
+            }
+        }
+    }
+
+    /** What a refused authentication command means; a wrong PIN is remembered so it is never sent again. */
+    private fun authenticationAnswer(
+        failure: AuthenticationSignFailure,
+        remainingRetries: Int?,
+        pin: Pin1Submission,
+    ): RappCardAnswer {
+        if (failure == AuthenticationSignFailure.WRONG_PIN) {
+            pinCache?.recordRejected(pin.copyBytes())
+        }
+        if (failure == AuthenticationSignFailure.WRONG_PIN || failure == AuthenticationSignFailure.PIN_LOCKED) {
+            primedCanStore?.forgetPin1()
+        }
+        return RappCardAnswer.of(failure, remainingRetries)
+    }
+
+    /** Keeps the accepted PIN 1 by this phone's policy and completes the operation with the signature. */
+    private fun authenticated(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
         startedNs: Long,
         cacheGeneration: Long?,
-        pin1Submission: Pin1Submission,
+        pin: Pin1Submission,
         service: AuthenticationCardService,
         result: AuthenticationSignResult.Success,
-        bridge: RappOperationBridge,
-    ) {
+    ): RappCardAnswer {
         try {
             if (onAuthenticationVerified != null && cacheGeneration != null) {
-                if (!onAuthenticationVerified.invoke(pin1Submission.copyBytes(), cacheGeneration)) {
-                    result.signature.close()
-                    respondCardRemoved(opId, bridge)
-                    return
+                if (!onAuthenticationVerified.invoke(pin.copyBytes(), cacheGeneration)) {
+                    return RappCardAnswer.Ends(RappCardFailure.CARD_ERROR)
                 }
-            } else if (pinCache?.recordVerified(pin1Submission.copyBytes(), cacheGeneration) == true &&
+            } else if (pinCache?.recordVerified(pin.copyBytes(), cacheGeneration) == true &&
                 primedCanStore?.isPrimed() == true
             ) {
-                primedCanStore.writePin1(pin1Submission.copyBytes())
+                primedCanStore.writePin1(pin.copyBytes())
             }
-        } catch (_: IllegalStateException) {
-            // If the submission was already closed or consumed, skip caching and proceed.
-        }
-        ensureAuthCertCached(service)
-        try {
-            val rawSig = result.signature.copyBytes()
+            ensureAuthCertCached(service)
+            val rawSignature = result.signature.copyBytes()
             val coordinateBytes = RappEcdsaWireSignature.coordinateBytes(result.signature.algorithm.keyProfile)
-            val wireSig =
+            val wireSignature =
                 if (coordinateBytes != null) {
-                    RappEcdsaWireSignature.toRaw(rawSig, coordinateBytes)
+                    RappEcdsaWireSignature.toRaw(rawSignature, coordinateBytes)
                 } else {
-                    rawSig
+                    rawSignature
                 }
-            val resp = bridge.completeSignature(opId, wireSig)
-            AppTrace.rappOperationCompleted(
-                "browser_auth",
-                opIdHex,
-                (System.nanoTime() - startedNs) / NANOS_PER_MICROSECOND,
-            )
-            handleBridgeAction(resp, bridge)
-        } catch (_: Exception) {
+            act(bridge) { it.completeSignature(operationId.toWire(), wireSignature) }
+            AppTrace.rappOperationCompleted("browser_auth", operationId.key, elapsedMicros(startedNs))
+            return RappCardAnswer.Done
         } finally {
             result.signature.close()
         }
@@ -1543,35 +1337,18 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
-    private fun handleBrowserAuthFailure(
-        opId: ByteArray,
-        opIdHex: String,
-        pin1Submission: Pin1Submission,
-        result: AuthenticationSignResult.Failure,
-        bridge: RappOperationBridge,
-    ) {
-        AppTrace.rappOperationFailed("browser_auth", opIdHex, result.kind.name)
-        if (result.kind == AuthenticationSignFailure.WRONG_PIN || result.kind == AuthenticationSignFailure.PIN_LOCKED) {
-            if (result.kind == AuthenticationSignFailure.WRONG_PIN) {
-                pinCache?.recordRejected(pin1Submission.copyBytes())
-            }
-            primedCanStore?.forgetPin1()
-            respondRejectedCredential(opId, result.remainingRetries, bridge)
-            onAuthenticationRejected()
-        } else {
-            respondCardRemoved(opId, bridge)
-        }
-    }
-
-    private fun resolveSignAlgorithm(desc: RappOperationDescriptor): AuthenticationSigningAlgorithm? =
-        when (desc.algorithm) {
+    private fun resolveSignAlgorithm(
+        algorithm: RappSignatureAlgorithm,
+        digest: ByteArray,
+    ): AuthenticationSigningAlgorithm? =
+        when (algorithm) {
             RappSignatureAlgorithm.ECDSA_SHA256 -> AuthenticationSigningAlgorithm.ECDSA_P384_SHA256
             RappSignatureAlgorithm.ECDSA_SHA384 -> AuthenticationSigningAlgorithm.ECDSA_P384_SHA384
             RappSignatureAlgorithm.RSA_PKCS1_SHA256 -> AuthenticationSigningAlgorithm.RSA_PKCS1_SHA256
             RappSignatureAlgorithm.RSA_PKCS1_SHA384 -> AuthenticationSigningAlgorithm.RSA_PKCS1_SHA384
             RappSignatureAlgorithm.RSA_PKCS1_SHA512 -> AuthenticationSigningAlgorithm.RSA_PKCS1_SHA512
             RappSignatureAlgorithm.RSA_PSS_SHA256 -> AuthenticationSigningAlgorithm.RSA_PSS_SHA256
-            else -> fallbackSignAlgorithm(desc.digest.size)
+            else -> fallbackSignAlgorithm(digest.size)
         }
 
     private fun fallbackSignAlgorithm(digestSize: Int): AuthenticationSigningAlgorithm? =
@@ -1581,301 +1358,200 @@ internal class RappPhoneProxyDispatcher(
             else -> null
         }
 
-    private class QualifiedSigningSetup(
-        val algorithm: QualifiedSigningAlgorithm,
-        val expectedCert: NativeQualifiedCertificate,
-    )
+    // --- Document signing (section 9.3) --------------------------------------
 
     /**
-     * Resolves the algorithm, brings the card, and reads the signature
-     * certificate the card must sign with; answers the bridge and returns
-     * null when any of that fails.
+     * Signs [documents] in order with the one PIN 2 entry the holder
+     * approved, then answers with [complete] over the signatures. A wrong PIN
+     * asks the holder again; signing that stops delivers no signature.
      */
-    private suspend fun prepareQualifiedSigning(
-        opId: ByteArray,
-        opIdHex: String,
-        desc: RappOperationDescriptor,
+    private suspend fun signDocuments(
         bridge: RappOperationBridge,
-    ): QualifiedSigningSetup? {
-        if (sessionBridge == null || activeListener == null) {
-            respondCardRemoved(opId, bridge)
-            return null
-        }
-        val algorithm = resolveQualifiedAlgorithm(desc)
-        if (algorithm == null) {
-            AppTrace.rappOperationFailed("document_sign", opIdHex, "unsupported_algorithm")
-            respondBridgeInvalid(opId, bridge)
-            return null
-        }
-        if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge)) {
-            return null
-        }
-        if (qualifiedCardService() == null) {
-            if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge, forcePrompt = true)) {
-                return null
-            }
-        }
-        if (qualifiedCardService() == null) {
-            AppTrace.rappOperationFailed("document_sign", opIdHex, "service_unavailable")
-            respondCardRemoved(opId, bridge)
-            return null
-        }
-        var expectedCert = readSignatureCertificateWithTimeout()
-        if (expectedCert == null) {
-            if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge, forcePrompt = true)) {
-                return null
-            }
-            expectedCert = readSignatureCertificateWithTimeout()
-        }
-        if (expectedCert == null) {
-            AppTrace.rappOperationFailed("document_sign", opIdHex, "certificate_read_timeout")
-            respondCardRemoved(opId, bridge)
-            return null
-        }
-        return QualifiedSigningSetup(algorithm, expectedCert)
-    }
-
-    private fun executeDocumentSign(
-        opId: ByteArray,
-        desc: RappOperationDescriptor,
-        pin2Submission: Pin2Submission,
-        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        keyProfile: RappCardKeyProfile,
+        algorithm: RappSignatureAlgorithm,
+        documents: List<RappDocument>,
+        complete: List<ByteArray>.(RappOperationBridge) -> RappBridgeAction,
     ) {
-        activeOperationJob?.cancel()
-        activeOperationJob =
-            scope.launch(Dispatchers.IO) {
+        val names = documents.map { it.name }
+        val qualified = resolveQualifiedAlgorithm(keyProfile, algorithm)
+        if (qualified == null) {
+            fail(bridge, operationId, RappCardFailure.UNSUPPORTED)
+            return
+        }
+        val first = askPin2(bridge, operationId, names, wrongPin = null)
+        if (first == null) {
+            fail(bridge, operationId, RappCardFailure.USER_CANCELLED)
+            return
+        }
+        HeldPin(first).use { pin ->
+            val command = approve(bridge, operationId) ?: return
+            val digests =
+                when (command) {
+                    is RappRequest.SignDocument -> listOf(command.document.digest)
+                    is RappRequest.BatchSignDocuments -> command.documents.map { it.digest }
+                    else -> return fail(bridge, operationId, RappCardFailure.OPERATION_FAILED)
+                }
+            val startedNs = System.nanoTime()
+            val certificate =
+                when (val read = signingCertificate(bridge, operationId)) {
+                    is CardRun.Answered -> read.result
+                    is CardRun.Missing -> return fail(bridge, operationId, read.failure)
+                }
+            val signatures = mutableListOf<ByteArray>()
+            val outcome =
                 try {
-                    val startedNs = System.nanoTime()
-                    val opIdHex = opId.joinToString("") { "%02x".format(it) }
-                    val setup = prepareQualifiedSigning(opId, opIdHex, desc, bridge) ?: return@launch
-                    try {
-                        val signResult =
-                            performQualifiedSignWithRetry(
-                                opId = opId,
-                                opIdHex = opIdHex,
-                                digest = desc.digest,
-                                pin2Submission = pin2Submission,
-                                algorithm = setup.algorithm,
-                                expectedCert = setup.expectedCert,
-                                bridge = bridge,
-                            ) ?: return@launch
-                        when (signResult) {
-                            is QualifiedSignResult.Success -> {
-                                handleDocumentSignSuccess(
-                                    opId = opId,
-                                    opIdHex = opIdHex,
-                                    startedNs = startedNs,
-                                    result = signResult,
-                                    bridge = bridge,
-                                )
+                    RappBatchSignatureRun(
+                        digests = digests,
+                        sign = { digest ->
+                            signDocument(bridge, operationId, names, qualified, certificate, digest, pin)
+                        },
+                        record = { signature ->
+                            if (command is RappRequest.BatchSignDocuments) {
+                                bridge.recordBatchSignature(operationId.toWire(), signature)
                             }
-
-                            is QualifiedSignResult.Failure -> {
-                                handleDocumentSignFailure(
-                                    opId = opId,
-                                    opIdHex = opIdHex,
-                                    result = signResult,
-                                    bridge = bridge,
-                                )
-                            }
-                        }
-                    } finally {
-                        setup.expectedCert.close()
-                    }
+                            signatures += signature
+                        },
+                    ).run()
                 } finally {
-                    pin2Submission.close()
+                    certificate.close()
                 }
-            }
-    }
-
-    /**
-     * Signs every document of a batch with the one PIN 2 entry the holder
-     * approved, journaling each signature before the next (RAPP v26.10.18
-     * section 9.3). A batch stopped after a signature answers ambiguous, and
-     * the signatures made so far travel with it.
-     */
-    private fun executeBatchDocumentSign(
-        opId: ByteArray,
-        desc: RappOperationDescriptor,
-        pin2Submission: Pin2Submission,
-        bridge: RappOperationBridge,
-    ) {
-        activeOperationJob?.cancel()
-        activeOperationJob =
-            scope.launch(Dispatchers.IO) {
-                try {
-                    val startedNs = System.nanoTime()
-                    val opIdHex = opId.joinToString("") { "%02x".format(it) }
-                    val setup = prepareQualifiedSigning(opId, opIdHex, desc, bridge) ?: return@launch
-                    try {
-                        val run =
-                            RappBatchSignatureRun(
-                                digests = desc.digests,
-                                sign = { digest ->
-                                    signBatchDocument(opId, opIdHex, digest, pin2Submission, setup, bridge)
-                                },
-                                record = { wireSignature -> bridge.recordBatchSignature(opId, wireSignature) },
-                            )
-                        finishBatch(opId, opIdHex, startedNs, run.run(), bridge)
-                    } finally {
-                        setup.expectedCert.close()
-                    }
-                } finally {
-                    pin2Submission.close()
-                }
-            }
-    }
-
-    private suspend fun signBatchDocument(
-        opId: ByteArray,
-        opIdHex: String,
-        digest: ByteArray,
-        pin2Submission: Pin2Submission,
-        setup: QualifiedSigningSetup,
-        bridge: RappOperationBridge,
-    ): RappBatchSignatureRun.Step {
-        val result =
-            performQualifiedSignWithRetry(
-                opId = opId,
-                opIdHex = opIdHex,
-                digest = digest,
-                pin2Submission = pin2Submission,
-                algorithm = setup.algorithm,
-                expectedCert = setup.expectedCert,
-                bridge = bridge,
-            ) ?: return RappBatchSignatureRun.Step.Failed(null)
-        return when (result) {
-            is QualifiedSignResult.Success -> {
-                try {
-                    RappBatchSignatureRun.Step.Signed(wireSignature(result))
-                } finally {
-                    result.signature.close()
-                }
-            }
-
-            is QualifiedSignResult.Failure -> {
-                RappBatchSignatureRun.Step.Failed(result)
-            }
-        }
-    }
-
-    private fun finishBatch(
-        opId: ByteArray,
-        opIdHex: String,
-        startedNs: Long,
-        outcome: RappBatchSignatureRun.Outcome,
-        bridge: RappOperationBridge,
-    ) {
-        try {
             when (outcome) {
                 RappBatchSignatureRun.Outcome.Completed -> {
-                    val resp = bridge.completeBatch(opId)
-                    AppTrace.rappOperationCompleted(
-                        "batch_sign",
-                        opIdHex,
-                        (System.nanoTime() - startedNs) / NANOS_PER_MICROSECOND,
-                    )
-                    handleBridgeAction(resp, bridge)
+                    act(bridge) { signatures.complete(it) }
+                    AppTrace.rappOperationCompleted("document_sign", operationId.key, elapsedMicros(startedNs))
                 }
 
                 is RappBatchSignatureRun.Outcome.Stopped -> {
-                    val failure = outcome.failure
-                    AppTrace.rappOperationFailed("batch_sign", opIdHex, failure?.kind?.name ?: "interrupted")
-                    when {
-                        outcome.signedCount > 0 -> {
-                            handleBridgeAction(bridge.cardCompletionAmbiguous(opId), bridge)
-                        }
-
-                        failure != null -> {
-                            handleDocumentSignFailure(opId, opIdHex, failure, bridge)
-                        }
-
-                        else -> {
-                            respondCardRemoved(opId, bridge)
-                        }
-                    }
+                    fail(bridge, operationId, outcome.failure)
                 }
             }
-        } catch (_: Exception) {
         }
     }
 
-    private suspend fun performQualifiedSignWithRetry(
-        opId: ByteArray,
-        opIdHex: String,
-        digest: ByteArray,
-        pin2Submission: Pin2Submission,
-        algorithm: QualifiedSigningAlgorithm,
-        expectedCert: NativeQualifiedCertificate,
+    /** Brings the card and reads the signature certificate the card must sign with. */
+    private suspend fun signingCertificate(
         bridge: RappOperationBridge,
+        operationId: RappOperationId,
+    ): CardRun<NativeQualifiedCertificate> {
+        awaitCard(bridge, operationId, RappAuthAction.DOCUMENT_SIGN)?.let { return CardRun.Missing(it) }
+        if (qualifiedCardService() == null) {
+            awaitCard(bridge, operationId, RappAuthAction.DOCUMENT_SIGN, forcePrompt = true)?.let {
+                return CardRun.Missing(it)
+            }
+        }
+        val certificate =
+            readSignatureCertificateWithTimeout()
+                ?: awaitCard(bridge, operationId, RappAuthAction.DOCUMENT_SIGN, forcePrompt = true)?.let {
+                    return CardRun.Missing(it)
+                } ?: readSignatureCertificateWithTimeout()
+        return if (certificate != null) CardRun.Answered(certificate) else CardRun.Missing(RappCardFailure.CARD_ERROR)
+    }
+
+    private suspend fun signDocument(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        names: List<String>,
+        algorithm: QualifiedSigningAlgorithm,
+        certificate: NativeQualifiedCertificate,
+        digest: ByteArray,
+        pin: HeldPin<Pin2Submission>,
+    ): RappBatchSignatureRun.Step {
+        while (true) {
+            val result =
+                when (
+                    val run =
+                        qualifiedSignature(
+                            bridge,
+                            operationId,
+                            algorithm,
+                            certificate,
+                            digest,
+                            pin.submission,
+                        )
+                ) {
+                    is CardRun.Answered -> run.result
+                    is CardRun.Missing -> return RappBatchSignatureRun.Step.Failed(run.failure)
+                }
+            val failure =
+                when (result) {
+                    is QualifiedSignResult.Success -> {
+                        return try {
+                            RappBatchSignatureRun.Step.Signed(wireSignature(result))
+                        } finally {
+                            result.signature.close()
+                        }
+                    }
+
+                    is QualifiedSignResult.Failure -> {
+                        result
+                    }
+                }
+            when (val answer = RappCardAnswer.of(failure.kind, failure.remainingRetries)) {
+                is RappCardAnswer.WrongPin -> {
+                    val next =
+                        askPin2(bridge, operationId, names, answer)
+                            ?: return RappBatchSignatureRun.Step.Failed(RappCardFailure.USER_CANCELLED)
+                    pin.replace(next)
+                }
+
+                is RappCardAnswer.Ends -> {
+                    return RappBatchSignatureRun.Step.Failed(answer.failure)
+                }
+
+                RappCardAnswer.Done -> {
+                    return RappBatchSignatureRun.Step.Failed(RappCardFailure.OPERATION_FAILED)
+                }
+            }
+        }
+    }
+
+    /**
+     * One qualified signature over [digest]; a card that left the field
+     * before the command is waited for once, and the command repeated with
+     * the certificate read afresh from it.
+     */
+    private suspend fun qualifiedSignature(
+        bridge: RappOperationBridge,
+        operationId: RappOperationId,
+        algorithm: QualifiedSigningAlgorithm,
+        certificate: NativeQualifiedCertificate,
+        digest: ByteArray,
+        pin: Pin2Submission,
+    ): CardRun<QualifiedSignResult> {
+        val first =
+            requestQualifiedSignature(algorithm, certificate, digest, pin)
+                ?: return CardRun.Missing(RappCardFailure.CARD_ERROR)
+        if (first !is QualifiedSignResult.Failure || first.kind != QualifiedSignFailure.CARD_UNAVAILABLE) {
+            return CardRun.Answered(first)
+        }
+        awaitCard(bridge, operationId, RappAuthAction.DOCUMENT_SIGN, forcePrompt = true)?.let {
+            return CardRun.Missing(it)
+        }
+        val fresh = readSignatureCertificateWithTimeout() ?: return CardRun.Missing(RappCardFailure.CARD_ERROR)
+        return try {
+            requestQualifiedSignature(algorithm, fresh, digest, pin)?.let { CardRun.Answered(it) }
+                ?: CardRun.Missing(RappCardFailure.CARD_ERROR)
+        } finally {
+            fresh.close()
+        }
+    }
+
+    private suspend fun requestQualifiedSignature(
+        algorithm: QualifiedSigningAlgorithm,
+        certificate: NativeQualifiedCertificate,
+        digest: ByteArray,
+        pin: Pin2Submission,
     ): QualifiedSignResult? {
         val service = qualifiedCardService() ?: return null
-        val pinBytes =
-            try {
-                pin2Submission.copyBytes()
-            } catch (_: IllegalStateException) {
-                return null
-            }
         val deferred = CompletableDeferred<QualifiedSignResult>()
         service.requestQualifiedDigestSignature(
             algorithm = algorithm,
-            pin2 = Pin2Submission.fromOwnedBytes(pinBytes),
+            pin2 = Pin2Submission.fromOwnedBytes(pin.copyBytes()),
             digest = digest,
-            expectedCertificate = expectedCert,
-        ) { signResult ->
-            deferred.complete(signResult)
-        }
-        var signResult = deferred.await()
-        if (signResult is QualifiedSignResult.Failure &&
-            signResult.kind == QualifiedSignFailure.CARD_UNAVAILABLE
-        ) {
-            if (!ensureCardOrAbort(opId, opIdHex, RappAuthAction.DOCUMENT_SIGN, bridge, forcePrompt = true)) {
-                return null
-            }
-            val retryService = qualifiedCardService()
-            if (retryService != null) {
-                val freshCert = readSignatureCertificateWithTimeout() ?: return null
-                try {
-                    val retryPinBytes = pin2Submission.copyBytes()
-                    val retryDeferred = CompletableDeferred<QualifiedSignResult>()
-                    retryService.requestQualifiedDigestSignature(
-                        algorithm = algorithm,
-                        pin2 = Pin2Submission.fromOwnedBytes(retryPinBytes),
-                        digest = digest,
-                        expectedCertificate = freshCert,
-                    ) { rResult ->
-                        retryDeferred.complete(rResult)
-                    }
-                    signResult = retryDeferred.await()
-                } catch (_: IllegalStateException) {
-                    return null
-                } finally {
-                    freshCert.close()
-                }
-            }
-        }
-        return signResult
-    }
-
-    private fun handleDocumentSignSuccess(
-        opId: ByteArray,
-        opIdHex: String,
-        startedNs: Long,
-        result: QualifiedSignResult.Success,
-        bridge: RappOperationBridge,
-    ) {
-        try {
-            val resp = bridge.completeSignature(opId, wireSignature(result))
-            AppTrace.rappOperationCompleted(
-                "document_sign",
-                opIdHex,
-                (System.nanoTime() - startedNs) / NANOS_PER_MICROSECOND,
-            )
-            handleBridgeAction(resp, bridge)
-        } catch (_: Exception) {
-        } finally {
-            result.signature.close()
-        }
+            expectedCertificate = certificate,
+        ) { result -> deferred.complete(result) }
+        return deferred.await()
     }
 
     /** The section 9.2 wire form of a qualified signature: raw `r || s` for ECDSA. */
@@ -1889,26 +1565,11 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
-    private fun handleDocumentSignFailure(
-        opId: ByteArray,
-        opIdHex: String,
-        result: QualifiedSignResult.Failure,
-        bridge: RappOperationBridge,
-    ) {
-        AppTrace.rappOperationFailed("document_sign", opIdHex, result.kind.name)
-        when (result.kind) {
-            QualifiedSignFailure.WRONG_PIN, QualifiedSignFailure.PIN_LOCKED -> {
-                respondRejectedCredential(opId, result.remainingRetries, bridge)
-            }
-
-            else -> {
-                respondCardRemoved(opId, bridge)
-            }
-        }
-    }
-
-    private fun resolveQualifiedAlgorithm(desc: RappOperationDescriptor): QualifiedSigningAlgorithm? =
-        when (desc.algorithm) {
+    private fun resolveQualifiedAlgorithm(
+        keyProfile: RappCardKeyProfile,
+        algorithm: RappSignatureAlgorithm,
+    ): QualifiedSigningAlgorithm? =
+        when (algorithm) {
             RappSignatureAlgorithm.ECDSA_SHA384 -> {
                 QualifiedSigningAlgorithm.ECDSA_P384_SHA384
             }
@@ -1918,9 +1579,9 @@ internal class RappPhoneProxyDispatcher(
             }
 
             else -> {
-                when (desc.keyProfile) {
-                    uniffi.refineid_rapp.RappCardKeyProfile.ECDSA_P384 -> QualifiedSigningAlgorithm.ECDSA_P384_SHA384
-                    uniffi.refineid_rapp.RappCardKeyProfile.RSA3072 -> QualifiedSigningAlgorithm.RSA_PKCS1_SHA384
+                when (keyProfile) {
+                    RappCardKeyProfile.ECDSA_P384 -> QualifiedSigningAlgorithm.ECDSA_P384_SHA384
+                    RappCardKeyProfile.RSA3072 -> QualifiedSigningAlgorithm.RSA_PKCS1_SHA384
                     else -> null
                 }
             }
@@ -1929,24 +1590,16 @@ internal class RappPhoneProxyDispatcher(
     override fun close() {
         isClosed = true
         RappCustodianService.stop(context)
-        cardStatusLane.close()
-        livenessJob?.cancel()
-        livenessJob = null
-        activeOperationJob?.cancel()
-        activeOperationJob = null
-        clearPendingPins()
         withdrawalJob?.cancel()
         withdrawalJob = null
+        hintRefreshJob?.cancel()
+        hintRefreshJob = null
+        endSession()
         activeListener?.close()
         activeListener = null
         sessionRouting?.close()
         sessionRouting = null
-        operationBridge?.close()
-        operationBridge = null
-        sessionBridge?.close()
-        sessionBridge = null
-        releasePairRecord()
-        dismissInbox()
+        cardStatusLane.close()
     }
 }
 

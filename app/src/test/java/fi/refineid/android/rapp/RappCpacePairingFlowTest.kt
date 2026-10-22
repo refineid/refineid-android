@@ -20,9 +20,9 @@ class RappCpacePairingFlowTest {
 
     private val profiles =
         listOf(
-            "fi.refineid.card-status.v1",
-            "fi.refineid.authentication.v1",
-            "fi.refineid.document-signing.v1",
+            "fi.refineid.card-status",
+            "fi.refineid.authentication",
+            "fi.refineid.document-signing",
         )
 
     @Before

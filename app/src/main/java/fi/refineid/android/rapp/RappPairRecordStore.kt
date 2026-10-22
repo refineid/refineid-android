@@ -12,7 +12,7 @@ import java.security.GeneralSecurityException
 
 /**
  * Device-local store of encoded RAPP pair records, which carry the pairing's
- * static private key (RAPP v26.10.18 section 4.3.4).
+ * static private key (RAPP v26.10.21 section 4.3 item 4).
  *
  * Each record is one file named by its pair identifier under [root], a
  * no-backup directory, sealed by [sealer] and replaced by an atomic move. A
@@ -21,7 +21,7 @@ import java.security.GeneralSecurityException
  */
 internal class RappPairRecordStore(
     private val root: File,
-    private val sealer: RappJournalSealer,
+    private val sealer: RappSealer,
 ) {
     /** Seals and stores one record, replacing any earlier one. */
     fun insert(

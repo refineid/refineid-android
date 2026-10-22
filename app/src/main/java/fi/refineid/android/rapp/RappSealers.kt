@@ -11,10 +11,21 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/**
+ * Seals and opens stored records so they are encrypted at rest. Opening
+ * fails on any tampered or foreign entry.
+ */
+internal interface RappSealer {
+    fun seal(plaintext: ByteArray): ByteArray
+
+    /** @throws java.security.GeneralSecurityException when the entry does not authenticate. */
+    fun open(sealed: ByteArray): ByteArray
+}
+
 /** AES-GCM sealing as `[IV][ciphertext and tag]`, under the key [key] supplies. */
-internal class AesGcmJournalSealer(
+internal class AesGcmSealer(
     private val key: () -> SecretKey,
-) : RappJournalSealer {
+) : RappSealer {
     override fun seal(plaintext: ByteArray): ByteArray {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key())
@@ -30,13 +41,14 @@ internal class AesGcmJournalSealer(
             Cipher.DECRYPT_MODE,
             key(),
             // nosemgrep: kotlin.lang.security.gcm-detection.gcm-detection
-            GCMParameterSpec(TAG_BITS, sealed, 0, IV_BYTES),
+            GCMParameterSpec(TAG_BITS, sealed, IV_OFFSET, IV_BYTES),
         )
         return cipher.doFinal(sealed, IV_BYTES, sealed.size - IV_BYTES)
     }
 
     companion object {
         const val TRANSFORMATION = "AES/GCM/NoPadding"
+        const val IV_OFFSET = 0
         const val IV_BYTES = 12
         const val TAG_BITS = 128
         const val TAG_BYTES = TAG_BITS / Byte.SIZE_BITS
@@ -44,14 +56,7 @@ internal class AesGcmJournalSealer(
     }
 }
 
-/** The device-bound journal key, created in the Android Keystore on first use. */
-internal object RappJournalKeystoreKey {
-    private const val ALIAS = "fi.refineid.rapp.journal.v1"
-
-    fun get(): SecretKey = RappKeystoreKeys.aes(ALIAS)
-}
-
-/** The device-bound pair-record key, separate from the journal key. */
+/** The device-bound pair-record key, created in the Android Keystore on first use. */
 internal object RappPairRecordKeystoreKey {
     private const val ALIAS = "fi.refineid.rapp.pairs.v1"
 
@@ -72,7 +77,7 @@ private object RappKeystoreKeys {
                 .Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(AesGcmJournalSealer.KEY_BITS)
+                .setKeySize(AesGcmSealer.KEY_BITS)
                 .setRandomizedEncryptionRequired(true)
                 .build(),
         )

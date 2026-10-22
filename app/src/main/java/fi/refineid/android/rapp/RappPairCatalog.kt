@@ -15,6 +15,12 @@ internal data class PairedPeer(
     val holderName: String? = null,
     val certificateDerBase64: String? = null,
     val lastUsedMs: Long = createdAtMs,
+    /**
+     * When the local user forgot the pairing while no session to its peer
+     * was open; the record then only waits to deliver the `pairing_revoked`
+     * close (RAPP v26.10.21 section 4.6 item 2).
+     */
+    val forgottenAtMs: Long? = null,
 )
 
 /** Persists authenticated RAPP paired devices locally on Android. */
@@ -27,10 +33,16 @@ internal class RappPairCatalog(
 
     companion object {
         private const val KEY_PAIRS = "paired_devices"
-        private const val KEY_SELECTED = "selected_pair_id"
     }
 
-    fun listPairs(): List<PairedPeer> {
+    /** The pairings the user has not forgotten. */
+    fun listPairs(): List<PairedPeer> = allPairs().filter { it.forgottenAtMs == null }
+
+    /** The pairings the user forgot whose records still wait to deliver the close. */
+    fun forgottenPairs(): List<PairedPeer> = allPairs().filter { it.forgottenAtMs != null }
+
+    /** Every catalogued pairing, forgotten or not. */
+    fun allPairs(): List<PairedPeer> {
         val raw = prefs.getString(KEY_PAIRS, null) ?: return emptyList()
         val result = mutableListOf<PairedPeer>()
         try {
@@ -46,6 +58,7 @@ internal class RappPairCatalog(
                         holderName = obj.optString("holderName").takeIf { it.isNotBlank() },
                         certificateDerBase64 = obj.optString("certificateDerBase64").takeIf { it.isNotBlank() },
                         lastUsedMs = obj.optLong("lastUsedMs", obj.getLong("createdAtMs")),
+                        forgottenAtMs = if (obj.has("forgottenAtMs")) obj.getLong("forgottenAtMs") else null,
                     ),
                 )
             }
@@ -63,7 +76,7 @@ internal class RappPairCatalog(
         certificateDerBase64: String? = null,
     ) {
         val hex = pairId.joinToString("") { "%02x".format(it) }
-        val updated = listPairs().filter { it.pairIdHex != hex }.toMutableList()
+        val updated = allPairs().filter { it.pairIdHex != hex }.toMutableList()
         updated.add(
             PairedPeer(
                 pairIdHex = hex,
@@ -80,51 +93,37 @@ internal class RappPairCatalog(
     fun updateHolderName(
         pairIdHex: String,
         holderName: String,
-    ) {
-        val current =
-            listPairs().map { peer ->
-                if (peer.pairIdHex == pairIdHex) {
-                    peer.copy(holderName = holderName)
-                } else {
-                    peer
-                }
-            }
-        persistPairs(current)
-    }
+    ) = update(pairIdHex) { it.copy(holderName = holderName) }
 
     fun updateCertificateDer(
         pairIdHex: String,
         certDer: ByteArray,
     ) {
         val b64 = Base64.getEncoder().encodeToString(certDer)
-        val current =
-            listPairs().map { peer ->
-                if (peer.pairIdHex == pairIdHex) {
-                    peer.copy(certificateDerBase64 = b64)
-                } else {
-                    peer
-                }
-            }
-        persistPairs(current)
+        update(pairIdHex) { it.copy(certificateDerBase64 = b64) }
     }
 
     /** Records that the pairing [pairIdHex] carried a session at [nowMs]. */
     fun markUsed(
         pairIdHex: String,
         nowMs: Long,
-    ) {
-        persistPairs(
-            listPairs().map { peer -> if (peer.pairIdHex == pairIdHex) peer.copy(lastUsedMs = nowMs) else peer },
-        )
-    }
+    ) = update(pairIdHex) { it.copy(lastUsedMs = nowMs) }
+
+    /** Records that the user forgot [pairIdHex] at [atMs] while its record waits to deliver the close. */
+    fun markForgotten(
+        pairIdHex: String,
+        atMs: Long,
+    ) = update(pairIdHex) { it.copy(forgottenAtMs = atMs) }
 
     fun removePair(pairIdHex: String) {
-        val current = listPairs().filter { it.pairIdHex != pairIdHex }
-        persistPairs(current)
+        persistPairs(allPairs().filter { it.pairIdHex != pairIdHex })
     }
 
-    fun clearAll() {
-        prefs.edit { remove(KEY_PAIRS) }
+    private fun update(
+        pairIdHex: String,
+        change: (PairedPeer) -> PairedPeer,
+    ) {
+        persistPairs(allPairs().map { peer -> if (peer.pairIdHex == pairIdHex) change(peer) else peer })
     }
 
     private fun persistPairs(pairs: List<PairedPeer>) {
@@ -138,6 +137,7 @@ internal class RappPairCatalog(
             p.holderName?.let { obj.put("holderName", it) }
             p.certificateDerBase64?.let { obj.put("certificateDerBase64", it) }
             obj.put("lastUsedMs", p.lastUsedMs)
+            p.forgottenAtMs?.let { obj.put("forgottenAtMs", it) }
             arr.put(obj)
         }
         prefs.edit { putString(KEY_PAIRS, arr.toString()) }

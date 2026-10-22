@@ -1,12 +1,4 @@
-@file:Suppress(
-    "TooGenericExceptionCaught",
-    "SwallowedException",
-    "MagicNumber",
-    "MaxLineLength",
-    "DEPRECATION",
-    "CyclomaticComplexMethod",
-    "LongMethod",
-)
+@file:Suppress("TooGenericExceptionCaught")
 
 package fi.refineid.android.rapp
 
@@ -14,320 +6,434 @@ import android.content.Context
 import fi.refineid.android.BuildConfig
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.refineid_rapp.RappBridgeAction
-import uniffi.refineid_rapp.RappBridgeActionKind
 import uniffi.refineid_rapp.RappCardKeyProfile
-import uniffi.refineid_rapp.RappLivenessConfiguration
+import uniffi.refineid_rapp.RappCloseReason
 import uniffi.refineid_rapp.RappOperationBridge
 import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
+import uniffi.refineid_rapp.rappRandomByteCounts
 import uniffi.refineid_rapp.rappStreamProfileName
+import java.io.IOException
 import java.security.SecureRandom
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Connects over stream transport to a paired proxy device and executes
- * operations on the remote card.
+ * Dials a paired custodian over the stream transport and runs one operation
+ * on its card per session (RAPP v26.10.21 sections 6.3 and 8). A pairing the
+ * local user forgot delivers its `pairing_revoked` close instead (section
+ * 4.6 item 2), and a custodian that forgot this pairing revokes it here
+ * (section 4.6 item 4) and calls [onPairingRevoked].
  */
 internal class RappRequesterClient(
     private val context: Context,
     private val scope: CoroutineScope,
     private val pairRecord: RappPairRecord,
     private val vault: AndroidRappVault,
+    private val onPairingRevoked: () -> Unit = {},
 ) {
-    private enum class SessionState {
-        IDLE,
-        AWAITING_RESPONDER_HANDSHAKE,
-        AWAITING_RESPONDER_READY,
-        ESTABLISHED,
+    private companion object {
+        const val TRACE_TAG = "REQUESTER_CLIENT"
+
+        /** The deadline each request carries (section 8.1 item 2). */
+        const val OPERATION_LIFETIME_MS = 120_000UL
+        const val CERTIFICATE_READ_TIMEOUT_MS = 15_000L
+        const val AUTHENTICATION_TIMEOUT_MS = 60_000L
+        const val NOTICE_TIMEOUT_MS = 15_000L
+
+        /** How often liveness is checked: a ping after 5 seconds of silence, the end after 30 (section 8.3). */
+        const val LIVENESS_POLL_INTERVAL_MS = 1_000L
+
+        val RANDOM_BYTE_COUNTS = rappRandomByteCounts()
+
+        /** The value random material is overwritten with once used. */
+        const val ERASED: Byte = 0
     }
 
-    suspend fun readAuthenticationCertificate(timeoutMs: Long = 15_000L): ByteArray? =
-        executeOperation(timeoutMs = timeoutMs) { bridge, opId ->
-            bridge.beginReadCertificate(
-                operationId = opId,
-                signatureCertificate = false,
-                localStartMs = RappClock.monotonicMs(),
-                expiresAfterMs = 120_000UL,
-            )
-        }
+    /**
+     * The custodian card's authentication certificate, offered only when the
+     * custodian named it by fingerprint in `card.status` on the same session
+     * (section 8.4 item 2); null otherwise.
+     */
+    suspend fun readAuthenticationCertificate(timeoutMs: Long = CERTIFICATE_READ_TIMEOUT_MS): RappCertificate? =
+        run(
+            timeoutMs,
+            begin = { bridge, operationId ->
+                bridge.beginReadCertificate(
+                    operationId = operationId.toWire(),
+                    signatureCertificate = false,
+                    localStartMs = RappClock.monotonicMs(),
+                    expiresAfterMs = OPERATION_LIFETIME_MS,
+                )
+            },
+            accept = { answer, status ->
+                val certificate = (answer as? RappAnswer.Certificate)?.certificate
+                when {
+                    certificate == null -> Acceptance.Refused
 
+                    status == null -> Acceptance.AwaitingCardStatus
+
+                    status is RappCardStatus.Present &&
+                        status.fingerprint ==
+                        RappCertificateFingerprint.of(
+                            certificate,
+                        )
+                    -> Acceptance.Accepted(certificate)
+
+                    else -> Acceptance.Refused
+                }
+            },
+        )
+
+    /** A signature in its section 9.2 wire form over [digest], or null when the operation did not complete. */
     suspend fun browserAuthenticate(
         origin: String,
         keyProfile: RappCardKeyProfile,
         algorithm: RappSignatureAlgorithm,
         digest: ByteArray,
-        timeoutMs: Long = 60_000L,
+        timeoutMs: Long = AUTHENTICATION_TIMEOUT_MS,
     ): ByteArray? =
-        executeOperation(timeoutMs = timeoutMs) { bridge, opId ->
-            bridge.beginBrowserAuthentication(
-                operationId = opId,
-                origin = origin,
-                keyProfile = keyProfile,
-                algorithm = algorithm,
-                digest = digest,
-                localStartMs = RappClock.monotonicMs(),
-                expiresAfterMs = 120_000UL,
-            )
+        run(
+            timeoutMs,
+            begin = { bridge, operationId ->
+                bridge.beginBrowserAuthentication(
+                    operationId.toWire(),
+                    origin,
+                    keyProfile,
+                    algorithm,
+                    digest,
+                    RappClock.monotonicMs(),
+                    OPERATION_LIFETIME_MS,
+                )
+            },
+            accept = { answer, _ ->
+                (answer as? RappAnswer.Signature)?.let { Acceptance.Accepted(it.signature) } ?: Acceptance.Refused
+            },
+        )
+
+    /** Dials once to deliver a forgotten pairing's close; true when it reached the custodian. */
+    suspend fun deliverRevocationNotice(timeoutMs: Long = NOTICE_TIMEOUT_MS): Boolean =
+        withTimeoutOrNull(timeoutMs) {
+            Session(begin = null, accept = { _, _ -> Acceptance.Refused }, delivered = Unit).run()
+        } !=
+            null
+
+    /** Whether an answer completes the run, given the card status received so far. */
+    private sealed interface Acceptance<out T> {
+        class Accepted<T>(
+            val value: T,
+        ) : Acceptance<T>
+
+        data object AwaitingCardStatus : Acceptance<Nothing>
+
+        data object Refused : Acceptance<Nothing>
+    }
+
+    private suspend fun <T> run(
+        timeoutMs: Long,
+        begin: (RappOperationBridge, RappOperationId) -> RappBridgeAction,
+        accept: (RappAnswer, RappCardStatus?) -> Acceptance<T>,
+    ): T? = withTimeoutOrNull(timeoutMs) { Session(begin, accept, delivered = null).run() }
+
+    /** Where a dial stands between its preamble and the established session. */
+    private enum class Phase {
+        AWAITING_HANDSHAKE,
+        AWAITING_READY,
+        ESTABLISHED,
+    }
+
+    /**
+     * One dial: routing preamble, `Noise_KK`, `session.ready`, then the one
+     * operation [begin] starts. A forgotten pairing ends with [delivered]
+     * once its close has gone out.
+     */
+    private inner class Session<T>(
+        private val begin: ((RappOperationBridge, RappOperationId) -> RappBridgeAction)?,
+        private val accept: (RappAnswer, RappCardStatus?) -> Acceptance<T>,
+        private val delivered: T?,
+    ) {
+        private val result = CompletableDeferred<T?>()
+        private val closed = AtomicBoolean(false)
+        private val sendLock = Any()
+        private val operationId = RappOperationId.random(SecureRandom())
+        private var browser: StreamRelayBrowser? = null
+        private var session: RappSessionBridge? = null
+        private var phase = Phase.AWAITING_HANDSHAKE
+
+        @Volatile
+        private var operation: RappOperationBridge? = null
+        private var livenessJob: Job? = null
+        private var cardStatus: RappCardStatus? = null
+        private var answer: RappAnswer? = null
+
+        suspend fun run(): T? {
+            val relay =
+                StreamRelayBrowser(context, scope, StreamRendezvousName.MODE_SESSION, rank = ::rank) { event ->
+                    try {
+                        handle(event)
+                    } catch (e: Exception) {
+                        trace("session failed", e)
+                        finish(null)
+                    }
+                }
+            browser = relay
+            relay.start()
+            return try {
+                result.await()
+            } finally {
+                finish(null)
+            }
         }
 
-    private suspend fun executeOperation(
-        timeoutMs: Long,
-        startOperation: (RappOperationBridge, ByteArray) -> RappBridgeAction,
-    ): ByteArray? =
-        withTimeoutOrNull(timeoutMs) {
-            val deferred = CompletableDeferred<ByteArray?>()
-
-            var browser: StreamRelayBrowser? = null
-            var sessionBridge: RappSessionBridge? = null
-            var operationBridge: RappOperationBridge? = null
-            var state = SessionState.IDLE
-            val opId = ByteArray(16).also { SecureRandom().nextBytes(it) }
-
-            fun cleanup() {
+        /**
+         * A phone whose hint names this pairing first, then one publishing no
+         * hints; never one whose hints name only other pairings (discovery
+         * hierarchy section 4.3).
+         */
+        private fun rank(attributes: Map<String, ByteArray?>): Int? {
+            val named =
                 try {
-                    operationBridge?.close()
+                    pairRecord.matchesDiscoveryRecord(
+                        StreamRendezvousName.entries(attributes),
+                        StreamRendezvousName.nowUnixSeconds().toULong(),
+                    )
                 } catch (_: Exception) {
+                    false
                 }
-                operationBridge = null
-                try {
-                    sessionBridge?.close()
-                } catch (_: Exception) {
-                }
-                sessionBridge = null
-                try {
-                    browser?.close()
-                } catch (_: Exception) {
-                }
-                browser = null
+            return when {
+                named -> RappDialCandidates.BEST_RANK
+                !StreamRendezvousName.hasHints(attributes) -> RappDialCandidates.UNHINTED_RANK
+                else -> null
             }
+        }
 
-            browser =
-                StreamRelayBrowser(
-                    context,
-                    scope,
-                    StreamRendezvousName.MODE_SESSION,
-                    rank = { attributes ->
-                        // A phone whose hint names this pairing first, then
-                        // one publishing no hints; never one whose hints
-                        // name only other pairings (discovery hierarchy
-                        // section 4.3).
-                        val named =
-                            try {
-                                pairRecord.matchesDiscoveryRecord(
-                                    StreamRendezvousName.entries(attributes),
-                                    StreamRendezvousName.nowUnixSeconds().toULong(),
-                                )
-                            } catch (_: Exception) {
-                                false
-                            }
-                        when {
-                            named -> RappDialCandidates.BEST_RANK
-                            !StreamRendezvousName.hasHints(attributes) -> RappDialCandidates.UNHINTED_RANK
-                            else -> null
-                        }
-                    },
-                ) { event ->
-                    when (event) {
-                        is StreamRelayEvent.Connected -> {
-                            try {
-                                if (BuildConfig.DEBUG) {
-                                    android.util.Log.i("REQUESTER_CLIENT", "Connected to proxy, sending preamble")
-                                }
-                                // A fresh nonce and routing tag on every dial (RAPP section 2.2.1).
-                                browser?.send(pairRecord.sessionPreamble(rappStreamProfileName()))
-                                val sess =
-                                    RappSessionBridge.beginRequester(
-                                        pair = pairRecord,
-                                        vault = vault,
-                                        transportProfile = rappStreamProfileName(),
-                                    )
-                                sessionBridge = sess
-                                val handshake1 = sess.writeHandshakeFrame()
-                                browser?.send(handshake1)
-                                state = SessionState.AWAITING_RESPONDER_HANDSHAKE
-                            } catch (e: Exception) {
-                                if (BuildConfig.DEBUG) {
-                                    android.util.Log.e("REQUESTER_CLIENT", "Failed starting handshake", e)
-                                }
-                                deferred.complete(null)
-                                cleanup()
-                            }
-                        }
+        private fun handle(event: StreamRelayEvent) {
+            when (event) {
+                is StreamRelayEvent.Connected -> {
+                    // A fresh nonce and routing tag on every dial (section 2.2.1).
+                    send(pairRecord.sessionPreamble(rappStreamProfileName()))
+                    val opened = RappSessionBridge.beginRequester(pairRecord, vault, rappStreamProfileName())
+                    session = opened
+                    send(opened.writeHandshakeFrame())
+                }
 
-                        is StreamRelayEvent.Frame -> {
-                            val sess = sessionBridge
-                            if (sess == null) {
-                                deferred.complete(null)
-                                cleanup()
-                                return@StreamRelayBrowser
-                            }
+                is StreamRelayEvent.Frame -> {
+                    receive(event.data)
+                }
 
-                            val op = operationBridge
-                            if (op != null) {
-                                try {
-                                    val action = op.receiveFrame(event.data, RappClock.monotonicMs())
-                                    if (action.kind == RappBridgeActionKind.RESULT_ACKNOWLEDGMENT) {
-                                        action.frame?.let { ackFrame ->
-                                            browser?.send(ackFrame)
-                                        }
-                                        val releasedOpId = action.operationId ?: opId
-                                        val result = op.acknowledgmentReleased(releasedOpId)
-                                        if (BuildConfig.DEBUG) {
-                                            android.util.Log.i(
-                                                "REQUESTER_CLIENT",
-                                                "Operation success! bytes=${result.bytes.size}",
-                                            )
-                                        }
-                                        try {
-                                            op.closeSession()
-                                        } catch (_: Exception) {
-                                        }
-                                        deferred.complete(result.bytes)
-                                        cleanup()
-                                    } else if (action.kind == RappBridgeActionKind.PROGRESS) {
-                                        if (BuildConfig.DEBUG) {
-                                            android.util.Log.i(
-                                                "REQUESTER_CLIENT",
-                                                "Operation progress: ${action.progressEvent}",
-                                            )
-                                        }
-                                        return@StreamRelayBrowser
-                                    } else if (action.kind == RappBridgeActionKind.SEND_FRAME) {
-                                        for (f in listOfNotNull(action.frame) + action.additionalFrames) {
-                                            browser?.send(f)
-                                        }
-                                    } else if (action.kind == RappBridgeActionKind.CARD_STATUS) {
-                                        // The custodian's card presence (RAPP v26.10.18 section
-                                        // 8.4); the one operation this client runs is already
-                                        // under way, so the report changes nothing here.
-                                        return@StreamRelayBrowser
-                                    } else if (action.kind == RappBridgeActionKind.TERMINAL ||
-                                        action.kind == RappBridgeActionKind.SESSION_CLOSED
-                                    ) {
-                                        // A terminal result is acknowledged whatever its status
-                                        // (RAPP v26.10.18 section 8.2 item 5).
-                                        for (f in listOfNotNull(action.frame) + action.additionalFrames) {
-                                            browser?.send(f)
-                                        }
-                                        if (BuildConfig.DEBUG) {
-                                            android.util.Log.w(
-                                                "REQUESTER_CLIENT",
-                                                "Operation ended with ${action.kind}",
-                                            )
-                                        }
-                                        deferred.complete(null)
-                                        cleanup()
-                                    }
-                                } catch (e: Exception) {
-                                    if (BuildConfig.DEBUG) {
-                                        android.util.Log.e("REQUESTER_CLIENT", "receiveFrame failed in operation", e)
-                                    }
-                                    deferred.complete(null)
-                                    cleanup()
-                                }
-                                return@StreamRelayBrowser
-                            }
+                is StreamRelayEvent.Disconnected, is StreamRelayEvent.Error -> {
+                    finish(null)
+                }
+            }
+        }
 
-                            when (state) {
-                                SessionState.AWAITING_RESPONDER_HANDSHAKE -> {
-                                    try {
-                                        sess.readHandshakeFrame(event.data)
-                                        if (!sess.handshakeComplete()) {
-                                            if (BuildConfig.DEBUG) {
-                                                android.util.Log.w(
-                                                    "REQUESTER_CLIENT",
-                                                    "Handshake not complete after reply",
-                                                )
-                                            }
-                                            deferred.complete(null)
-                                            cleanup()
-                                            return@StreamRelayBrowser
-                                        }
-                                        sess.enterAuthentication()
-                                        val nonce = ByteArray(32).also { SecureRandom().nextBytes(it) }
-                                        val ready = sess.sendReady(nonce)
-                                        browser?.send(ready)
-                                        state = SessionState.AWAITING_RESPONDER_READY
-                                    } catch (e: Exception) {
-                                        if (BuildConfig.DEBUG) {
-                                            android.util.Log.e("REQUESTER_CLIENT", "Handshake reply failed", e)
-                                        }
-                                        deferred.complete(null)
-                                        cleanup()
-                                    }
-                                }
+        private fun receive(data: ByteArray) {
+            val opened = checkNotNull(session)
+            when (phase) {
+                Phase.AWAITING_HANDSHAKE -> {
+                    handshake(opened, data)
+                }
 
-                                SessionState.AWAITING_RESPONDER_READY -> {
-                                    try {
-                                        sess.receiveReady(event.data, RappClock.wallMs())
-                                        sess.enterEstablished()
-                                        state = SessionState.ESTABLISHED
-                                        if (BuildConfig.DEBUG) {
-                                            android.util.Log.i(
-                                                "REQUESTER_CLIENT",
-                                                "Session established! Starting operation",
-                                            )
-                                        }
+                Phase.AWAITING_READY -> {
+                    ready(opened, data)
+                }
 
-                                        val liveness =
-                                            RappLivenessConfiguration(
-                                                baseIntervalMs = 5_000UL,
-                                                responseTimeoutMs = 10_000UL,
-                                                maximumIntervalMs = 60_000UL,
-                                                maximumJitterMs = 500UL,
-                                                maximumMisses = 3.toUByte(),
-                                            )
-                                        val bridge =
-                                            RappOperationBridge.beginRequester(
-                                                session = sess,
-                                                vault = vault,
-                                                maximumLifetimeMs = 120_000UL,
-                                                liveness = liveness,
-                                                nowMs = RappClock.monotonicMs(),
-                                            )
-                                        operationBridge = bridge
+                Phase.ESTABLISHED -> {
+                    operation?.let { bridge ->
+                        outcome(act(bridge) { it.receiveFrame(data, RappClock.monotonicMs()) })
+                    }
+                }
+            }
+        }
 
-                                        val action = startOperation(bridge, opId)
-                                        if (action.kind == RappBridgeActionKind.SEND_FRAME && action.frame != null) {
-                                            browser?.send(action.frame!!)
-                                        }
-                                    } catch (e: Exception) {
-                                        if (BuildConfig.DEBUG) {
-                                            android.util.Log.e(
-                                                "REQUESTER_CLIENT",
-                                                "Failed establishing or startOperation",
-                                                e,
-                                            )
-                                        }
-                                        deferred.complete(null)
-                                        cleanup()
-                                    }
-                                }
+        /** Completes `Noise_KK`; a forgotten pairing then sends its close as the session's only message. */
+        private fun handshake(
+            opened: RappSessionBridge,
+            data: ByteArray,
+        ) {
+            opened.readHandshakeFrame(data)
+            check(opened.handshakeComplete())
+            opened.enterAuthentication()
+            if (pairRecord.pairing().state is RappPairState.Forgotten) {
+                send(opened.deliverRevocationNotice())
+                revoke()
+                finish(delivered)
+            } else {
+                phase = Phase.AWAITING_READY
+            }
+        }
 
-                                else -> {
-                                }
-                            }
-                        }
-
-                        is StreamRelayEvent.Disconnected -> {
-                            if (!deferred.isCompleted) {
-                                deferred.complete(null)
-                            }
-                            cleanup()
-                        }
-
-                        is StreamRelayEvent.Error -> {
-                            if (!deferred.isCompleted) {
-                                deferred.complete(null)
-                            }
-                            cleanup()
-                        }
+        /** Verifies `session.ready` (section 7.1 item 5) and starts the operation. */
+        private fun ready(
+            opened: RappSessionBridge,
+            data: ByteArray,
+        ) {
+            when (val outcome = RappBridgeOutcome.from(opened.receiveReady(data, RappClock.monotonicMs()))) {
+                RappBridgeOutcome.Idle -> {
+                    opened.enterEstablished()
+                    val bridge =
+                        RappOperationBridge.beginRequester(
+                            opened,
+                            OPERATION_LIFETIME_MS,
+                            RappClock.monotonicMs(),
+                        )
+                    operation = bridge
+                    phase = Phase.ESTABLISHED
+                    startLiveness(bridge)
+                    val start = begin
+                    if (start == null) {
+                        finish(null)
+                    } else {
+                        outcome(act(bridge) { start(it, operationId) })
                     }
                 }
 
-            browser?.start()
-            deferred.await()
+                else -> {
+                    outcome(outcome)
+                }
+            }
         }
+
+        private fun outcome(outcome: RappBridgeOutcome?) {
+            when (outcome) {
+                null -> {
+                    finish(null)
+                }
+
+                is RappBridgeOutcome.Send -> {
+                    if (outcome.closesWith != null) finish(null)
+                }
+
+                is RappBridgeOutcome.Completed -> {
+                    if (outcome.operationId == operationId) {
+                        answer = outcome.answer
+                        decide()
+                    }
+                }
+
+                is RappBridgeOutcome.CardStatus -> {
+                    cardStatus = outcome.status
+                    decide()
+                }
+
+                is RappBridgeOutcome.Terminal -> {
+                    trace("operation ended: ${outcome.reason}", null)
+                    finish(null)
+                }
+
+                is RappBridgeOutcome.Closed -> {
+                    if (outcome.reason == RappCloseReason.PAIRING_REVOKED) revoke()
+                    finish(null)
+                }
+
+                RappBridgeOutcome.Idle,
+                is RappBridgeOutcome.Progress,
+                is RappBridgeOutcome.Admitted,
+                is RappBridgeOutcome.AwaitConsent,
+                is RappBridgeOutcome.ExecuteRead,
+                is RappBridgeOutcome.ExecuteCommand,
+                -> {}
+            }
+        }
+
+        private fun decide() {
+            val received = answer ?: return
+            when (val acceptance = accept(received, cardStatus)) {
+                is Acceptance.Accepted -> {
+                    finish(acceptance.value)
+                }
+
+                Acceptance.AwaitingCardStatus -> {}
+
+                Acceptance.Refused -> {
+                    finish(null)
+                }
+            }
+        }
+
+        /** The custodian forgot this pairing: it is revoked here at once (section 4.6 item 4). */
+        private fun revoke() {
+            RappPairRevocation.revoke(pairRecord.pairing().id, pairRecord, vault)
+            onPairingRevoked()
+        }
+
+        private fun startLiveness(bridge: RappOperationBridge) {
+            livenessJob =
+                scope.launch(Dispatchers.IO) {
+                    val random = SecureRandom()
+                    while (isActive && operation === bridge) {
+                        delay(LIVENESS_POLL_INTERVAL_MS)
+                        val challenge = ByteArray(RANDOM_BYTE_COUNTS.livenessChallenge.toInt()).also(random::nextBytes)
+                        try {
+                            outcome(act(bridge) { it.pollLiveness(RappClock.monotonicMs(), challenge) })
+                        } finally {
+                            challenge.fill(ERASED)
+                        }
+                    }
+                }
+        }
+
+        /** Runs one bridge call, types its action at the binding border, and sends the frame it sealed. */
+        private fun act(
+            bridge: RappOperationBridge,
+            call: (RappOperationBridge) -> RappBridgeAction,
+        ): RappBridgeOutcome? =
+            synchronized(sendLock) {
+                try {
+                    val outcome = RappBridgeOutcome.from(call(bridge))
+                    if (outcome is RappBridgeOutcome.Send) browser?.send(outcome.frame)
+                    outcome
+                } catch (e: Exception) {
+                    trace("bridge call failed", e)
+                    null
+                }
+            }
+
+        private fun send(frame: ByteArray) {
+            synchronized(sendLock) { (browser ?: throw IOException("dial closed")).send(frame) }
+        }
+
+        /** Ends the run with [value]; a session that is still open is closed with reason `normal`. */
+        private fun finish(value: T?) {
+            result.complete(value)
+            if (!closed.compareAndSet(false, true)) return
+            livenessJob?.cancel()
+            livenessJob = null
+            val bridge = operation
+            operation = null
+            if (bridge != null) {
+                try {
+                    synchronized(sendLock) {
+                        (
+                            RappBridgeOutcome.from(
+                                bridge.closeWithReason(RappCloseReason.NORMAL),
+                            ) as? RappBridgeOutcome.Send
+                        )?.let { browser?.send(it.frame) }
+                    }
+                } catch (_: Exception) {
+                }
+                bridge.close()
+            }
+            session?.close()
+            session = null
+            browser?.close()
+            browser = null
+        }
+
+        private fun trace(
+            message: String,
+            error: Exception?,
+        ) {
+            if (BuildConfig.DEBUG) {
+                android.util.Log.w(TRACE_TAG, message, error)
+            }
+        }
+    }
 }

@@ -18,7 +18,7 @@ what turns a proven pair of devices into a cross-platform one.
 ## Roles
 
 Android pairs only as the custodian: the phone shows the pairing code, serves
-the RAPP v26.10.18 offer over the stream transport, and holds the card. No
+the RAPP v26.10.21 offer over the stream transport, and holds the card. No
 screen pairs the phone as a requester, so the app never calls
 `RappPairingBridge.fromBootstrap`.
 
@@ -31,6 +31,43 @@ offer, type its code); the session side is already in place.
 `RappStoredPairs` loads every catalogued pairing through the core. A record
 in a format the core no longer decodes is removed from the catalog and the
 vault when the app starts, and its device pairs again.
+
+The binding's flat action records are typed once, at the binding border:
+`RappBridgeOutcome.from` turns each `RappBridgeAction` into a sealed outcome
+with a checked `RappOperationId`, a typed `RappRequest`, a `RappCardStatus`
+of `Present(fingerprint)` or `Absent`, and a `RappAnswer`; `RappPairing.of`
+does the same for pair-record metadata (`RappPairId`, role, and the
+`Unconfirmed`, `Active` or `Forgotten` state). The rest of the app consumes
+only these; raw bytes stay in transit to and from the binding and the
+transport.
+
+## Custodian behaviour
+
+- The listener holds one session at a time. Operations take the card one
+  at a time through one lock; an operation that finds it held by another
+  session's operation is reported `queued` once (section 8.2 item 2).
+- `card.status` follows `session.ready` before any operation runs, and again
+  on every reader change. A card ready in the USB reader or on NFC, or a
+  primed card the holder can present, is present and named by its
+  authentication certificate; after an operation ends without the card
+  answering, absence is reported until a card is coupled again (section
+  8.4 item 1).
+- Reads skip consent. Authentication and document signing show the consent
+  view and report `consent_shown`; a cached PIN 1 approves without a prompt,
+  as the phone's own PIN 1 policy allows (section 11 item 2).
+- The native card session reads the PIN status with a header-only VERIFY
+  before every verification and, without sending one, refuses one or two
+  remaining attempts, a blocked PIN, and a status that carries no count and
+  is not "verified"; the operation then ends as `retry_floor` and the holder
+  is told the attempts are reserved for the issuer's software. A wrong PIN with at least three
+  attempts left re-prompts on the phone with the count; the requester learns
+  nothing of it (section 10.2).
+- Forgetting a pairing with its session open closes it with
+  `pairing_revoked` and destroys the record. Otherwise the record is kept,
+  hidden from the list, still announced and routed, and its next session
+  carries only the close; a record that kept its key for 30 days is
+  destroyed at start (section 4.6). A received `pairing_revoked` close
+  destroys the record at once.
 
 ## The protocol is not implemented here
 
@@ -99,8 +136,8 @@ checkout for local development.
 - The wrapper produces `librefineid_rapp.so` for both ABIs.
 - The Kotlin binding generates from the built library and exposes the RAPP
   surface: `RappPairingBridge`, `RappSessionBridge`, `RappOperationBridge`,
-  `RappPairVault`, `RappOperationVault`, and the operation, pairing and
-  liveness value types.
+  `RappPairRecord`, `RappPairVault`, and the operation and pairing value
+  types.
 - Gradle configures with the tasks registered.
 
 ### Proven Live on 2026-09-03
