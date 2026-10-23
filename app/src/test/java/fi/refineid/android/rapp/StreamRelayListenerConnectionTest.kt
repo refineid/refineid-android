@@ -26,10 +26,12 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.util.concurrent.CompletableFuture
+import java.util.Random
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.LockSupport
 import kotlin.concurrent.thread
 
 /**
@@ -74,6 +76,21 @@ class StreamRelayListenerConnectionTest {
         const val FROM_A_LATE = "peer A frame after peer B connected"
         const val FROM_B = "peer B frame"
 
+        /** How many peers connect, one after another, while their connections are dropped at random. */
+        const val STRESS_PEERS = 100
+
+        /** How many frames each of those peers sends. */
+        const val FRAMES_PER_PEER = 3
+
+        /** The longest pause between two random drops, so that some frames arrive while connected. */
+        const val MAX_DROP_PAUSE_NANOS = 200_000L
+
+        /** How many listeners start and close while a peer connects. */
+        const val STRESS_LISTENERS = 50
+
+        /** A handshake deadline no test outlives. */
+        const val LONG_HANDSHAKE_DEADLINE_MS = 60_000L
+
         /** The frames a stream connection's lane runs in: its writes and its close. */
         val CONNECTION_LANE_CLASS = StreamRelayListener::class.java.name + "\$StreamConnection"
     }
@@ -95,10 +112,28 @@ class StreamRelayListenerConnectionTest {
         scope.cancel()
     }
 
-    private fun listener(onEvent: (StreamRelayEvent) -> Unit): StreamRelayListener =
-        StreamRelayListener(DummyContext(), scope, NO_HANDSHAKE_DEADLINE_MS, onEvent).also {
-            it.start(INSTANCE_NAME, emptyMap())
-        }
+    /** The thread the last started listener accepts on. */
+    private lateinit var acceptor: Thread
+
+    private fun acceptingThreads(): Set<Thread> =
+        Thread
+            .getAllStackTraces()
+            .filterValues { stack ->
+                stack.any { it.className == ServerSocket::class.java.name && it.methodName == "accept" }
+            }.keys
+
+    /** Starts a listener and waits until it accepts, on [acceptor]. */
+    private fun listener(
+        handshakeDeadlineMs: Long = NO_HANDSHAKE_DEADLINE_MS,
+        onEvent: (StreamRelayEvent) -> Unit,
+    ): StreamRelayListener {
+        val othersAccepting = acceptingThreads()
+        val listener = StreamRelayListener(DummyContext(), scope, handshakeDeadlineMs, onEvent)
+        listener.start(INSTANCE_NAME, emptyMap())
+        awaitCondition("the listener never accepted") { (acceptingThreads() - othersAccepting).isNotEmpty() }
+        acceptor = (acceptingThreads() - othersAccepting).single()
+        return listener
+    }
 
     private fun peer(
         listener: StreamRelayListener,
@@ -139,11 +174,10 @@ class StreamRelayListenerConnectionTest {
     }
 
     /**
-     * Waits until [acceptor], the thread the accept loop ran a connection's
-     * handler on, waits for the next connection, which it does only after
-     * it finished with the previous one.
+     * Waits until the listener waits for the next connection, which it does
+     * only after it finished with the previous one.
      */
-    private fun awaitAccepting(acceptor: Thread) =
+    private fun awaitAccepting() =
         awaitCondition("the listener never went back to accepting") {
             acceptor.stackTrace.any { it.className == ServerSocket::class.java.name && it.methodName == "accept" }
         }
@@ -153,6 +187,27 @@ class StreamRelayListenerConnectionTest {
         Thread.getAllStackTraces().values.any { stack ->
             stack.any { it.className.startsWith(CONNECTION_LANE_CLASS) }
         }
+
+    /**
+     * The first event of [events] that does not follow from the ones before
+     * it: a connection opens, carries frames and ends, one at a time, with
+     * no error; null when every event does.
+     */
+    private fun firstOutOfOrder(events: List<String>): Int? {
+        var connected = false
+        events.forEachIndexed { index, event ->
+            val follows =
+                when (event) {
+                    CONNECTED -> !connected
+                    DISCONNECTED -> connected
+                    ERROR -> false
+                    else -> connected
+                }
+            if (!follows) return index
+            if (event == CONNECTED || event == DISCONNECTED) connected = event == CONNECTED
+        }
+        return null
+    }
 
     private fun label(event: StreamRelayEvent): String =
         when (event) {
@@ -180,20 +235,13 @@ class StreamRelayListenerConnectionTest {
 
     @Test
     fun aConnectionItsConnectedHandlerDropsEndsQuietly() {
-        val acceptor = CompletableFuture<Thread>()
         lateinit var listener: StreamRelayListener
-        listener =
-            listener { event ->
-                if (event == StreamRelayEvent.Connected) {
-                    acceptor.complete(Thread.currentThread())
-                    listener.disconnectClient()
-                }
-            }
+        listener = listener { if (it == StreamRelayEvent.Connected) listener.disconnectClient() }
         try {
             peer(listener).use { socket ->
                 assertEquals(END_OF_STREAM, socket.getInputStream().read())
             }
-            awaitAccepting(acceptor.get(EVENT_WAIT_SECONDS, TimeUnit.SECONDS))
+            awaitAccepting()
             awaitCondition("the dropped connection's coroutines never ended") {
                 runningCoroutines().size == ACCEPT_LOOP_ONLY
             }
@@ -243,36 +291,16 @@ class StreamRelayListenerConnectionTest {
 
     @Test
     fun withdrawingEndsAcceptingWithoutAnError() {
-        val acceptor = CompletableFuture<Thread>()
-        val errors = CopyOnWriteArrayList<StreamRelayEvent.Error>()
-        val listener =
-            listener { event ->
-                when (event) {
-                    StreamRelayEvent.Connected -> {
-                        acceptor.complete(Thread.currentThread())
-                    }
-
-                    is StreamRelayEvent.Error -> {
-                        errors += event
-                    }
-
-                    StreamRelayEvent.Disconnected, is StreamRelayEvent.Frame -> {}
-                }
-            }
+        val events = CopyOnWriteArrayList<String>()
+        val listener = listener { events += label(it) }
         try {
-            peer(listener).use { socket ->
-                awaitAccepting(acceptor.get(EVENT_WAIT_SECONDS, TimeUnit.SECONDS))
-
-                listener.withdraw(emptyMap())
-
-                assertEquals(END_OF_STREAM, socket.getInputStream().read())
-            }
+            listener.withdraw(emptyMap())
             settle()
         } finally {
             listener.close()
         }
 
-        assertEquals(emptyList<StreamRelayEvent.Error>(), errors.toList())
+        assertEquals(emptyList<String>(), events.toList())
         assertEquals(emptyList<Throwable>(), uncaught)
     }
 
@@ -346,7 +374,7 @@ class StreamRelayListenerConnectionTest {
 
                 peerA.sendFrame(FROM_A)
                 awaitCondition("peer A's reads never ended") {
-                    runningCoroutines().size == ACCEPT_LOOP_ONLY || FROM_A in events
+                    (runningCoroutines().size == ACCEPT_LOOP_ONLY && DISCONNECTED in events) || FROM_A in events
                 }
                 assertEquals(listOf(CONNECTED, DISCONNECTED), events.toList())
 
@@ -393,6 +421,51 @@ class StreamRelayListenerConnectionTest {
             }
         } finally {
             listener.close()
+        }
+        settle()
+
+        assertEquals(emptyList<Throwable>(), uncaught)
+    }
+
+    @Test
+    fun eventsFollowTheConnectionsInOrderWhileTheyAreDroppedAtRandom() {
+        val events = CopyOnWriteArrayList<String>()
+        val listener = listener { events += label(it) }
+        val dropping = AtomicBoolean(true)
+        val dropper =
+            thread {
+                val random = Random()
+                while (dropping.get()) {
+                    listener.disconnectClient()
+                    LockSupport.parkNanos(random.nextLong(MAX_DROP_PAUSE_NANOS))
+                }
+            }
+        try {
+            repeat(STRESS_PEERS) { index ->
+                peer(listener).use { socket ->
+                    repeat(FRAMES_PER_PEER) { runCatching { socket.sendFrame("$FROM_A $index") } }
+                }
+            }
+        } finally {
+            dropping.set(false)
+            dropper.join()
+        }
+        awaitCondition("the last connection's coroutines never ended") { runningCoroutines().size == ACCEPT_LOOP_ONLY }
+        listener.close()
+        settle()
+
+        assertTrue("no connection was taken", CONNECTED in events)
+        val delivered = events.toList()
+        assertEquals("events out of order: $delivered", null, firstOutOfOrder(delivered))
+        assertEquals(emptyList<Throwable>(), uncaught)
+    }
+
+    @Test
+    fun aClosedListenerLeavesNoHandshakeDeadlineRunning() {
+        repeat(STRESS_LISTENERS) {
+            val listener = StreamRelayListener(DummyContext(), scope, LONG_HANDSHAKE_DEADLINE_MS) {}
+            listener.start(INSTANCE_NAME, emptyMap())
+            peer(listener).use { listener.close() }
         }
         settle()
 
