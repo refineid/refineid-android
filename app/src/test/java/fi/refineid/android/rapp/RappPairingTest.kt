@@ -36,6 +36,7 @@ class RappPairingTest {
         createdAtMs = CREATED_AT_MS,
         storageConfirmed = confirmed,
         forgottenAtMs = forgottenAtMs,
+        lastSessionAtMs = null,
     )
 
     @Test

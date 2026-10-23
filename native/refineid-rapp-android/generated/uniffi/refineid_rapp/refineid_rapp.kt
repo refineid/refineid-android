@@ -725,6 +725,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_refineid_rapp_checksum_func_rapp_ble_sar_segment(
     ): Int
+    external fun uniffi_refineid_rapp_checksum_func_rapp_pairing_idle_expiry_ms(
+    ): Int
     external fun uniffi_refineid_rapp_checksum_func_rapp_pairing_preamble(
     ): Int
     external fun uniffi_refineid_rapp_checksum_func_rapp_quit_withdrawal_bound_ms(
@@ -762,6 +764,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_revoke(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_session_preamble(
+    ): Int
+    external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_sweep(
     ): Int
     external fun uniffi_refineid_rapp_checksum_method_rapppairrecord_withdrawal_hint(
     ): Int
@@ -990,6 +994,8 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_refineid_rapp_fn_method_rapppairrecord_session_preamble(`ptr`: Long,`profileName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_refineid_rapp_fn_method_rapppairrecord_sweep(`ptr`: Long,`vault`: Long,`nowMs`: Long,`sessionEstablished`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_method_rapppairrecord_withdrawal_hint(`ptr`: Long,`instanceName`: RustBuffer.ByValue,`unixTimeSeconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_clone_rapppairvault(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1192,6 +1198,8 @@ internal object UniffiLib {
     ): Int
     external fun uniffi_refineid_rapp_fn_func_rapp_ble_sar_segment(`message`: RustBuffer.ByValue,`capacity`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_refineid_rapp_fn_func_rapp_pairing_idle_expiry_ms(uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     external fun uniffi_refineid_rapp_fn_func_rapp_pairing_preamble(`profileName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_func_rapp_quit_withdrawal_bound_ms(uniffi_out_err: UniffiRustCallStatus, 
@@ -1329,10 +1337,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_func_rapp_ble_sar_segment() and 0xFFFF) != 20401) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_refineid_rapp_checksum_func_rapp_pairing_idle_expiry_ms() and 0xFFFF) != 48070) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_refineid_rapp_checksum_func_rapp_pairing_preamble() and 0xFFFF) != 35041) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_func_rapp_quit_withdrawal_bound_ms() and 0xFFFF) != 15673) {
+    if ((lib.uniffi_refineid_rapp_checksum_func_rapp_quit_withdrawal_bound_ms() and 0xFFFF) != 47193) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_func_rapp_random_byte_counts() and 0xFFFF) != 14631) {
@@ -1359,7 +1370,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_discovery_hint() and 0xFFFF) != 6468) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_forget() and 0xFFFF) != 7108) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_forget() and 0xFFFF) != 29571) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_matches_discovery_record() and 0xFFFF) != 50206) {
@@ -1380,10 +1391,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_revocation_notice_expired() and 0xFFFF) != 62609) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_revoke() and 0xFFFF) != 2079) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_revoke() and 0xFFFF) != 64071) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_session_preamble() and 0xFFFF) != 13261) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_sweep() and 0xFFFF) != 57568) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rapppairrecord_withdrawal_hint() and 0xFFFF) != 20317) {
@@ -1500,7 +1514,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rappsessionbridge_enter_authentication() and 0xFFFF) != 17188) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rappsessionbridge_enter_established() and 0xFFFF) != 16269) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappsessionbridge_enter_established() and 0xFFFF) != 24113) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rappsessionbridge_handshake_complete() and 0xFFFF) != 14073) {
@@ -1551,7 +1565,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_close_session() and 0xFFFF) != 19164) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_close_with_reason() and 0xFFFF) != 47460) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_close_with_reason() and 0xFFFF) != 56549) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_batch() and 0xFFFF) != 36447) {
@@ -2519,7 +2533,9 @@ public interface RappOperationBridgeInterface {
      * a frame. An endpoint that withdraws, custodian or requester, closes
      * every open session with `ServiceWithdrawn` (RAPP section 4.5 items 3
      * and 8); a requester that quits waits at most
-     * `rapp_quit_withdrawal_bound_ms()` for the frames to leave.
+     * `rapp_quit_withdrawal_bound_ms()` for the frames to leave. A requester
+     * whose holder turns remote use off closes every open session with
+     * `PairingRevoked` under the same bound (section 4.6 item 6).
      *
      * # Errors
      * [`RappBindingError::LocalStateFailure`] on a poisoned local state.
@@ -3022,7 +3038,9 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
      * a frame. An endpoint that withdraws, custodian or requester, closes
      * every open session with `ServiceWithdrawn` (RAPP section 4.5 items 3
      * and 8); a requester that quits waits at most
-     * `rapp_quit_withdrawal_bound_ms()` for the frames to leave.
+     * `rapp_quit_withdrawal_bound_ms()` for the frames to leave. A requester
+     * whose holder turns remote use off closes every open session with
+     * `PairingRevoked` under the same bound (section 4.6 item 6).
      *
      * # Errors
      * [`RappBindingError::LocalStateFailure`] on a poisoned local state.
@@ -3613,13 +3631,17 @@ public interface RappPairRecordInterface {
     fun `discoveryHint`(`unixTimeSeconds`: kotlin.ULong): kotlin.ByteArray
     
     /**
-     * The local user forgets the pairing while no session to the peer is
-     * open (RAPP §4.6). A confirmed record is stored as forgotten and keeps
-     * its key only to deliver the `pairing_revoked` close on the next
-     * session; an unconfirmed one is destroyed at once. With a session
-     * open, close it with reason `pairing_revoked` and call
-     * [`Self::revoke`] instead. `forgotten_at_ms` is milliseconds since the
-     * Unix epoch.
+     * The custodian's user forgets the pairing while no session to the
+     * peer is open (RAPP §4.6); idle expiry is [`Self::sweep`]'s. A
+     * confirmed record is stored as forgotten and keeps its key
+     * only to deliver the `pairing_revoked` close on the next session; an
+     * unconfirmed one is destroyed at once. With a session open, close it
+     * with reason `pairing_revoked` and call [`Self::revoke`] instead. A
+     * requester whose holder turns remote use off never forgets this way:
+     * it closes each open session with `pairing_revoked`, waits at most
+     * [`rapp_quit_withdrawal_bound_ms`] for the closes to leave, and calls
+     * [`Self::revoke`] for every pairing, owing nothing (§4.6 item 6).
+     * `forgotten_at_ms` is milliseconds since the Unix epoch.
      *
      * # Errors
      * [`RappBindingError`] on an already-revoked record or a storage
@@ -3693,7 +3715,9 @@ public interface RappPairRecordInterface {
      * Irreversibly delete active secret material and retain only a local
      * tombstone. The in-memory private key is dropped only after the vault
      * confirms deletion; `revoked_at_ms` is milliseconds since the Unix
-     * epoch.
+     * epoch. A requester whose holder turns remote use off revokes every
+     * pairing this way, after the closes of its open sessions left or
+     * their bound passed (RAPP §4.6 item 6).
      *
      * # Errors
      * [`RappBindingError`] on an already-revoked record or a storage
@@ -3713,6 +3737,32 @@ public interface RappPairRecordInterface {
      * when the random source fails.
      */
     fun `sessionPreamble`(`profileName`: kotlin.String): kotlin.ByteArray
+    
+    /**
+     * Check this pairing for idle expiry at `now_ms`, milliseconds since
+     * the Unix epoch, and store what changed (RAPP §4.6 item 5).
+     * `session_established` says whether a session to the pairing is
+     * established now. With one, the time is recorded and the pairing kept,
+     * whatever was recorded before, so no order of calls expires a pairing
+     * in session; the recorded time never moves back. Without one, the
+     * pairing expires 30 days after its latest recorded session, or its
+     * creation while it has had none, and is then stored as forgotten. The
+     * change is stored first and taken into memory only once the vault
+     * confirmed it, so a sweep that failed to store is repeated whole by
+     * the next one.
+     *
+     * Sweep every pairing at launch and at least once a day, and sweep a
+     * pairing with `session_established` true once
+     * [`RappSessionBridge::enter_established`] succeeded and when that
+     * session ends.
+     *
+     * # Errors
+     * [`RappBindingError::WrongPhase`] for a revoked record,
+     * [`RappBindingError::StorageUnconfirmed`] for one the peer has not
+     * confirmed, and [`RappBindingError::LocalStateFailure`] on a storage
+     * failure, which changes nothing.
+     */
+    fun `sweep`(`vault`: RappPairVault, `nowMs`: kotlin.ULong, `sessionEstablished`: kotlin.Boolean): RappSweepOutcome
     
     /**
      * This pairing's withdrawal hint for the advertised service instance
@@ -3860,13 +3910,17 @@ open class RappPairRecord: Disposable, AutoCloseable, RappPairRecordInterface
 
     
     /**
-     * The local user forgets the pairing while no session to the peer is
-     * open (RAPP §4.6). A confirmed record is stored as forgotten and keeps
-     * its key only to deliver the `pairing_revoked` close on the next
-     * session; an unconfirmed one is destroyed at once. With a session
-     * open, close it with reason `pairing_revoked` and call
-     * [`Self::revoke`] instead. `forgotten_at_ms` is milliseconds since the
-     * Unix epoch.
+     * The custodian's user forgets the pairing while no session to the
+     * peer is open (RAPP §4.6); idle expiry is [`Self::sweep`]'s. A
+     * confirmed record is stored as forgotten and keeps its key
+     * only to deliver the `pairing_revoked` close on the next session; an
+     * unconfirmed one is destroyed at once. With a session open, close it
+     * with reason `pairing_revoked` and call [`Self::revoke`] instead. A
+     * requester whose holder turns remote use off never forgets this way:
+     * it closes each open session with `pairing_revoked`, waits at most
+     * [`rapp_quit_withdrawal_bound_ms`] for the closes to leave, and calls
+     * [`Self::revoke`] for every pairing, owing nothing (§4.6 item 6).
+     * `forgotten_at_ms` is milliseconds since the Unix epoch.
      *
      * # Errors
      * [`RappBindingError`] on an already-revoked record or a storage
@@ -4032,7 +4086,9 @@ open class RappPairRecord: Disposable, AutoCloseable, RappPairRecordInterface
      * Irreversibly delete active secret material and retain only a local
      * tombstone. The in-memory private key is dropped only after the vault
      * confirms deletion; `revoked_at_ms` is milliseconds since the Unix
-     * epoch.
+     * epoch. A requester whose holder turns remote use off revokes every
+     * pairing this way, after the closes of its open sessions left or
+     * their bound passed (RAPP §4.6 item 6).
      *
      * # Errors
      * [`RappBindingError`] on an already-revoked record or a storage
@@ -4072,6 +4128,47 @@ open class RappPairRecord: Disposable, AutoCloseable, RappPairRecordInterface
         it,
         
         FfiConverterString.lower(`profileName`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Check this pairing for idle expiry at `now_ms`, milliseconds since
+     * the Unix epoch, and store what changed (RAPP §4.6 item 5).
+     * `session_established` says whether a session to the pairing is
+     * established now. With one, the time is recorded and the pairing kept,
+     * whatever was recorded before, so no order of calls expires a pairing
+     * in session; the recorded time never moves back. Without one, the
+     * pairing expires 30 days after its latest recorded session, or its
+     * creation while it has had none, and is then stored as forgotten. The
+     * change is stored first and taken into memory only once the vault
+     * confirmed it, so a sweep that failed to store is repeated whole by
+     * the next one.
+     *
+     * Sweep every pairing at launch and at least once a day, and sweep a
+     * pairing with `session_established` true once
+     * [`RappSessionBridge::enter_established`] succeeded and when that
+     * session ends.
+     *
+     * # Errors
+     * [`RappBindingError::WrongPhase`] for a revoked record,
+     * [`RappBindingError::StorageUnconfirmed`] for one the peer has not
+     * confirmed, and [`RappBindingError::LocalStateFailure`] on a storage
+     * failure, which changes nothing.
+     */
+    @Throws(RappBindingException::class)override fun `sweep`(`vault`: RappPairVault, `nowMs`: kotlin.ULong, `sessionEstablished`: kotlin.Boolean): RappSweepOutcome {
+            return FfiConverterTypeRappSweepOutcome.lift(
+    callWithHandle {
+    uniffiRustCallWithError(RappBindingException) { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_method_rapppairrecord_sweep(
+        it,
+        
+        FfiConverterTypeRappPairVault.lower(`vault`),
+        FfiConverterULong.lower(`nowMs`),
+        FfiConverterBoolean.lower(`sessionEstablished`),_status)
 }
     }
     )
@@ -6864,7 +6961,9 @@ public interface RappSessionBridgeInterface {
     
     /**
      * Promote the authenticated channel to healthy established use once the
-     * Custodian sent, or the Requester verified, `session.ready`.
+     * Custodian sent, or the Requester verified, `session.ready`. The
+     * session is then established: sweep its pairing with
+     * [`RappPairRecord::sweep`], `session_established` true.
      *
      * # Errors
      * [`RappBindingError`] on the wrong phase, a forgotten record, or a
@@ -7113,7 +7212,9 @@ open class RappSessionBridge: Disposable, AutoCloseable, RappSessionBridgeInterf
     
     /**
      * Promote the authenticated channel to healthy established use once the
-     * Custodian sent, or the Requester verified, `session.ready`.
+     * Custodian sent, or the Requester verified, `session.ready`. The
+     * session is then established: sweep its pairing with
+     * [`RappPairRecord::sweep`], `session_established` true.
      *
      * # Errors
      * [`RappBindingError`] on the wrong phase, a forgotten record, or a
@@ -8119,11 +8220,19 @@ data class RappPairMetadata (
     var `storageConfirmed`: kotlin.Boolean
     , 
     /**
-     * When the local user forgot the pairing while no session was open:
-     * the record serves nothing and keeps its key only to deliver the
-     * `pairing_revoked` close on the next session (RAPP §4.6 item 2).
+     * When the local user forgot the pairing, or it expired, while no
+     * session was open: the record serves nothing and keeps its key only
+     * to deliver the `pairing_revoked` close on the next session (RAPP
+     * §4.6 item 2).
      */
     var `forgottenAtMs`: kotlin.ULong?
+    , 
+    /**
+     * The latest wall-clock time [`RappPairRecord::sweep`] recorded at
+     * which the pairing had an established session, or `None` while it has
+     * had none (RAPP §4.6 item 5).
+     */
+    var `lastSessionAtMs`: kotlin.ULong?
     
 ){
     
@@ -8146,6 +8255,7 @@ public object FfiConverterTypeRappPairMetadata: FfiConverterRustBuffer<RappPairM
             FfiConverterULong.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalULong.read(buf),
+            FfiConverterOptionalULong.read(buf),
         )
     }
 
@@ -8155,7 +8265,8 @@ public object FfiConverterTypeRappPairMetadata: FfiConverterRustBuffer<RappPairM
             FfiConverterSequenceString.allocationSize(value.`profiles`) +
             FfiConverterULong.allocationSize(value.`createdAtMs`) +
             FfiConverterBoolean.allocationSize(value.`storageConfirmed`) +
-            FfiConverterOptionalULong.allocationSize(value.`forgottenAtMs`)
+            FfiConverterOptionalULong.allocationSize(value.`forgottenAtMs`) +
+            FfiConverterOptionalULong.allocationSize(value.`lastSessionAtMs`)
     )
 
     override fun write(value: RappPairMetadata, buf: ByteBuffer) {
@@ -8165,6 +8276,7 @@ public object FfiConverterTypeRappPairMetadata: FfiConverterRustBuffer<RappPairM
             FfiConverterULong.write(value.`createdAtMs`, buf)
             FfiConverterBoolean.write(value.`storageConfirmed`, buf)
             FfiConverterOptionalULong.write(value.`forgottenAtMs`, buf)
+            FfiConverterOptionalULong.write(value.`lastSessionAtMs`, buf)
     }
 }
 
@@ -9318,6 +9430,57 @@ public object FfiConverterTypeRappSignatureAlgorithm: FfiConverterRustBuffer<Rap
 
 
 /**
+ * What an idle-expiry sweep did with one pairing (RAPP §4.6 item 5).
+ */
+
+enum class RappSweepOutcome {
+    
+    /**
+     * A session to the pairing is established: its time is recorded and
+     * stored, and the pairing stays.
+     */
+    RECORDED,
+    /**
+     * Nothing changed: no session is established and the pairing is short
+     * of the idle limit, or the record is forgotten already.
+     */
+    KEPT,
+    /**
+     * The pairing went 30 days without an established session: it is
+     * stored as forgotten and keeps its key only for the close (RAPP §4.6
+     * items 2 to 4). Withdraw its identity; send nothing and tell no user.
+     */
+    EXPIRED;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRappSweepOutcome: FfiConverterRustBuffer<RappSweepOutcome> {
+    override fun read(buf: ByteBuffer) = try {
+        RappSweepOutcome.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RappSweepOutcome) = 4UL
+
+    override fun write(value: RappSweepOutcome, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
  * Why an operation ended without completing: the registered error name
  * (RAPP section 10.3).
  */
@@ -10178,6 +10341,20 @@ public object FfiConverterSequenceTypeRappTxtEntry: FfiConverterRustBuffer<List<
     
 
         /**
+         * How long a pairing lives without an established session before it
+         * expires (RAPP v26.10.22 section 4.6 item 5).
+         */ fun `rappPairingIdleExpiryMs`(): kotlin.ULong {
+            return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_func_rapp_pairing_idle_expiry_ms(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
          * Preamble frame payload the dialing proxy sends to reach the custodian's
          * active pairing offer on the transport profile `profile_name`.
          *
@@ -10198,7 +10375,9 @@ public object FfiConverterSequenceTypeRappTxtEntry: FfiConverterRustBuffer<List<
 
         /**
          * How long a requester that quits waits for its `service_withdrawn` closes
-         * to leave before it exits (RAPP v26.10.22 section 4.5 item 8).
+         * to leave before it exits (RAPP v26.10.22 section 4.5 item 8), and one
+         * whose holder turned remote use off waits for its `pairing_revoked` closes
+         * (section 4.6 item 6).
          */ fun `rappQuitWithdrawalBoundMs`(): kotlin.ULong {
             return FfiConverterULong.lift(
     uniffiRustCall() { _status ->

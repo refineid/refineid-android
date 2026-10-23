@@ -35,6 +35,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -48,6 +49,7 @@ import uniffi.refineid_rapp.RappCloseReason
 import uniffi.refineid_rapp.RappEndpointRole
 import uniffi.refineid_rapp.RappOperationBridge
 import uniffi.refineid_rapp.RappPairRecord
+import uniffi.refineid_rapp.RappPairVault
 import uniffi.refineid_rapp.RappPreAuthenticationLimiter
 import uniffi.refineid_rapp.RappProgressEvent
 import uniffi.refineid_rapp.RappSessionBridge
@@ -99,6 +101,7 @@ internal class RappPhoneProxyDispatcher(
     private var sessionRouting: RappSessionRouting? = null
     private var withdrawalJob: Job? = null
     private var hintRefreshJob: Job? = null
+    private var idleExpiryJob: Job? = null
     private var vault: AndroidRappVault? = null
     private val catalog = RappPairCatalog(context)
     private val preAuthenticationLimiter = RappPreAuthenticationLimiter()
@@ -168,6 +171,11 @@ internal class RappPhoneProxyDispatcher(
 
     private val _connectedPeer = MutableStateFlow<PairedPeer?>(null)
     val connectedPeer: StateFlow<PairedPeer?> = _connectedPeer.asStateFlow()
+
+    private val _pairingsExpired = MutableStateFlow(0)
+
+    /** How many pairings idle expiry forgot while this process ran; the list of paired computers follows it. */
+    val pairingsExpired: StateFlow<Int> = _pairingsExpired.asStateFlow()
 
     val isListening: Boolean
         get() = activeListener != null
@@ -362,15 +370,54 @@ internal class RappPhoneProxyDispatcher(
      */
     fun closePairingRevoked(pairId: RappPairId): Boolean {
         synchronized(sessionLock) {
-            if (routed?.pairing?.id != pairId) return false
+            val pair = routed
+            if (pair?.pairing?.id != pairId) return false
             val bridge = operationBridge
             if (bridge == null) {
                 dropConnection()
                 return false
             }
+            // The caller revokes the pairing next, so the session's end records no time for it.
+            routed = null
             val closed = act(bridge) { it.closeWithReason(RappCloseReason.PAIRING_REVOKED) } != null
             dropConnection()
+            pair.record.close()
             return closed
+        }
+    }
+
+    /**
+     * Sweeps the pairings for idle expiry every
+     * [RappIdleExpiry.SWEEP_INTERVAL_MS] until this dispatcher closes,
+     * whether or not the phone serves (RAPP v26.10.22 section 4.6 item 5);
+     * the start's sweep is [RappStoredPairs.cleanAtStartup]'s.
+     */
+    fun startIdleExpiry(vault: RappPairVault) {
+        synchronized(sessionLock) {
+            if (isClosed || idleExpiryJob != null) return
+            idleExpiryJob =
+                scope.launch {
+                    while (isActive) {
+                        delay(RappIdleExpiry.SWEEP_INTERVAL_MS)
+                        sweepIdlePairings(vault)
+                    }
+                }
+        }
+    }
+
+    /**
+     * Sweeps every pairing for idle expiry under the session lock, so the
+     * session cannot come up or end meanwhile: the pairing of an established
+     * session is recorded, never expired, and one whose session is coming
+     * up is left for the next sweep. A pairing that expired leaves the list
+     * of paired computers and nothing else shows it.
+     */
+    private fun sweepIdlePairings(vault: RappPairVault) {
+        synchronized(sessionLock) {
+            if (isClosed) return
+            val session = routed?.let { RappServedSession(it.pairing.id, established = operationBridge != null) }
+            val expired = RappIdleExpiry.sweep(catalog, vault, RappClock.wallMs(), session)
+            if (expired.isNotEmpty()) _pairingsExpired.update { it + expired.size }
         }
     }
 
@@ -786,7 +833,7 @@ internal class RappPhoneProxyDispatcher(
                 nonce.fill(ERASED)
             }
             session.enterEstablished()
-            establish(session, pair)
+            establish(vault, session, pair)
         } catch (_: Exception) {
             dropConnection()
         }
@@ -804,13 +851,14 @@ internal class RappPhoneProxyDispatcher(
     ) {
         send(session.deliverRevocationNotice())
         routed = null
-        RappPairRevocation.revoke(pair.pairing.id, pair.record, vault)
-        catalog.removePair(pair.peer.pairIdHex)
+        RappPairRevocation.revoke(pair, catalog, vault)
         dropConnection()
         pairingsChanged()
     }
 
+    /** The session is established: its pairing's session time is recorded (section 4.6 item 5). */
     private fun establish(
+        vault: RappPairVault,
         session: RappSessionBridge,
         pair: RappStoredPair,
     ) {
@@ -822,6 +870,7 @@ internal class RappPhoneProxyDispatcher(
         cardReported = CompletableDeferred()
         reportedCard = null
         operationBridge = bridge
+        RappIdleExpiry.recordSession(pair.record, vault, RappClock.wallMs())
         startLivenessLoop(bridge)
         cardChanged()
         catalog.markUsed(pair.peer.pairIdHex, System.currentTimeMillis())
@@ -915,8 +964,7 @@ internal class RappPhoneProxyDispatcher(
         dropConnection()
         val vlt = vault ?: return
         if (pair != null) {
-            catalog.removePair(pair.peer.pairIdHex)
-            RappPairRevocation.revoke(pair.pairing.id, pair.record, vlt)
+            RappPairRevocation.revoke(pair, catalog, vlt)
             pairingsChanged()
         }
     }
@@ -979,7 +1027,8 @@ internal class RappPhoneProxyDispatcher(
     /**
      * Forgets the session: every operation of it is over (section 8.1 item
      * 3). A card command in flight is never interrupted; it runs to the
-     * card's answer, which nothing delivers.
+     * card's answer, which nothing delivers. An established session's end is
+     * recorded as its pairing's session time (section 4.6 item 5).
      */
     private fun endSession() {
         synchronized(sessionLock) {
@@ -995,8 +1044,13 @@ internal class RappPhoneProxyDispatcher(
             bridge?.close()
             sessionBridge?.close()
             sessionBridge = null
-            routed?.record?.close()
+            val pair = routed
             routed = null
+            val vlt = vault
+            if (bridge != null && pair != null && vlt != null) {
+                RappIdleExpiry.recordSession(pair.record, vlt, RappClock.wallMs())
+            }
+            pair?.record?.close()
             cardReported = null
             reportedCard = null
             lastReadAuthCertDer = null
@@ -1965,6 +2019,8 @@ internal class RappPhoneProxyDispatcher(
         synchronized(sessionLock) {
             isClosed = true
             RappCustodianService.stop(context)
+            idleExpiryJob?.cancel()
+            idleExpiryJob = null
             withdrawalJob?.cancel()
             withdrawalJob = null
             hintRefreshJob?.cancel()

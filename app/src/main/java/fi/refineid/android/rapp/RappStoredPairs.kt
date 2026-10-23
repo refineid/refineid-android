@@ -2,6 +2,7 @@
 
 package fi.refineid.android.rapp
 
+import fi.refineid.android.diagnostics.AppTrace
 import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappPairVault
@@ -24,7 +25,8 @@ internal class RappStoredPair(
  * revoked too, by every load: the start, each routed connection, each
  * discovery-hint window and each change of the pairings rebuild the served
  * set, so a record past its window neither routes nor stays announced. A
- * storage failure removes nothing.
+ * storage failure removes nothing. The start also sweeps every pairing for
+ * idle expiry ([RappIdleExpiry]).
  */
 internal object RappStoredPairs {
     /**
@@ -46,15 +48,16 @@ internal object RappStoredPairs {
     /**
      * Removes every catalogued pairing whose record the core no longer
      * decodes, revokes catalogued records left unconfirmed or past their
-     * notice window, and revokes every vault record no catalogue entry
-     * names: a ceremony interrupted after it stored its record leaves one
-     * behind (section 4.3 item 4).
+     * notice window, sweeps the others for idle expiry with no session open
+     * (section 4.6 item 5), and revokes every vault record no catalogue
+     * entry names: a ceremony interrupted after it stored its record leaves
+     * one behind (section 4.3 item 4).
      */
     fun cleanAtStartup(
         catalog: RappPairCatalog,
         vault: AndroidRappVault,
     ) {
-        served(catalog, vault).forEach { it.record.close() }
+        RappIdleExpiry.sweep(catalog, vault, RappClock.wallMs(), session = null)
         val catalogued = catalog.allPairs().map { it.pairIdHex }
         for (pairIdHex in orphanPairIds(vault.storedPairIds, catalogued)) {
             val pairId = RappPairId.fromKey(pairIdHex) ?: continue
@@ -86,6 +89,7 @@ internal object RappStoredPairs {
             try {
                 RappPairRecord.loadFromVault(pairId.toWire(), vault)
             } catch (_: RappBindingException.InvalidInput) {
+                AppTrace.rappPairRecordRefused()
                 vault.revokeDeviceOnly(pairId.toWire(), RappClock.wallMs())
                 catalog.removePair(peer.pairIdHex)
                 return null

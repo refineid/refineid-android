@@ -31,7 +31,7 @@ import java.security.SecureRandom
  * One RAPP v26.10.22 session between a requester and a custodian bridge,
  * read through the app's typed binding border: the custodian's ready, card
  * status, consent, reads, the retry floor, deadlines, liveness and the
- * pairing_revoked close.
+ * pairing_revoked close either end sends.
  */
 class RappSessionFlowTest {
     private companion object {
@@ -44,6 +44,8 @@ class RappSessionFlowTest {
         const val PING_AFTER_SILENCE_MS = 5_000UL
         const val SESSION_SILENCE_LIMIT_MS = 30_000UL
         const val ORIGIN = "https://login.example.fi"
+        const val DISPLAY_NAME = "Workstation"
+        const val PLATFORM = "Windows"
 
         /** Sessions opened one after another, each told the card and the reader afresh. */
         const val SESSIONS = 2
@@ -302,6 +304,26 @@ class RappSessionFlowTest {
         assertEquals(RappCloseReason.PAIRING_REVOKED, (close as RappBridgeOutcome.Send).closesWith)
         val closed = close.deliverTo(requester)
         assertEquals(RappCloseReason.PAIRING_REVOKED, (closed as RappBridgeOutcome.Closed).reason)
+    }
+
+    @Test
+    fun aComputerThatTurnsRemoteUseOffIsForgottenByItsClose() {
+        val pairing = pairing()
+        val catalog = RappPairCatalog(FakeSharedPreferences())
+        val pairId = pairing.custodian.pairing().id
+        catalog.savePair(pairId.toWire(), DISPLAY_NAME, PLATFORM, WALL_MS.toLong())
+        val (requester, custodian) = establish(pairing)
+
+        val close = send { requester.closeWithReason(RappCloseReason.PAIRING_REVOKED) }
+        assertEquals(RappCloseReason.PAIRING_REVOKED, (close as RappBridgeOutcome.Send).closesWith)
+        val closed = close.deliverTo(custodian)
+        assertEquals(RappCloseReason.PAIRING_REVOKED, (closed as RappBridgeOutcome.Closed).reason)
+
+        val routed = RappStoredPair(catalog.listPairs().single(), pairing.custodian, pairing.custodian.pairing())
+        RappPairRevocation.revoke(routed, catalog, pairing.custodianVault)
+        assertTrue(catalog.allPairs().isEmpty())
+        assertTrue(pairing.custodianVault.isRevoked(pairId.toWire()))
+        assertTrue(RappStoredPairs.served(catalog, pairing.custodianVault).isEmpty())
     }
 
     @Test
