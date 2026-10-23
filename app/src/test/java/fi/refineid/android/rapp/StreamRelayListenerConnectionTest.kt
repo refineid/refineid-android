@@ -21,6 +21,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -62,6 +63,19 @@ class StreamRelayListenerConnectionTest {
         const val QUEUED_FRAMES = 192
 
         const val END_OF_STREAM = -1
+
+        /** A length prefix announcing no payload, which the stream framing refuses. */
+        const val EMPTY_FRAME_LENGTH = 0
+
+        const val CONNECTED = "connected"
+        const val DISCONNECTED = "disconnected"
+        const val ERROR = "error"
+        const val FROM_A = "peer A frame"
+        const val FROM_A_LATE = "peer A frame after peer B connected"
+        const val FROM_B = "peer B frame"
+
+        /** The frames a stream connection's lane runs in: its writes and its close. */
+        val CONNECTION_LANE_CLASS = StreamRelayListener::class.java.name + "\$StreamConnection"
     }
 
     /** A context that offers no system service, so nothing is advertised. */
@@ -98,7 +112,7 @@ class StreamRelayListenerConnectionTest {
 
     private fun runningCoroutines(): List<Job> =
         scope.coroutineContext.job.children
-            .filter { it.isActive }
+            .filter { !it.isCompleted }
             .toList()
 
     /** Waits until every coroutine the listener started has ended. */
@@ -133,6 +147,30 @@ class StreamRelayListenerConnectionTest {
         awaitCondition("the listener never went back to accepting") {
             acceptor.stackTrace.any { it.className == ServerSocket::class.java.name && it.methodName == "accept" }
         }
+
+    /** Whether some thread is inside a stream connection's write or close. */
+    private fun connectionLaneBusy(): Boolean =
+        Thread.getAllStackTraces().values.any { stack ->
+            stack.any { it.className.startsWith(CONNECTION_LANE_CLASS) }
+        }
+
+    private fun label(event: StreamRelayEvent): String =
+        when (event) {
+            StreamRelayEvent.Connected -> CONNECTED
+            StreamRelayEvent.Disconnected -> DISCONNECTED
+            is StreamRelayEvent.Frame -> event.data.decodeToString()
+            is StreamRelayEvent.Error -> ERROR
+        }
+
+    private fun Socket.sendFrame(text: String) {
+        getOutputStream().write(checkNotNull(StreamRelayFraming.encode(text.encodeToByteArray())))
+    }
+
+    /** Queues more frames than a peer that does not read can take, and waits until a write is held up. */
+    private fun fillTheConnection(listener: StreamRelayListener) {
+        repeat(QUEUED_FRAMES) { listener.send(frame(it)) }
+        awaitCondition("no write was held up") { connectionLaneBusy() }
+    }
 
     /** One full-size synthetic frame, its text naming its place in the sequence. */
     private fun frame(index: Int): ByteArray {
@@ -255,6 +293,97 @@ class StreamRelayListenerConnectionTest {
                 listener.disconnectClient()
                 listener.withdraw(emptyMap())
                 listener.close()
+
+                val input = DataInputStream(socket.getInputStream())
+                for (expected in frames) {
+                    assertArrayEquals(expected, ByteArray(input.readUnsignedShort()).also(input::readFully))
+                }
+                assertEquals(END_OF_STREAM, input.read())
+            }
+        } finally {
+            listener.close()
+        }
+        settle()
+
+        assertEquals(emptyList<Throwable>(), uncaught)
+    }
+
+    @Test
+    fun aCloseThePeerDoesNotDrainEndsWithinTheBound() {
+        val connected = CountDownLatch(1)
+        val listener = listener { if (it == StreamRelayEvent.Connected) connected.countDown() }
+        try {
+            peer(listener) { receiveBufferSize = PEER_RECEIVE_BUFFER_BYTES }.use {
+                assertTrue(connected.await(EVENT_WAIT_SECONDS, TimeUnit.SECONDS))
+                fillTheConnection(listener)
+
+                val droppedAtMs = System.currentTimeMillis()
+                listener.disconnectClient()
+
+                awaitCondition("the dropped connection's write or read never ended") {
+                    runningCoroutines().size == ACCEPT_LOOP_ONLY && !connectionLaneBusy()
+                }
+                assertTrue(System.currentTimeMillis() - droppedAtMs >= StreamRelayListener.CLOSE_DRAIN_BOUND_MS)
+            }
+        } finally {
+            listener.close()
+        }
+        settle()
+
+        assertEquals(emptyList<Throwable>(), uncaught)
+    }
+
+    @Test
+    fun aDroppedConnectionsFramesAreNeverDelivered() {
+        val events = CopyOnWriteArrayList<String>()
+        val listener = listener { events += label(it) }
+        try {
+            peer(listener) { receiveBufferSize = PEER_RECEIVE_BUFFER_BYTES }.use { peerA ->
+                awaitCondition("peer A never connected") { events == listOf(CONNECTED) }
+                // Frames queued for peer A keep its socket open after the drop.
+                fillTheConnection(listener)
+                listener.disconnectClient()
+
+                peerA.sendFrame(FROM_A)
+                awaitCondition("peer A's reads never ended") {
+                    runningCoroutines().size == ACCEPT_LOOP_ONLY || FROM_A in events
+                }
+                assertEquals(listOf(CONNECTED, DISCONNECTED), events.toList())
+
+                peer(listener).use { peerB ->
+                    awaitCondition("peer B never connected") { events == listOf(CONNECTED, DISCONNECTED, CONNECTED) }
+                    runCatching { peerA.sendFrame(FROM_A_LATE) }
+                    peerB.sendFrame(FROM_B)
+                    awaitCondition("peer B's frame never arrived") { FROM_B in events }
+                }
+            }
+        } finally {
+            listener.close()
+        }
+        settle()
+
+        assertEquals(listOf(CONNECTED, DISCONNECTED, CONNECTED, FROM_B), events.toList())
+        assertEquals(emptyList<Throwable>(), uncaught)
+    }
+
+    @Test
+    fun aReadFailureStillWritesTheFramesQueuedBeforeIt() {
+        val disconnected = CountDownLatch(1)
+        val connected = CountDownLatch(1)
+        val listener =
+            listener { event ->
+                if (event == StreamRelayEvent.Connected) connected.countDown()
+                if (event == StreamRelayEvent.Disconnected) disconnected.countDown()
+            }
+        val frames = List(QUEUED_FRAMES, ::frame)
+        try {
+            peer(listener) { receiveBufferSize = PEER_RECEIVE_BUFFER_BYTES }.use { socket ->
+                assertTrue(connected.await(EVENT_WAIT_SECONDS, TimeUnit.SECONDS))
+                frames.forEach(listener::send)
+                awaitCondition("no write was held up") { connectionLaneBusy() }
+
+                DataOutputStream(socket.getOutputStream()).writeShort(EMPTY_FRAME_LENGTH)
+                assertTrue(disconnected.await(EVENT_WAIT_SECONDS, TimeUnit.SECONDS))
 
                 val input = DataInputStream(socket.getInputStream())
                 for (expected in frames) {

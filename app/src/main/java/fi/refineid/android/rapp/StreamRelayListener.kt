@@ -11,6 +11,7 @@ import fi.refineid.android.diagnostics.AppTrace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -20,7 +21,9 @@ import java.io.IOException
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal sealed interface StreamRelayEvent {
@@ -43,8 +46,11 @@ internal sealed interface StreamRelayEvent {
  * It holds one connection at a time. [send] and [disconnectClient] return
  * at once on any thread: each connection writes its frames, and is finally
  * closed, in the order they were queued, on its own lane off the calling
- * thread. A connection that fails or is closed under its read loop ends
- * quietly; only the current connection's end is reported.
+ * thread; a close waits at most [CLOSE_DRAIN_BOUND_MS] for the frames
+ * queued before it. A connection that fails or is closed under its read
+ * loop ends quietly. Only the current connection's frames and end are
+ * reported, and a connection's read loop ends before the next connection
+ * is taken.
  */
 internal class StreamRelayListener(
     private val context: Context,
@@ -56,6 +62,24 @@ internal class StreamRelayListener(
         const val SERVICE_TYPE = "_refineid-stream._tcp"
         const val DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000L
         const val ESTABLISHED_READ_TIMEOUT_MS = 60_000
+
+        /**
+         * How long a closing connection's queued frames have to leave before
+         * its socket closes regardless: the bound RAPP v26.10.22 section 4.5
+         * item 8 sets on a quitting Requester's closes.
+         */
+        const val CLOSE_DRAIN_BOUND_MS = 1_000L
+
+        /**
+         * How long a new connection waits for the previous connection's read
+         * loop to end before it is refused: that socket closes within
+         * [CLOSE_DRAIN_BOUND_MS] of its close, and its loop has as long
+         * again to return from its last event.
+         */
+        private const val READ_HANDOFF_BOUND_MS = 2 * CLOSE_DRAIN_BOUND_MS
+
+        /** Runs the bounded closes of every listener's connections; never cancelled. */
+        private val closeDeadlines = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 
     /**
@@ -68,6 +92,10 @@ internal class StreamRelayListener(
     ) {
         private val output: OutputStream = socket.getOutputStream()
         private val lane: Executor = Dispatchers.IO.limitedParallelism(1).asExecutor()
+        private val closing = AtomicBoolean(false)
+
+        /** Opens once the connection's read loop has ended, or once it is known never to run. */
+        val readsEnded = CountDownLatch(1)
 
         val isOpen: Boolean
             get() = !socket.isClosed && socket.isConnected
@@ -85,9 +113,26 @@ internal class StreamRelayListener(
             }
         }
 
-        /** Closes the socket once every frame queued before is written. */
+        /**
+         * Closes the socket once every frame queued before is written, or
+         * after [CLOSE_DRAIN_BOUND_MS] with frames still queued; closing the
+         * socket ends a write the peer does not read, and the read loop.
+         * Later calls do nothing.
+         */
         fun close() {
-            lane.execute(::closeNow)
+            if (!closing.compareAndSet(false, true)) return
+            val deadline =
+                closeDeadlines.launch {
+                    delay(CLOSE_DRAIN_BOUND_MS)
+                    if (!socket.isClosed) {
+                        AppTrace.rappListenerFailed("close_drain_bound_expired")
+                        closeNow()
+                    }
+                }
+            lane.execute {
+                closeNow()
+                deadline.cancel()
+            }
         }
 
         fun closeNow() {
@@ -109,6 +154,9 @@ internal class StreamRelayListener(
 
     /** The connected peer; guarded by this listener's lock. */
     private var connection: StreamConnection? = null
+
+    /** The connection whose read loop may still run; guarded by this listener's lock. */
+    private var reader: StreamConnection? = null
     private var listenerJob: Job? = null
     private var readJob: Job? = null
     private var authDeadlineJob: Job? = null
@@ -199,7 +247,8 @@ internal class StreamRelayListener(
 
     /**
      * Takes [socket] as the connection unless a peer is already connected,
-     * then reads it until it ends.
+     * once the previous connection's read loop has ended, then reads it
+     * until it ends.
      */
     private fun admit(socket: Socket) {
         val accepted =
@@ -212,23 +261,14 @@ internal class StreamRelayListener(
                 }
                 return
             }
-        val shouldReject =
-            synchronized(this) {
-                if (connection?.isOpen == true) {
-                    true
-                } else {
-                    readJob?.cancel()
-                    connection = accepted
-                    false
-                }
-            }
-
-        if (shouldReject) {
+        val refusal = handOff(accepted)
+        if (refusal != null) {
             AppTrace.rappConnectionRejected(
                 socket.remoteSocketAddress?.toString() ?: "unknown",
-                "already_connected",
+                refusal,
             )
             accepted.closeNow()
+            accepted.readsEnded.countDown()
             return
         }
         if (handshakeTimeoutMs > 0) {
@@ -265,31 +305,86 @@ internal class StreamRelayListener(
         onEvent(StreamRelayEvent.Connected)
 
         // The handler may already have dropped the connection.
-        synchronized(this) {
-            if (connection === accepted) {
-                readJob = scope.launch(Dispatchers.IO) { readLoop(accepted) }
+        val reading =
+            synchronized(this) {
+                if (connection === accepted) {
+                    reader = accepted
+                    scope.launch(Dispatchers.IO) { readLoop(accepted) }.also { readJob = it }
+                } else {
+                    null
+                }
             }
+        if (reading == null) {
+            accepted.readsEnded.countDown()
+        } else {
+            reading.invokeOnCompletion { readsEnded(accepted) }
         }
     }
 
     /**
-     * Reads [accepted]'s frames until it ends. Any read failure, the socket
-     * closed by another thread included, ends the connection at once; only
-     * the current connection's end is reported as
-     * [StreamRelayEvent.Disconnected]. A loop that stops because the
-     * listener closed leaves the socket to close after its queued frames.
+     * Makes [accepted] the connection once the previous connection's read
+     * loop has ended, waiting at most [READ_HANDOFF_BOUND_MS]. Returns why
+     * it was refused: a peer is connected, the previous reads still run, or
+     * the listener stopped meanwhile; null when it was taken.
+     */
+    private fun handOff(accepted: StreamConnection): String? {
+        val previous =
+            synchronized(this) {
+                if (connection?.isOpen == true) return "already_connected"
+                reader
+            }
+        if (previous?.readsEnded?.await(READ_HANDOFF_BOUND_MS, TimeUnit.MILLISECONDS) == false) {
+            return "previous_reads_running"
+        }
+        return synchronized(this) {
+            when {
+                isClosed.get() || isWithdrawn -> {
+                    "listener_stopped"
+                }
+
+                connection?.isOpen == true -> {
+                    "already_connected"
+                }
+
+                else -> {
+                    readJob?.cancel()
+                    connection = accepted
+                    null
+                }
+            }
+        }
+    }
+
+    private fun readsEnded(accepted: StreamConnection) {
+        accepted.readsEnded.countDown()
+        synchronized(this) {
+            if (reader === accepted) reader = null
+        }
+    }
+
+    private fun isCurrent(accepted: StreamConnection): Boolean =
+        synchronized(this) { !isClosed.get() && connection === accepted }
+
+    /**
+     * Reads [accepted]'s frames while it is the current connection; a frame
+     * read after it stopped being current is dropped and the loop ends. Any
+     * read failure, the socket closed by another thread included, ends the
+     * connection: its socket closes once the frames queued for it are
+     * written, within [CLOSE_DRAIN_BOUND_MS], and only the current
+     * connection's end is reported as [StreamRelayEvent.Disconnected].
      */
     private fun readLoop(accepted: StreamConnection) {
         val socket = accepted.socket
         try {
             val input = DataInputStream(socket.getInputStream())
-            while (scope.isActive && !isClosed.get()) {
+            while (scope.isActive && isCurrent(accepted)) {
                 val length = input.readUnsignedShort()
                 if (length == 0) {
                     throw IOException("empty stream frame")
                 }
                 val buffer = ByteArray(length)
                 input.readFully(buffer)
+                if (!isCurrent(accepted)) break
                 if (BuildConfig.DEBUG) {
                     android.util.Log.d(
                         "STREAM_LISTENER",
@@ -302,7 +397,7 @@ internal class StreamRelayListener(
             if (BuildConfig.DEBUG) {
                 android.util.Log.w("STREAM_LISTENER", "Socket read loop ended: ${e.javaClass.simpleName}")
             }
-            accepted.closeNow()
+            accepted.close()
             val notifyDisconnect =
                 synchronized(this) {
                     if (!isClosed.get() && connection === accepted) {
@@ -342,8 +437,9 @@ internal class StreamRelayListener(
 
     /**
      * Stops accepting connections and drops the connected peer once the
-     * frames queued for it are written, then keeps the instance advertised
-     * with [attributes] until [close] (RAPP section 4.5 steps 2 and 3).
+     * frames queued for it are written, within [CLOSE_DRAIN_BOUND_MS], then
+     * keeps the instance advertised with [attributes] until [close] (RAPP
+     * section 4.5 steps 2 and 3).
      */
     fun withdraw(attributes: Map<String, String>) {
         if (isClosed.get() || isWithdrawn) return
@@ -465,7 +561,10 @@ internal class StreamRelayListener(
         }
     }
 
-    /** Drops the connected peer at once; its socket closes once the frames queued for it are written. */
+    /**
+     * Drops the connected peer at once; its socket closes once the frames
+     * queued for it are written, within [CLOSE_DRAIN_BOUND_MS].
+     */
     fun disconnectClient() {
         val notifyDisconnect =
             synchronized(this) {
@@ -494,7 +593,10 @@ internal class StreamRelayListener(
         }
     }
 
-    /** Stops listening and advertising; the connected peer's socket closes once the frames queued for it are written. */
+    /**
+     * Stops listening and advertising; the connected peer's socket closes
+     * once the frames queued for it are written, within [CLOSE_DRAIN_BOUND_MS].
+     */
     override fun close() {
         if (isClosed.compareAndSet(false, true)) {
             if (BuildConfig.DEBUG) android.util.Log.i("STREAM_LISTENER", "close() called")
