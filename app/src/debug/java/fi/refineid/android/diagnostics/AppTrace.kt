@@ -604,6 +604,11 @@ internal object AppTrace {
         debug("rapp:pairing-completed peer=" + peerName)
     }
 
+    /** The paired computer closed its session as withdrawn: it is off, not failed. */
+    fun rappPeerWithdrew() {
+        debug("rapp:peer-withdrawn")
+    }
+
     fun rappOperationApproveFailed(error: String) {
         debug("rapp:approve-failed error=" + error)
     }

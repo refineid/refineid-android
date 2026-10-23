@@ -896,11 +896,15 @@ internal class RappPhoneProxyDispatcher(
     }
 
     /**
-     * The session closed. A requester that forgot this phone closes it with
-     * `pairing_revoked`, and the pairing is revoked here at once (RAPP
-     * v26.10.22 section 4.6 item 4).
+     * The session closed, and with it its operation and any prompt for it.
+     * A requester that forgot this phone closes it with `pairing_revoked`,
+     * and the pairing is revoked here at once (RAPP v26.10.22 section 4.6
+     * item 4). One that withdrew closes it with `service_withdrawn`: this
+     * phone sends no close of its own and keeps the pairing (section 4.5
+     * item 9).
      */
     private fun sessionClosed(reason: RappCloseReason?) {
+        if (reason == RappCloseReason.SERVICE_WITHDRAWN) AppTrace.rappPeerWithdrew()
         val pair = routed.takeIf { reason == RappCloseReason.PAIRING_REVOKED }
         if (pair != null) routed = null
         dropConnection()

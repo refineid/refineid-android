@@ -334,6 +334,8 @@ internal object AppTrace {
 
     fun rappPairingCompleted(peerName: String) = Unit
 
+    fun rappPeerWithdrew() = Unit
+
     fun rappOperationApproveFailed(error: String) = Unit
 
     fun rappOperationDenyFailed(error: String) = Unit

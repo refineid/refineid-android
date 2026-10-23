@@ -24,9 +24,12 @@ screen pairs the phone as a requester, so the app never calls
 
 `RemoteCardModel` and `RappRequesterClient` open sessions for a stored pairing
 whose role is requester, but the app cannot create such a pairing, so in
-practice they are idle. Giving Android a requester role needs a product
-decision and a pairing entry point (dial a phone in pairing mode, read its
-offer, type its code); the session side is already in place.
+practice they are idle. Each session lives for one operation and closes with
+`normal`; there is no remote-use switch and no session held open, so the
+requester's withdrawal (section 4.5 item 8) has nothing to close. Giving
+Android a requester role needs a product decision and a pairing entry point
+(dial a phone in pairing mode, read its offer, type its code); the session
+side is already in place.
 
 `RappStoredPairs` loads every catalogued pairing through the core. A record
 in a format the core no longer decodes is removed from the catalog and the
@@ -99,6 +102,12 @@ transport.
   carries only the close; a record that kept its key for 30 days is
   destroyed when the served pairings are next loaded (section 4.6). A
   received `pairing_revoked` close destroys the record at once.
+- A received `service_withdrawn` close is the computer's withdrawal, never a
+  protocol violation (section 4.5 item 9). The session ends with its
+  operation and any prompt for it, the phone sends no close of its own, and
+  the pairing stays. The phone keeps no record that the computer is off: the
+  Remote Access page shows no per-computer connection state, so nothing on
+  screen changes beyond the prompt going away.
 
 ## The protocol is not implemented here
 
