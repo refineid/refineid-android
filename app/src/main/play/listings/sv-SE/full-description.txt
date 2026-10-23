@@ -3,6 +3,6 @@ RefineID möjliggör säker användning av finländska identitetskort och medbor
 Huvudfunktioner:
 • Stark elektronisk identifiering (PIN1) för webbtjänster
 • Juridiskt bindande kvalificerad elektronisk underskrift (PIN2 / QES)
-• Granskning av kortcertifikat och officiellt passfoto från kortet
+• Granskning av kortcertifikat
 • Stöd för både trådlös NFC-inläsning och trådbundna USB CCID-läsare
 • Fullständig lokal behandling på enheten och stark integritet – inga personuppgifter skickas till externa servrar

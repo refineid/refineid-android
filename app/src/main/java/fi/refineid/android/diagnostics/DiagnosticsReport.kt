@@ -119,9 +119,9 @@ internal object DiagnosticsCollector {
 
 /**
  * Card and identity summary for diagnostics. Holder identity (name,
- * document number, validity dates) is omitted: it identifies the
- * holder without helping a bug report. The generation bucket keeps
- * the activation scheme debuggable without leaking dates.
+ * validity dates) is omitted: it identifies the holder without helping
+ * a bug report. The generation bucket keeps the activation scheme
+ * debuggable without leaking dates.
  */
 internal fun cardStatusText(cardDetails: PersonCardDetails?): String =
     buildString {

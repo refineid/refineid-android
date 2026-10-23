@@ -231,23 +231,6 @@ internal class CcidUsbSession(
         return result
     }
 
-    /**
-     * Face photo over the secure-messaging channel a prior
-     * [openContactless] left open, without a second PACE handshake; null
-     * when no contactless session is held.
-     */
-    fun readFacePhoto(): ByteArray? {
-        checkOwnerThread()
-        check(!isClosed) {
-            "CCID session is closed"
-        }
-        return if (contactlessSessionActive) {
-            NativeContactlessSession.readFacePhotoOnSession(nativeExchange)
-        } else {
-            null
-        }
-    }
-
     fun cacheAuthenticationCertificate(): NativeCertificateReadResult<NativeAuthenticationCertificate> {
         checkOwnerThread()
         check(!isClosed) {

@@ -130,46 +130,6 @@ internal object NativeContactlessSession {
         }
     }
 
-    /**
-     * Read the face photo over the currently held session without a new PACE handshake.
-     */
-    fun readFacePhotoOnSession(exchange: NativeBlockExchange): ByteArray? =
-        if (!NativeCore.isLoaded) {
-            null
-        } else {
-            try {
-                val bytes = readFacePhotoOnSessionNative(exchange)
-                if (bytes.isNotEmpty()) bytes else null
-            } catch (_: LinkageError) {
-                null
-            } catch (_: RuntimeException) {
-                null
-            }
-        }
-
-    /**
-     * Open a session with CAN and read the face photo.
-     */
-    fun readFacePhotoWithCan(
-        canCopy: ByteArray,
-        exchange: NativeBlockExchange,
-    ): ByteArray? =
-        if (!NativeCore.isLoaded) {
-            canCopy.fill(0)
-            null
-        } else {
-            try {
-                val bytes = readFacePhotoWithCanNative(canCopy, exchange)
-                if (bytes.isNotEmpty()) bytes else null
-            } catch (_: LinkageError) {
-                null
-            } catch (_: RuntimeException) {
-                null
-            } finally {
-                canCopy.fill(0)
-            }
-        }
-
     @JvmStatic
     private external fun contactlessConnectNative(
         can: ByteArray,
@@ -186,13 +146,4 @@ internal object NativeContactlessSession {
 
     @JvmStatic
     private external fun contactlessCloseNative(): Int
-
-    @JvmStatic
-    private external fun readFacePhotoOnSessionNative(callback: Any): ByteArray
-
-    @JvmStatic
-    private external fun readFacePhotoWithCanNative(
-        can: ByteArray,
-        callback: Any,
-    ): ByteArray
 }

@@ -109,25 +109,6 @@ internal class ContactlessSession(
         return material.copyAuthenticationCertificate()
     }
 
-    fun readFacePhoto(): ByteArray? {
-        checkOwnerThread()
-        check(!isClosed) {
-            "contactless session is closed"
-        }
-        return if (heldSession && isoDep.isConnected) {
-            NativeContactlessSession.readFacePhotoOnSession(
-                NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
-            )
-        } else if (isoDep.isConnected) {
-            NativeContactlessSession.readFacePhotoWithCan(
-                can.copyOf(),
-                NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
-            )
-        } else {
-            null
-        }
-    }
-
     /**
      * Verifies PIN1 on the held secure channel, reopening it when the field
      * dropped. [isCurrent] gates the credential command after any handshake.

@@ -37,6 +37,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -242,4 +246,23 @@ private fun copyReportToClipboard(
     val clip = ClipData.newPlainText("RefineID Diagnostics", text)
     clipboard?.setPrimaryClip(clip)
     Toast.makeText(context, context.getString(R.string.report_copied), Toast.LENGTH_SHORT).show()
+}
+
+private val CopyIcon: ImageVector by lazy {
+    ImageVector
+        .Builder(
+            name = "Copy",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f,
+        ).addPath(
+            pathData =
+                PathParser()
+                    .parsePathString(
+                        "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14" +
+                            "c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z",
+                    ).toNodes(),
+            fill = SolidColor(Color.Black),
+        ).build()
 }

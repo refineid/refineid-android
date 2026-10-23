@@ -67,7 +67,7 @@ tap, so NFC keeps the held PIN1 rather than asking for it on each request.
 ## Failure and lifecycle
 
 A wrong or locked PIN stops the operation without retry. The app clears accepted
-PIN1, CAN, primed identity, certificates, photo and session caches and disconnects
+PIN1, CAN, primed identity, certificates and session caches and disconnects
 the active remote connection. Established pairings remain. Rejected candidates
 remain represented only by the existing process-local keyed negative cache.
 

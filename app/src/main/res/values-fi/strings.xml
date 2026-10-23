@@ -50,11 +50,7 @@
     <string name="card_read_failed">Korttia ei voitu lukea</string>
     <string name="pair_computer">Etäkäyttö</string>
     <string name="section_identity">Identiteetti</string>
-    <string name="forget_identity_title">Unohdetaanko henkilöllisyys?</string>
     <string name="forget_identity">Unohda henkilöllisyys</string>
-    <string name="copy_photo">Kopioi kuva</string>
-    <string name="share_photo">Jaa kuva</string>
-    <string name="photo_copied">Kuva kopioitu leikepöydälle</string>
     <string name="pairing_failed">Yhdistäminen epäonnistui</string>
     <string name="hold_card_against_back">Pidä henkilökorttia taustaa vasten.</string>
     <string name="connect_id_card">Yhdistä henkilökortti</string>

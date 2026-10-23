@@ -16,7 +16,6 @@ import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
-import fi.refineid.android.core.CardPhotoStore
 import fi.refineid.android.core.CertificateHolderName
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.NativeCertificateReadFailure
@@ -546,24 +545,13 @@ internal class UsbReaderController(
      * prompt for retry.
      */
     @Suppress("CyclomaticComplexMethod")
-    fun connect(
-        can: CanSubmission,
-        onPhotoRead: ((ByteArray?) -> Unit)? = null,
-    ) {
+    fun connect(can: CanSubmission) {
         val cardAwaitsAccessNumber =
             latestSnapshot.status == ReaderConnectionStatus.ACCESS_NUMBER_REQUIRED ||
                 latestSnapshot.status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER
-        // A plain contact session is already open without PACE; the access
-        // number re-opens it under PACE so the eMRTD face photo can be read.
-        val cardIsOpenWithoutPace =
-            (
-                latestSnapshot.status == ReaderConnectionStatus.READY ||
-                    latestSnapshot.status == ReaderConnectionStatus.ACTIVATION_REQUIRED
-            ) && latestSnapshot.cardPresence == CardPresence.PRESENT
-        if (!isStarted || (!cardAwaitsAccessNumber && !cardIsOpenWithoutPace)) {
+        if (!isStarted || !cardAwaitsAccessNumber) {
             can.close()
             AppTrace.usbContactlessConnectIgnored()
-            onPhotoRead?.invoke(null)
             return
         }
         // An identity already read on this session stays valid even when
@@ -581,7 +569,6 @@ internal class UsbReaderController(
         ioExecutor.execute {
             if (!isStarted || generation != probeGeneration) {
                 can.close()
-                mainHandler.post { onPhotoRead?.invoke(null) }
                 return@execute
             }
             can.peekDigits()?.let {
@@ -598,8 +585,6 @@ internal class UsbReaderController(
             if (result is NativeContactlessOpenResult.Success) {
                 activeProviderGeneration = providerGenerationRandom.nextProviderGeneration()
             }
-            val photoBytes = activeSession?.readFacePhoto()
-            val documentNumber = NativeCore.readCardDocumentNumber()
             val certificate =
                 when (result) {
                     is NativeContactlessOpenResult.Success -> result.certificate
@@ -611,12 +596,7 @@ internal class UsbReaderController(
             val holder =
                 if (certificate != null) {
                     try {
-                        cardDetails =
-                            PersonCardDetails.fromDer(
-                                certificate.copyDer(),
-                                photoBytes,
-                                documentNumber,
-                            )
+                        cardDetails = PersonCardDetails.fromDer(certificate.copyDer())
                         cardDetails?.holderName ?: holderNameFromCert
                     } catch (_: Exception) {
                         holderNameFromCert
@@ -625,9 +605,6 @@ internal class UsbReaderController(
                     null
                 }
             val effectiveHolder = holder ?: holderNameFromCert ?: previousHolderName
-            if (photoBytes != null && photoBytes.isNotEmpty()) {
-                CardPhotoStore.savePhoto(photoBytes, effectiveHolder, documentNumber)
-            }
             val snapshot =
                 when (result) {
                     is NativeContactlessOpenResult.Success -> {
@@ -669,30 +646,8 @@ internal class UsbReaderController(
             mainHandler.post {
                 if (isStarted && generation == probeGeneration) {
                     publish(snapshot)
-                    onPhotoRead?.invoke(photoBytes)
-                } else {
-                    onPhotoRead?.invoke(null)
                 }
             }
-        }
-    }
-
-    /**
-     * Read the face photo on demand via PACE if CAN is known.
-     */
-    fun readPhoto(onResult: (ByteArray?) -> Unit) {
-        val existingPhoto =
-            latestSnapshot.cardDetails?.photoBytes
-                ?: latestSnapshot.holderName?.let(CardPhotoStore::getPhoto)
-        if (existingPhoto != null) {
-            onResult(existingPhoto)
-            return
-        }
-        val storedCan = CanSessionStore.currentCan
-        if (storedCan != null && activeSession != null && isStarted) {
-            connect(CanSubmission.from(storedCan), onResult)
-        } else {
-            mainHandler.post { onResult(null) }
         }
     }
 
@@ -930,22 +885,7 @@ internal class UsbReaderController(
                             }
                         },
                     )
-                    if (result is CcidSessionOpenResult.Ready ||
-                        result is CcidSessionOpenResult.ActivationRequired
-                    ) {
-                        // A plain contact read never opens the eMRTD
-                        // application: the face photo sits behind PACE. When
-                        // the holder has already trusted this session with
-                        // the card access number, fetch the photo once.
-                        val storedCan = CanSessionStore.currentCan
-                        if (
-                            storedCan != null &&
-                            holder != null &&
-                            CardPhotoStore.getPhoto(holder) == null
-                        ) {
-                            connect(CanSubmission.from(storedCan))
-                        }
-                    } else if (result is CcidSessionOpenResult.AccessNumberRequired) {
+                    if (result is CcidSessionOpenResult.AccessNumberRequired) {
                         // Contactless sessions on dual/contactless pads require
                         // the card access number (PACE) before card applications
                         // can be read. If CAN is already cached for this reader,

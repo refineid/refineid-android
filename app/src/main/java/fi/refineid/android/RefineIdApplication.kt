@@ -87,10 +87,6 @@ class RefineIdApplication : Application() {
                     rappProxyDispatcher.disconnectClient()
                 }
                 nfcCleared.await()
-                synchronized(authenticationCustodyLock) {
-                    fi.refineid.android.core.CardPhotoStore
-                        .clear()
-                }
             }
     }
 
@@ -121,8 +117,6 @@ class RefineIdApplication : Application() {
                 .uncaughtException(thread, throwable)
             defaultHandler?.uncaughtException(thread, throwable)
         }
-        fi.refineid.android.core.CardPhotoStore
-            .initialize(java.io.File(filesDir, CARD_PHOTO_CACHE_DIRECTORY))
         readerController = UsbReaderController(this)
         val caStore = CaCertificateStore(this)
         caStore.load()
@@ -377,9 +371,5 @@ class RefineIdApplication : Application() {
         } else {
             fi.refineid.android.rapp.RappOfferedCard.Absent
         }
-    }
-
-    private companion object {
-        const val CARD_PHOTO_CACHE_DIRECTORY = "card-photos"
     }
 }

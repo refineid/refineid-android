@@ -49,16 +49,13 @@ class DiagnosticsReportTest {
                 expiryDate = "14.1.2031",
                 issuer = "Test Issuer",
                 signatureAlgorithm = "SHA384withECDSA",
-                documentNumber = "ABC123456",
             )
 
         val status = cardStatusText(details)
 
         assertFalse(status.contains("Holder:"))
-        assertFalse(status.contains("Document Number:"))
         assertFalse(status.contains("Valid:"))
         assertFalse(status.contains("Test Holder"))
-        assertFalse(status.contains("ABC123456"))
         assertFalse(status.contains("14.1.2026"))
         assertFalse(status.contains("14.1.2031"))
         assertTrue(status.contains("Newer (preset activation PIN, issued on/after 13.1.2026)"))
@@ -70,7 +67,6 @@ class DiagnosticsReportTest {
         val status = cardStatusText(null)
 
         assertFalse(status.contains("Holder:"))
-        assertFalse(status.contains("Document Number:"))
         assertFalse(status.contains("Valid:"))
         assertTrue(status.contains("unknown (no issue date)"))
     }

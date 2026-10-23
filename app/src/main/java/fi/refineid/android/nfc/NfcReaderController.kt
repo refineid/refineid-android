@@ -16,7 +16,6 @@ import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
-import fi.refineid.android.core.CardPhotoStore
 import fi.refineid.android.core.CertificateHolderName
 import fi.refineid.android.core.NativeCardAccessResult
 import fi.refineid.android.core.NativeCardCa
@@ -26,7 +25,6 @@ import fi.refineid.android.core.NativeCertificateReadFailure
 import fi.refineid.android.core.NativeContactlessCore
 import fi.refineid.android.core.NativeContactlessOpenResult
 import fi.refineid.android.core.NativeContactlessSession
-import fi.refineid.android.core.NativeCore
 import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.diagnostics.AppTrace
@@ -906,89 +904,16 @@ internal class NfcReaderController(
                 is NativeContactlessOpenResult.Failure -> null
             }
         val holderNameFromCert = certificate?.let(CertificateHolderName::fromCertificate)
-        val photoBytes = CardPhotoStore.getPhoto(holderNameFromCert) ?: NativeCore.readCardFacePhoto()
-        val documentNumber = NativeCore.readCardDocumentNumber()
         val cardDetails: PersonCardDetails? =
             certificate?.let { cert ->
                 try {
-                    PersonCardDetails.fromDer(
-                        cert.copyDer(),
-                        photoBytes = photoBytes,
-                        documentNumber = documentNumber,
-                    )
+                    PersonCardDetails.fromDer(cert.copyDer())
                 } catch (_: Exception) {
                     null
                 }
             }
         val holderName = cardDetails?.holderName ?: holderNameFromCert
-        if (photoBytes != null && photoBytes.isNotEmpty() && holderName != null) {
-            CardPhotoStore.savePhoto(photoBytes, holderName, documentNumber)
-        }
         return Pair(cardDetails, holderName)
-    }
-
-    /**
-     * Read the face photo from the card on demand.
-     * Uses the active held session if present, or connects with primed CAN if a tag is resting.
-     */
-    fun readPhoto(onResult: (ByteArray?) -> Unit) {
-        val session = activeSession
-        if (session != null) {
-            probeExecutor.execute {
-                val photo =
-                    try {
-                        session.readFacePhoto()
-                    } catch (_: Exception) {
-                        null
-                    }
-                val holderName = latestSnapshot.holderName
-                val docNum = NativeCore.readCardDocumentNumber()
-                if (photo != null && holderName != null) {
-                    CardPhotoStore.savePhoto(photo, holderName, docNum)
-                }
-                val updatedDetails = latestSnapshot.cardDetails?.copy(photoBytes = photo)
-                mainHandler.post {
-                    if (updatedDetails != null) {
-                        publish(latestSnapshot.copy(cardDetails = updatedDetails))
-                    }
-                    onResult(photo)
-                }
-            }
-            return
-        }
-        val resting = latestIsoDep
-        val canBytes = CanSessionStore.canBytes() ?: primedCanStore.read()
-        if (resting != null && canBytes != null) {
-            probeExecutor.execute {
-                val photo =
-                    try {
-                        if (!resting.isConnected) {
-                            resting.connect()
-                            resting.timeout = TRANSCEIVE_TIMEOUT_MILLISECONDS
-                        }
-                        val exchange = NfcNativeBlockExchange(IsoDepCardChannel(resting))
-                        NativeContactlessSession.readFacePhotoWithCan(canBytes, exchange)
-                    } catch (_: Exception) {
-                        null
-                    }
-                val holderName = latestSnapshot.holderName
-                val docNum = NativeCore.readCardDocumentNumber()
-                if (photo != null && holderName != null) {
-                    CardPhotoStore.savePhoto(photo, holderName, docNum)
-                }
-                val updatedDetails = latestSnapshot.cardDetails?.copy(photoBytes = photo)
-                mainHandler.post {
-                    if (updatedDetails != null) {
-                        publish(latestSnapshot.copy(cardDetails = updatedDetails))
-                    }
-                    onResult(photo)
-                }
-            }
-            return
-        }
-        mainHandler.post {
-            onResult(null)
-        }
     }
 
     private fun closeActiveSession() {

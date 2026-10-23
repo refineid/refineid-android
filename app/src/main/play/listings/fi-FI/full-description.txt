@@ -3,6 +3,6 @@ RefineID mahdollistaa suomalaisen henkilökortin ja Digi- ja väestötietovirast
 Tärkeimmät ominaisuudet:
 • Vahva sähköinen tunnistautuminen (PIN1) verkkopalveluihin
 • Lainvoimainen qualified-tason sähköinen allekirjoitus (PIN2 / QES)
-• Asiakirjojen varmenteiden ja virallisen passikuvan tarkastus kortilta
+• Asiakirjojen varmenteiden tarkastus
 • Tuki sekä langattomalle NFC-lähiluvulle että langallisille USB CCID -lukijoille
 • Täysin laitteella suoritettava salaus ja tiukka tietosuoja – henkilökohtaisia tietoja ei lähetetä ulkopuolisille palvelimille

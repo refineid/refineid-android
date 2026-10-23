@@ -55,11 +55,7 @@
     <string name="card_read_failed">The card could not be read</string>
     <string name="pair_computer">Remote Access</string>
     <string name="section_identity">Identity</string>
-    <string name="forget_identity_title">Forget identity?</string>
     <string name="forget_identity">Forget identity</string>
-    <string name="copy_photo">Copy photo</string>
-    <string name="share_photo">Share photo</string>
-    <string name="photo_copied">Photo copied to clipboard</string>
     <string name="pairing_failed">Pairing failed</string>
     <string name="hold_card_against_back">Please hold your ID card against the back of the phone.</string>
     <string name="connect_id_card">Connect ID card</string>
