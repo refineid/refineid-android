@@ -3,6 +3,6 @@ RefineID enables secure usage of Finnish national identity cards and citizen cer
 Key Features:
 • Strong electronic authentication (PIN1) for online services
 • Qualified electronic digital signatures (PIN2 / QES)
-• Card certificate verification and official portrait retrieval
+• Card certificate verification
 • Support for contactless NFC reading and USB CCID hardware readers
 • Fully local, on-device cryptographic processing with strict privacy – no personal data is transmitted to external servers

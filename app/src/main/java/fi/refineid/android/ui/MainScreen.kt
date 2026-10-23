@@ -41,13 +41,11 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -69,9 +67,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -96,7 +91,6 @@ import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationPurpose
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
-import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.QualifiedCardService
 import fi.refineid.android.diagnostics.AppTrace
@@ -121,7 +115,6 @@ private enum class MainDestination {
     VERIFY,
     SIGN,
     PAIRING,
-    PERSON,
     CARD_MANAGEMENT,
     DIAGNOSTICS,
 }
@@ -134,7 +127,7 @@ internal fun MainScreen(
     onAuthenticationRejected: (() -> Unit)? = null,
     onRequestPermission: () -> Unit,
     onSelectUsbDevice: (Int) -> Unit = {},
-    onReaderConnect: (CanSubmission, ((ByteArray?) -> Unit)?) -> Unit = { _, _ -> },
+    onReaderConnect: (CanSubmission) -> Unit = {},
     browserCardService: AuthenticationCardService? = null,
     qualifiedCardService: QualifiedCardService? = null,
     nfcQualifiedCardService: QualifiedCardService? = null,
@@ -155,7 +148,6 @@ internal fun MainScreen(
     rappInbox: RappAuthorizationInbox? = null,
     remoteCardModel: fi.refineid.android.rapp.RemoteCardModel? = null,
     onPin1Changed: () -> Unit = {},
-    onReadPhoto: (((ByteArray?) -> Unit) -> Unit)? = null,
 ) {
     val preparationState = authenticationPreparation?.state?.collectAsState()?.value
     val preparationActive =
@@ -164,23 +156,6 @@ internal fun MainScreen(
             preparationState != fi.refineid.android.core.AuthenticationPreparationState.Ready
     DisposableEffect(authenticationPreparation) {
         onDispose { authenticationPreparation?.cancel() }
-    }
-
-    var showsPhotoReadNfcDialog by remember { mutableStateOf(false) }
-    var pendingPhotoConsumer by remember { mutableStateOf<((ByteArray?) -> Unit)?>(null) }
-
-    LaunchedEffect(nfcSnapshot.status, pendingPhotoConsumer) {
-        val nfcReady =
-            nfcSnapshot.status == NfcReaderStatus.CARD_READY ||
-                nfcSnapshot.status == NfcReaderStatus.ACTIVATION_REQUIRED
-        if (nfcReady && pendingPhotoConsumer != null && fi.refineid.android.core.CanSessionStore.hasCan) {
-            val consumer = pendingPhotoConsumer
-            pendingPhotoConsumer = null
-            showsPhotoReadNfcDialog = false
-            onReadPhoto?.invoke { bytes ->
-                consumer?.invoke(bytes)
-            }
-        }
     }
 
     var userDismissedUsbCanDialog by rememberSaveable { mutableStateOf(false) }
@@ -249,15 +224,11 @@ internal fun MainScreen(
             }
 
             usbActivationRequired -> {
-                snapshot.holderName
-                    ?: snapshot.cardDetails?.documentNumber?.let { "Document $it" }
-                    ?: stringResource(R.string.card_transport_usb)
+                snapshot.holderName ?: stringResource(R.string.card_transport_usb)
             }
 
             nfcActivationRequired -> {
-                nfcSnapshot.holderName
-                    ?: nfcSnapshot.cardDetails?.documentNumber?.let { "Document $it" }
-                    ?: stringResource(R.string.card_transport_nfc)
+                nfcSnapshot.holderName ?: stringResource(R.string.card_transport_nfc)
             }
 
             else -> {
@@ -266,7 +237,6 @@ internal fun MainScreen(
         }
 
     var destination by rememberSaveable { mutableStateOf(MainDestination.HOME) }
-    var activePersonDetails by remember { mutableStateOf<PersonCardDetails?>(null) }
 
     // Signing follows the one-transport rule: a wired reader signs on
     // its open session, while a contactless card is never assumed
@@ -352,22 +322,6 @@ internal fun MainScreen(
         } else {
             nfcSnapshot.cardDetails ?: snapshot.cardDetails
         }
-
-    // A removed card leaves an empty Person page: with a USB reader
-    // attached, drop back to the front page once the last identity is
-    // gone. Re-probes and readerless NFC flows never trigger this.
-    LaunchedEffect(destination, usbReaderPresent, snapshot.status, effectiveHolderName) {
-        if (shouldClosePersonPage(
-                isPersonPage = destination == MainDestination.PERSON,
-                usbReaderPresent = usbReaderPresent,
-                usbReaderChecking = snapshot.status == ReaderConnectionStatus.CHECKING,
-                hasIdentity = effectiveHolderName != null,
-            )
-        ) {
-            activePersonDetails = null
-            destination = MainDestination.HOME
-        }
-    }
     val performFullIdentityReset: () -> Unit = {
         onForgetPrimedCard()
         CanSessionStore.drop()
@@ -403,7 +357,6 @@ internal fun MainScreen(
                             isSelected = reader.isSelected,
                             details = if (reader.isSelected) snapshot.cardDetails else null,
                             onSelect = { onSelectUsbDevice(reader.deviceId) },
-                            hasCard = reader.cardPresence != CardPresence.NOT_PRESENT,
                         ),
                     )
                 }
@@ -441,11 +394,6 @@ internal fun MainScreen(
             }
         }
 
-    val onOpenPersonForCard: (CardIdentityItem) -> Unit = { card ->
-        activePersonDetails = card.details ?: PersonCardDetails.fromHolderName(card.title)
-        destination = MainDestination.PERSON
-    }
-
     // Remote Access prepares the card only when the holder turns it on, and
     // never asks for PIN 1 (remoteAccessPreparation).
     val readyRemoteAccess: (RemoteAccessAction, () -> Unit) -> Unit = { action, onReady ->
@@ -481,10 +429,8 @@ internal fun MainScreen(
                 unactivatedCardLabel = unactivatedCardLabel,
                 isMultipleUnactivated = isMultipleUnactivated,
                 cards = cardItems,
-                onOpenPersonForCard = onOpenPersonForCard,
                 onForgetIdentity = forgetIdentity,
                 onWrongPin = onAuthenticationRejected ?: performFullIdentityReset,
-                onOpenPerson = { destination = MainDestination.PERSON },
                 onOpenDiagnostics = { destination = MainDestination.DIAGNOSTICS },
                 browserCardService =
                     if (snapshot.cardPresence == CardPresence.PRESENT) {
@@ -511,7 +457,7 @@ internal fun MainScreen(
                 // contactless path primes NFC for the next tap otherwise.
                 onReadCard = { can ->
                     if (snapshot.cardPresence == CardPresence.PRESENT) {
-                        onReaderConnect(can, null)
+                        onReaderConnect(can)
                     } else {
                         onNfcConnect(can, null)
                     }
@@ -608,35 +554,6 @@ internal fun MainScreen(
             }
         }
 
-        MainDestination.PERSON -> {
-            val details =
-                activePersonDetails
-                    ?: effectiveDetails
-                    ?: PersonCardDetails.fromHolderName(effectiveHolderName ?: "")
-            SubScreen(
-                title = stringResource(R.string.section_identity),
-                tag = "PersonScreen",
-                onBack = {
-                    activePersonDetails = null
-                    destination = MainDestination.HOME
-                },
-            ) {
-                PersonScreen(
-                    details = details,
-                    activationRequired = isActivationRequired,
-                    onActivate = { destination = MainDestination.CARD_MANAGEMENT },
-                    onReadPhoto = { onLoaded ->
-                        if (fi.refineid.android.core.CanSessionStore.hasCan) {
-                            onReadPhoto?.invoke(onLoaded)
-                        } else {
-                            pendingPhotoConsumer = onLoaded
-                            showsPhotoReadNfcDialog = true
-                        }
-                    },
-                )
-            }
-        }
-
         MainDestination.CARD_MANAGEMENT -> {
             var detectedNeedsActivation by remember { mutableStateOf(false) }
             val effectiveActivationRequired = isActivationRequired || detectedNeedsActivation
@@ -708,37 +625,7 @@ internal fun MainScreen(
             },
             onConnect = { can ->
                 isSubmittingUsbCan = true
-                onReaderConnect(can, null)
-            },
-        )
-    }
-
-    if (showsPhotoReadNfcDialog) {
-        ReadCardNfcDialog(
-            onDismiss = {
-                showsPhotoReadNfcDialog = false
-                pendingPhotoConsumer?.invoke(null)
-                pendingPhotoConsumer = null
-            },
-            onConnect = { can ->
-                val canDigits = can.peekDigits()
-                if (canDigits != null) {
-                    fi.refineid.android.core.CanSessionStore
-                        .remember(canDigits)
-                }
-                val consumer = pendingPhotoConsumer
-                pendingPhotoConsumer = null
-                showsPhotoReadNfcDialog = false
-                if (snapshot.cardPresence == CardPresence.PRESENT) {
-                    onReaderConnect(can) { bytes ->
-                        consumer?.invoke(bytes)
-                    }
-                } else {
-                    onNfcConnect(can, null)
-                    if (consumer != null) {
-                        pendingPhotoConsumer = consumer
-                    }
-                }
+                onReaderConnect(can)
             },
         )
     }
@@ -762,10 +649,8 @@ private fun HomeScreen(
     unactivatedCardLabel: String? = null,
     isMultipleUnactivated: Boolean = false,
     cards: List<CardIdentityItem> = emptyList(),
-    onOpenPersonForCard: ((CardIdentityItem) -> Unit)? = null,
     onForgetIdentity: (() -> Unit)?,
     onWrongPin: (() -> Unit)? = null,
-    onOpenPerson: () -> Unit,
     onOpenDiagnostics: () -> Unit = {},
     browserCardService: AuthenticationCardService?,
     pinCache: AuthenticationPinCache?,
@@ -891,12 +776,10 @@ private fun HomeScreen(
                 usbReaderPresent = usbReaderPresent,
                 isActivationRequired = isActivationRequired,
                 onForget = onForgetIdentity,
-                onOpenPerson = onOpenPerson,
                 onReadCard = onReadCard,
                 onOpenPairing = onOpenPairing,
                 pinCache = pinCache,
                 cards = cards,
-                onOpenPersonForCard = onOpenPersonForCard,
                 onRequestUsbCan = onRequestUsbCan,
             )
 
@@ -953,15 +836,12 @@ private fun IdentitySection(
     usbReaderPresent: Boolean,
     isActivationRequired: Boolean = false,
     onForget: (() -> Unit)?,
-    onOpenPerson: () -> Unit,
     onReadCard: (CanSubmission) -> Unit,
     onOpenPairing: () -> Unit = {},
     pinCache: AuthenticationPinCache? = null,
     cards: List<CardIdentityItem> = emptyList(),
-    onOpenPersonForCard: ((CardIdentityItem) -> Unit)? = null,
     onRequestUsbCan: (() -> Unit)? = null,
 ) {
-    var showsForgetConfirmation by remember { mutableStateOf(false) }
     var showsNfcReadDialog by remember { mutableStateOf(false) }
     val rowAction =
         identityRowAction(
@@ -984,8 +864,6 @@ private fun IdentitySection(
                             card.onSelect?.invoke()
                             if (card.isSelected && onRequestUsbCan != null && card.details == null) {
                                 onRequestUsbCan()
-                            } else if ((card.details != null || card.title.isNotEmpty()) && card.hasCard) {
-                                onOpenPersonForCard?.invoke(card) ?: onOpenPerson()
                             }
                         },
                     )
@@ -996,7 +874,6 @@ private fun IdentitySection(
                     rowAction = rowAction,
                     pinCache = pinCache,
                     onForget = onForget,
-                    onOpenPerson = onOpenPerson,
                     onOpenPairing = onOpenPairing,
                     onShowNfcRead = {
                         val currentCan = CanSessionStore.currentCan
@@ -1006,40 +883,10 @@ private fun IdentitySection(
                             showsNfcReadDialog = true
                         }
                     },
-                    onShowForgetConfirmation = { showsForgetConfirmation = true },
                     onRequestUsbCan = onRequestUsbCan,
                 )
             }
         }
-    }
-
-    if (showsForgetConfirmation && onForget != null) {
-        AlertDialog(
-            onDismissRequest = { showsForgetConfirmation = false },
-            title = {
-                Text(
-                    text = stringResource(R.string.forget_identity_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showsForgetConfirmation = false
-                        onForget()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                ) {
-                    Text(stringResource(R.string.forget))
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showsForgetConfirmation = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
     }
 
     if (showsNfcReadDialog) {
@@ -1059,25 +906,22 @@ private fun SingleIdentityRow(
     rowAction: IdentityRowAction,
     pinCache: AuthenticationPinCache?,
     onForget: (() -> Unit)?,
-    onOpenPerson: () -> Unit,
     onOpenPairing: () -> Unit,
     onShowNfcRead: () -> Unit,
-    onShowForgetConfirmation: () -> Unit,
     onRequestUsbCan: (() -> Unit)?,
 ) {
     Row(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .clickable {
+                .then(
                     when (rowAction) {
-                        IdentityRowAction.OPEN_PERSON -> onOpenPerson()
-                        IdentityRowAction.REQUEST_USB_CAN -> onRequestUsbCan?.invoke()
-                        IdentityRowAction.OPEN_PAIRING -> onOpenPairing()
-                        IdentityRowAction.ASK_NFC_READ -> onShowNfcRead()
-                        IdentityRowAction.NOTHING -> Unit
-                    }
-                }.padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING)
+                        IdentityRowAction.REQUEST_USB_CAN -> Modifier.clickable { onRequestUsbCan?.invoke() }
+                        IdentityRowAction.OPEN_PAIRING -> Modifier.clickable(onClick = onOpenPairing)
+                        IdentityRowAction.ASK_NFC_READ -> Modifier.clickable(onClick = onShowNfcRead)
+                        IdentityRowAction.NOTHING -> Modifier
+                    },
+                ).padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING)
                 .testTag(UiAutomationIds.IDENTITY_ROW),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(ROW_ITEM_SPACING),
@@ -1112,20 +956,7 @@ private fun SingleIdentityRow(
             )
         }
         if ((holderName != null || pinCache?.hasPin == true) && onForget != null) {
-            IconButton(
-                onClick = onShowForgetConfirmation,
-                modifier =
-                    Modifier
-                        .size(44.dp)
-                        .testTag("forgetCardIdentityButton"),
-            ) {
-                Icon(
-                    imageVector = MinusCircleIcon,
-                    contentDescription = stringResource(R.string.forget_identity),
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(24.dp),
-                )
-            }
+            ForgetIdentityButton(onForget = onForget)
         } else if (rowAction != IdentityRowAction.NOTHING) {
             Icon(
                 imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
@@ -1996,22 +1827,3 @@ private val CARD_CORNER_RADIUS = 16.dp
 private val CARD_ELEVATION = 0.dp
 private val READER_STATUS_ITEM_SPACING = 12.dp
 private val READER_STATUS_INDICATOR_SIZE = 12.dp
-
-private val MinusCircleIcon: ImageVector by lazy {
-    ImageVector
-        .Builder(
-            name = "MinusCircle",
-            defaultWidth = 24.dp,
-            defaultHeight = 24.dp,
-            viewportWidth = 24f,
-            viewportHeight = 24f,
-        ).addPath(
-            pathData =
-                PathParser()
-                    .parsePathString(
-                        "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18" +
-                            "c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-9h10v2H7z",
-                    ).toNodes(),
-            fill = SolidColor(Color.Black),
-        ).build()
-}

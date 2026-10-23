@@ -419,7 +419,7 @@ internal class CcidProtocolException(
     /**
      * Short framing detail built from integers only (slots, sequences,
      * status bytes, lengths) — never response payloads, so holder data
-     * such as photos or document numbers can never reach the trace.
+     * such as names or certificates can never reach the trace.
      */
     val detail: String = "",
 ) : Exception(message)

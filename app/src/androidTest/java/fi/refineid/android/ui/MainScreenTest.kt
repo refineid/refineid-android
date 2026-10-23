@@ -1,9 +1,8 @@
 package fi.refineid.android.ui
 
 import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -170,7 +169,7 @@ internal class MainScreenTest {
                     status = ReaderConnectionStatus.ACCESS_NUMBER_REQUIRED,
                     cardPresence = CardPresence.PRESENT,
                 ),
-            onReaderConnect = { can, _ ->
+            onReaderConnect = { can ->
                 connectedCan = can.peekDigits()
             },
         )
@@ -230,22 +229,20 @@ internal class MainScreenTest {
     }
 
     @Test
-    fun removingCardClosesPersonPageBackToFront() {
-        var snapshot by mutableStateOf(
-            READY_WITH_CARD.copy(
-                holderName = SYNTHETIC_HOLDER_NAME,
-                cardDetails =
-                    PersonCardDetails(
-                        holderName = SYNTHETIC_HOLDER_NAME,
-                        fullName = SYNTHETIC_HOLDER_NAME,
-                    ),
-            ),
-        )
+    fun contactlessIdentityRowRemovesIdentityAtOnce() {
+        var forgotten = false
         composeRule.setContent {
             RefineIdTheme {
                 MainScreen(
-                    snapshot = snapshot,
+                    snapshot = UsbReaderSnapshot(),
                     onRequestPermission = {},
+                    hasNfc = true,
+                    nfcSnapshot =
+                        NfcReaderSnapshot(
+                            status = NfcReaderStatus.CARD_READY,
+                            holderName = SYNTHETIC_HOLDER_NAME,
+                        ),
+                    onForgetPrimedCard = { forgotten = true },
                 )
             }
         }
@@ -253,24 +250,37 @@ internal class MainScreenTest {
         composeRule
             .onNodeWithTag(UiAutomationIds.IDENTITY_ROW)
             .performScrollTo()
-            .performClick()
+            .assertHasNoClickAction()
         composeRule
-            .onNodeWithTag(PERSON_SCREEN_TAG)
+            .onNodeWithTag(UiAutomationIds.FORGET_IDENTITY_ACTION)
             .assertIsDisplayed()
+            .performClick()
 
-        snapshot =
-            READY_WITH_CARD.copy(
-                cardPresence = CardPresence.NOT_PRESENT,
-                holderName = null,
-                cardDetails = null,
-            )
+        assertEquals(true, forgotten)
+    }
 
-        composeRule
-            .onNodeWithTag(PERSON_SCREEN_TAG)
-            .assertDoesNotExist()
+    @Test
+    fun wiredIdentityRowShowsTheHolderOnly() {
+        show(
+            snapshot =
+                READY_WITH_CARD.copy(
+                    holderName = SYNTHETIC_HOLDER_NAME,
+                    cardDetails =
+                        PersonCardDetails(
+                            holderName = SYNTHETIC_HOLDER_NAME,
+                            fullName = SYNTHETIC_HOLDER_NAME,
+                        ),
+                ),
+        )
+
         composeRule
             .onNodeWithTag(UiAutomationIds.IDENTITY_ROW)
+            .performScrollTo()
             .assertIsDisplayed()
+            .assertHasNoClickAction()
+        composeRule
+            .onNodeWithTag(UiAutomationIds.FORGET_IDENTITY_ACTION)
+            .assertDoesNotExist()
     }
 
     @Test
@@ -403,7 +413,7 @@ internal class MainScreenTest {
     private fun show(
         snapshot: UsbReaderSnapshot,
         onRequestPermission: () -> Unit = {},
-        onReaderConnect: (CanSubmission, ((ByteArray?) -> Unit)?) -> Unit = { _, _ -> },
+        onReaderConnect: (CanSubmission) -> Unit = {},
         browserCardService: AuthenticationCardService? = null,
     ) {
         composeRule.setContent {
@@ -439,7 +449,6 @@ internal class MainScreenTest {
     private companion object {
         const val SYNTHETIC_HOLDER_NAME = "MEIKALAINEN MATTI SAKARI"
         const val EXPECTED_PERMISSION_REQUEST_COUNT = 1
-        const val PERSON_SCREEN_TAG = "PersonScreen"
 
         val READY_WITH_CARD =
             UsbReaderSnapshot(

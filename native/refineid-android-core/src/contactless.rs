@@ -12,7 +12,6 @@
 use std::sync::Mutex;
 
 use refineid_apdu::{CardTransport, TransportOutcome};
-use refineid_emrtd::{CardFaceImage, EmrtdOps};
 use refineid_pace::{Can, PaceError, PaceSession, SmTransport, UnvalidatedCan, run_pace_with_can};
 use refineid_pkcs15::{CertSlot, Pkcs15Error, Pkcs15Ops};
 
@@ -86,42 +85,6 @@ pub(crate) fn contactless_close() {
     if let Ok(mut slot) = HELD_SESSION.lock() {
         *slot = None;
     }
-    set_last_read_face_photo(None);
-    set_last_read_document_number(None);
-}
-
-/// The latest face photo extracted from EF.DG2 under secure messaging.
-static LAST_READ_FACE_PHOTO: Mutex<Option<CardFaceImage>> = Mutex::new(None);
-
-/// The latest MRZ document number extracted from EF.DG1 under secure
-/// messaging; the printed card number that makes exported photo file
-/// names globally unique.
-static LAST_READ_DOCUMENT_NUMBER: Mutex<Option<String>> = Mutex::new(None);
-
-pub(crate) fn get_last_read_face_photo() -> Option<CardFaceImage> {
-    LAST_READ_FACE_PHOTO
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
-}
-
-pub(crate) fn set_last_read_face_photo(photo: Option<CardFaceImage>) {
-    if let Ok(mut guard) = LAST_READ_FACE_PHOTO.lock() {
-        *guard = photo;
-    }
-}
-
-pub(crate) fn get_last_read_document_number() -> Option<String> {
-    LAST_READ_DOCUMENT_NUMBER
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
-}
-
-pub(crate) fn set_last_read_document_number(document_number: Option<String>) {
-    if let Ok(mut guard) = LAST_READ_DOCUMENT_NUMBER.lock() {
-        *guard = document_number;
-    }
 }
 
 /// The latest on-card root CA certificate extracted from EF.4334.
@@ -190,7 +153,7 @@ fn is_activation_required<T: CardTransport>(_transport: &mut T, _profile: CardKe
     // Probing activation records via GET DATA (0xCB) or PIN2 counters tears down
     // the PACE secure channel (SW=0x6988) on Finnish ID cards because those probes
     // answer only in the card-management or DF.5016 context outside PKCS#15.
-    // Contactless sessions stay strictly within PKCS#15 and eMRTD; full card
+    // Contactless sessions stay strictly within PKCS#15; full card
     // activation requires the contact interface.
     false
 }
@@ -438,39 +401,6 @@ pub(crate) fn contactless_probe_pin2<Exchange: SingleBlockExchange>(
         .map_err(pin2_selection_failure)
         .and_then(|()| probe_pin2_preflight(&mut secure));
     (result, secure.into_inner().into_exchange())
-}
-
-/// Read the eMRTD face photo and document number on the currently-held
-/// secure-messaging session. Re-selects the PKCS#15 application before
-/// returning so following operations are unaffected.
-pub(crate) fn contactless_read_face_photo_on_session<Exchange: SingleBlockExchange>(
-    transport: AndroidCardTransport<Exchange>,
-) -> (Option<CardFaceImage>, Exchange) {
-    let Some(session) = take_held_session() else {
-        return (None, transport.into_exchange());
-    };
-    let mut secure = SmTransport::new(transport, session);
-    read_emrtd_data_from_secure_channel(&mut secure);
-    let photo = get_last_read_face_photo();
-    let (transport, session) = secure.into_parts();
-    store_held_session(session);
-    (photo, transport.into_exchange())
-}
-
-/// One PACE handshake, then reads the eMRTD face photo and document number.
-pub(crate) fn contactless_read_face_photo<Exchange: SingleBlockExchange>(
-    transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
-) -> (Option<CardFaceImage>, Exchange) {
-    let mut secure = match open_secure_channel(transport, can_bytes) {
-        Ok(secure) => secure,
-        Err((exchange, _)) => return (None, exchange),
-    };
-    read_emrtd_data_from_secure_channel(&mut secure);
-    let photo = get_last_read_face_photo();
-    let (transport, session) = secure.into_parts();
-    store_held_session(session);
-    (photo, transport.into_exchange())
 }
 
 /// PACE, then the PKCS#15 selection and one qualified signature inside
@@ -852,25 +782,6 @@ fn qualified_selection_failure<E>(error: Pkcs15Error<E>) -> QualifiedSignFailure
     }
 }
 
-/// Selects the eMRTD application and reads EF.DG1 for the document number
-/// and EF.DG2 for the face photo, then re-selects the PKCS#15 application.
-/// A file that fails to read or parse leaves its slot empty.
-fn read_emrtd_data_from_secure_channel<T: CardTransport + Pkcs15Ops + EmrtdOps>(secure: &mut T) {
-    set_last_read_face_photo(None);
-    set_last_read_document_number(None);
-
-    if secure.select_emrtd_application().is_ok() {
-        if let Ok(Some(mrz)) = secure.read_mrz_td1() {
-            set_last_read_document_number(Some(mrz.document_number));
-        }
-        if let Ok(Some(face)) = secure.read_face_image() {
-            set_last_read_face_photo(Some(face));
-        }
-    }
-
-    let _ = secure.select_pkcs15_application();
-}
-
 #[cfg(test)]
 mod tests {
     use refineid_apdu::{StatusWord, TransportOutcome};
@@ -987,22 +898,5 @@ mod tests {
             qualified_channel_failure(SecureChannelFailure::Bridge),
             QualifiedSignFailure::Bridge
         );
-    }
-
-    #[test]
-    fn extracts_portrait_via_emrtd() {
-        let dg2 = vec![
-            0x75, 0x1A, // DG2 tag + len
-            0x00, 0x01, 0x02, // Biometric header
-            0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08, // SOF0 marker
-            0x01, 0x90, // Height 400
-            0x01, 0x2C, // Width 300
-            0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xFF, 0xD9,
-        ];
-        let portrait = refineid_emrtd::parse_card_face_image(&dg2).expect("portrait extracted");
-        assert_eq!(portrait.format(), refineid_emrtd::ImageFormat::Jpeg);
-        assert_eq!(portrait.width(), 300);
-        assert_eq!(portrait.height(), 400);
-        assert_eq!(&portrait.image_bytes()[..3], &[0xFF, 0xD8, 0xFF]);
     }
 }

@@ -16,7 +16,6 @@ refineid-ber = { git = "https://github.com/RefineID/refineid-core.git", branch =
 refineid-atr = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-digest = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-pace = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
-refineid-emrtd = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-pkcs15 = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-sign = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-x509 = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
@@ -27,7 +26,6 @@ refineid-atr = { path = "../../../refineid-core/crates/atr" }
 refineid-auth = { path = "../../../refineid-core/crates/auth" }
 refineid-ber = { path = "../../../refineid-core/crates/ber" }
 refineid-digest = { path = "../../../refineid-core/crates/digest" }
-refineid-emrtd = { path = "../../../refineid-core/crates/emrtd" }
 refineid-pace = { path = "../../../refineid-core/crates/pace" }
 refineid-pkcs15 = { path = "../../../refineid-core/crates/pkcs15" }
 refineid-sign = { path = "../../../refineid-core/crates/sign" }

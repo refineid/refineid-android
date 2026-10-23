@@ -63,7 +63,7 @@ internal class LocalAuthenticationPreparationBackend(
         if (wired) {
             if (!app.readerController.isCardReady) {
                 if (can != null) {
-                    app.readerController.connect(can.copy(), null)
+                    app.readerController.connect(can.copy())
                 } else {
                     app.readerController.refresh(ReaderRefreshCause.CARD_WANTED)
                 }
