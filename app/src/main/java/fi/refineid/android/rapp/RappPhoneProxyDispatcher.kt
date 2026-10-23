@@ -73,9 +73,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  * that session and any earlier one whose card command is still finishing
  * (section 8.2 item 2).
  *
- * Session state changes, and every frame sent, under one lock, so frames
- * leave in the order their bridge sealed them and a frame of one session
- * never goes out on another's transport.
+ * Session state changes, and every frame is queued on its transport, under
+ * one lock. Each transport writes its frames off the calling thread, in the
+ * order they were queued, and closes a connection only after the frames
+ * queued before; so frames leave in the order their bridge sealed them, a
+ * frame of one session never goes out on another's transport, and every
+ * public call returns without waiting on the network.
  */
 internal class RappPhoneProxyDispatcher(
     private val context: Context,
@@ -143,7 +146,7 @@ internal class RappPhoneProxyDispatcher(
     private var livenessJob: Job? = null
     private var operationJob: Job? = null
 
-    /** Guards the session's state and its transport; frames leave in the order their bridge sealed them. */
+    /** Guards the session's state and its transport; frames are queued in the order their bridge sealed them. */
     private val sessionLock = Any()
 
     /** The card serves one operation at a time (section 8.2 item 2). */
@@ -413,7 +416,8 @@ internal class RappPhoneProxyDispatcher(
      * the listener and the Bluetooth server stop accepting and the
      * advertisement stops; the instance is advertised as withdrawn for a few
      * seconds, and then everything stops. The Bluetooth advertisement carries
-     * no withdrawal (section 4.5 item 5).
+     * no withdrawal (section 4.5 item 5). It returns at once: the close is
+     * queued on the session's transport, which writes it before it closes.
      */
     fun withdraw() {
         synchronized(sessionLock) {
@@ -825,12 +829,12 @@ internal class RappPhoneProxyDispatcher(
         AppTrace.rappPairingCompleted(pair.peer.displayName)
     }
 
-    /** Sends one frame on the connection, before the session's bridge exists. */
+    /** Queues one frame on the connection, before the session's bridge exists. */
     private fun send(frame: ByteArray) {
         synchronized(sessionLock) { transportSend(frame) }
     }
 
-    /** Sends [frame] on the transport that carries the session. */
+    /** Queues [frame] on the transport that carries the session. */
     private fun transportSend(frame: ByteArray) {
         when (val transport = served) {
             RappServedTransport.Stream -> {
@@ -848,7 +852,7 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
-    /** Closes [transport]: the stream connection, or the Bluetooth link once its queued frames are out. */
+    /** Closes [transport], the stream connection or the Bluetooth link, once its queued frames are out. */
     private fun closeTransport(transport: RappServedTransport?) {
         when (transport) {
             RappServedTransport.Stream -> {
@@ -865,9 +869,10 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Runs one call on the session's bridge, types its action at the binding
-     * border, and sends the frame it sealed, so frames leave in the order the
-     * bridge sealed them; a closing session ends here. Null when [bridge] no
-     * longer serves the session or the call failed.
+     * border, and queues the frame it sealed, so frames leave in the order
+     * the bridge sealed them; a closing session ends here, its transport
+     * closing after the frame. Null when [bridge] no longer serves the
+     * session or the call failed.
      */
     private fun act(
         bridge: RappOperationBridge,
