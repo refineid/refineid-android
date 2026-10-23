@@ -727,6 +727,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_refineid_rapp_checksum_func_rapp_pairing_preamble(
     ): Int
+    external fun uniffi_refineid_rapp_checksum_func_rapp_quit_withdrawal_bound_ms(
+    ): Int
     external fun uniffi_refineid_rapp_checksum_func_rapp_random_byte_counts(
     ): Int
     external fun uniffi_refineid_rapp_checksum_func_rapp_session_record(
@@ -1192,6 +1194,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_func_rapp_pairing_preamble(`profileName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_refineid_rapp_fn_func_rapp_quit_withdrawal_bound_ms(uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     external fun uniffi_refineid_rapp_fn_func_rapp_random_byte_counts(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_refineid_rapp_fn_func_rapp_session_record(`candidates`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1326,6 +1330,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_func_rapp_pairing_preamble() and 0xFFFF) != 35041) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_refineid_rapp_checksum_func_rapp_quit_withdrawal_bound_ms() and 0xFFFF) != 15673) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_func_rapp_random_byte_counts() and 0xFFFF) != 14631) {
@@ -1544,7 +1551,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_close_session() and 0xFFFF) != 19164) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_close_with_reason() and 0xFFFF) != 49878) {
+    if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_close_with_reason() and 0xFFFF) != 47460) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_refineid_rapp_checksum_method_rappoperationbridge_complete_batch() and 0xFFFF) != 36447) {
@@ -2509,7 +2516,10 @@ public interface RappOperationBridgeInterface {
      * Close the session with an authenticated `session.close` carrying
      * `reason` and return the notice frame to deliver before dropping the
      * link. A session that is already closed yields `SessionClosed` without
-     * a frame.
+     * a frame. An endpoint that withdraws, custodian or requester, closes
+     * every open session with `ServiceWithdrawn` (RAPP section 4.5 items 3
+     * and 8); a requester that quits waits at most
+     * `rapp_quit_withdrawal_bound_ms()` for the frames to leave.
      *
      * # Errors
      * [`RappBindingError::LocalStateFailure`] on a poisoned local state.
@@ -3009,7 +3019,10 @@ open class RappOperationBridge: Disposable, AutoCloseable, RappOperationBridgeIn
      * Close the session with an authenticated `session.close` carrying
      * `reason` and return the notice frame to deliver before dropping the
      * link. A session that is already closed yields `SessionClosed` without
-     * a frame.
+     * a frame. An endpoint that withdraws, custodian or requester, closes
+     * every open session with `ServiceWithdrawn` (RAPP section 4.5 items 3
+     * and 8); a requester that quits waits at most
+     * `rapp_quit_withdrawal_bound_ms()` for the frames to leave.
      *
      * # Errors
      * [`RappBindingError::LocalStateFailure`] on a poisoned local state.
@@ -8618,7 +8631,13 @@ enum class RappBridgeActionKind {
      * runs on to the card's answer, which is discarded (RAPP section 8.1
      * item 3). On a received `PairingRevoked` close, revoke the record with
      * `RappPairRecord::revoke` and withdraw its identity (section 4.6 item
-     * 4).
+     * 4). A received `ServiceWithdrawn` close is the peer's withdrawal
+     * (section 4.5) and the pairing stays: a custodian shows that computer
+     * as off, not merely disconnected, until the pairing's next session
+     * (item 9); a requester withdraws the custodian's identity at once and
+     * does not dial it until it is discovered serving again (item 6). A
+     * close with no reason, or with another one, is neither a revocation
+     * nor a withdrawal.
      */
     SESSION_CLOSED;
 
@@ -8785,7 +8804,8 @@ enum class RappCloseReason {
      */
     CARD_UNAVAILABLE,
     /**
-     * The custodian stopped serving every pairing (RAPP section 4.5).
+     * The sender withdrew: a custodian stopped serving, or a requester
+     * stopped using, every pairing (RAPP section 4.5).
      */
     SERVICE_WITHDRAWN;
 
@@ -10171,6 +10191,20 @@ public object FfiConverterSequenceTypeRappTxtEntry: FfiConverterRustBuffer<List<
     
         
         FfiConverterString.lower(`profileName`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * How long a requester that quits waits for its `service_withdrawn` closes
+         * to leave before it exits (RAPP v26.10.22 section 4.5 item 8).
+         */ fun `rappQuitWithdrawalBoundMs`(): kotlin.ULong {
+            return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_refineid_rapp_fn_func_rapp_quit_withdrawal_bound_ms(
+    
+        _status)
 }
     )
     }
