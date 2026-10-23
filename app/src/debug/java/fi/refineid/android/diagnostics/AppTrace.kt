@@ -609,6 +609,21 @@ internal object AppTrace {
         debug("rapp:peer-withdrawn")
     }
 
+    /** Idle expiry forgot a pairing (RAPP v26.10.22 section 4.6 item 5). */
+    fun rappPairingExpired() {
+        debug("rapp:pairing-expired")
+    }
+
+    /** An idle-expiry sweep failed and changed nothing; the next sweep repeats it. */
+    fun rappIdleSweepFailed(failure: Exception) {
+        debug("rapp:error idle-sweep-failed failure=" + failure.javaClass.simpleName)
+    }
+
+    /** The core refused a stored pair record; it is removed with its catalogue entry. */
+    fun rappPairRecordRefused() {
+        debug("rapp:error pair-record-refused")
+    }
+
     fun rappOperationApproveFailed(error: String) {
         debug("rapp:approve-failed error=" + error)
     }

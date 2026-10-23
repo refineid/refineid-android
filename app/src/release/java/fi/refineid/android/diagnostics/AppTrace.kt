@@ -336,6 +336,12 @@ internal object AppTrace {
 
     fun rappPeerWithdrew() = Unit
 
+    fun rappPairingExpired() = Unit
+
+    fun rappIdleSweepFailed(failure: Exception) = Unit
+
+    fun rappPairRecordRefused() = Unit
+
     fun rappOperationApproveFailed(error: String) = Unit
 
     fun rappOperationDenyFailed(error: String) = Unit

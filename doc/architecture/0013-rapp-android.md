@@ -29,11 +29,14 @@ practice they are idle. Each session lives for one operation and closes with
 requester's withdrawal (section 4.5 item 8) has nothing to close. Giving
 Android a requester role needs a product decision and a pairing entry point
 (dial a phone in pairing mode, read its offer, type its code); the session
-side is already in place.
+side is already in place. Idle expiry (section 4.6 item 5) sweeps only the
+pairings this phone serves as custodian, and the requester's sessions record
+no session time.
 
 `RappStoredPairs` loads every catalogued pairing through the core. A record
 in a format the core no longer decodes is removed from the catalog and the
-vault when the app starts, and its device pairs again.
+vault when the app starts, and its device pairs again; a debug build traces
+the refusal once, as the record is gone after it.
 
 The binding's flat action records are typed once, at the binding border:
 `RappBridgeOutcome.from` turns each `RappBridgeAction` into a sealed outcome
@@ -101,7 +104,23 @@ transport.
   hidden from the list, still announced and routed, and its next session
   carries only the close; a record that kept its key for 30 days is
   destroyed when the served pairings are next loaded (section 4.6). A
-  received `pairing_revoked` close destroys the record at once.
+  received `pairing_revoked` close destroys the record at once; a computer
+  sends it on its open session when its holder turns remote use off
+  (section 4.6 item 6).
+- A pairing with no established session for 30 days expires (section 4.6
+  item 5; core STPA CC-103). `RappIdleExpiry` sweeps every custodian
+  pairing when the app starts and every hour while the process runs,
+  serving or not, and sweeps a session's pairing when the session is
+  established and when it ends, so the record keeps the latest session
+  time. A periodic sweep runs under the session lock: it records the
+  pairing of the established session instead of checking it, and leaves a
+  pairing whose session is still coming up to the next sweep, since that
+  session goes on with the record it loaded. An expired pairing is
+  forgotten as above, silently: it leaves the list, nothing is sent and
+  nothing is shown, and a computer that dials within the notice window
+  gets only the `pairing_revoked` close. This is also how the phone forgets
+  a computer that turned remote use off with no session open. A sweep the
+  store refused changes nothing, and the next one repeats it.
 - A received `service_withdrawn` close is the computer's withdrawal, never a
   protocol violation (section 4.5 item 9). The session ends with its
   operation and any prompt for it, the phone sends no close of its own, and

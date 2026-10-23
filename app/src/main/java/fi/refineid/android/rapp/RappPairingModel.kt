@@ -119,6 +119,10 @@ internal class RappPairingModel(
                 }
             }
         }
+        // A pairing that idle expiry forgot leaves the list (RAPP v26.10.22 section 4.6 item 5).
+        app?.rappProxyDispatcher?.pairingsExpired?.let { expired ->
+            scope.launch { expired.collect { pairedDevices = catalog.listPairs() } }
+        }
     }
 
     fun setRemoteAccessEnabled(enabled: Boolean) {

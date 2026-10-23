@@ -28,6 +28,21 @@ internal object RappPairRevocation {
         revoke(pairId, record, vault)
     }
 
+    /**
+     * Destroys the record of a served [pair] in [vault] at once, closes it,
+     * and removes the pairing from [catalog]: the `pairing_revoked` close
+     * reached the peer, or the peer's close reached this phone (section 4.6
+     * items 3 and 4).
+     */
+    fun revoke(
+        pair: RappStoredPair,
+        catalog: RappPairCatalog,
+        vault: RappPairVault,
+    ) {
+        revoke(pair.pairing.id, pair.record, vault)
+        catalog.removePair(pair.peer.pairIdHex)
+    }
+
     /** Destroys a loaded [record] of [pairId] in [vault] at once and closes it. */
     fun revoke(
         pairId: RappPairId,

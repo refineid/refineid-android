@@ -229,6 +229,7 @@ class RefineIdApplication : Application() {
         }
         readerController.start()
         rappProxyDispatcher = createRappProxyDispatcher(primedStore)
+        rappProxyDispatcher.startIdleExpiry(rappVault)
         // Either reader's card arriving or leaving, and the USB reader's
         // attachment or detachment, are reported on the open RAPP session
         // (RAPP v26.10.22 section 8.4 item 1).
