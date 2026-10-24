@@ -35,9 +35,8 @@
     <string name="timestamp_authorities">Tidsstämpeltjänster</string>
     <string name="authenticate">Identifiera dig</string>
     <string name="cancel">Avbryt</string>
-    <string name="sign_document">Signera dokument</string>
-    <string name="deny">Neka</string>
-    <string name="approve_and_sign">Godkänn och signera</string>
+    <string name="signature">Underskrift</string>
+    <string name="ok">OK</string>
     <string name="signing">Signerar</string>
     <string name="signed">Signerat</string>
     <string name="wrong_pin">Fel PIN</string>
@@ -117,7 +116,9 @@
     <string name="remote_authentication_request">%1$s begär inloggning med ditt ID-kort.</string>
     <string name="remote_signature_request">%1$s begär en underskrift.</string>
     <string name="remote_card_needed">%1$s behöver ditt ID-kort.</string>
-    <string name="rapp_prompt_computer">Dator</string>
+    <string name="rapp_prompt_authenticate">%1$s ber dig att autentisera dig.</string>
+    <string name="rapp_prompt_sign_document">%1$s ber dig att underteckna %2$s.</string>
+    <string name="rapp_prompt_sign">%1$s ber dig att underteckna.</string>
     <string name="insert_card_into_reader">Sätt in ID-kortet i läsaren.</string>
     <string name="card_reading_hold_still">Kortet läses. Håll det stilla.</string>
     <string name="card_contact_lost">Kontakten med kortet bröts. Håll det mot telefonen igen.</string>
