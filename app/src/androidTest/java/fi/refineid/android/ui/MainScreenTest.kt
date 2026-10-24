@@ -367,9 +367,9 @@ internal class MainScreenTest {
     }
 
     @Test
-    fun readCardAfterWrongCanShowsPrepopulatedCanDialogAndRetries() {
+    fun readCardAfterWrongCanAsksForCanWithEmptyField() {
+        CanSessionStore.remember("123456")
         CanSessionStore.drop()
-        CanSessionStore.recordRejected("123456")
         var connectedCan: String? = null
         composeRule.setContent {
             RefineIdTheme {
@@ -396,6 +396,10 @@ internal class MainScreenTest {
         composeRule
             .onNodeWithTag(UiAutomationIds.NFC_CAN_FIELD)
             .assertIsDisplayed()
+
+        composeRule
+            .onNodeWithTag(UiAutomationIds.NFC_CONNECT_ACTION)
+            .assertIsNotEnabled()
 
         composeRule
             .onNodeWithTag(UiAutomationIds.NFC_CAN_FIELD)

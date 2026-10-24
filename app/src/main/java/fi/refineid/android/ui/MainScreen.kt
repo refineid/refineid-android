@@ -107,7 +107,6 @@ import fi.refineid.android.settings.TimestampAuthorityRepository
 import fi.refineid.android.usb.CardPresence
 import fi.refineid.android.usb.ReaderConnectionStatus
 import fi.refineid.android.usb.UsbReaderSnapshot
-import kotlinx.coroutines.delay
 
 /** The screens the grouped home navigates to, one at a time. */
 private enum class MainDestination {
@@ -986,34 +985,9 @@ private fun ReadCardNfcDialog(
     onDismiss: () -> Unit,
     onConnect: (CanSubmission) -> Unit,
 ) {
-    val initialCan =
-        remember {
-            fi.refineid.android.core.CanSessionStore.currentCan
-                ?: fi.refineid.android.core.CanSessionStore.mostRecentRejectedCan
-                ?: ""
-        }
+    val initialCan = remember { fi.refineid.android.core.CanSessionStore.currentCan ?: "" }
     val canState = remember { TextFieldState(initialCan) }
-
-    var remainingCooldown by remember {
-        mutableIntStateOf(
-            fi.refineid.android.core.CanSessionStore
-                .remainingCooldownSeconds(canState.text),
-        )
-    }
-    LaunchedEffect(canState.text) {
-        while (true) {
-            remainingCooldown =
-                fi.refineid.android.core.CanSessionStore
-                    .remainingCooldownSeconds(canState.text)
-            if (remainingCooldown <= 0) break
-            delay(1000L)
-        }
-    }
-
-    val isCanBlocked = remainingCooldown > 0
-    val rejectedCan = fi.refineid.android.core.CanSessionStore.mostRecentRejectedCan
-    val isRejectedCanCurrent = rejectedCan != null && canState.text.contentEquals(rejectedCan)
-    val canReady = CanSubmission.isComplete(canState.text) && !isCanBlocked
+    val canReady = CanSubmission.isComplete(canState.text)
 
     val submit = {
         if (canReady) {
@@ -1031,14 +1005,7 @@ private fun ReadCardNfcDialog(
         properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = {
             Text(
-                text =
-                    stringResource(
-                        if (isRejectedCanCurrent) {
-                            R.string.wrong_can
-                        } else {
-                            R.string.read_identity_card
-                        },
-                    ),
+                text = stringResource(R.string.read_identity_card),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -1063,15 +1030,6 @@ private fun ReadCardNfcDialog(
                             keyboardType = KeyboardType.NumberPassword,
                             imeAction = ImeAction.Done,
                         ),
-                    isError = isCanBlocked || isRejectedCanCurrent,
-                    supportingText = {
-                        if (isCanBlocked) {
-                            Text(
-                                text = stringResource(R.string.can_rejected_cooldown, remainingCooldown),
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    },
                     onKeyboardAction = {
                         submit()
                     },
@@ -1157,27 +1115,8 @@ private fun ReaderCanDialog(
 ) {
     val initialCan = remember { CanSessionStore.currentCan ?: "" }
     val canState = remember { TextFieldState(initialCan) }
-
-    var remainingCooldown by remember {
-        mutableIntStateOf(
-            CanSessionStore.remainingCooldownSeconds(canState.text),
-        )
-    }
-    LaunchedEffect(canState.text) {
-        while (true) {
-            remainingCooldown =
-                CanSessionStore.remainingCooldownSeconds(canState.text)
-            if (remainingCooldown <= 0) break
-            delay(1000L)
-        }
-    }
-
-    val isCanBlocked = remainingCooldown > 0
     val isChecking = status == ReaderConnectionStatus.CHECKING
-    val rejectedCan = CanSessionStore.mostRecentRejectedCan
-    val isRejectedCanCurrent = rejectedCan != null && canState.text.contentEquals(rejectedCan)
-    val isWrongCan = status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER && isRejectedCanCurrent
-    val canReady = CanSubmission.isComplete(canState.text) && !isCanBlocked && !isChecking
+    val canReady = CanSubmission.isComplete(canState.text) && !isChecking
 
     val submit = {
         if (canReady) {
@@ -1197,14 +1136,7 @@ private fun ReaderCanDialog(
         properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = {
             Text(
-                text =
-                    stringResource(
-                        if (status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER && isRejectedCanCurrent) {
-                            R.string.wrong_can
-                        } else {
-                            R.string.access_number_required
-                        },
-                    ),
+                text = stringResource(R.string.access_number_required),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -1229,20 +1161,6 @@ private fun ReaderCanDialog(
                             keyboardType = KeyboardType.NumberPassword,
                             imeAction = ImeAction.Done,
                         ),
-                    isError = isCanBlocked || isWrongCan,
-                    supportingText = {
-                        if (isCanBlocked) {
-                            Text(
-                                text = stringResource(R.string.can_rejected_cooldown, remainingCooldown),
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        } else if (isWrongCan) {
-                            Text(
-                                text = stringResource(R.string.wrong_can),
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    },
                     onKeyboardAction = { submit() },
                 )
             }
@@ -1761,25 +1679,7 @@ private fun ReaderCard(
 private fun ReaderCanEntry(onConnect: (CanSubmission) -> Unit) {
     val initialCan = remember { fi.refineid.android.core.CanSessionStore.currentCan ?: "" }
     val canState = remember { TextFieldState(initialCan) }
-
-    var remainingCooldown by remember {
-        mutableIntStateOf(
-            fi.refineid.android.core.CanSessionStore
-                .remainingCooldownSeconds(canState.text),
-        )
-    }
-    LaunchedEffect(canState.text) {
-        while (true) {
-            remainingCooldown =
-                fi.refineid.android.core.CanSessionStore
-                    .remainingCooldownSeconds(canState.text)
-            if (remainingCooldown <= 0) break
-            delay(1000L)
-        }
-    }
-
-    val isCanBlocked = remainingCooldown > 0
-    val canReady = CanSubmission.isComplete(canState.text) && !isCanBlocked
+    val canReady = CanSubmission.isComplete(canState.text)
 
     val submit = {
         if (canReady) {
@@ -1805,15 +1705,6 @@ private fun ReaderCanEntry(onConnect: (CanSubmission) -> Unit) {
                 keyboardType = KeyboardType.NumberPassword,
                 imeAction = ImeAction.Done,
             ),
-        isError = isCanBlocked,
-        supportingText = {
-            if (isCanBlocked) {
-                Text(
-                    text = stringResource(R.string.can_rejected_cooldown, remainingCooldown),
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-        },
         onKeyboardAction = { submit() },
     )
     Button(

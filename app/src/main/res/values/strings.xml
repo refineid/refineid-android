@@ -25,7 +25,6 @@
     <string name="unlock">Unlock</string>
     <string name="wrong_can" tools:ignore="Typos">Wrong CAN</string>
     <string name="access_number_required" tools:ignore="Typos">CAN required</string>
-    <string name="can_rejected_cooldown" tools:ignore="Typos,PluralsCandidate">CAN was rejected by the card. Try again in %1$d seconds or enter the correct CAN.</string>
     <string name="card_primed">Card saved for tap</string>
     <string name="forget">Forget</string>
     <string name="present">Present</string>

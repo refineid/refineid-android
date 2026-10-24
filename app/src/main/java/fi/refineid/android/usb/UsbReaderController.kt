@@ -628,8 +628,7 @@ internal class UsbReaderController(
                     is NativeContactlessOpenResult.Failure -> {
                         val status = result.kind.toContactlessConnectStatus()
                         if (status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER) {
-                            val canDigits = can.peekDigits()
-                            CanSessionStore.recordRejected(canDigits)
+                            CanSessionStore.drop()
                         }
                         UsbReaderSnapshot(
                             status = status,
