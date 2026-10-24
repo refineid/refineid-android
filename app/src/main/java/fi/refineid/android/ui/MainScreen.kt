@@ -220,8 +220,13 @@ internal fun MainScreen(
     // home screen, as on the iPhone, from the first frame; a holder who
     // leaves the form sees the home screen, whose identity row leads back.
     var activationDismissed by rememberSaveable { mutableStateOf(false) }
+    // The choice to leave the form is forgotten when the card's reading
+    // stops saying activation, not on a first reading that has not said it
+    // yet, as after the activity is recreated and the reader reconnects.
+    var activationWasRequired by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(isActivationRequired) {
-        if (!isActivationRequired) activationDismissed = false
+        if (!isActivationRequired && activationWasRequired) activationDismissed = false
+        activationWasRequired = isActivationRequired
     }
     val shownDestination =
         if (isActivationRequired && !activationDismissed && destination == MainDestination.HOME) {

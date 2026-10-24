@@ -1192,7 +1192,9 @@ internal class CcidUsbSessionOpener(
                         CcidSessionOpenResult.ActivationRequired(session)
                     } else {
                         prepareWithCertificate(session).also { result ->
-                            if (result is CcidSessionOpenResult.Ready) {
+                            if (result is CcidSessionOpenResult.Ready ||
+                                result is CcidSessionOpenResult.ActivationRequired
+                            ) {
                                 retainSession = true
                             }
                         }

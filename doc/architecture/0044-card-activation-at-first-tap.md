@@ -82,7 +82,7 @@ Feedback: the certificate and the per-PIN probes.
   the card per PIN, and the form asks only for the PINs still waiting.
 - UCA-2: the app sends an entry of the wrong length, or over the wrong
   command, on a guessed scheme (H: a try spent). CC: the scheme comes from
-  the certificate's issuance date; an unnamed scheme gets no attempt, on
+  what the card answered at reset; an unnamed scheme gets no attempt, on
   either side of the bridge.
 - UCA-3: the app routes an activated card to activation on a stale or
   failed reading (H: the holder enters codes for nothing). CC: a refused
@@ -116,6 +116,9 @@ detection is covered by scripted tests only.
 
 ## Consequences
 
-Android and the Apple platforms classify the same way from the same
-certificate fields. The native crate carries a small X.509 walk for the
-issuer and the validity start, which the public core excludes by design.
+Android classifies a card awaiting activation from its answer to reset
+alone, where the iPhone reads the certificate's issuance date first and
+falls back to the same table; the two agree on every card the table names.
+The native crate carries a small X.509 walk for the issuer and the validity
+start, used only for an activated card's health report, which the public
+core excludes by design.
