@@ -6,6 +6,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import fi.refineid.android.MainActivity
 import fi.refineid.android.RefineIdApplication
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -65,7 +66,30 @@ class ExternalKeyProviderManifestInstrumentedTest {
         assertTrue(permissions.contains(START_BACKGROUND_ACTIVITIES_PERMISSION))
     }
 
+    @Test
+    fun activitiesSurviveARotationWithTheirTypedEntry() {
+        val context = ApplicationProvider.getApplicationContext<RefineIdApplication>()
+        for (activity in listOf(MainActivity::class.java, ExternalKeyPinActivity::class.java)) {
+            val activityInfo =
+                context.packageManager.getActivityInfo(
+                    ComponentName(context, activity),
+                    PackageManager.ComponentInfoFlags.of(NO_PACKAGE_MANAGER_FLAGS),
+                )
+            assertEquals(
+                activity.simpleName,
+                ROTATION_CONFIG_CHANGES,
+                activityInfo.configChanges and ROTATION_CONFIG_CHANGES,
+            )
+        }
+    }
+
     private companion object {
+        const val ROTATION_CONFIG_CHANGES =
+            ActivityInfo.CONFIG_ORIENTATION or
+                ActivityInfo.CONFIG_SCREEN_SIZE or
+                ActivityInfo.CONFIG_SCREEN_LAYOUT or
+                ActivityInfo.CONFIG_SMALLEST_SCREEN_SIZE or
+                ActivityInfo.CONFIG_KEYBOARD_HIDDEN
         const val KEYCHAIN_BIND_PERMISSION =
             "com.android.keychain.permission.BIND_EXTERNAL_KEY_PROVIDER"
         const val PROVIDER_INTERFACE_ACTION =
