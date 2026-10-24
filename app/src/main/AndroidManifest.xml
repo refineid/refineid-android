@@ -62,13 +62,18 @@
         </service>
 
         <!-- MainActivity is the system launcher entrypoint and must be exported for the OS launcher -->
+        <!-- The main screen stays in portrait on phones; large screens ignore the
+             request from Android 16 and lay the screen out as the platform prefers
+             (design record 0045), so lint's discouraged-API finding is accepted here. -->
         <!-- nosemgrep: java.android.security.exported_activity.exported_activity -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboardHidden"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            tools:ignore="DiscouragedApi,LockedOrientationActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

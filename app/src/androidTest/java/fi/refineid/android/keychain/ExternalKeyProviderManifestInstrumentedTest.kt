@@ -79,6 +79,17 @@ class ExternalKeyProviderManifestInstrumentedTest {
         }
     }
 
+    @Test
+    fun theMainScreenStaysInPortrait() {
+        val context = ApplicationProvider.getApplicationContext<RefineIdApplication>()
+        val activityInfo =
+            context.packageManager.getActivityInfo(
+                ComponentName(context, MainActivity::class.java),
+                PackageManager.ComponentInfoFlags.of(NO_PACKAGE_MANAGER_FLAGS),
+            )
+        assertEquals(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, activityInfo.screenOrientation)
+    }
+
     private companion object {
         const val ROTATION_CONFIG_CHANGES =
             ActivityInfo.CONFIG_ORIENTATION or

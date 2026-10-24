@@ -24,13 +24,18 @@ Secrets and typed entry live in plain `remember` state, never in
 `rememberSaveable`: nothing typed into a secure field goes into the
 saved instance state.
 
-Orientation is not locked: the app keeps following the device so that
-large screens and foldables lay it out as the platform prefers.
+The main screen requests portrait, so a phone lying flat or tilted over
+a card no longer flips the screen on its own. Large screens and
+foldables ignore that request by platform rule and lay the screen out
+as they prefer, which is why the configuration-change declaration stays
+in place beside it. The PIN prompt raised over a browser keeps the
+orientation the browser is in.
 
 ## Verification
 
 The manifest instrumentation test asserts that both activities declare
-exactly this set, so a wider set cannot creep in unnoticed. The
+exactly this set, so a wider set cannot creep in unnoticed, and that the
+main screen requests portrait. The
 behaviour is checked by hand: open the access number dialog, type a few
 digits, rotate, and read the same digits.
 
