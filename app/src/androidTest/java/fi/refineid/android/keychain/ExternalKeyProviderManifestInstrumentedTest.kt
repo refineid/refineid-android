@@ -75,11 +75,7 @@ class ExternalKeyProviderManifestInstrumentedTest {
                     ComponentName(context, activity),
                     PackageManager.ComponentInfoFlags.of(NO_PACKAGE_MANAGER_FLAGS),
                 )
-            assertEquals(
-                activity.simpleName,
-                ROTATION_CONFIG_CHANGES,
-                activityInfo.configChanges and ROTATION_CONFIG_CHANGES,
-            )
+            assertEquals(activity.simpleName, ROTATION_CONFIG_CHANGES, activityInfo.configChanges)
         }
     }
 
@@ -89,6 +85,7 @@ class ExternalKeyProviderManifestInstrumentedTest {
                 ActivityInfo.CONFIG_SCREEN_SIZE or
                 ActivityInfo.CONFIG_SCREEN_LAYOUT or
                 ActivityInfo.CONFIG_SMALLEST_SCREEN_SIZE or
+                ActivityInfo.CONFIG_DENSITY or
                 ActivityInfo.CONFIG_KEYBOARD_HIDDEN
         const val KEYCHAIN_BIND_PERMISSION =
             "com.android.keychain.permission.BIND_EXTERNAL_KEY_PROVIDER"
