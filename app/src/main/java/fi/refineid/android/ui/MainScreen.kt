@@ -1115,6 +1115,11 @@ private fun ReaderCanDialog(
 ) {
     val initialCan = remember { CanSessionStore.currentCan ?: "" }
     val canState = remember { TextFieldState(initialCan) }
+    LaunchedEffect(status) {
+        if (status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER) {
+            canState.clearText()
+        }
+    }
     val isChecking = status == ReaderConnectionStatus.CHECKING
     val canReady = CanSubmission.isComplete(canState.text) && !isChecking
 
@@ -1668,7 +1673,7 @@ private fun ReaderCard(
                 snapshot.status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER
             ) {
                 HorizontalDivider()
-                ReaderCanEntry(onConnect = onConnect)
+                ReaderCanEntry(status = snapshot.status, onConnect = onConnect)
             }
         }
     }
@@ -1676,9 +1681,17 @@ private fun ReaderCard(
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-private fun ReaderCanEntry(onConnect: (CanSubmission) -> Unit) {
+private fun ReaderCanEntry(
+    status: ReaderConnectionStatus,
+    onConnect: (CanSubmission) -> Unit,
+) {
     val initialCan = remember { fi.refineid.android.core.CanSessionStore.currentCan ?: "" }
     val canState = remember { TextFieldState(initialCan) }
+    LaunchedEffect(status) {
+        if (status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER) {
+            canState.clearText()
+        }
+    }
     val canReady = CanSubmission.isComplete(canState.text)
 
     val submit = {
