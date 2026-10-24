@@ -1,4 +1,3 @@
-@file:Suppress("MagicNumber")
 // Copyright 2026 Petri Koistinen. Licensed under the Apache License, Version 2.0.
 
 package fi.refineid.android.core
@@ -18,7 +17,7 @@ class CanRejectionTest {
 
     @Test
     fun rejectionDropsTheCanWithoutATrace() {
-        CanSessionStore.remember("123456")
+        CanSessionStore.remember(FIRST_CAN)
         assertTrue(CanSessionStore.hasCan)
 
         CanSessionStore.drop()
@@ -30,21 +29,24 @@ class CanRejectionTest {
 
     @Test
     fun theSameCanIsAcceptedAgainRightAfterADrop() {
-        CanSessionStore.remember("123456")
+        CanSessionStore.remember(FIRST_CAN)
         CanSessionStore.drop()
 
-        CanSessionStore.remember("123456")
+        CanSessionStore.remember(FIRST_CAN)
 
-        assertEquals("123456", CanSessionStore.currentCan)
+        assertEquals(FIRST_CAN, CanSessionStore.currentCan)
     }
 
     @Test
     fun aSubmissionAfterADropIsRememberedAtOnce() {
-        CanSessionStore.remember("123456")
+        CanSessionStore.remember(FIRST_CAN)
         CanSessionStore.drop()
 
-        CanSessionStore.remember(CanSubmission.from("654321"))
+        CanSessionStore.remember(CanSubmission.from(SECOND_CAN))
 
-        assertEquals("654321", CanSessionStore.currentCan)
+        assertEquals(SECOND_CAN, CanSessionStore.currentCan)
     }
 }
+
+private const val FIRST_CAN = "123456"
+private const val SECOND_CAN = "654321"
