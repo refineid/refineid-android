@@ -15,14 +15,14 @@ use refineid_apdu::{CardTransport, TransportOutcome};
 use refineid_pace::{Can, PaceError, PaceSession, SmTransport, UnvalidatedCan, run_pace_with_can};
 use refineid_pkcs15::{CertSlot, Pkcs15Error, Pkcs15Ops};
 
+use crate::activation_scheme::classify_activation_scheme;
 use crate::authentication_signer::{
     AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
     AuthenticationSigningInput, authenticate_and_sign, verify_authentication_pin,
 };
 use crate::card_certificate::{
-    CardCertificate, CardKeyProfile, CertificateReadFailure, IntermediateCaCertificate,
-    RootCaCertificate, map_pkcs15_error, read_authentication_certificate,
-    read_qualified_certificate,
+    CardCertificate, CertificateReadFailure, IntermediateCaCertificate, RootCaCertificate,
+    map_pkcs15_error, read_authentication_certificate, read_qualified_certificate,
 };
 use crate::card_management::{
     CardManagementFailure, activate_card, change_pin1, change_pin2, probe_credential_health,
@@ -36,7 +36,10 @@ use crate::qualified_signer::{
     QualifiedCertificateSource, QualifiedSignFailure, QualifiedSignature,
     QualifiedSigningAlgorithm, QualifiedSigningInput, qualified_sign,
 };
-use refineid_auth::{ActivationReport, CredentialHealthReport, ManageOutcome};
+use refineid_auth::{
+    ActivationReport, ActivationScheme, CardActivationNeeds, CredentialHealthReport, ManageOutcome,
+    PinManageOps,
+};
 
 /// Coarse failures of the secure-channel front door, before any
 /// operation-specific vocabulary applies.
@@ -145,17 +148,25 @@ fn read_on_card_ca_certificates_if_needed<T: CardTransport + Pkcs15Ops>(secure: 
 
 pub(crate) enum ContactlessOpenOutcome {
     Ready(CardCertificate, Pin1Preflight),
-    ActivationRequired(CardCertificate),
+    /// The card still awaits activation: its scheme, and which PINs.
+    ActivationRequired(CardCertificate, ActivationScheme, CardActivationNeeds),
     Failure(CertificateReadFailure),
 }
 
-fn is_activation_required<T: CardTransport>(_transport: &mut T, _profile: CardKeyProfile) -> bool {
-    // Probing activation records via GET DATA (0xCB) or PIN2 counters tears down
-    // the PACE secure channel (SW=0x6988) on Finnish ID cards because those probes
-    // answer only in the card-management or DF.5016 context outside PKCS#15.
-    // Contactless sessions stay strictly within PKCS#15; full card
-    // activation requires the contact interface.
-    false
+/// The first-tap classification, inside the secure channel after the
+/// certificate read: the scheme from the certificate, the needs from the
+/// card by counter-safe probes alone (FINEID S4-1 section 4.6). A card
+/// whose scheme cannot be named, an organisational card among them, gets
+/// no activation decision; a card the probes cannot answer for is treated
+/// as activated, so a transient fault never routes an activated card to
+/// activation.
+fn activation_needs<T: CardTransport>(
+    transport: &mut T,
+    certificate: &CardCertificate,
+) -> Option<(ActivationScheme, CardActivationNeeds)> {
+    let scheme = classify_activation_scheme(certificate.der().as_bytes())?;
+    let needs = transport.activation_needs(scheme).ok()?;
+    needs.any().then_some((scheme, needs))
 }
 
 /// One PACE handshake, then the PKCS#15 selection, authentication
@@ -174,8 +185,8 @@ pub(crate) fn contactless_open<Exchange: SingleBlockExchange>(
                     Err(failure) => ContactlessOpenOutcome::Failure(failure),
                     Ok(certificate) => {
                         read_on_card_ca_certificates_if_needed(&mut secure);
-                        if is_activation_required(&mut secure, certificate.profile()) {
-                            ContactlessOpenOutcome::ActivationRequired(certificate)
+                        if let Some((scheme, needs)) = activation_needs(&mut secure, &certificate) {
+                            ContactlessOpenOutcome::ActivationRequired(certificate, scheme, needs)
                         } else {
                             match probe_pin1_preflight(&mut secure) {
                                 Ok(preflight) => {
@@ -251,8 +262,8 @@ pub(crate) fn contactless_connect<Exchange: SingleBlockExchange>(
                     Err(failure) => ContactlessOpenOutcome::Failure(failure),
                     Ok(certificate) => {
                         read_on_card_ca_certificates_if_needed(&mut secure);
-                        if is_activation_required(&mut secure, certificate.profile()) {
-                            ContactlessOpenOutcome::ActivationRequired(certificate)
+                        if let Some((scheme, needs)) = activation_needs(&mut secure, &certificate) {
+                            ContactlessOpenOutcome::ActivationRequired(certificate, scheme, needs)
                         } else {
                             match probe_pin1_preflight(&mut secure) {
                                 Ok(preflight) => {
@@ -278,7 +289,7 @@ pub(crate) fn contactless_connect<Exchange: SingleBlockExchange>(
 
     if matches!(
         outcome,
-        ContactlessOpenOutcome::Ready(_, _) | ContactlessOpenOutcome::ActivationRequired(_)
+        ContactlessOpenOutcome::Ready(_, _) | ContactlessOpenOutcome::ActivationRequired(..)
     ) && let Some(session) = session
     {
         store_held_session(session);

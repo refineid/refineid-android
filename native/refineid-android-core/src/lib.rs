@@ -7,6 +7,7 @@
 
 #![allow(deprecated)]
 
+mod activation_scheme;
 mod authentication_signer;
 mod card_access;
 mod card_certificate;
@@ -78,6 +79,10 @@ const CERTIFICATE_TRANSPORT_ERROR: u8 = 4;
 const CERTIFICATE_INVALID: u8 = 5;
 const CERTIFICATE_PACE_REJECTED: u8 = 6;
 const CERTIFICATE_ACTIVATION_REQUIRED: u8 = 7;
+/// The tag byte that opens every certificate reply.
+const CERTIFICATE_TAG_LENGTH: usize = 1;
+/// Tag, activation scheme and activation needs of an activation reply.
+const ACTIVATION_REPLY_HEADER_LENGTH: usize = 3;
 
 const CARD_ACCESS_BRIDGE_ERROR: u8 = 0;
 const CARD_ACCESS_SUCCEEDED: u8 = 1;
@@ -2016,7 +2021,9 @@ fn encode_certificate_reply(result: Result<CardCertificate, CertificateReadFailu
 
 /// The contactless open reply nests the two established vocabularies:
 /// `[CERTIFICATE_SUCCEEDED, preflight-reply length, preflight reply,
-/// certificate reply]` on success, or one certificate-vocabulary failure
+/// certificate reply]` on success, `[CERTIFICATE_ACTIVATION_REQUIRED,
+/// activation scheme, activation needs, key profile, certificate DER]`
+/// for a card awaiting activation, or one certificate-vocabulary failure
 /// byte. Kotlin splits the wrapper and reuses both strict sub-decoders.
 fn encode_contactless_open_reply(outcome: ContactlessOpenOutcome) -> Vec<u8> {
     match outcome {
@@ -2032,10 +2039,15 @@ fn encode_contactless_open_reply(outcome: ContactlessOpenOutcome) -> Vec<u8> {
             reply.append(&mut certificate_reply);
             reply
         }
-        ContactlessOpenOutcome::ActivationRequired(certificate) => {
-            let mut certificate_reply = encode_certificate_reply(Ok(certificate));
-            certificate_reply[0] = CERTIFICATE_ACTIVATION_REQUIRED;
-            certificate_reply
+        ContactlessOpenOutcome::ActivationRequired(certificate, scheme, needs) => {
+            let certificate_reply = encode_certificate_reply(Ok(certificate));
+            let mut reply =
+                Vec::with_capacity(ACTIVATION_REPLY_HEADER_LENGTH + certificate_reply.len());
+            reply.push(CERTIFICATE_ACTIVATION_REQUIRED);
+            reply.push(card_management::activation_scheme_byte(scheme));
+            reply.push(card_management::activation_needs_byte(needs));
+            reply.extend_from_slice(&certificate_reply[CERTIFICATE_TAG_LENGTH..]);
+            reply
         }
         ContactlessOpenOutcome::Failure(failure) => encode_certificate_reply(Err(failure)),
     }
@@ -2233,6 +2245,8 @@ mod tests {
     use refineid_atr::{Convention, MINIMAL_DIRECT_ATR};
     use refineid_auth::PinReferenceScheme;
     use refineid_pkcs15::Pkcs15Error;
+
+    use crate::card_management;
     use refineid_sign::{ECDSA_P384_SIG_BYTES, RSA_3072_SIG_BYTES};
 
     use super::{
@@ -2680,16 +2694,27 @@ mod tests {
             ]
             .concat()
         );
-        let activation_required = encode_contactless_open_reply(
-            ContactlessOpenOutcome::ActivationRequired(CardCertificate::new(
-                CardKeyProfile::EcdsaP256,
-                CertificateDer::from_validated(SYNTHETIC_DER.to_vec()),
-            )),
-        );
+        let activation_required =
+            encode_contactless_open_reply(ContactlessOpenOutcome::ActivationRequired(
+                CardCertificate::new(
+                    CardKeyProfile::EcdsaP256,
+                    CertificateDer::from_validated(SYNTHETIC_DER.to_vec()),
+                ),
+                refineid_auth::ActivationScheme::PresetActivationPin,
+                refineid_auth::CardActivationNeeds {
+                    pin1: false,
+                    pin2: true,
+                },
+            ));
         assert_eq!(
             activation_required,
             [
-                &[CERTIFICATE_ACTIVATION_REQUIRED, KEY_PROFILE_ECDSA_P256],
+                &[
+                    CERTIFICATE_ACTIVATION_REQUIRED,
+                    card_management::ACTIVATION_SCHEME_PRESET,
+                    card_management::ACTIVATION_NEEDS_PIN2_ONLY,
+                    KEY_PROFILE_ECDSA_P256
+                ],
                 SYNTHETIC_DER,
             ]
             .concat()

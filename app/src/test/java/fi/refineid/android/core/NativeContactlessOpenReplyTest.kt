@@ -27,17 +27,55 @@ class NativeContactlessOpenReplyTest {
     }
 
     @Test
-    fun decodesActivationRequiredWithCertificate() {
+    fun decodesActivationRequiredWithSchemeNeedsAndCertificate() {
         val reply =
             byteArrayOf(
                 CERTIFICATE_ACTIVATION_REQUIRED,
+                ACTIVATION_SCHEME_PRESET,
+                ACTIVATION_NEEDS_PIN2_ONLY,
                 KEY_PROFILE_RSA_3072,
                 *SYNTHETIC_DER,
             )
         val result = NativeContactlessOpenReply.decode(reply) as NativeContactlessOpenResult.ActivationRequired
+        assertEquals(CardManagementScheme.PRESET_PIN, result.scheme)
+        assertEquals(CardActivationNeeds(pin1 = false, pin2 = true), result.needs)
         assertEquals(NativeCardKeyProfile.RSA_3072, result.certificate.keyProfile)
         assertArrayEquals(SYNTHETIC_DER, result.certificate.copyDer())
+        assertTrue(reply.all { it == ZERO_BYTE })
         result.certificate.close()
+    }
+
+    @Test
+    fun refusesActivationRequiredWithoutASchemeOrWithoutNeeds() {
+        val unknownScheme =
+            byteArrayOf(
+                CERTIFICATE_ACTIVATION_REQUIRED,
+                ACTIVATION_SCHEME_UNKNOWN,
+                ACTIVATION_NEEDS_BOTH,
+                KEY_PROFILE_RSA_3072,
+                *SYNTHETIC_DER,
+            )
+        assertEquals(
+            NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR),
+            NativeContactlessOpenReply.decode(unknownScheme),
+        )
+        val noNeeds =
+            byteArrayOf(
+                CERTIFICATE_ACTIVATION_REQUIRED,
+                ACTIVATION_SCHEME_PUK,
+                ACTIVATION_NEEDS_NONE,
+                KEY_PROFILE_RSA_3072,
+                *SYNTHETIC_DER,
+            )
+        assertEquals(
+            NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR),
+            NativeContactlessOpenReply.decode(noNeeds),
+        )
+        val truncated = byteArrayOf(CERTIFICATE_ACTIVATION_REQUIRED, ACTIVATION_SCHEME_PUK)
+        assertEquals(
+            NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR),
+            NativeContactlessOpenReply.decode(truncated),
+        )
     }
 
     @Test
@@ -114,6 +152,12 @@ class NativeContactlessOpenReplyTest {
         const val CERTIFICATE_INVALID: Byte = 5
         const val CERTIFICATE_PACE_REJECTED: Byte = 6
         const val CERTIFICATE_ACTIVATION_REQUIRED: Byte = 7
+        const val ACTIVATION_SCHEME_UNKNOWN: Byte = 0
+        const val ACTIVATION_SCHEME_PUK: Byte = 1
+        const val ACTIVATION_SCHEME_PRESET: Byte = 2
+        const val ACTIVATION_NEEDS_NONE: Byte = 0
+        const val ACTIVATION_NEEDS_PIN2_ONLY: Byte = 2
+        const val ACTIVATION_NEEDS_BOTH: Byte = 3
         const val PREFLIGHT_SUCCEEDED: Byte = 1
         const val PIN_REFERENCE_CITIZEN: Byte = 0
         const val PIN1_STATE_REMAINING: Byte = 1

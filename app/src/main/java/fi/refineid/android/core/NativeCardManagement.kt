@@ -4,11 +4,42 @@ package fi.refineid.android.core
 
 import fi.refineid.android.diagnostics.AppTrace
 
-internal enum class CardManagementScheme {
-    UNKNOWN,
-    PUK,
-    PRESET_PIN,
+/**
+ * How a citizen card is activated (FINEID S4-1 section 4.6), and the exact
+ * digit count the card accepts for the activation entry: the card enforces
+ * the length itself and a wrong length spends a try. An unknown scheme has
+ * no length and gets no activation attempt.
+ */
+internal enum class CardManagementScheme(
+    val activationEntryDigitCount: Int?,
+) {
+    UNKNOWN(null),
+    PUK(ACTIVATION_CODE_DIGIT_COUNT),
+    PRESET_PIN(PRESET_ACTIVATION_PIN_DIGIT_COUNT),
 }
+
+/** Digits of the activation code, the PUK, under section 4.6.1. */
+private const val ACTIVATION_CODE_DIGIT_COUNT = 8
+
+/** Digits of the preset activation PIN under section 4.6.2. */
+private const val PRESET_ACTIVATION_PIN_DIGIT_COUNT = 7
+
+/** The activation scheme a native reply byte names. */
+internal fun decodeActivationScheme(byte: Int): CardManagementScheme =
+    when (byte) {
+        ACTIVATION_SCHEME_PUK -> CardManagementScheme.PUK
+        ACTIVATION_SCHEME_PRESET -> CardManagementScheme.PRESET_PIN
+        else -> CardManagementScheme.UNKNOWN
+    }
+
+/** Which PINs a native reply byte says still await activation. */
+internal fun decodeActivationNeeds(byte: Int): CardActivationNeeds =
+    when (byte) {
+        ACTIVATION_NEEDS_PIN1_ONLY -> CardActivationNeeds(pin1 = true, pin2 = false)
+        ACTIVATION_NEEDS_PIN2_ONLY -> CardActivationNeeds(pin1 = false, pin2 = true)
+        ACTIVATION_NEEDS_BOTH -> CardActivationNeeds(pin1 = true, pin2 = true)
+        else -> CardActivationNeeds(pin1 = false, pin2 = false)
+    }
 
 internal data class CardActivationNeeds(
     val pin1: Boolean,
@@ -350,19 +381,8 @@ internal object NativeCardManagement {
                         } else {
                             NativePinReferenceScheme.CITIZEN
                         }
-                    val actScheme =
-                        when (reply[8].toInt()) {
-                            ACTIVATION_SCHEME_PUK -> CardManagementScheme.PUK
-                            ACTIVATION_SCHEME_PRESET -> CardManagementScheme.PRESET_PIN
-                            else -> CardManagementScheme.UNKNOWN
-                        }
-                    val needs =
-                        when (reply[9].toInt()) {
-                            ACTIVATION_NEEDS_PIN1_ONLY -> CardActivationNeeds(pin1 = true, pin2 = false)
-                            ACTIVATION_NEEDS_PIN2_ONLY -> CardActivationNeeds(pin1 = false, pin2 = true)
-                            ACTIVATION_NEEDS_BOTH -> CardActivationNeeds(pin1 = true, pin2 = true)
-                            else -> CardActivationNeeds(pin1 = false, pin2 = false)
-                        }
+                    val actScheme = decodeActivationScheme(reply[8].toInt())
+                    val needs = decodeActivationNeeds(reply[9].toInt())
                     CardManagementResult.Success(
                         CredentialHealth(
                             pin1State = p1State,
