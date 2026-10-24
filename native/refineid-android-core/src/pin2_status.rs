@@ -19,7 +19,9 @@
 //! so the credential and signature chain use one card-proven numbering.
 
 use refineid_apdu::{CardTransport, TransportOutcome};
-use refineid_auth::{AuthError, PinOps, PinReferenceScheme, PinSlot, PinStatus, check_retry_floor};
+use refineid_auth::{
+    AuthError, FlooredCredential, PinOps, PinReferenceScheme, PinSlot, PinStatus, check_retry_floor,
+};
 
 /// Counter-safe PIN2 state with unrecognised status words erased.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +85,7 @@ where
     Ok(Pin2Preflight {
         scheme,
         state,
-        retry_floor_permits: check_retry_floor(PinSlot::Pin2, status).is_ok(),
+        retry_floor_permits: check_retry_floor(FlooredCredential::Pin2, status).is_ok(),
     })
 }
 
@@ -100,7 +102,8 @@ pub(crate) fn map_auth_error<E>(error: AuthError<E>) -> Pin2PreflightFailure {
         ) => Pin2PreflightFailure::Transport,
         AuthError::Outcome(TransportOutcome::Response(_))
         | AuthError::Command(_)
-        | AuthError::LengthUnsupported { .. } => Pin2PreflightFailure::Bridge,
+        | AuthError::LengthUnsupported { .. }
+        | AuthError::RetryFloor(_) => Pin2PreflightFailure::Bridge,
     }
 }
 

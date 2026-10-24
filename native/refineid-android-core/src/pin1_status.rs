@@ -21,8 +21,8 @@
 
 use refineid_apdu::{CardTransport, StatusWord, TransportOutcome};
 use refineid_auth::{
-    AuthError, PinOps, PinReferenceScheme, PinSlot, PinStatus, check_retry_floor,
-    classify_pin_status_sw,
+    AuthError, FlooredCredential, PinOps, PinReferenceScheme, PinSlot, PinStatus,
+    check_retry_floor, classify_pin_status_sw,
 };
 
 /// Counter-safe PIN1 state, with unrecognised status words erased at this
@@ -103,7 +103,7 @@ where
     Ok(Pin1Preflight {
         scheme,
         state,
-        retry_floor_permits: check_retry_floor(PinSlot::Pin1, status).is_ok(),
+        retry_floor_permits: check_retry_floor(FlooredCredential::Pin1, status).is_ok(),
     })
 }
 
@@ -120,7 +120,8 @@ pub(crate) fn map_auth_error<E>(error: AuthError<E>) -> Pin1PreflightFailure {
         ) => Pin1PreflightFailure::Transport,
         AuthError::Outcome(TransportOutcome::Response(_))
         | AuthError::Command(_)
-        | AuthError::LengthUnsupported { .. } => Pin1PreflightFailure::Bridge,
+        | AuthError::LengthUnsupported { .. }
+        | AuthError::RetryFloor(_) => Pin1PreflightFailure::Bridge,
     }
 }
 

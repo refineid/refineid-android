@@ -77,6 +77,7 @@ pub(crate) fn map_auth_error<E>(error: AuthError<E>) -> CardManagementFailure {
             | TransportOutcome::ProtocolDesync,
         ) => CardManagementFailure::TransportError,
         AuthError::LengthUnsupported { .. } => CardManagementFailure::InvalidCredential,
+        AuthError::RetryFloor(_) => CardManagementFailure::SafetyRefused,
         AuthError::Outcome(TransportOutcome::Response(_)) | AuthError::Command(_) => {
             CardManagementFailure::BridgeError
         }
@@ -174,7 +175,7 @@ fn require_retry_floor<T: CardTransport>(
     slot: PinSlot,
 ) -> Result<(), CardManagementFailure> {
     let status = transport.pin_status(slot).map_err(map_auth_error)?;
-    check_retry_floor(slot, status).map_err(|_| CardManagementFailure::SafetyRefused)
+    check_retry_floor(slot.into(), status).map_err(|_| CardManagementFailure::SafetyRefused)
 }
 
 /// Execute change PIN1.
@@ -373,12 +374,13 @@ mod tests {
 
     use super::*;
     use refineid_apdu::{CommandApdu, CredentialCommand, PinRetries, ResponseApdu, StatusWord};
-    use refineid_auth::CardActivationNeeds;
+    use refineid_auth::{CardActivationNeeds, FlooredCredential};
 
     const SYNTHETIC_PIN1: &[u8] = b"1357";
     const SYNTHETIC_NEW_PIN1: &[u8] = b"2468";
     const SYNTHETIC_PIN2: &[u8] = b"135790";
     const SYNTHETIC_NEW_PIN2: &[u8] = b"246802";
+    const SYNTHETIC_PUK: &[u8] = b"97531864";
     const SERVED_RETRIES: u8 = 3;
     const BELOW_FLOOR_RETRIES: u8 = 2;
     const LAST_RETRY: u8 = 1;
@@ -506,6 +508,70 @@ mod tests {
         assert_eq!(result, Err(CardManagementFailure::TransportError));
         assert_eq!(transport.credential_calls, 1);
         assert!(transport.responses.is_empty());
+    }
+
+    /// PUK counter answers the core retry floor refuses, each carrying a
+    /// counter or a blocked state so no container read follows.
+    fn refused_puk_statuses() -> [StatusWord; 4] {
+        [
+            remaining(BELOW_FLOOR_RETRIES),
+            remaining(LAST_RETRY),
+            remaining(NO_RETRIES),
+            StatusWord::AuthenticationBlocked,
+        ]
+    }
+
+    type Unblock = fn(
+        &mut ScriptedTransport,
+        Vec<u8>,
+        Vec<u8>,
+    ) -> Result<ManageOutcome, CardManagementFailure>;
+
+    /// Both unblock operations with a valid new PIN for the target.
+    fn unblocks() -> [(Unblock, &'static [u8]); 2] {
+        [
+            (unblock_pin1 as Unblock, SYNTHETIC_NEW_PIN1),
+            (unblock_pin2 as Unblock, SYNTHETIC_NEW_PIN2),
+        ]
+    }
+
+    #[test]
+    fn unblock_is_refused_below_the_puk_retry_floor_without_presenting_it() {
+        for (unblock, new_pin) in unblocks() {
+            for puk_status in refused_puk_statuses() {
+                let mut transport =
+                    ScriptedTransport::new(&[remaining(SERVED_RETRIES), puk_status]);
+
+                let result = unblock(&mut transport, SYNTHETIC_PUK.to_vec(), new_pin.to_vec());
+
+                assert_eq!(result, Err(CardManagementFailure::SafetyRefused));
+                assert_eq!(transport.credential_calls, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn unblock_at_the_puk_floor_reaches_the_card() {
+        for (unblock, new_pin) in unblocks() {
+            let mut transport =
+                ScriptedTransport::new(&[remaining(SERVED_RETRIES), remaining(SERVED_RETRIES)]);
+
+            let result = unblock(&mut transport, SYNTHETIC_PUK.to_vec(), new_pin.to_vec());
+
+            assert_eq!(result, Err(CardManagementFailure::TransportError));
+            assert_eq!(transport.credential_calls, 1);
+            assert!(transport.responses.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_retry_floor_refusal_maps_to_the_safety_refusal() {
+        let refusal = check_retry_floor(FlooredCredential::Puk, PinStatus::Locked)
+            .expect_err("a blocked PUK is refused");
+        assert_eq!(
+            map_auth_error::<&str>(AuthError::RetryFloor(refusal)),
+            CardManagementFailure::SafetyRefused
+        );
     }
 
     #[test]
