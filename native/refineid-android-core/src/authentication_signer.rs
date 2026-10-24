@@ -140,7 +140,7 @@ where
     let prepared_input = prepare_signing_input(algorithm, input)?;
     let pin = Pin1::reconstruct(pin_input).map_err(|_| AuthenticationSignFailure::InvalidPin)?;
     let preflight = probe_pin1_preflight(transport).map_err(map_preflight_failure)?;
-    if !preflight.consumer_authentication_permitted {
+    if !preflight.retry_floor_permits {
         return Err(match preflight.state {
             Pin1State::Locked => AuthenticationSignFailure::PinLocked,
             Pin1State::Verified
@@ -193,7 +193,7 @@ pub(crate) fn verify_authentication_pin<T: CardTransport>(
     let pin = Pin1::reconstruct(UnvalidatedSecret::from_owned_bytes(pin_bytes))
         .map_err(|_| AuthenticationSignFailure::InvalidPin)?;
     let preflight = probe_pin1_preflight(transport).map_err(map_preflight_failure)?;
-    if !preflight.consumer_authentication_permitted {
+    if !preflight.retry_floor_permits {
         return Err(if preflight.state == Pin1State::Locked {
             AuthenticationSignFailure::PinLocked
         } else {

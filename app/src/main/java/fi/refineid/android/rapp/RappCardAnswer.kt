@@ -10,7 +10,10 @@ internal enum class RappCardFailure {
     /** The holder declined or cancelled on the phone: `user_cancelled`. */
     USER_CANCELLED,
 
-    /** The card allows fewer than three PIN attempts, or will not say how many: `retry_floor`. */
+    /**
+     * The card allows two, one or no PIN attempts, reports the PIN blocked,
+     * or will not say how many: `retry_floor`.
+     */
     RETRY_FLOOR,
 
     /** The card did not answer: `card_error`. */
@@ -28,9 +31,9 @@ internal enum class RappCardFailure {
  * it (RAPP v26.10.22 section 10.2).
  *
  * The native card session reads the PIN status with a header-only VERIFY
- * before every verification and, without sending one, refuses one or two
- * remaining attempts, a blocked PIN, and a status that carries no count and
- * is not "verified"; those refusals end the operation as `retry_floor`. A
+ * before every verification and, without sending one, refuses two, one or
+ * no remaining attempts, a blocked PIN, and a status that carries no count
+ * and is not "verified"; those refusals end the operation as `retry_floor`. A
  * wrong PIN is the holder's to correct on the phone while the card still
  * allows at least [MINIMUM_REMAINING_ATTEMPTS]; the requester learns nothing
  * of it.

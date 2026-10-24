@@ -81,9 +81,9 @@
     <string name="confirm_pin_reset_warning" tools:ignore="PluralsCandidate">En felaktig %1$s förbrukar ett försök. %2$d försök återstår.</string>
     <string name="proceed">Fortsätt</string>
     <string name="spent_attempts_notice">%1$s: %2$d av %3$d försök kvar.</string>
-    <string name="refuse_low_attempts_pin">RefineID använder inte en kod med ett eller två försök kvar. Återställ den med annan programvara, eller lås upp den här när kortet har låst den.</string>
+    <string name="refuse_low_attempts_pin">RefineID använder inte en kod med två eller färre försök kvar. En ny kod kan anges här med PUK-koden.</string>
     <string name="refuse_low_attempts_puk">RefineID använder inte något av de två sista PUK-försöken.</string>
-    <string name="rapp_retry_floor">De återstående PIN-försöken är reserverade för kortutfärdarens programvara.</string>
+    <string name="rapp_retry_floor">RefineID använder inte en PIN-kod med två eller färre försök kvar. Med PUK-koden kan en ny PIN-kod anges.</string>
     <string name="recovery_guidance_pin1">PIN 1 måste återställas\nÅterställ PIN 1 med din PUK-kod.</string>
     <string name="recovery_guidance_pin2">PIN 2 måste återställas\nÅterställ PIN 2 med din PUK-kod.</string>
     <string name="unrecoverable_card">PUK-koden är spärrad\nDetta kort kan inte återställas med programvara.</string>

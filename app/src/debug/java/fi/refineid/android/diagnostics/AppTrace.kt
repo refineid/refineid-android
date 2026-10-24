@@ -196,7 +196,7 @@ internal object AppTrace {
                 is NativePin1PreflightResult.Success -> {
                     "success scheme=" + result.preflight.referenceScheme +
                         " state=" + result.preflight.state +
-                        " permitted=" + result.preflight.consumerAuthenticationPermitted
+                        " permitted=" + result.preflight.retryFloorPermits
                 }
 
                 is NativePin1PreflightResult.Failure -> {
@@ -223,7 +223,7 @@ internal object AppTrace {
                 is NativePin2PreflightResult.Success -> {
                     "success scheme=" + result.preflight.referenceScheme +
                         " state=" + result.preflight.state +
-                        " permitted=" + result.preflight.qualifiedSignaturePermitted
+                        " permitted=" + result.preflight.retryFloorPermits
                 }
 
                 is NativePin2PreflightResult.Failure -> {

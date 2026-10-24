@@ -2083,7 +2083,7 @@ fn encode_pin1_preflight_reply(result: Result<Pin1Preflight, Pin1PreflightFailur
                 },
                 state,
                 retries,
-                if preflight.consumer_authentication_permitted {
+                if preflight.retry_floor_permits {
                     POLICY_PERMITTED
                 } else {
                     POLICY_REFUSED
@@ -2117,7 +2117,7 @@ fn encode_pin2_preflight_reply(result: Result<Pin2Preflight, Pin2PreflightFailur
                 },
                 state,
                 retries,
-                if preflight.qualified_signature_permitted {
+                if preflight.retry_floor_permits {
                     POLICY_PERMITTED
                 } else {
                     POLICY_REFUSED
@@ -2659,7 +2659,7 @@ mod tests {
             Pin1Preflight {
                 scheme: PinReferenceScheme::Citizen,
                 state: Pin1State::Remaining(SYNTHETIC_PIN_RETRY_COUNT),
-                consumer_authentication_permitted: true,
+                retry_floor_permits: true,
             },
         ));
         assert_eq!(
@@ -2713,7 +2713,7 @@ mod tests {
         let success = encode_pin1_preflight_reply(Ok(Pin1Preflight {
             scheme: PinReferenceScheme::Citizen,
             state: Pin1State::Remaining(SYNTHETIC_PIN_RETRY_COUNT),
-            consumer_authentication_permitted: true,
+            retry_floor_permits: true,
         }));
         assert_eq!(
             success,
@@ -2742,7 +2742,7 @@ mod tests {
         let success = encode_pin2_preflight_reply(Ok(Pin2Preflight {
             scheme: PinReferenceScheme::Citizen,
             state: Pin2State::Remaining(SYNTHETIC_PIN_RETRY_COUNT),
-            qualified_signature_permitted: true,
+            retry_floor_permits: true,
         }));
         assert_eq!(
             success,

@@ -20,6 +20,9 @@ class RappCardAnswerTest {
         /** The attempts a wrong PIN at the floor leaves, below it. */
         const val BELOW_FLOOR = 2
 
+        /** The last attempt the card allows. */
+        const val LAST_ATTEMPT = 1
+
         /** A blocked PIN's count. */
         const val BLOCKED = 0
     }
@@ -36,7 +39,7 @@ class RappCardAnswerTest {
 
     @Test
     fun aWrongPinBelowTheFloorOrWithoutACountEndsAtTheFloor() {
-        for (remaining in listOf(BELOW_FLOOR, BLOCKED, null)) {
+        for (remaining in listOf(BELOW_FLOOR, LAST_ATTEMPT, BLOCKED, null)) {
             assertEquals(
                 RappCardFailure.RETRY_FLOOR,
                 ends(RappCardAnswer.of(AuthenticationSignFailure.WRONG_PIN, remaining)),
@@ -46,7 +49,9 @@ class RappCardAnswerTest {
                 ends(RappCardAnswer.of(QualifiedSignFailure.WRONG_PIN, remaining)),
             )
         }
-        assertNull(RappCardAnswer.WrongPin.after(BELOW_FLOOR))
+        for (remaining in listOf(BELOW_FLOOR, LAST_ATTEMPT, BLOCKED)) {
+            assertNull(RappCardAnswer.WrongPin.after(remaining))
+        }
     }
 
     @Test

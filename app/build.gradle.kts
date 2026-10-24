@@ -13,7 +13,8 @@ val rappDebugJniLibs = layout.buildDirectory.dir("rapp/jniLibs/debug")
 val rappReleaseJniLibs = layout.buildDirectory.dir("rapp/jniLibs/release")
 val rappCrateDirectory =
     rootProject.layout.projectDirectory.dir("native/refineid-rapp-android")
-val rappGeneratedKotlin = rappCrateDirectory.dir("generated")
+val rappHostLibrary =
+    rappCrateDirectory.file("target/debug/" + System.mapLibraryName("refineid_rapp"))
 val minimumAndroidApi = 33
 val currentAndroidApi = 37
 val androidAbis = listOf("arm64-v8a", "x86_64")
@@ -241,7 +242,6 @@ android {
         getByName("release").jniLibs.directories.add(
             rappReleaseJniLibs.get().asFile.absolutePath,
         )
-        getByName("main").kotlin.directories.add(rappGeneratedKotlin.asFile.absolutePath)
     }
 
     testOptions {
@@ -301,11 +301,11 @@ val rustCrateDirectory =
     rootProject.layout.projectDirectory.dir("native/refineid-android-core")
 val androidNdkDirectory = androidComponents.sdkComponents.ndkDirectory
 
-// Path-patched refineid-core crates both Rust bridges compile against (see
-// the [patch] sections). Without this input, core edits silently reuse
-// stale .so files because Cargo.lock never changes for path patches.
-val sharedRefineIdCoreCrates =
-    rootProject.layout.projectDirectory.dir("../refineid-core/crates")
+// Every cargo build first moves its crate's refineid-core revision to core
+// main (root project tasks). The new revision lands in Cargo.lock, an input
+// of each build task, so a core change rebuilds the shared objects.
+val refreshAndroidCoreRevision = ":refreshAndroidCoreRevision"
+val refreshRappCoreRevision = ":refreshRappCoreRevision"
 
 // --- RAPP -----------------------------------------------------------------
 //
@@ -322,11 +322,11 @@ fun registerRappBuild(
 ) = tasks.register<Exec>(taskName) {
     group = "build"
     description = "Build the shared RAPP core for Android ABIs."
+    dependsOn(refreshRappCoreRevision)
     workingDir(rappCrateDirectory)
     inputs.file(rappCrateDirectory.file("Cargo.toml"))
     inputs.file(rappCrateDirectory.file("Cargo.lock"))
     inputs.dir(rappCrateDirectory.dir("src"))
-    inputs.dir(sharedRefineIdCoreCrates)
     outputs.dir(output)
     environment("ANDROID_NDK_HOME", androidNdkDirectory.get().asFile.absolutePath)
     val arguments =
@@ -354,11 +354,11 @@ val buildRustDebug =
     tasks.register<Exec>("buildRustDebug") {
         group = "build"
         description = "Build the pinned RefineID Rust bridge for debug ABIs."
+        dependsOn(refreshAndroidCoreRevision)
         workingDir(rustCrateDirectory)
         inputs.file(rustCrateDirectory.file("Cargo.toml"))
         inputs.file(rustCrateDirectory.file("Cargo.lock"))
         inputs.dir(rustCrateDirectory.dir("src"))
-        inputs.dir(sharedRefineIdCoreCrates)
         outputs.dir(rustDebugJniLibs)
         environment(
             "ANDROID_NDK_HOME",
@@ -381,11 +381,11 @@ val buildRustRelease =
     tasks.register<Exec>("buildRustRelease") {
         group = "build"
         description = "Build the pinned RefineID Rust bridge for release ABIs."
+        dependsOn(refreshAndroidCoreRevision)
         workingDir(rustCrateDirectory)
         inputs.file(rustCrateDirectory.file("Cargo.toml"))
         inputs.file(rustCrateDirectory.file("Cargo.lock"))
         inputs.dir(rustCrateDirectory.dir("src"))
-        inputs.dir(sharedRefineIdCoreCrates)
         outputs.dir(rustReleaseJniLibs)
         environment(
             "ANDROID_NDK_HOME",
@@ -408,15 +408,63 @@ val buildRustRelease =
 val buildRappHostDebug =
     tasks.register<Exec>("buildRappHostDebug") {
         group = "build"
-        description = "Build the host RAPP cdylib for JVM unit tests."
+        description = "Build the host RAPP library for the binding generator and JVM unit tests."
+        dependsOn(refreshRappCoreRevision)
         workingDir(rappCrateDirectory)
         inputs.file(rappCrateDirectory.file("Cargo.toml"))
         inputs.file(rappCrateDirectory.file("Cargo.lock"))
         inputs.dir(rappCrateDirectory.dir("src"))
-        inputs.dir(sharedRefineIdCoreCrates)
-        outputs.dir(rappCrateDirectory.dir("target/debug"))
+        outputs.file(rappHostLibrary)
         commandLine("cargo", "build", "--locked")
     }
+
+// The Kotlin binding is generated from the host library built from the same
+// Cargo.lock as the device libraries, so it always matches the core revision
+// they link.
+abstract class GenerateRappBinding : Exec() {
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+}
+
+val generateRappBinding =
+    tasks.register<GenerateRappBinding>("generateRappBinding") {
+        group = "build"
+        description = "Generate the Kotlin RAPP binding from the host library."
+        dependsOn(buildRappHostDebug)
+        workingDir(rappCrateDirectory)
+        inputs.file(rappHostLibrary)
+        inputs.file(rappCrateDirectory.file("Cargo.lock"))
+        inputs.dir(rappCrateDirectory.dir("src"))
+        val bindingDirectory = outputDirectory
+        doFirst { bindingDirectory.get().asFile.deleteRecursively() }
+        commandLine(
+            "cargo",
+            "run",
+            "--locked",
+            "--bin",
+            "refineid-uniffi-bindgen-kotlin",
+            "--",
+            "generate",
+            "--library",
+            rappHostLibrary.asFile.absolutePath,
+            "--language",
+            "kotlin",
+            "--no-format",
+            "--out-dir",
+        )
+        argumentProviders.add(
+            CommandLineArgumentProvider { listOf(bindingDirectory.get().asFile.absolutePath) },
+        )
+    }
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.kotlin?.addGeneratedSourceDirectory(
+            generateRappBinding,
+            GenerateRappBinding::outputDirectory,
+        )
+    }
+}
 
 tasks.configureEach {
     when (name) {

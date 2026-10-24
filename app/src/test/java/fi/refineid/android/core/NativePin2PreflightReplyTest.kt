@@ -35,10 +35,10 @@ class NativePin2PreflightReplyTest {
                     permitted = false,
                 ),
                 Case(
-                    wire = success(PIN_REFERENCE_CITIZEN, PIN2_STATE_REMAINING, EXHAUSTED_RETRY_COUNT, true),
+                    wire = success(PIN_REFERENCE_CITIZEN, PIN2_STATE_REMAINING, EXHAUSTED_RETRY_COUNT, false),
                     scheme = NativePinReferenceScheme.CITIZEN,
                     state = NativePin2State.Remaining(EXHAUSTED_RETRY_COUNT),
-                    permitted = true,
+                    permitted = false,
                 ),
                 Case(
                     wire = success(PIN_REFERENCE_CITIZEN, PIN2_STATE_LOCKED, NO_RETRY_COUNT, false),
@@ -67,7 +67,7 @@ class NativePin2PreflightReplyTest {
 
             assertEquals(case.scheme, result.preflight.referenceScheme)
             assertEquals(case.state, result.preflight.state)
-            assertEquals(case.permitted, result.preflight.qualifiedSignaturePermitted)
+            assertEquals(case.permitted, result.preflight.retryFloorPermits)
             assertTrue(reply.all { byte -> byte == ZERO_BYTE })
         }
     }

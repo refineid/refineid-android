@@ -87,10 +87,11 @@ transport.
   signature or batch and never held (section 11 item 2; credential
   custody).
 - The native card session reads the PIN status with a header-only VERIFY
-  before every verification and, without sending one, refuses one or two
-  remaining attempts, a blocked PIN, and a status that carries no count and
-  is not "verified"; the operation then ends as `retry_floor` and the holder
-  is told the attempts are reserved for the issuer's software. A wrong PIN
+  before every verification and, without sending one, refuses two, one or
+  no remaining attempts, a blocked PIN, and a status that carries no count
+  and is not "verified" (`check_retry_floor` in refineid-auth); the
+  operation then ends as `retry_floor` and the holder is told the PUK can
+  set a new PIN on the phone. A wrong PIN
   with at least three attempts left re-prompts on the phone with the count;
   the requester learns nothing of it (section 10.2).
 - A PIN command the card did not answer is sent again, once the card is
@@ -159,34 +160,29 @@ shared object for Android:
   is why this wrapper sets `[lib] name = "refineid_rapp"`.
 - `src/bin/refineid-uniffi-bindgen-kotlin.rs` generates the binding, mirroring
   the Apple repository's Swift generator.
-- `generated/uniffi/refineid_rapp/refineid_rapp.kt` is the generated
-  binding, in package `uniffi.refineid_rapp`. It is
-  committed so a build does not depend on regenerating it, and it must be
-  regenerated and committed together with the Rust revision that defines its
-  ABI.
+- The Kotlin binding, package `uniffi.refineid_rapp`, is not committed.
+  `generateRappBinding` generates it into the app build directory from the
+  host library that `buildRappHostDebug` builds from the same `Cargo.lock` as
+  the device libraries, so the binding always matches the core revision the
+  APK links.
 
-The Gradle wiring in `app/build.gradle.kts` follows the existing pinned-core
-pattern: `buildRappDebug` and `buildRappRelease` run `cargo ndk` for
-`arm64-v8a` and `x86_64`, their output directories are added as `jniLibs`, and
-the generated Kotlin is added as a source directory. The binding calls Rust
-through JNA, which the application did not previously need, so `jna` with the
-`aar` artifact type is now a dependency.
+The Gradle wiring in `app/build.gradle.kts`: `buildRappDebug` and
+`buildRappRelease` run `cargo ndk` for `arm64-v8a` and `x86_64`, their output
+directories are added as `jniLibs`, and the generated binding is added as a
+generated Kotlin source directory of every variant. The binding calls Rust
+through JNA, so `jna` with the `aar` artifact type is a dependency.
 
-## Rebuilding the binding
+## Core revision
 
-From the crate directory, with the NDK available:
-
-```sh
-cargo ndk -t arm64-v8a -t x86_64 -o jniLibs build --release --locked
-cargo run --bin refineid-uniffi-bindgen-kotlin -- \
-    generate --library jniLibs/arm64-v8a/librefineid_rapp.so \
-    --language kotlin --out-dir generated --no-format
-```
-
-The crate depends on `refineid-rapp` from the refineid-core repository using
-the same pattern as the pinned core crates: a git dependency on
-`refineid-core` `main` with a `[patch]` to the sibling `refineid-core`
-checkout for local development.
+Both native crates depend on refineid-core `main` as a git dependency and
+build against its latest commit. Before any cargo build, test or Clippy run,
+`refreshAndroidCoreRevision` and `refreshRappCoreRevision` run
+`cargo update --package` on one core package, which moves the whole core git
+source in that crate's `Cargo.lock` to the current `main` commit. Third-party
+crates stay at their locked versions and every cargo build runs with
+`--locked`. A build that picked up a newer core leaves the updated
+`Cargo.lock` in the working tree; it is committed with the next change. A
+local core checkout is never required.
 
 ## Measured so far
 

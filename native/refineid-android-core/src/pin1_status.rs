@@ -21,8 +21,8 @@
 
 use refineid_apdu::{CardTransport, StatusWord, TransportOutcome};
 use refineid_auth::{
-    AuthError, PinOps, PinReferenceScheme, PinSlot, PinStatus, classify_pin_status_sw,
-    pin1_status_permits_consumer_authentication,
+    AuthError, PinOps, PinReferenceScheme, PinSlot, PinStatus, check_retry_floor,
+    classify_pin_status_sw,
 };
 
 /// Counter-safe PIN1 state, with unrecognised status words erased at this
@@ -48,8 +48,8 @@ pub(crate) struct Pin1Preflight {
     pub(crate) scheme: PinReferenceScheme,
     /// Live PIN1 state from the header-only `VERIFY` query.
     pub(crate) state: Pin1State,
-    /// Public core policy verdict for an ordinary authentication operation.
-    pub(crate) consumer_authentication_permitted: bool,
+    /// Whether the core retry floor lets a PIN1 attempt be sent.
+    pub(crate) retry_floor_permits: bool,
 }
 
 /// Coarse failures safe to expose across JNI.
@@ -103,7 +103,7 @@ where
     Ok(Pin1Preflight {
         scheme,
         state,
-        consumer_authentication_permitted: pin1_status_permits_consumer_authentication(status),
+        retry_floor_permits: check_retry_floor(PinSlot::Pin1, status).is_ok(),
     })
 }
 
@@ -141,7 +141,13 @@ mod tests {
     const CITIZEN_PROBE_COMMAND_INDEX: usize = 0;
     const ORGANIZATIONAL_PROBE_COMMAND_START_INDEX: usize = 1;
     const SAFE_RETRIES: u8 = 3;
-    const LOW_RETRIES: u8 = 2;
+    const PRISTINE_RETRIES: u8 = 5;
+    const ONE_SPENT_RETRIES: u8 = 4;
+    const BELOW_FLOOR_RETRIES: u8 = 2;
+    const LAST_RETRY: u8 = 1;
+    const NO_RETRIES: u8 = 0;
+    const SERVED_RETRIES: [u8; 3] = [PRISTINE_RETRIES, ONE_SPENT_RETRIES, SAFE_RETRIES];
+    const REFUSED_RETRIES: [u8; 3] = [BELOW_FLOOR_RETRIES, LAST_RETRY, NO_RETRIES];
 
     struct ScriptedTransport {
         responses: VecDeque<TransportOutcome>,
@@ -212,7 +218,7 @@ mod tests {
 
         assert_eq!(result.scheme, PinReferenceScheme::Citizen);
         assert_eq!(result.state, Pin1State::Remaining(SAFE_RETRIES));
-        assert!(result.consumer_authentication_permitted);
+        assert!(result.retry_floor_permits);
         assert_eq!(transport.public_commands.len(), 1);
         assert_eq!(transport.credential_calls, 0);
         for command in transport.public_commands {
@@ -252,24 +258,48 @@ mod tests {
         assert_eq!(transport.credential_calls, 0);
     }
 
+    fn remaining(value: u8) -> StatusWord {
+        StatusWord::PinIncorrect {
+            retries: retries(value),
+        }
+    }
+
     #[test]
-    fn low_and_unreadable_states_fail_the_consumer_policy_closed() {
-        let low = StatusWord::PinIncorrect {
-            retries: retries(LOW_RETRIES),
-        };
-        for (status, expected_state) in [
-            (low, Pin1State::Remaining(LOW_RETRIES)),
-            (StatusWord::AuthenticationBlocked, Pin1State::Locked),
-            (StatusWord::AuthenticationFailed, Pin1State::NoInformation),
-            (StatusWord::WrongLength, Pin1State::Unrecognised),
-        ] {
+    fn retry_floor_serves_five_four_three_and_verified() {
+        let served = SERVED_RETRIES
+            .into_iter()
+            .map(|count| (remaining(count), Pin1State::Remaining(count)))
+            .chain([(StatusWord::Success, Pin1State::Verified)]);
+        for (status, expected_state) in served {
             let mut transport = ScriptedTransport::new(&[status]);
             let result = match probe_pin1_preflight(&mut transport) {
                 Ok(result) => result,
                 Err(failure) => panic!("scripted preflight failed: {failure:?}"),
             };
             assert_eq!(result.state, expected_state);
-            assert!(!result.consumer_authentication_permitted);
+            assert!(result.retry_floor_permits);
+            assert_eq!(transport.credential_calls, 0);
+        }
+    }
+
+    #[test]
+    fn retry_floor_refuses_two_one_zero_blocked_and_unreadable() {
+        let refused = REFUSED_RETRIES
+            .into_iter()
+            .map(|count| (remaining(count), Pin1State::Remaining(count)))
+            .chain([
+                (StatusWord::AuthenticationBlocked, Pin1State::Locked),
+                (StatusWord::AuthenticationFailed, Pin1State::NoInformation),
+                (StatusWord::WrongLength, Pin1State::Unrecognised),
+            ]);
+        for (status, expected_state) in refused {
+            let mut transport = ScriptedTransport::new(&[status]);
+            let result = match probe_pin1_preflight(&mut transport) {
+                Ok(result) => result,
+                Err(failure) => panic!("scripted preflight failed: {failure:?}"),
+            };
+            assert_eq!(result.state, expected_state);
+            assert!(!result.retry_floor_permits);
             assert_eq!(transport.credential_calls, 0);
         }
     }

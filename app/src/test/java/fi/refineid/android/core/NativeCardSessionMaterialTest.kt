@@ -41,7 +41,7 @@ class NativeCardSessionMaterialTest {
             NativePin1Preflight(
                 referenceScheme = NativePinReferenceScheme.ORGANIZATIONAL,
                 state = NativePin1State.Remaining(SAFE_RETRY_COUNT),
-                consumerAuthenticationPermitted = true,
+                retryFloorPermits = true,
             )
 
         material.cachePin1Preflight(preflight)

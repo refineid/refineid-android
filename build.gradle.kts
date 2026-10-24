@@ -68,6 +68,28 @@ spotless {
 }
 
 val rustCrateDirectory = layout.projectDirectory.dir("native/refineid-android-core")
+val rappCrateDirectory = layout.projectDirectory.dir("native/refineid-rapp-android")
+
+// Both native crates build against the latest refineid-core main. Updating one
+// core package moves the whole core git source in the crate's Cargo.lock to the
+// current main commit; third-party crates keep their locked versions, so every
+// later cargo invocation still runs with --locked.
+fun registerCoreRefresh(
+    taskName: String,
+    crateDirectory: Directory,
+    corePackage: String,
+) = tasks.register<Exec>(taskName) {
+    group = "build"
+    description = "Move the refineid-core revision in a native Cargo.lock to core main."
+    workingDir(crateDirectory)
+    outputs.file(crateDirectory.file("Cargo.lock"))
+    outputs.upToDateWhen { false }
+    commandLine("cargo", "update", "--package", corePackage)
+}
+
+val refreshAndroidCoreRevision =
+    registerCoreRefresh("refreshAndroidCoreRevision", rustCrateDirectory, "refineid-apdu")
+registerCoreRefresh("refreshRappCoreRevision", rappCrateDirectory, "refineid-rapp")
 val aospProviderContractVerifier = "Scripts/verify-aosp-provider-contract.sh"
 val aospProviderContractPatch =
     "platform/aosp/android-13.0.0_r31/patches/packages-apps-KeyChain/" +
@@ -107,7 +129,7 @@ val rustTest =
     tasks.register<Exec>("rustTest") {
         group = "verification"
         description = "Run locked Rust tests."
-        dependsOn(rustFormatCheck)
+        dependsOn(rustFormatCheck, refreshAndroidCoreRevision)
         workingDir(rustCrateDirectory)
         commandLine("cargo", "test", "--locked")
     }
@@ -116,7 +138,7 @@ val rustClippy =
     tasks.register<Exec>("rustClippy") {
         group = "verification"
         description = "Run Clippy for every Rust target with warnings denied."
-        dependsOn(rustTest)
+        dependsOn(rustTest, refreshAndroidCoreRevision)
         workingDir(rustCrateDirectory)
         commandLine("cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings")
     }
