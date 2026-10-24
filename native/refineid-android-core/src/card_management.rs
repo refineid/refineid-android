@@ -510,15 +510,77 @@ mod tests {
         assert!(transport.responses.is_empty());
     }
 
-    /// PUK counter answers the core retry floor refuses, each carrying a
-    /// counter or a blocked state so no container read follows.
-    fn refused_puk_statuses() -> [StatusWord; 4] {
+    /// The answer the citizen numbering gives the PIN 1 resolution probe
+    /// when the target PIN is blocked, as it is before an unblock.
+    const CITIZEN_TARGET_BLOCKED: StatusWord = StatusWord::AuthenticationBlocked;
+
+    /// Answers that resolve the citizen numbering, with the target PIN
+    /// served or blocked; the target PIN's counter does not gate the PUK.
+    fn citizen_resolutions() -> [Vec<StatusWord>; 2] {
+        [
+            vec![remaining(SERVED_RETRIES)],
+            vec![CITIZEN_TARGET_BLOCKED],
+        ]
+    }
+
+    /// Answers that resolve the organizational numbering: the citizen
+    /// reference is not found and the organizational one answers.
+    fn organizational_resolution() -> Vec<StatusWord> {
+        vec![StatusWord::ReferenceDataNotFound, remaining(SERVED_RETRIES)]
+    }
+
+    /// PUK counter answers the floor refuses under either numbering.
+    fn refused_puk_counters() -> [StatusWord; 4] {
         [
             remaining(BELOW_FLOOR_RETRIES),
             remaining(LAST_RETRY),
             remaining(NO_RETRIES),
             StatusWord::AuthenticationBlocked,
         ]
+    }
+
+    /// Every transcript, up to and including the PUK counter read, that
+    /// the floor refuses: low, exhausted and blocked counters under both
+    /// numberings and with the target PIN served or blocked; a citizen
+    /// probe reporting verified or no counter, whose PIN container read
+    /// carries no counter either; an organizational PUK reported verified
+    /// or answering without a counter.
+    fn refused_puk_transcripts() -> Vec<Vec<StatusWord>> {
+        let mut transcripts = Vec::new();
+        let resolutions = citizen_resolutions()
+            .into_iter()
+            .chain([organizational_resolution()]);
+        for resolution in resolutions {
+            for counter in refused_puk_counters() {
+                let mut transcript = resolution.clone();
+                transcript.push(counter);
+                transcripts.push(transcript);
+            }
+        }
+        for probe in [StatusWord::Success, StatusWord::AuthenticationFailed] {
+            let mut transcript = vec![remaining(SERVED_RETRIES)];
+            transcript.extend([probe, StatusWord::Success]);
+            transcripts.push(transcript);
+        }
+        for probe in [StatusWord::Success, StatusWord::AuthenticationFailed] {
+            let mut transcript = organizational_resolution();
+            transcript.push(probe);
+            transcripts.push(transcript);
+        }
+        transcripts
+    }
+
+    /// Transcripts the floor serves: the PUK at the floor under each
+    /// numbering, with the target PIN served or blocked.
+    fn served_puk_transcripts() -> Vec<Vec<StatusWord>> {
+        citizen_resolutions()
+            .into_iter()
+            .chain([organizational_resolution()])
+            .map(|mut transcript| {
+                transcript.push(remaining(SERVED_RETRIES));
+                transcript
+            })
+            .collect()
     }
 
     type Unblock = fn(
@@ -538,14 +600,18 @@ mod tests {
     #[test]
     fn unblock_is_refused_below_the_puk_retry_floor_without_presenting_it() {
         for (unblock, new_pin) in unblocks() {
-            for puk_status in refused_puk_statuses() {
-                let mut transport =
-                    ScriptedTransport::new(&[remaining(SERVED_RETRIES), puk_status]);
+            for transcript in refused_puk_transcripts() {
+                let mut transport = ScriptedTransport::new(&transcript);
 
                 let result = unblock(&mut transport, SYNTHETIC_PUK.to_vec(), new_pin.to_vec());
 
-                assert_eq!(result, Err(CardManagementFailure::SafetyRefused));
+                assert_eq!(
+                    result,
+                    Err(CardManagementFailure::SafetyRefused),
+                    "{transcript:?}"
+                );
                 assert_eq!(transport.credential_calls, 0);
+                assert!(transport.responses.is_empty(), "{transcript:?}");
             }
         }
     }
@@ -553,15 +619,61 @@ mod tests {
     #[test]
     fn unblock_at_the_puk_floor_reaches_the_card() {
         for (unblock, new_pin) in unblocks() {
-            let mut transport =
-                ScriptedTransport::new(&[remaining(SERVED_RETRIES), remaining(SERVED_RETRIES)]);
+            for transcript in served_puk_transcripts() {
+                let mut transport = ScriptedTransport::new(&transcript);
 
-            let result = unblock(&mut transport, SYNTHETIC_PUK.to_vec(), new_pin.to_vec());
+                let result = unblock(&mut transport, SYNTHETIC_PUK.to_vec(), new_pin.to_vec());
 
-            assert_eq!(result, Err(CardManagementFailure::TransportError));
-            assert_eq!(transport.credential_calls, 1);
+                assert_eq!(result, Err(CardManagementFailure::TransportError));
+                assert_eq!(transport.credential_calls, 1);
+                assert!(transport.responses.is_empty());
+            }
+        }
+    }
+
+    /// Answers a citizen card awaiting activation by PUK gives before the
+    /// PUK counter read: the numbering probe, the PIN 1 status, and the
+    /// numbering and PIN 2 status probes, every PIN blocked.
+    const PUK_ACTIVATION_PREAMBLE: [StatusWord; 4] = [StatusWord::AuthenticationBlocked; 4];
+
+    fn activate_by_puk(
+        transport: &mut ScriptedTransport,
+    ) -> Result<ActivationReport, CardManagementFailure> {
+        activate_card(
+            transport,
+            ACTIVATION_SCHEME_PUK,
+            SYNTHETIC_PUK.to_vec(),
+            Some(SYNTHETIC_NEW_PIN1.to_vec()),
+            Some(SYNTHETIC_NEW_PIN2.to_vec()),
+        )
+    }
+
+    #[test]
+    fn activation_by_puk_is_refused_below_the_puk_retry_floor_without_presenting_it() {
+        for counter in refused_puk_counters() {
+            let mut transcript = PUK_ACTIVATION_PREAMBLE.to_vec();
+            transcript.push(counter);
+            let mut transport = ScriptedTransport::new(&transcript);
+
+            let result = activate_by_puk(&mut transport);
+
+            assert_eq!(result, Err(CardManagementFailure::SafetyRefused));
+            assert_eq!(transport.credential_calls, 0);
             assert!(transport.responses.is_empty());
         }
+    }
+
+    #[test]
+    fn activation_by_puk_at_the_puk_floor_reaches_the_card() {
+        let mut transcript = PUK_ACTIVATION_PREAMBLE.to_vec();
+        transcript.push(remaining(SERVED_RETRIES));
+        let mut transport = ScriptedTransport::new(&transcript);
+
+        let result = activate_by_puk(&mut transport);
+
+        assert_eq!(result, Err(CardManagementFailure::TransportError));
+        assert_eq!(transport.credential_calls, 1);
+        assert!(transport.responses.is_empty());
     }
 
     #[test]
