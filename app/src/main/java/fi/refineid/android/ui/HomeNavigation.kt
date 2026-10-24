@@ -16,9 +16,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.Warning
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,7 +36,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fi.refineid.android.R
 
@@ -254,88 +250,4 @@ internal fun SectionHeader(title: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(start = 4.dp),
     )
-}
-
-@Suppress("FunctionName", "ktlint:standard:function-naming")
-@Composable
-internal fun ActivationBanner(
-    modifier: Modifier = Modifier,
-    cardLabel: String? = null,
-    isMultiple: Boolean = false,
-    onActivate: (() -> Unit)? = null,
-) {
-    Card(
-        modifier =
-            modifier
-                .fillMaxWidth()
-                .testTag(UiAutomationIds.ACTIVATION_BANNER),
-        colors =
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
-            ),
-        shape = RoundedCornerShape(GROUP_CORNER_RADIUS),
-    ) {
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(ROW_HORIZONTAL_PADDING),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Warning,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(28.dp),
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    val title =
-                        when {
-                            !cardLabel.isNullOrBlank() && isMultiple -> {
-                                stringResource(R.string.cards_not_activated_multiple, cardLabel)
-                            }
-
-                            !cardLabel.isNullOrBlank() -> {
-                                stringResource(R.string.card_not_activated_named, cardLabel)
-                            }
-
-                            else -> {
-                                stringResource(R.string.card_not_activated)
-                            }
-                        }
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                    )
-                    Text(
-                        text = stringResource(R.string.card_activation_needed_description),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                    )
-                }
-            }
-            if (onActivate != null) {
-                Button(
-                    onClick = onActivate,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .testTag(UiAutomationIds.ACTIVATION_BUTTON),
-                    colors =
-                        ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError,
-                        ),
-                ) {
-                    Text(stringResource(R.string.activate_card))
-                }
-            }
-        }
-    }
 }

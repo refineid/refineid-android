@@ -755,10 +755,23 @@ internal class NfcReaderController(
     ) {
         CanSessionStore.remember(String(canBytes, Charsets.US_ASCII))
         val (cardDetails, holderName) = extractCardDetails(opened)
-        currentAuthCertDer = opened.certificate.copyDer()
         pin1?.close()
-        primedCanStore.clear()
-        primedCardStored = false
+        // PACE proved the access number against this card, so it is kept
+        // from here on, activated or not: the holder is not asked for it
+        // again at the activation tap, and a mismatch on a later tap
+        // forgets it as for any card. The certificate is not kept, in
+        // memory or in the store: the identity a paired computer is offered
+        // comes from there, and a card is offered only once it is
+        // activated and its certificate read on an activated open.
+        currentAuthCertDer = null
+        if (holderName != null) {
+            rememberedHolderName = holderName
+            rememberedDetails = cardDetails
+        }
+        primedCanStore.write(canBytes.copyOf())
+        primedCanStore.writeHolderName(holderName)
+        primedCanStore.writeAuthCertificateDer(null)
+        primedCardStored = true
         activeSession =
             ContactlessSession(
                 isoDep = isoDep,

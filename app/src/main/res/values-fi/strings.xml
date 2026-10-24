@@ -92,12 +92,9 @@
     <string name="report_copied">Diagnostiikkaraportti kopioitu leikepöydälle</string>
     <string name="clear_logs">Tyhjennä lokit</string>
     <string name="card_not_activated">Korttia ei ole aktivoitu</string>
-    <string name="card_not_activated_named">Korttia (%1$s) ei ole aktivoitu</string>
-    <string name="cards_not_activated_multiple">Kortteja ei ole aktivoitu: %1$s</string>
     <string name="card_transport_usb">USB-kortti</string>
     <string name="card_transport_nfc">Lähiluettava kortti</string>
     <string name="card_switch_reader">Vaihda lukijaa</string>
-    <string name="card_activation_needed_description">Kortti vaatii käyttöönoton ennen tunnistautumista tai sähköistä allekirjoitusta.</string>
     <string name="show_pin">Näytä tunnusluku</string>
     <string name="hide_pin">Piilota tunnusluku</string>
     <string name="pins_do_not_match">Tunnusluvut eivät täsmää</string>

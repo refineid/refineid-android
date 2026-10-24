@@ -83,7 +83,7 @@ internal class MainScreenTest {
     }
 
     @Test
-    fun activationRequiredReaderHidesCardActionsAndShowsBanner() {
+    fun activationRequiredReaderOpensActivationInPlaceOfHome() {
         show(
             snapshot =
                 UsbReaderSnapshot(
@@ -95,7 +95,7 @@ internal class MainScreenTest {
         )
 
         composeRule
-            .onNodeWithTag(UiAutomationIds.ACTIVATION_BANNER)
+            .onNodeWithTag("CardManagementScreen")
             .assertIsDisplayed()
 
         composeRule

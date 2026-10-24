@@ -48,6 +48,21 @@ PIN's value the moment that PIN is changed.
   length from the scheme and never submits an activation for a scheme it
   does not know; the native side refuses the same, instead of guessing the
   newer procedure as it did.
+- **Straight to the form.** A reading that says the card awaits activation
+  shows the activation form in place of the home screen, from the first
+  frame, as the iPhone's flow routes an unactivated card. A holder who
+  leaves the form finds the identity row reading "Activate Card" and
+  leading back to it; the home screen carries no banner. The identity row
+  shows a chevron only where a tap opens a page, so the card-reading prompt
+  has none.
+- **The access number stays; the certificate does not.** PACE proved the
+  card access number against the card, so the open keeps it for a card
+  awaiting activation as for an activated one: the holder types it once,
+  and a mismatch on a later tap forgets it as for any card. The
+  authentication certificate is kept neither in memory nor in the store
+  until an activated open reads it: the identity a paired computer is
+  offered over RAPP comes from that certificate, and a card is offered only
+  once it is activated.
 - **Every build.** Activation is in release builds as in debug builds, as
   on the Apple platforms.
 
@@ -73,10 +88,11 @@ Feedback: the certificate and the per-PIN probes.
 Scripted: the classifier against synthetic certificates on both sides of
 the cutover, organisational and unfamiliar issuers, unreadable validity, and
 malformed or truncated DER; the open reply encoding and the Kotlin decoder
-with scheme and needs, and the decoder's refusals. Hardware: an activated
-card at the first NFC tap opens as ready, which proves the changed-record
-read survives the secure channel; a card awaiting activation is the open
-item, since each one serves once.
+with scheme and needs, and the decoder's refusals. Hardware, observed by
+the owner on 2026-10-24 on a phone over NFC: an activated card opened as
+ready, which proves the changed-record read survives the secure channel,
+and a card awaiting activation was routed to activation. The activation
+itself, which each card serves once, is not yet observed on Android.
 
 ## Consequences
 
