@@ -402,7 +402,7 @@ internal fun CardManagementScreen(
                         }
 
                         is CardManagementResult.Failure -> {
-                            outcomeNotice = OutcomeNotice(R.string.error)
+                            outcomeNotice = OutcomeNotice(pukFailureNotice(result.kind))
                             outcomeIsError = true
                         }
                     }
@@ -454,7 +454,7 @@ internal fun CardManagementScreen(
                         }
 
                         is CardManagementResult.Failure -> {
-                            outcomeNotice = OutcomeNotice(R.string.error)
+                            outcomeNotice = OutcomeNotice(pukFailureNotice(result.kind))
                             outcomeIsError = true
                         }
                     }
@@ -713,6 +713,13 @@ private fun getAttempts(state: Any): Int? =
         is NativePin1State.Locked, is NativePin2State.Locked -> 0
         is NativePin1State.Verified, is NativePin2State.Verified -> 5
         else -> null
+    }
+
+private fun pukFailureNotice(kind: CardManagementFailure): Int =
+    if (kind == CardManagementFailure.SAFETY_REFUSED) {
+        R.string.refuse_low_attempts_puk
+    } else {
+        R.string.error
     }
 
 private fun isLowAttempts(attempts: Int?): Boolean = attempts != null && (attempts == 1 || attempts == 2)

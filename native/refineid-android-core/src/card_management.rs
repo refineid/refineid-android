@@ -77,6 +77,7 @@ pub(crate) fn map_auth_error<E>(error: AuthError<E>) -> CardManagementFailure {
             | TransportOutcome::ProtocolDesync,
         ) => CardManagementFailure::TransportError,
         AuthError::LengthUnsupported { .. } => CardManagementFailure::InvalidCredential,
+        AuthError::RetryFloor(_) => CardManagementFailure::SafetyRefused,
         AuthError::Outcome(TransportOutcome::Response(_)) | AuthError::Command(_) => {
             CardManagementFailure::BridgeError
         }
@@ -174,7 +175,7 @@ fn require_retry_floor<T: CardTransport>(
     slot: PinSlot,
 ) -> Result<(), CardManagementFailure> {
     let status = transport.pin_status(slot).map_err(map_auth_error)?;
-    check_retry_floor(slot, status).map_err(|_| CardManagementFailure::SafetyRefused)
+    check_retry_floor(slot.into(), status).map_err(|_| CardManagementFailure::SafetyRefused)
 }
 
 /// Execute change PIN1.
@@ -373,12 +374,13 @@ mod tests {
 
     use super::*;
     use refineid_apdu::{CommandApdu, CredentialCommand, PinRetries, ResponseApdu, StatusWord};
-    use refineid_auth::CardActivationNeeds;
+    use refineid_auth::{CardActivationNeeds, FlooredCredential};
 
     const SYNTHETIC_PIN1: &[u8] = b"1357";
     const SYNTHETIC_NEW_PIN1: &[u8] = b"2468";
     const SYNTHETIC_PIN2: &[u8] = b"135790";
     const SYNTHETIC_NEW_PIN2: &[u8] = b"246802";
+    const SYNTHETIC_PUK: &[u8] = b"97531864";
     const SERVED_RETRIES: u8 = 3;
     const BELOW_FLOOR_RETRIES: u8 = 2;
     const LAST_RETRY: u8 = 1;
@@ -506,6 +508,182 @@ mod tests {
         assert_eq!(result, Err(CardManagementFailure::TransportError));
         assert_eq!(transport.credential_calls, 1);
         assert!(transport.responses.is_empty());
+    }
+
+    /// The answer the citizen numbering gives the PIN 1 resolution probe
+    /// when the target PIN is blocked, as it is before an unblock.
+    const CITIZEN_TARGET_BLOCKED: StatusWord = StatusWord::AuthenticationBlocked;
+
+    /// Answers that resolve the citizen numbering, with the target PIN
+    /// served or blocked; the target PIN's counter does not gate the PUK.
+    fn citizen_resolutions() -> [Vec<StatusWord>; 2] {
+        [
+            vec![remaining(SERVED_RETRIES)],
+            vec![CITIZEN_TARGET_BLOCKED],
+        ]
+    }
+
+    /// Answers that resolve the organizational numbering: the citizen
+    /// reference is not found and the organizational one answers.
+    fn organizational_resolution() -> Vec<StatusWord> {
+        vec![StatusWord::ReferenceDataNotFound, remaining(SERVED_RETRIES)]
+    }
+
+    /// PUK counter answers the floor refuses under either numbering.
+    fn refused_puk_counters() -> [StatusWord; 4] {
+        [
+            remaining(BELOW_FLOOR_RETRIES),
+            remaining(LAST_RETRY),
+            remaining(NO_RETRIES),
+            StatusWord::AuthenticationBlocked,
+        ]
+    }
+
+    /// Every transcript, up to and including the PUK counter read, that
+    /// the floor refuses: low, exhausted and blocked counters under both
+    /// numberings and with the target PIN served or blocked; a citizen
+    /// probe reporting verified or no counter, whose PIN container read
+    /// carries no counter either; an organizational PUK reported verified
+    /// or answering without a counter.
+    fn refused_puk_transcripts() -> Vec<Vec<StatusWord>> {
+        let mut transcripts = Vec::new();
+        let resolutions = citizen_resolutions()
+            .into_iter()
+            .chain([organizational_resolution()]);
+        for resolution in resolutions {
+            for counter in refused_puk_counters() {
+                let mut transcript = resolution.clone();
+                transcript.push(counter);
+                transcripts.push(transcript);
+            }
+        }
+        for probe in [StatusWord::Success, StatusWord::AuthenticationFailed] {
+            let mut transcript = vec![remaining(SERVED_RETRIES)];
+            transcript.extend([probe, StatusWord::Success]);
+            transcripts.push(transcript);
+        }
+        for probe in [StatusWord::Success, StatusWord::AuthenticationFailed] {
+            let mut transcript = organizational_resolution();
+            transcript.push(probe);
+            transcripts.push(transcript);
+        }
+        transcripts
+    }
+
+    /// Transcripts the floor serves: the PUK at the floor under each
+    /// numbering, with the target PIN served or blocked.
+    fn served_puk_transcripts() -> Vec<Vec<StatusWord>> {
+        citizen_resolutions()
+            .into_iter()
+            .chain([organizational_resolution()])
+            .map(|mut transcript| {
+                transcript.push(remaining(SERVED_RETRIES));
+                transcript
+            })
+            .collect()
+    }
+
+    type Unblock = fn(
+        &mut ScriptedTransport,
+        Vec<u8>,
+        Vec<u8>,
+    ) -> Result<ManageOutcome, CardManagementFailure>;
+
+    /// Both unblock operations with a valid new PIN for the target.
+    fn unblocks() -> [(Unblock, &'static [u8]); 2] {
+        [
+            (unblock_pin1 as Unblock, SYNTHETIC_NEW_PIN1),
+            (unblock_pin2 as Unblock, SYNTHETIC_NEW_PIN2),
+        ]
+    }
+
+    #[test]
+    fn unblock_is_refused_below_the_puk_retry_floor_without_presenting_it() {
+        for (unblock, new_pin) in unblocks() {
+            for transcript in refused_puk_transcripts() {
+                let mut transport = ScriptedTransport::new(&transcript);
+
+                let result = unblock(&mut transport, SYNTHETIC_PUK.to_vec(), new_pin.to_vec());
+
+                assert_eq!(
+                    result,
+                    Err(CardManagementFailure::SafetyRefused),
+                    "{transcript:?}"
+                );
+                assert_eq!(transport.credential_calls, 0);
+                assert!(transport.responses.is_empty(), "{transcript:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn unblock_at_the_puk_floor_reaches_the_card() {
+        for (unblock, new_pin) in unblocks() {
+            for transcript in served_puk_transcripts() {
+                let mut transport = ScriptedTransport::new(&transcript);
+
+                let result = unblock(&mut transport, SYNTHETIC_PUK.to_vec(), new_pin.to_vec());
+
+                assert_eq!(result, Err(CardManagementFailure::TransportError));
+                assert_eq!(transport.credential_calls, 1);
+                assert!(transport.responses.is_empty());
+            }
+        }
+    }
+
+    /// Answers a citizen card awaiting activation by PUK gives before the
+    /// PUK counter read: the numbering probe, the PIN 1 status, and the
+    /// numbering and PIN 2 status probes, every PIN blocked.
+    const PUK_ACTIVATION_PREAMBLE: [StatusWord; 4] = [StatusWord::AuthenticationBlocked; 4];
+
+    fn activate_by_puk(
+        transport: &mut ScriptedTransport,
+    ) -> Result<ActivationReport, CardManagementFailure> {
+        activate_card(
+            transport,
+            ACTIVATION_SCHEME_PUK,
+            SYNTHETIC_PUK.to_vec(),
+            Some(SYNTHETIC_NEW_PIN1.to_vec()),
+            Some(SYNTHETIC_NEW_PIN2.to_vec()),
+        )
+    }
+
+    #[test]
+    fn activation_by_puk_is_refused_below_the_puk_retry_floor_without_presenting_it() {
+        for counter in refused_puk_counters() {
+            let mut transcript = PUK_ACTIVATION_PREAMBLE.to_vec();
+            transcript.push(counter);
+            let mut transport = ScriptedTransport::new(&transcript);
+
+            let result = activate_by_puk(&mut transport);
+
+            assert_eq!(result, Err(CardManagementFailure::SafetyRefused));
+            assert_eq!(transport.credential_calls, 0);
+            assert!(transport.responses.is_empty());
+        }
+    }
+
+    #[test]
+    fn activation_by_puk_at_the_puk_floor_reaches_the_card() {
+        let mut transcript = PUK_ACTIVATION_PREAMBLE.to_vec();
+        transcript.push(remaining(SERVED_RETRIES));
+        let mut transport = ScriptedTransport::new(&transcript);
+
+        let result = activate_by_puk(&mut transport);
+
+        assert_eq!(result, Err(CardManagementFailure::TransportError));
+        assert_eq!(transport.credential_calls, 1);
+        assert!(transport.responses.is_empty());
+    }
+
+    #[test]
+    fn a_retry_floor_refusal_maps_to_the_safety_refusal() {
+        let refusal = check_retry_floor(FlooredCredential::Puk, PinStatus::Locked)
+            .expect_err("a blocked PUK is refused");
+        assert_eq!(
+            map_auth_error::<&str>(AuthError::RetryFloor(refusal)),
+            CardManagementFailure::SafetyRefused
+        );
     }
 
     #[test]
