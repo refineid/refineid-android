@@ -2,6 +2,7 @@
 
 package fi.refineid.android.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -63,6 +64,7 @@ import fi.refineid.android.rapp.RappCardAnswer
 internal fun RappAuthorizationDialog(request: RappAuthRequest) {
     var pin by remember(request.requestId) { mutableStateOf("") }
     LaunchedEffect(request.requestId) { request.onShown() }
+    val text = rappPromptText(request)
     val isPinValid =
         when (request) {
             is RappAuthRequest.BrowserAuth -> Pin1Submission.isComplete(pin)
@@ -91,20 +93,17 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(
-                    text =
-                        when (request.action) {
-                            RappAuthAction.BROWSER_AUTH -> stringResource(R.string.authentication)
-                            RappAuthAction.DOCUMENT_SIGN -> stringResource(R.string.sign_document)
-                        },
+                    text = stringResource(text.title),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
 
-                RappPromptComputer(request.requester)
+                Text(
+                    text = stringResource(text.body, *text.bodyArgs.toTypedArray()),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
 
-                if (request is RappAuthRequest.DocumentSign) {
-                    RappDocumentNames(request.documentNames)
-                }
+                RappDocumentNames(text.listedDocuments)
 
                 request.wrongPin?.let { RappWrongPinNotice(it) }
 
@@ -121,14 +120,7 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                             pin = digits
                         }
                     },
-                    label = {
-                        Text(
-                            when (request.action) {
-                                RappAuthAction.BROWSER_AUTH -> stringResource(R.string.pin1)
-                                RappAuthAction.DOCUMENT_SIGN -> stringResource(R.string.pin2)
-                            },
-                        )
-                    },
+                    label = { Text(stringResource(text.pinLabel)) },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
@@ -146,14 +138,7 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                         },
                         modifier = Modifier.padding(end = 8.dp),
                     ) {
-                        // Browser auth: Cancel (no conceptual denial, just close).
-                        // Document sign: Deny (explicit refusal to sign).
-                        Text(
-                            when (request.action) {
-                                RappAuthAction.BROWSER_AUTH -> stringResource(R.string.cancel)
-                                RappAuthAction.DOCUMENT_SIGN -> stringResource(R.string.deny)
-                            },
-                        )
+                        Text(stringResource(R.string.cancel))
                     }
                     Button(
                         onClick = {
@@ -171,38 +156,11 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                         },
                         enabled = isPinValid,
                     ) {
-                        Text(
-                            when (request.action) {
-                                RappAuthAction.BROWSER_AUTH -> stringResource(R.string.proceed)
-                                RappAuthAction.DOCUMENT_SIGN -> stringResource(R.string.approve_and_sign)
-                            },
-                        )
+                        Text(stringResource(R.string.ok))
                     }
                 }
             }
         }
-    }
-}
-
-/** The paired computer that asked, under its label (core STPA CC-55). */
-@Suppress("FunctionName", "ktlint:standard:function-naming")
-@Composable
-private fun RappPromptComputer(name: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.rapp_prompt_computer),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = name,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
-        )
     }
 }
 
@@ -225,6 +183,41 @@ private fun RappWrongPinNotice(wrongPin: RappCardAnswer.WrongPin) {
         }
     }
 }
+
+/** The text a PIN prompt shows: title, the sentence naming the asking computer, and the PIN field label. */
+internal data class RappPromptText(
+    @param:StringRes val title: Int,
+    @param:StringRes val body: Int,
+    val bodyArgs: List<String>,
+    @param:StringRes val pinLabel: Int,
+    /** Documents listed under the sentence when it cannot name a single one. */
+    val listedDocuments: List<String>,
+)
+
+/** Selects the prompt text for [request]; the sentence names the document when exactly one is signed. */
+internal fun rappPromptText(request: RappAuthRequest): RappPromptText =
+    when (request) {
+        is RappAuthRequest.BrowserAuth -> {
+            RappPromptText(
+                title = R.string.authentication,
+                body = R.string.rapp_prompt_authenticate,
+                bodyArgs = listOf(request.requester),
+                pinLabel = R.string.pin1,
+                listedDocuments = emptyList(),
+            )
+        }
+
+        is RappAuthRequest.DocumentSign -> {
+            val single = request.documentNames.singleOrNull()
+            RappPromptText(
+                title = R.string.signature,
+                body = if (single == null) R.string.rapp_prompt_sign else R.string.rapp_prompt_sign_document,
+                bodyArgs = listOfNotNull(request.requester, single),
+                pinLabel = R.string.pin2,
+                listedDocuments = if (single == null) request.documentNames else emptyList(),
+            )
+        }
+    }
 
 /** The documents an approval signs, in signing order. */
 @Suppress("FunctionName", "ktlint:standard:function-naming")
