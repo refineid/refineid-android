@@ -194,7 +194,10 @@ internal data class RappPromptText(
     val listedDocuments: List<String>,
 )
 
-/** Selects the prompt text for [request]; the sentence names the document when exactly one is signed. */
+/**
+ * Selects the prompt text for [request]. The sentence names the paired computer (core STPA CC-85) and,
+ * when exactly one document with a name is signed, that document.
+ */
 internal fun rappPromptText(request: RappAuthRequest): RappPromptText =
     when (request) {
         is RappAuthRequest.BrowserAuth -> {
@@ -208,13 +211,13 @@ internal fun rappPromptText(request: RappAuthRequest): RappPromptText =
         }
 
         is RappAuthRequest.DocumentSign -> {
-            val single = request.documentNames.singleOrNull()
+            val single = request.documentNames.singleOrNull()?.takeIf { it.isNotBlank() }
             RappPromptText(
                 title = R.string.signature,
                 body = if (single == null) R.string.rapp_prompt_sign else R.string.rapp_prompt_sign_document,
                 bodyArgs = listOfNotNull(request.requester, single),
                 pinLabel = R.string.pin2,
-                listedDocuments = if (single == null) request.documentNames else emptyList(),
+                listedDocuments = request.documentNames.takeIf { it.size > 1 } ?: emptyList(),
             )
         }
     }

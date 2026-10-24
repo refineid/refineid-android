@@ -46,9 +46,20 @@ class RappPromptTextTest {
         val names = listOf(FIRST_DOCUMENT, SECOND_DOCUMENT)
         val text = rappPromptText(documentSign(names))
 
+        assertEquals(R.string.signature, text.title)
         assertEquals(R.string.rapp_prompt_sign, text.body)
         assertEquals(listOf(COMPUTER), text.bodyArgs)
+        assertEquals(R.string.pin2, text.pinLabel)
         assertEquals(names, text.listedDocuments)
+    }
+
+    @Test
+    fun aBlankDocumentNameLeavesTheSentenceWithoutOne() {
+        val text = rappPromptText(documentSign(listOf(BLANK_DOCUMENT)))
+
+        assertEquals(R.string.rapp_prompt_sign, text.body)
+        assertEquals(listOf(COMPUTER), text.bodyArgs)
+        assertTrue(text.listedDocuments.isEmpty())
     }
 
     private fun browserAuth() =
@@ -75,5 +86,6 @@ class RappPromptTextTest {
         const val COMPUTER = "Example Computer"
         const val FIRST_DOCUMENT = "contract.pdf"
         const val SECOND_DOCUMENT = "appendix.pdf"
+        const val BLANK_DOCUMENT = " "
     }
 }
