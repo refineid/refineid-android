@@ -86,6 +86,8 @@ internal class CcidUsbSession(
     private val exchange: CcidCommandExchange,
     private val sequenceCounter: CcidSequenceCounter,
     private val interruptIn: UsbEndpoint? = null,
+    /** What the card answered at reset, for the activation classification. */
+    private val cardAnswer: ByteArray = ByteArray(0),
 ) : AutoCloseable {
     private val ownerThread = Thread.currentThread()
     private val exchangeLevel =
@@ -219,14 +221,13 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        val result = NativeContactlessSession.connect(canBytes, nativeExchange)
+        val result = NativeContactlessSession.connect(canBytes, cardAnswer, nativeExchange)
         if (result is NativeContactlessOpenResult.Success) {
             contactlessSessionActive = true
             sessionMaterial.cacheAuthenticationCertificate(result.certificate)
             sessionMaterial.cachePin1Preflight(result.preflight)
         } else if (result is NativeContactlessOpenResult.ActivationRequired) {
             contactlessSessionActive = true
-            sessionMaterial.cacheAuthenticationCertificate(result.certificate)
         }
         return result
     }
@@ -708,7 +709,7 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return NativeCardManagement.probeCredentialHealth(exchangeLevel, nativeExchange)
+        return NativeCardManagement.probeCredentialHealth(exchangeLevel, cardAnswer, nativeExchange)
     }
 
     fun changePin1(
@@ -1052,9 +1053,13 @@ internal class CcidUsbSessionOpener(
                         bulkIo = AndroidCcidBulkIo(this, endpoints),
                         maximumMessageLength = descriptor.maximumMessageLength,
                     )
+                var answerToReset = ByteArray(0)
                 val activation =
                     CcidCardActivator(
-                        validateAtr = validateAtr,
+                        validateAtr = { atr ->
+                            answerToReset = atr.copyOf()
+                            validateAtr(atr)
+                        },
                         sequenceCounter = sequenceCounter,
                         hostPpsRequired = descriptor.hostPpsExchangeRequired,
                     ).activate(
@@ -1071,6 +1076,7 @@ internal class CcidUsbSessionOpener(
                                 exchange = exchange,
                                 sequenceCounter = sequenceCounter,
                                 interruptIn = endpoints.interruptIn,
+                                cardAnswer = answerToReset,
                             )
                         ownsConnection = false
                         isClaimed = false
@@ -1110,15 +1116,22 @@ internal class CcidUsbSessionOpener(
         }
     }
 
-    /** After a certificate is read successfully, check activation needs then PIN1 preflight. */
-    private fun preparePastCertificate(session: CcidUsbSession): CcidSessionOpenResult {
+    /**
+     * Whether the card still awaits activation, asked of its counters alone
+     * before any identity is read: a card awaiting activation has no
+     * identity, and nothing of it is read beyond those counters.
+     */
+    private fun awaitsActivation(session: CcidUsbSession): Boolean {
         val healthResult = session.probeCredentialHealth()
-        if (healthResult is fi.refineid.android.core.CardManagementResult.Success) {
-            AppTrace.credentialHealth(healthResult.value)
-            if (healthResult.value.activationNeeds.any) {
-                return CcidSessionOpenResult.ActivationRequired(session)
-            }
+        if (healthResult !is fi.refineid.android.core.CardManagementResult.Success) {
+            return false
         }
+        AppTrace.credentialHealth(healthResult.value)
+        return healthResult.value.activationNeeds.any
+    }
+
+    /** After a certificate is read successfully, the PIN1 preflight. */
+    private fun preparePastCertificate(session: CcidUsbSession): CcidSessionOpenResult {
         return when (val preflight = session.cachePin1Preflight()) {
             is NativePin1PreflightResult.Success -> {
                 CcidSessionOpenResult.Ready(session)
@@ -1136,45 +1149,53 @@ internal class CcidUsbSessionOpener(
         }
     }
 
+    /** The certificate read of an activated card, then the PIN1 preflight. */
+    private fun prepareWithCertificate(session: CcidUsbSession): CcidSessionOpenResult =
+        when (val result = session.cacheAuthenticationCertificate()) {
+            is NativeCertificateReadResult.Success -> {
+                preparePastCertificate(session)
+            }
+
+            is NativeCertificateReadResult.Failure -> {
+                when (result.kind) {
+                    NativeCertificateReadFailure.ACTIVATION_REQUIRED -> {
+                        CcidSessionOpenResult.ActivationRequired(session)
+                    }
+
+                    NativeCertificateReadFailure.CARD_UNAVAILABLE -> {
+                        CcidSessionOpenResult.NoCard
+                    }
+
+                    NativeCertificateReadFailure.REJECTED,
+                    NativeCertificateReadFailure.INVALID_CERTIFICATE,
+                    -> {
+                        CcidSessionOpenResult.CardError
+                    }
+
+                    NativeCertificateReadFailure.TRANSPORT_ERROR,
+                    NativeCertificateReadFailure.PACE_REJECTED,
+                    NativeCertificateReadFailure.BRIDGE_ERROR,
+                    -> {
+                        CcidSessionOpenResult.TransportError
+                    }
+                }
+            }
+        }
+
     private fun prepareSession(session: CcidUsbSession): CcidSessionOpenResult {
         var retainSession = false
         return try {
             when (session.selectPkcs15Application()) {
                 NativeCardOperationResult.SUCCEEDED -> {
-                    when (val result = session.cacheAuthenticationCertificate()) {
-                        is NativeCertificateReadResult.Success -> {
-                            preparePastCertificate(session).also { result ->
-                                if (result is CcidSessionOpenResult.Ready ||
-                                    result is CcidSessionOpenResult.ActivationRequired
-                                ) {
-                                    retainSession = true
-                                }
-                            }
-                        }
-
-                        is NativeCertificateReadResult.Failure -> {
-                            when (result.kind) {
-                                NativeCertificateReadFailure.ACTIVATION_REQUIRED -> {
-                                    retainSession = true
-                                    CcidSessionOpenResult.ActivationRequired(session)
-                                }
-
-                                NativeCertificateReadFailure.CARD_UNAVAILABLE -> {
-                                    CcidSessionOpenResult.NoCard
-                                }
-
-                                NativeCertificateReadFailure.REJECTED,
-                                NativeCertificateReadFailure.INVALID_CERTIFICATE,
-                                -> {
-                                    CcidSessionOpenResult.CardError
-                                }
-
-                                NativeCertificateReadFailure.TRANSPORT_ERROR,
-                                NativeCertificateReadFailure.PACE_REJECTED,
-                                NativeCertificateReadFailure.BRIDGE_ERROR,
-                                -> {
-                                    CcidSessionOpenResult.TransportError
-                                }
+                    if (awaitsActivation(session)) {
+                        retainSession = true
+                        CcidSessionOpenResult.ActivationRequired(session)
+                    } else {
+                        prepareWithCertificate(session).also { result ->
+                            if (result is CcidSessionOpenResult.Ready ||
+                                result is CcidSessionOpenResult.ActivationRequired
+                            ) {
+                                retainSession = true
                             }
                         }
                     }

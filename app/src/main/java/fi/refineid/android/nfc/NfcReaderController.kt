@@ -747,18 +747,28 @@ internal class NfcReaderController(
 
     private fun handleOpenActivationRequired(
         generation: Int,
-        opened: NativeContactlessOpenResult.ActivationRequired,
         canBytes: ByteArray,
         pin1: Pin1Submission?,
         isoDep: IsoDep,
         material: NativeCardSessionMaterial,
     ) {
         CanSessionStore.remember(String(canBytes, Charsets.US_ASCII))
-        val (cardDetails, holderName) = extractCardDetails(opened)
-        currentAuthCertDer = opened.certificate.copyDer()
         pin1?.close()
-        primedCanStore.clear()
-        primedCardStored = false
+        // PACE proved the access number against this card, so it is kept
+        // from here on, activated or not: the holder is not asked for it
+        // again at the activation tap, and a mismatch on a later tap
+        // forgets it as for any card. A card awaiting activation has no
+        // identity: nothing of it was read, and whatever an earlier card
+        // left in memory or in the store goes, so no name is shown and no
+        // identity is offered to a paired computer until an activated open
+        // reads the certificate.
+        currentAuthCertDer = null
+        rememberedHolderName = null
+        rememberedDetails = null
+        primedCanStore.write(canBytes.copyOf())
+        primedCanStore.writeHolderName(null)
+        primedCanStore.writeAuthCertificateDer(null)
+        primedCardStored = true
         activeSession =
             ContactlessSession(
                 isoDep = isoDep,
@@ -768,12 +778,7 @@ internal class NfcReaderController(
             )
         activeProviderGeneration = providerGenerationRandom.nextProviderGeneration()
         feedback.onCardSuccess()
-        publishAsync(
-            generation,
-            NfcReaderStatus.ACTIVATION_REQUIRED,
-            holderName = holderName,
-            cardDetails = cardDetails,
-        )
+        publishAsync(generation, NfcReaderStatus.ACTIVATION_REQUIRED, holderName = null, cardDetails = null)
     }
 
     private fun handleOpenFailure(
@@ -862,7 +867,7 @@ internal class NfcReaderController(
             }
             val exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep))
             val material = NativeCardSessionMaterial()
-            val opened = NativeContactlessSession.connect(canBytes.copyOf(), exchange)
+            val opened = NativeContactlessSession.connect(canBytes.copyOf(), isoDep.cardAnswer(), exchange)
             when (opened) {
                 is NativeContactlessOpenResult.Success -> {
                     material.cacheAuthenticationCertificate(opened.certificate)
@@ -877,9 +882,8 @@ internal class NfcReaderController(
                 }
 
                 is NativeContactlessOpenResult.ActivationRequired -> {
-                    material.cacheAuthenticationCertificate(opened.certificate)
                     if (generation == probeGeneration) {
-                        handleOpenActivationRequired(generation, opened, canBytes, pin1, isoDep, material)
+                        handleOpenActivationRequired(generation, canBytes, pin1, isoDep, material)
                     } else {
                         canBytes.fill(0)
                         pin1?.close()
@@ -900,7 +904,7 @@ internal class NfcReaderController(
         val certificate =
             when (opened) {
                 is NativeContactlessOpenResult.Success -> opened.certificate
-                is NativeContactlessOpenResult.ActivationRequired -> opened.certificate
+                is NativeContactlessOpenResult.ActivationRequired -> null
                 is NativeContactlessOpenResult.Failure -> null
             }
         val holderNameFromCert = certificate?.let(CertificateHolderName::fromCertificate)

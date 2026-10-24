@@ -7,6 +7,7 @@
 
 #![allow(deprecated)]
 
+mod activation_scheme;
 mod authentication_signer;
 mod card_access;
 mod card_certificate;
@@ -293,6 +294,7 @@ const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeContactlessCore",
     static extern fn contactless_open_native(
         can: [jbyte],
+        card_answer: [jbyte],
         callback: JObject,
     ) -> [jbyte],
 };
@@ -340,6 +342,7 @@ const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeContactlessSession",
     static extern fn contactless_connect_native(
         can: [jbyte],
+        card_answer: [jbyte],
         callback: JObject,
     ) -> [jbyte],
 };
@@ -363,6 +366,7 @@ const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeCardManagement",
     static extern fn probe_credential_health_native(
         exchange_level: jint,
+        card_answer: [jbyte],
         callback: JObject,
     ) -> [jbyte],
 };
@@ -423,6 +427,7 @@ const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeCardManagement",
     static extern fn contactless_probe_credential_health_native(
         can: [jbyte],
+        card_answer: [jbyte],
         callback: JObject,
     ) -> [jbyte],
 };
@@ -611,14 +616,16 @@ fn contactless_open_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
     can: JByteArray<'local>,
+    card_answer: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
     let can_bytes = take_secret_bytes(env, &can)?;
+    let card_answer = env.convert_byte_array(&card_answer)?;
 
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
-        let (result, exchange) = contactless_open(transport, can_bytes);
+        let (result, exchange) = contactless_open(transport, can_bytes, card_answer);
         (result, exchange.bridge_failed())
     };
 
@@ -640,14 +647,16 @@ fn contactless_connect_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
     can: JByteArray<'local>,
+    card_answer: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
     let can_bytes = take_secret_bytes(env, &can)?;
+    let card_answer = env.convert_byte_array(&card_answer)?;
 
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
-        let (result, exchange) = contactless_connect(transport, can_bytes);
+        let (result, exchange) = contactless_connect(transport, can_bytes, card_answer);
         (result, exchange.bridge_failed())
     };
 
@@ -1083,8 +1092,10 @@ fn probe_credential_health_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
     exchange_level: jint,
+    card_answer: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
+    let card_answer = env.convert_byte_array(&card_answer)?;
     let Some(level) = exchange_level_from_jint(exchange_level) else {
         return env.byte_array_from_slice(&[card_management::MANAGEMENT_TAG_BRIDGE_ERROR]);
     };
@@ -1092,7 +1103,7 @@ fn probe_credential_health_native<'local>(
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let mut transport = AndroidCardTransport::new(exchange, level);
-        let result = card_management::probe_credential_health(&mut transport);
+        let result = card_management::probe_credential_health(&mut transport, &card_answer);
         let exchange = transport.into_exchange();
         (result, exchange.bridge_failed())
     };
@@ -1333,14 +1344,16 @@ fn contactless_probe_credential_health_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
     can: JByteArray<'local>,
+    card_answer: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
     let can_bytes = take_secret_bytes(env, &can)?;
+    let card_answer = env.convert_byte_array(&card_answer)?;
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
         let (result, exchange) =
-            contactless::contactless_probe_credential_health(transport, can_bytes);
+            contactless::contactless_probe_credential_health(transport, can_bytes, card_answer);
         (result, exchange.bridge_failed())
     };
 
@@ -2016,7 +2029,9 @@ fn encode_certificate_reply(result: Result<CardCertificate, CertificateReadFailu
 
 /// The contactless open reply nests the two established vocabularies:
 /// `[CERTIFICATE_SUCCEEDED, preflight-reply length, preflight reply,
-/// certificate reply]` on success, or one certificate-vocabulary failure
+/// certificate reply]` on success, `[CERTIFICATE_ACTIVATION_REQUIRED,
+/// activation scheme, activation needs]` for a card awaiting activation,
+/// whose identity is not read, or one certificate-vocabulary failure
 /// byte. Kotlin splits the wrapper and reuses both strict sub-decoders.
 fn encode_contactless_open_reply(outcome: ContactlessOpenOutcome) -> Vec<u8> {
     match outcome {
@@ -2032,11 +2047,11 @@ fn encode_contactless_open_reply(outcome: ContactlessOpenOutcome) -> Vec<u8> {
             reply.append(&mut certificate_reply);
             reply
         }
-        ContactlessOpenOutcome::ActivationRequired(certificate) => {
-            let mut certificate_reply = encode_certificate_reply(Ok(certificate));
-            certificate_reply[0] = CERTIFICATE_ACTIVATION_REQUIRED;
-            certificate_reply
-        }
+        ContactlessOpenOutcome::ActivationRequired(scheme, needs) => vec![
+            CERTIFICATE_ACTIVATION_REQUIRED,
+            card_management::activation_scheme_byte(scheme),
+            card_management::activation_needs_byte(needs),
+        ],
         ContactlessOpenOutcome::Failure(failure) => encode_certificate_reply(Err(failure)),
     }
 }
@@ -2233,6 +2248,8 @@ mod tests {
     use refineid_atr::{Convention, MINIMAL_DIRECT_ATR};
     use refineid_auth::PinReferenceScheme;
     use refineid_pkcs15::Pkcs15Error;
+
+    use crate::card_management;
     use refineid_sign::{ECDSA_P384_SIG_BYTES, RSA_3072_SIG_BYTES};
 
     use super::{
@@ -2253,22 +2270,21 @@ mod tests {
         CARD_OPERATION_SUCCEEDED, CARD_OPERATION_TRANSPORT_ERROR, CERTIFICATE_ACTIVATION_REQUIRED,
         CERTIFICATE_CARD_UNAVAILABLE, CERTIFICATE_INVALID, CERTIFICATE_PACE_REJECTED,
         CERTIFICATE_REPLY_HEADER_LENGTH, CERTIFICATE_SUCCEEDED, ContactlessOpenOutcome,
-        EXCHANGE_LEVEL_APDU, EXCHANGE_LEVEL_T0_TPDU, KEY_PROFILE_ECDSA_P256, KEY_PROFILE_RSA_2048,
-        NO_RETRY_COUNT, PIN_REFERENCE_CITIZEN, PIN1_PREFLIGHT_BRIDGE_ERROR,
-        PIN1_PREFLIGHT_CARD_UNAVAILABLE, PIN1_PREFLIGHT_REPLY_LENGTH,
-        PIN1_PREFLIGHT_REPLY_LENGTH_BYTE, PIN1_PREFLIGHT_SUCCEEDED, PIN1_STATE_REMAINING,
-        PIN2_PREFLIGHT_BRIDGE_ERROR, PIN2_PREFLIGHT_CARD_UNAVAILABLE, PIN2_PREFLIGHT_REPLY_LENGTH,
-        PIN2_PREFLIGHT_SUCCEEDED, PIN2_STATE_REMAINING, POLICY_PERMITTED, PUBLISHED_PROFILE_ABSENT,
-        PUBLISHED_PROFILE_PRESENT, QUALIFIED_ALGORITHM_ECDSA_P384_SHA384,
-        QUALIFIED_ALGORITHM_RSA_PKCS1_SHA384, QUALIFIED_PREHASHED_ECDSA_P384_SHA384,
-        QUALIFIED_PREHASHED_RSA_PKCS1_SHA384, QUALIFIED_SIGNATURE_CARD_UNAVAILABLE,
-        QUALIFIED_SIGNATURE_REPLY_HEADER_LENGTH, QUALIFIED_SIGNATURE_SUCCEEDED,
-        QUALIFIED_SIGNATURE_WRONG_PIN, authentication_algorithm_from_jint,
-        authentication_request_from_jint, encode_authentication_signature_reply,
-        encode_card_access_reply, encode_certificate_reply, encode_contactless_open_reply,
-        encode_pin1_preflight_reply, encode_pin2_preflight_reply, encode_qualified_signature_reply,
-        exchange_level_from_jint, map_pkcs15_selection_result, qualified_algorithm_from_jint,
-        qualified_request_from_jint, validate_atr_bytes,
+        EXCHANGE_LEVEL_APDU, EXCHANGE_LEVEL_T0_TPDU, KEY_PROFILE_RSA_2048, NO_RETRY_COUNT,
+        PIN_REFERENCE_CITIZEN, PIN1_PREFLIGHT_BRIDGE_ERROR, PIN1_PREFLIGHT_CARD_UNAVAILABLE,
+        PIN1_PREFLIGHT_REPLY_LENGTH, PIN1_PREFLIGHT_REPLY_LENGTH_BYTE, PIN1_PREFLIGHT_SUCCEEDED,
+        PIN1_STATE_REMAINING, PIN2_PREFLIGHT_BRIDGE_ERROR, PIN2_PREFLIGHT_CARD_UNAVAILABLE,
+        PIN2_PREFLIGHT_REPLY_LENGTH, PIN2_PREFLIGHT_SUCCEEDED, PIN2_STATE_REMAINING,
+        POLICY_PERMITTED, PUBLISHED_PROFILE_ABSENT, PUBLISHED_PROFILE_PRESENT,
+        QUALIFIED_ALGORITHM_ECDSA_P384_SHA384, QUALIFIED_ALGORITHM_RSA_PKCS1_SHA384,
+        QUALIFIED_PREHASHED_ECDSA_P384_SHA384, QUALIFIED_PREHASHED_RSA_PKCS1_SHA384,
+        QUALIFIED_SIGNATURE_CARD_UNAVAILABLE, QUALIFIED_SIGNATURE_REPLY_HEADER_LENGTH,
+        QUALIFIED_SIGNATURE_SUCCEEDED, QUALIFIED_SIGNATURE_WRONG_PIN,
+        authentication_algorithm_from_jint, authentication_request_from_jint,
+        encode_authentication_signature_reply, encode_card_access_reply, encode_certificate_reply,
+        encode_contactless_open_reply, encode_pin1_preflight_reply, encode_pin2_preflight_reply,
+        encode_qualified_signature_reply, exchange_level_from_jint, map_pkcs15_selection_result,
+        qualified_algorithm_from_jint, qualified_request_from_jint, validate_atr_bytes,
     };
     use crate::authentication_signer::{
         AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
@@ -2680,19 +2696,21 @@ mod tests {
             ]
             .concat()
         );
-        let activation_required = encode_contactless_open_reply(
-            ContactlessOpenOutcome::ActivationRequired(CardCertificate::new(
-                CardKeyProfile::EcdsaP256,
-                CertificateDer::from_validated(SYNTHETIC_DER.to_vec()),
-            )),
-        );
+        let activation_required =
+            encode_contactless_open_reply(ContactlessOpenOutcome::ActivationRequired(
+                refineid_auth::ActivationScheme::PresetActivationPin,
+                refineid_auth::CardActivationNeeds {
+                    pin1: false,
+                    pin2: true,
+                },
+            ));
         assert_eq!(
             activation_required,
             [
-                &[CERTIFICATE_ACTIVATION_REQUIRED, KEY_PROFILE_ECDSA_P256],
-                SYNTHETIC_DER,
+                CERTIFICATE_ACTIVATION_REQUIRED,
+                card_management::ACTIVATION_SCHEME_PRESET,
+                card_management::ACTIVATION_NEEDS_PIN2_ONLY,
             ]
-            .concat()
         );
         assert_eq!(
             encode_contactless_open_reply(ContactlessOpenOutcome::Failure(

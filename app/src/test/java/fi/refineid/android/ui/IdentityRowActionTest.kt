@@ -7,6 +7,20 @@ import org.junit.Test
 
 class IdentityRowActionTest {
     @Test
+    fun identityRowOpensActivationWhateverElseHolds() {
+        assertEquals(
+            IdentityRowAction.ACTIVATE_CARD,
+            identityRowAction(
+                hasHolder = true,
+                usbCanRequested = true,
+                hasNfc = true,
+                usbReaderPresent = true,
+                activationRequired = true,
+            ),
+        )
+    }
+
+    @Test
     fun identityRowOffersNoTapWithHolder() {
         assertEquals(
             IdentityRowAction.NOTHING,

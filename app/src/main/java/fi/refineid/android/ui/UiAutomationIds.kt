@@ -71,7 +71,6 @@ internal object UiAutomationIds {
     const val DIAGNOSTICS_SCREEN = "diagnosticsScreen"
     const val COPY_REPORT_ACTION = "copyReportAction"
     const val CLEAR_LOGS_ACTION = "clearLogsAction"
-    const val ACTIVATION_BANNER = "activationBanner"
     const val ACTIVATION_BUTTON = "activationButton"
     const val ACTIVATION_CODE_FIELD = "managementActivationCode"
     const val ACTIVATION_NEW_PIN1_FIELD = "managementNewPin1"

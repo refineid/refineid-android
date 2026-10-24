@@ -92,12 +92,9 @@
     <string name="report_copied">Diagnostikrapporten har kopierats till urklipp</string>
     <string name="clear_logs">Rensa loggar</string>
     <string name="card_not_activated">Kortet är inte aktiverat</string>
-    <string name="card_not_activated_named">Kortet för %1$s är inte aktiverat</string>
-    <string name="cards_not_activated_multiple">Korten är inte aktiverade: %1$s</string>
     <string name="card_transport_usb">USB-kort</string>
     <string name="card_transport_nfc">Kontaktlöst kort</string>
     <string name="card_switch_reader">Byt läsare</string>
-    <string name="card_activation_needed_description">Kortet måste aktiveras innan det kan användas för identifiering eller elektronisk underskrift.</string>
     <string name="show_pin">Visa PIN-kod</string>
     <string name="hide_pin">Dölj PIN-kod</string>
     <string name="pins_do_not_match">PIN-koderna stämmer inte överens</string>

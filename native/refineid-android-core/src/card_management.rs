@@ -16,12 +16,13 @@
 
 use refineid_apdu::{CardTransport, TransportOutcome};
 use refineid_auth::{
-    ActivationCode, ActivationReport, ActivationScheme, AuthError, CredentialHealthReport,
-    ManageOutcome, Pin1, Pin2, PinManageOps, PinOps, PinReferenceScheme, PinSlot, PinStatus, Puk,
-    UnvalidatedSecret, check_retry_floor,
+    ActivationCode, ActivationReport, ActivationScheme, AuthError, CardActivationNeeds,
+    CredentialHealthReport, ManageOutcome, Pin1, Pin2, PinManageOps, PinOps, PinReferenceScheme,
+    PinSlot, PinStatus, Puk, UnvalidatedSecret, check_retry_floor,
 };
 
-use crate::card_certificate::{CardKeyProfile, read_authentication_certificate};
+use crate::activation_scheme::{classify_activation_scheme, classify_by_card_answer};
+use crate::card_certificate::read_authentication_certificate;
 
 pub(crate) const MANAGEMENT_TAG_BRIDGE_ERROR: u8 = 0;
 pub(crate) const MANAGEMENT_TAG_SUCCEEDED: u8 = 1;
@@ -94,26 +95,54 @@ fn encode_pin_status(status: PinStatus) -> (u8, u8) {
     }
 }
 
+/// The activation scheme of the card on `transport`, from its
+/// authentication certificate (`activation_scheme`), or nothing for a card
+/// whose scheme must not be guessed.
 fn detect_activation_scheme<T: CardTransport>(transport: &mut T) -> Option<ActivationScheme> {
-    if let Ok(cert) = read_authentication_certificate(transport) {
-        match cert.profile() {
-            CardKeyProfile::Rsa2048 | CardKeyProfile::Rsa3072 => {
-                Some(ActivationScheme::ActivationCodeIsPuk)
-            }
-            CardKeyProfile::EcdsaP256 | CardKeyProfile::EcdsaP384 => {
-                Some(ActivationScheme::PresetActivationPin)
-            }
-        }
-    } else {
-        None
+    read_authentication_certificate(transport)
+        .ok()
+        .and_then(|certificate| classify_activation_scheme(certificate.der().as_bytes()))
+}
+
+/// The wire byte of an activation scheme, or of none.
+pub(crate) const fn activation_scheme_byte(scheme: ActivationScheme) -> u8 {
+    match scheme {
+        ActivationScheme::ActivationCodeIsPuk => ACTIVATION_SCHEME_PUK,
+        ActivationScheme::PresetActivationPin => ACTIVATION_SCHEME_PRESET,
+    }
+}
+
+/// The wire byte of which PINs still await activation.
+pub(crate) const fn activation_needs_byte(needs: CardActivationNeeds) -> u8 {
+    match (needs.pin1, needs.pin2) {
+        (true, true) => ACTIVATION_NEEDS_BOTH,
+        (true, false) => ACTIVATION_NEEDS_PIN1_ONLY,
+        (false, true) => ACTIVATION_NEEDS_PIN2_ONLY,
+        (false, false) => ACTIVATION_NEEDS_NONE,
     }
 }
 
 /// Execute credential health probe on `transport`.
+/// The activation scheme a wire byte names, or none.
+pub(crate) const fn activation_scheme_from_byte(byte: u8) -> Option<ActivationScheme> {
+    match byte {
+        ACTIVATION_SCHEME_PUK => Some(ActivationScheme::ActivationCodeIsPuk),
+        ACTIVATION_SCHEME_PRESET => Some(ActivationScheme::PresetActivationPin),
+        _ => None,
+    }
+}
+
+/// The health probe under the activation scheme the card's answer to
+/// reset names, so a card awaiting activation has nothing read beyond its
+/// counters. An answer that names none belongs to a card opened as an
+/// activated one, and the scheme is then read from its certificate for
+/// the report's sake.
 pub(crate) fn probe_credential_health<T: CardTransport>(
     transport: &mut T,
+    card_answer: &[u8],
 ) -> Result<CredentialHealthReport, CardManagementFailure> {
-    let scheme = detect_activation_scheme(transport);
+    let scheme =
+        classify_by_card_answer(card_answer).or_else(|| detect_activation_scheme(transport));
     transport
         .probe_credential_health(scheme)
         .map_err(map_auth_error)
@@ -132,20 +161,12 @@ pub(crate) fn encode_credential_health_reply(
                 PinReferenceScheme::Citizen => SCHEME_CITIZEN,
                 PinReferenceScheme::Organizational => SCHEME_ORGANIZATIONAL,
             };
-            let act_scheme_byte = match report.activation_scheme {
-                Some(ActivationScheme::ActivationCodeIsPuk) => ACTIVATION_SCHEME_PUK,
-                Some(ActivationScheme::PresetActivationPin) => ACTIVATION_SCHEME_PRESET,
-                None => ACTIVATION_SCHEME_UNKNOWN,
-            };
-            let act_needs_byte = match report.activation_needs {
-                Some(needs) => match (needs.pin1, needs.pin2) {
-                    (true, true) => ACTIVATION_NEEDS_BOTH,
-                    (true, false) => ACTIVATION_NEEDS_PIN1_ONLY,
-                    (false, true) => ACTIVATION_NEEDS_PIN2_ONLY,
-                    (false, false) => ACTIVATION_NEEDS_NONE,
-                },
-                None => ACTIVATION_NEEDS_NONE,
-            };
+            let act_scheme_byte = report
+                .activation_scheme
+                .map_or(ACTIVATION_SCHEME_UNKNOWN, activation_scheme_byte);
+            let act_needs_byte = report
+                .activation_needs
+                .map_or(ACTIVATION_NEEDS_NONE, activation_needs_byte);
             vec![
                 MANAGEMENT_TAG_SUCCEEDED,
                 p1_state,
@@ -291,13 +312,19 @@ pub(crate) fn activate_card<T: CardTransport>(
     mut new_pin1_bytes: Option<Vec<u8>>,
     mut new_pin2_bytes: Option<Vec<u8>>,
 ) -> Result<ActivationReport, CardManagementFailure> {
-    let scheme = match scheme_byte {
-        ACTIVATION_SCHEME_PUK => ActivationScheme::ActivationCodeIsPuk,
-        ACTIVATION_SCHEME_PRESET => ActivationScheme::PresetActivationPin,
-        _ => {
-            // Auto-detect if unspecified
-            detect_activation_scheme(transport).unwrap_or(ActivationScheme::PresetActivationPin)
+    // The caller names the scheme the open found; without one there is no
+    // activation attempt, since the entry's length and the command it rides
+    // on both depend on the scheme and a wrong guess spends a try, and a
+    // card awaiting activation has nothing read to find it.
+    let Some(scheme) = activation_scheme_from_byte(scheme_byte) else {
+        code_bytes.fill(0);
+        if let Some(bytes) = new_pin1_bytes.as_mut() {
+            bytes.fill(0);
         }
+        if let Some(bytes) = new_pin2_bytes.as_mut() {
+            bytes.fill(0);
+        }
+        return Err(CardManagementFailure::SafetyRefused);
     };
 
     let code_sec = UnvalidatedSecret::from_owned_bytes(code_bytes.clone());

@@ -213,30 +213,27 @@ internal fun MainScreen(
     val usbActivationRequired = snapshot.status == ReaderConnectionStatus.ACTIVATION_REQUIRED
     val nfcActivationRequired = nfcSnapshot.status == NfcReaderStatus.ACTIVATION_REQUIRED
     val isActivationRequired = usbActivationRequired || nfcActivationRequired
-    val isMultipleUnactivated = usbActivationRequired && nfcActivationRequired
-
-    val unactivatedCardLabel =
-        when {
-            isMultipleUnactivated -> {
-                val usbLabel = snapshot.holderName ?: stringResource(R.string.card_transport_usb)
-                val nfcLabel = nfcSnapshot.holderName ?: stringResource(R.string.card_transport_nfc)
-                "$usbLabel, $nfcLabel"
-            }
-
-            usbActivationRequired -> {
-                snapshot.holderName ?: stringResource(R.string.card_transport_usb)
-            }
-
-            nfcActivationRequired -> {
-                nfcSnapshot.holderName ?: stringResource(R.string.card_transport_nfc)
-            }
-
-            else -> {
-                null
-            }
-        }
 
     var destination by rememberSaveable { mutableStateOf(MainDestination.HOME) }
+
+    // A card awaiting activation shows the activation form in place of the
+    // home screen, as on the iPhone, from the first frame; a holder who
+    // leaves the form sees the home screen, whose identity row leads back.
+    var activationDismissed by rememberSaveable { mutableStateOf(false) }
+    // The choice to leave the form is forgotten when the card's reading
+    // stops saying activation, not on a first reading that has not said it
+    // yet, as after the activity is recreated and the reader reconnects.
+    var activationWasRequired by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(isActivationRequired) {
+        if (!isActivationRequired && activationWasRequired) activationDismissed = false
+        activationWasRequired = isActivationRequired
+    }
+    val shownDestination =
+        if (isActivationRequired && !activationDismissed && destination == MainDestination.HOME) {
+            MainDestination.CARD_MANAGEMENT
+        } else {
+            destination
+        }
 
     // Signing follows the one-transport rule: a wired reader signs on
     // its open session, while a contactless card is never assumed
@@ -246,8 +243,13 @@ internal fun MainScreen(
             nfcSnapshot.status != NfcReaderStatus.NOT_AVAILABLE &&
             nfcSnapshot.status != NfcReaderStatus.TURNED_OFF
     val remoteSigningAvailable = !hasNfc && remoteHolderName != null
+    // Signing needs an identity this phone has read from an activated card,
+    // as on the iPhone, where the drop area appears with the identity: a
+    // reader with an open card, a contactless card whose holder is known,
+    // or a remote card with a holder.
     val signingAvailable =
-        (usbCardReady || nfcSigningAvailable || remoteSigningAvailable) && !isActivationRequired
+        !isActivationRequired &&
+            (usbCardReady || (nfcSigningAvailable && nfcSnapshot.holderName != null) || remoteSigningAvailable)
 
     val permissionContext = LocalContext.current
     val notificationPermissionLauncher =
@@ -304,9 +306,10 @@ internal fun MainScreen(
             }
         }
 
-    BackHandler(enabled = destination != MainDestination.HOME) {
+    BackHandler(enabled = shownDestination != MainDestination.HOME) {
         rappPairingModel?.reset()
         validationUri = null
+        if (isActivationRequired) activationDismissed = true
         destination = MainDestination.HOME
     }
 
@@ -417,7 +420,7 @@ internal fun MainScreen(
         ) &&
             !isActivationRequired
 
-    when (destination) {
+    when (shownDestination) {
         MainDestination.HOME -> {
             HomeScreen(
                 signingAvailable = signingAvailable,
@@ -426,8 +429,6 @@ internal fun MainScreen(
                 hasNfc = hasNfc,
                 usbReaderPresent = usbReaderPresent,
                 isActivationRequired = isActivationRequired,
-                unactivatedCardLabel = unactivatedCardLabel,
-                isMultipleUnactivated = isMultipleUnactivated,
                 cards = cardItems,
                 onForgetIdentity = forgetIdentity,
                 onWrongPin = onAuthenticationRejected ?: performFullIdentityReset,
@@ -563,7 +564,10 @@ internal fun MainScreen(
                         if (effectiveActivationRequired) R.string.card_activation else R.string.card_pins,
                     ),
                 tag = "CardManagementScreen",
-                onBack = { destination = MainDestination.HOME },
+                onBack = {
+                    if (isActivationRequired) activationDismissed = true
+                    destination = MainDestination.HOME
+                },
             ) {
                 CardManagementScreen(
                     cardManagementService =
@@ -646,8 +650,6 @@ private fun HomeScreen(
     hasNfc: Boolean = true,
     usbReaderPresent: Boolean,
     isActivationRequired: Boolean = false,
-    unactivatedCardLabel: String? = null,
-    isMultipleUnactivated: Boolean = false,
     cards: List<CardIdentityItem> = emptyList(),
     onForgetIdentity: (() -> Unit)?,
     onWrongPin: (() -> Unit)? = null,
@@ -692,14 +694,6 @@ private fun HomeScreen(
                     ),
             verticalArrangement = Arrangement.spacedBy(SCREEN_ITEM_SPACING),
         ) {
-            if (isActivationRequired) {
-                ActivationBanner(
-                    cardLabel = unactivatedCardLabel,
-                    isMultiple = isMultipleUnactivated,
-                    onActivate = onOpenCardManagement,
-                )
-            }
-
             Section(stringResource(R.string.section_document)) {
                 NavigationGroup {
                     NavigationRow(
@@ -778,6 +772,7 @@ private fun HomeScreen(
                 onForget = onForgetIdentity,
                 onReadCard = onReadCard,
                 onOpenPairing = onOpenPairing,
+                onOpenActivation = onOpenCardManagement,
                 pinCache = pinCache,
                 cards = cards,
                 onRequestUsbCan = onRequestUsbCan,
@@ -838,6 +833,7 @@ private fun IdentitySection(
     onForget: (() -> Unit)?,
     onReadCard: (CanSubmission) -> Unit,
     onOpenPairing: () -> Unit = {},
+    onOpenActivation: () -> Unit = {},
     pinCache: AuthenticationPinCache? = null,
     cards: List<CardIdentityItem> = emptyList(),
     onRequestUsbCan: (() -> Unit)? = null,
@@ -849,6 +845,7 @@ private fun IdentitySection(
             usbCanRequested = onRequestUsbCan != null,
             hasNfc = hasNfc,
             usbReaderPresent = usbReaderPresent,
+            activationRequired = isActivationRequired,
         )
 
     Section(stringResource(R.string.section_identity)) {
@@ -875,6 +872,7 @@ private fun IdentitySection(
                     pinCache = pinCache,
                     onForget = onForget,
                     onOpenPairing = onOpenPairing,
+                    onOpenActivation = onOpenActivation,
                     onShowNfcRead = {
                         val currentCan = CanSessionStore.currentCan
                         if (currentCan != null) {
@@ -907,6 +905,7 @@ private fun SingleIdentityRow(
     pinCache: AuthenticationPinCache?,
     onForget: (() -> Unit)?,
     onOpenPairing: () -> Unit,
+    onOpenActivation: () -> Unit,
     onShowNfcRead: () -> Unit,
     onRequestUsbCan: (() -> Unit)?,
 ) {
@@ -919,6 +918,7 @@ private fun SingleIdentityRow(
                         IdentityRowAction.REQUEST_USB_CAN -> Modifier.clickable { onRequestUsbCan?.invoke() }
                         IdentityRowAction.OPEN_PAIRING -> Modifier.clickable(onClick = onOpenPairing)
                         IdentityRowAction.ASK_NFC_READ -> Modifier.clickable(onClick = onShowNfcRead)
+                        IdentityRowAction.ACTIVATE_CARD -> Modifier.clickable(onClick = onOpenActivation)
                         IdentityRowAction.NOTHING -> Modifier
                     },
                 ).padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING)
@@ -932,7 +932,14 @@ private fun SingleIdentityRow(
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(ROW_ICON_SIZE),
         )
-        if (holderName != null) {
+        if (rowAction == IdentityRowAction.ACTIVATE_CARD) {
+            Text(
+                text = stringResource(R.string.activate_card),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(ROW_LABEL_WEIGHT),
+            )
+        } else if (holderName != null) {
             Text(
                 text = holderName,
                 style = MaterialTheme.typography.bodyLarge,
@@ -955,9 +962,14 @@ private fun SingleIdentityRow(
                 modifier = Modifier.weight(ROW_LABEL_WEIGHT),
             )
         }
-        if ((holderName != null || pinCache?.hasPin == true) && onForget != null) {
+        // A chevron only where a tap opens a page; a prompt is not a page.
+        val opensPage =
+            rowAction == IdentityRowAction.ACTIVATE_CARD || rowAction == IdentityRowAction.OPEN_PAIRING
+        if (rowAction != IdentityRowAction.ACTIVATE_CARD &&
+            (holderName != null || pinCache?.hasPin == true) && onForget != null
+        ) {
             ForgetIdentityButton(onForget = onForget)
-        } else if (rowAction != IdentityRowAction.NOTHING) {
+        } else if (opensPage) {
             Icon(
                 imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                 contentDescription = null,

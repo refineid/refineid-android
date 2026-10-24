@@ -195,11 +195,7 @@ internal fun CardManagementScreen(
     val pin2Bounds = 6..12
     val pukBounds = 8..8
     val activationCodeBounds =
-        when (health?.activationScheme) {
-            CardManagementScheme.PRESET_PIN -> 7..7
-            CardManagementScheme.PUK -> 8..8
-            else -> 7..8
-        }
+        health?.activationScheme?.activationEntryDigitCount?.let { it..it } ?: IntRange.EMPTY
 
     val targetBounds =
         if (selectedTask == ManagementTask.CHANGE_PIN2 || selectedTask == ManagementTask.RESET_PIN2) {
@@ -428,7 +424,8 @@ internal fun CardManagementScreen(
                     } else {
                         null
                     }
-                val scheme = health?.activationScheme ?: CardManagementScheme.PRESET_PIN
+                val scheme = health?.activationScheme ?: return
+                if (scheme == CardManagementScheme.UNKNOWN) return
                 pinCache?.clear()
                 onPin1Changed?.invoke()
                 cardManagementService.activateCard(scheme, codeBytes, new1Bytes, new2Bytes) { result ->
@@ -1098,12 +1095,7 @@ private fun CardActivationForm(
     isOperating: Boolean,
     onSubmit: () -> Unit,
 ) {
-    val activationCodeLength =
-        when (health.activationScheme) {
-            CardManagementScheme.PRESET_PIN -> 7
-            CardManagementScheme.PUK -> 8
-            else -> 7
-        }
+    val activationCodeLength = health.activationScheme.activationEntryDigitCount ?: return
 
     Column(
         modifier = Modifier.fillMaxWidth(),
