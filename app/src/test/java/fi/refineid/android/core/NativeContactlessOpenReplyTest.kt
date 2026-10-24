@@ -16,7 +16,7 @@ class NativeContactlessOpenReplyTest {
             NativePin1Preflight(
                 referenceScheme = NativePinReferenceScheme.CITIZEN,
                 state = NativePin1State.Remaining(SYNTHETIC_RETRY_COUNT.toInt()),
-                consumerAuthenticationPermitted = true,
+                retryFloorPermits = true,
             ),
             result.preflight,
         )

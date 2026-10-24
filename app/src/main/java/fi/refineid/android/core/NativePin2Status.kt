@@ -25,7 +25,7 @@ internal sealed interface NativePin2State {
 internal data class NativePin2Preflight(
     val referenceScheme: NativePinReferenceScheme,
     val state: NativePin2State,
-    val qualifiedSignaturePermitted: Boolean,
+    val retryFloorPermits: Boolean,
 )
 
 internal enum class NativePin2PreflightFailure {
@@ -139,14 +139,14 @@ internal object NativePin2PreflightReply {
                 POLICY_PERMITTED -> true
                 else -> return bridgeFailure()
             }
-        if (permitted != expectedQualifiedSignaturePolicy(state)) {
+        if (permitted != expectedRetryFloor(state)) {
             return bridgeFailure()
         }
         return NativePin2PreflightResult.Success(
             NativePin2Preflight(
                 referenceScheme = scheme,
                 state = state,
-                qualifiedSignaturePermitted = permitted,
+                retryFloorPermits = permitted,
             ),
         )
     }
@@ -161,15 +161,14 @@ internal object NativePin2PreflightReply {
             bridgeFailure()
         }
 
-    private fun expectedQualifiedSignaturePolicy(state: NativePin2State): Boolean =
+    private fun expectedRetryFloor(state: NativePin2State): Boolean =
         when (state) {
             NativePin2State.Verified -> {
                 true
             }
 
             is NativePin2State.Remaining -> {
-                state.attempts == EXHAUSTED_RETRY_COUNT ||
-                    state.attempts in MINIMUM_SAFE_RETRY_COUNT..FINEID_PIN_TRY_LIMIT
+                state.attempts in MINIMUM_SAFE_RETRY_COUNT..FINEID_PIN_TRY_LIMIT
             }
 
             NativePin2State.Locked,
@@ -211,7 +210,6 @@ internal object NativePin2PreflightReply {
     private const val FAILURE_REPLY_LENGTH = 1
     private const val SUCCESS_REPLY_LENGTH = 5
     private const val NO_RETRY_COUNT = 0xFF
-    private const val EXHAUSTED_RETRY_COUNT = 0
     private const val MINIMUM_SAFE_RETRY_COUNT = 3
     private const val ZERO_BYTE: Byte = 0
 }

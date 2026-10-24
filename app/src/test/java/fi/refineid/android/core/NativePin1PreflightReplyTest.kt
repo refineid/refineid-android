@@ -35,10 +35,10 @@ class NativePin1PreflightReplyTest {
                     permitted = false,
                 ),
                 Case(
-                    wire = success(PIN_REFERENCE_CITIZEN, PIN1_STATE_REMAINING, EXHAUSTED_RETRY_COUNT, true),
+                    wire = success(PIN_REFERENCE_CITIZEN, PIN1_STATE_REMAINING, EXHAUSTED_RETRY_COUNT, false),
                     scheme = NativePinReferenceScheme.CITIZEN,
                     state = NativePin1State.Remaining(EXHAUSTED_RETRY_COUNT),
-                    permitted = true,
+                    permitted = false,
                 ),
                 Case(
                     wire = success(PIN_REFERENCE_CITIZEN, PIN1_STATE_LOCKED, NO_RETRY_COUNT, false),
@@ -79,7 +79,7 @@ class NativePin1PreflightReplyTest {
 
             assertEquals(case.scheme, result.preflight.referenceScheme)
             assertEquals(case.state, result.preflight.state)
-            assertEquals(case.permitted, result.preflight.consumerAuthenticationPermitted)
+            assertEquals(case.permitted, result.preflight.retryFloorPermits)
             assertTrue(reply.all { byte -> byte == 0.toByte() })
         }
     }

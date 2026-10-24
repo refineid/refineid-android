@@ -164,7 +164,7 @@ where
     let pin_input = UnvalidatedSecret::from_owned_bytes(pin_bytes);
     let pin = Pin2::reconstruct(pin_input).map_err(|_| QualifiedSignFailure::InvalidPin)?;
     let preflight = probe_pin2_preflight(transport).map_err(map_preflight_failure)?;
-    if !preflight.qualified_signature_permitted {
+    if !preflight.retry_floor_permits {
         return Err(match preflight.state {
             Pin2State::Locked => QualifiedSignFailure::PinLocked,
             Pin2State::Verified

@@ -354,7 +354,14 @@ internal fun CardManagementScreen(
                         }
 
                         is CardManagementResult.Failure -> {
-                            outcomeNotice = OutcomeNotice(R.string.error)
+                            outcomeNotice =
+                                OutcomeNotice(
+                                    if (result.kind == CardManagementFailure.SAFETY_REFUSED) {
+                                        R.string.refuse_low_attempts_pin
+                                    } else {
+                                        R.string.error
+                                    },
+                                )
                             outcomeIsError = true
                         }
                     }

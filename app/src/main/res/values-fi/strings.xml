@@ -81,9 +81,9 @@
     <string name="confirm_pin_reset_warning" tools:ignore="PluralsCandidate">Väärä %1$s kuluttaa yhden yrityksen. Yrityksiä on jäljellä %2$d.</string>
     <string name="proceed">Jatka</string>
     <string name="spent_attempts_notice">%1$s: %2$d/%3$d yritystä jäljellä.</string>
-    <string name="refuse_low_attempts_pin">RefineID ei käytä tunnuslukua, jossa on yksi tai kaksi yritystä jäljellä. Palauta se toisella ohjelmistolla tai poista sulku täällä, kun kortti on lukinnut sen.</string>
+    <string name="refuse_low_attempts_pin">RefineID ei käytä tunnuslukua, jossa on kaksi yritystä tai vähemmän jäljellä. Uuden tunnusluvun voi asettaa täällä PUK-koodilla.</string>
     <string name="refuse_low_attempts_puk">RefineID ei käytä kumpaakaan kahdesta viimeisestä PUK-yrityksestä.</string>
-    <string name="rapp_retry_floor">Jäljellä olevat PIN-yritykset on varattu kortin myöntäjän ohjelmistolle.</string>
+    <string name="rapp_retry_floor">RefineID ei käytä kahta viimeistä PIN-yritystä. PUK-koodilla voi asettaa uuden PIN-koodin.</string>
     <string name="recovery_guidance_pin1">PIN 1 on palautettava\nPalauta PIN 1 PUK-koodilla.</string>
     <string name="recovery_guidance_pin2">PIN 2 on palautettava\nPalauta PIN 2 PUK-koodilla.</string>
     <string name="unrecoverable_card">PUK on lukittu\nTätä korttia ei voi palauttaa ohjelmistolla.</string>

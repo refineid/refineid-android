@@ -19,10 +19,7 @@
 //! so the credential and signature chain use one card-proven numbering.
 
 use refineid_apdu::{CardTransport, TransportOutcome};
-use refineid_auth::{
-    AuthError, PinOps, PinReferenceScheme, PinSlot, PinStatus,
-    pin2_status_permits_qualified_signature,
-};
+use refineid_auth::{AuthError, PinOps, PinReferenceScheme, PinSlot, PinStatus, check_retry_floor};
 
 /// Counter-safe PIN2 state with unrecognised status words erased.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,8 +43,8 @@ pub(crate) struct Pin2Preflight {
     pub(crate) scheme: PinReferenceScheme,
     /// Live PIN2 state from the header-only `VERIFY` query.
     pub(crate) state: Pin2State,
-    /// Public core policy verdict for a qualified-signature attempt.
-    pub(crate) qualified_signature_permitted: bool,
+    /// Whether the core retry floor lets a PIN2 attempt be sent.
+    pub(crate) retry_floor_permits: bool,
 }
 
 /// Coarse failures safe to expose across JNI.
@@ -86,7 +83,7 @@ where
     Ok(Pin2Preflight {
         scheme,
         state,
-        qualified_signature_permitted: pin2_status_permits_qualified_signature(status),
+        retry_floor_permits: check_retry_floor(PinSlot::Pin2, status).is_ok(),
     })
 }
 
@@ -125,7 +122,13 @@ mod tests {
     const VERIFY_HEADER_LENGTH: usize = 4;
     const P2_OFFSET: usize = 3;
     const SAFE_RETRIES: u8 = 3;
-    const LOW_RETRIES: u8 = 2;
+    const PRISTINE_RETRIES: u8 = 5;
+    const ONE_SPENT_RETRIES: u8 = 4;
+    const BELOW_FLOOR_RETRIES: u8 = 2;
+    const LAST_RETRY: u8 = 1;
+    const NO_RETRIES: u8 = 0;
+    const SERVED_RETRIES: [u8; 3] = [PRISTINE_RETRIES, ONE_SPENT_RETRIES, SAFE_RETRIES];
+    const REFUSED_RETRIES: [u8; 3] = [BELOW_FLOOR_RETRIES, LAST_RETRY, NO_RETRIES];
     const CITIZEN_PREFLIGHT_COMMAND_COUNT: usize = 2;
     const ORGANIZATIONAL_PREFLIGHT_COMMAND_COUNT: usize = 3;
     const CITIZEN_REFERENCE_COMMAND_INDEX: usize = 0;
@@ -205,7 +208,7 @@ mod tests {
 
         assert_eq!(preflight.scheme, PinReferenceScheme::Citizen);
         assert_eq!(preflight.state, Pin2State::Remaining(SAFE_RETRIES));
-        assert!(preflight.qualified_signature_permitted);
+        assert!(preflight.retry_floor_permits);
         assert_eq!(
             transport.public_commands.len(),
             CITIZEN_PREFLIGHT_COMMAND_COUNT
@@ -252,19 +255,35 @@ mod tests {
     }
 
     #[test]
-    fn low_and_unreadable_states_fail_the_qualified_policy_closed() {
-        for status in [
-            remaining(LOW_RETRIES),
-            StatusWord::AuthenticationFailed,
-            StatusWord::AuthenticationBlocked,
-            StatusWord::ReferenceDataInvalidated,
-            StatusWord::FileNotFound,
-        ] {
+    fn retry_floor_serves_five_four_three_and_verified() {
+        let served = SERVED_RETRIES
+            .into_iter()
+            .map(remaining)
+            .chain([StatusWord::Success]);
+        for status in served {
             let mut transport = ScriptedTransport::new(&[remaining(SAFE_RETRIES), status]);
 
             let preflight = probe_pin2_preflight(&mut transport).expect("scripted preflight");
 
-            assert!(!preflight.qualified_signature_permitted);
+            assert!(preflight.retry_floor_permits);
+            assert_eq!(transport.credential_calls, 0);
+        }
+    }
+
+    #[test]
+    fn retry_floor_refuses_two_one_zero_blocked_and_unreadable() {
+        let refused = REFUSED_RETRIES.into_iter().map(remaining).chain([
+            StatusWord::AuthenticationFailed,
+            StatusWord::AuthenticationBlocked,
+            StatusWord::ReferenceDataInvalidated,
+            StatusWord::FileNotFound,
+        ]);
+        for status in refused {
+            let mut transport = ScriptedTransport::new(&[remaining(SAFE_RETRIES), status]);
+
+            let preflight = probe_pin2_preflight(&mut transport).expect("scripted preflight");
+
+            assert!(!preflight.retry_floor_permits);
             assert_eq!(transport.credential_calls, 0);
         }
     }

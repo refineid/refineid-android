@@ -17,7 +17,8 @@
 use refineid_apdu::{CardTransport, TransportOutcome};
 use refineid_auth::{
     ActivationCode, ActivationReport, ActivationScheme, AuthError, CredentialHealthReport,
-    ManageOutcome, Pin1, Pin2, PinManageOps, PinReferenceScheme, PinStatus, Puk, UnvalidatedSecret,
+    ManageOutcome, Pin1, Pin2, PinManageOps, PinOps, PinReferenceScheme, PinSlot, PinStatus, Puk,
+    UnvalidatedSecret, check_retry_floor,
 };
 
 use crate::card_certificate::{CardKeyProfile, read_authentication_certificate};
@@ -60,7 +61,6 @@ pub(crate) enum CardManagementFailure {
     TransportError,
     BridgeError,
     InvalidCredential,
-    #[allow(dead_code)]
     SafetyRefused,
     PaceRejected,
 }
@@ -167,6 +167,16 @@ pub(crate) fn encode_credential_health_reply(
     }
 }
 
+/// Refuse a command that presents the current `slot` PIN unless the core
+/// retry floor serves it; the status query spends no attempt.
+fn require_retry_floor<T: CardTransport>(
+    transport: &mut T,
+    slot: PinSlot,
+) -> Result<(), CardManagementFailure> {
+    let status = transport.pin_status(slot).map_err(map_auth_error)?;
+    check_retry_floor(slot, status).map_err(|_| CardManagementFailure::SafetyRefused)
+}
+
 /// Execute change PIN1.
 pub(crate) fn change_pin1<T: CardTransport>(
     transport: &mut T,
@@ -183,6 +193,7 @@ pub(crate) fn change_pin1<T: CardTransport>(
     let new_pin =
         Pin1::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
 
+    require_retry_floor(transport, PinSlot::Pin1)?;
     transport
         .change_pin1(current_pin, new_pin)
         .map_err(map_auth_error)
@@ -204,6 +215,7 @@ pub(crate) fn change_pin2<T: CardTransport>(
     let new_pin =
         Pin2::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
 
+    require_retry_floor(transport, PinSlot::Pin2)?;
     transport
         .change_pin2(current_pin, new_pin)
         .map_err(map_auth_error)
@@ -357,9 +369,124 @@ pub(crate) fn encode_activation_reply(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use super::*;
-    use refineid_apdu::PinRetries;
+    use refineid_apdu::{CommandApdu, CredentialCommand, PinRetries, ResponseApdu, StatusWord};
     use refineid_auth::CardActivationNeeds;
+
+    const SYNTHETIC_PIN1: &[u8] = b"1357";
+    const SYNTHETIC_NEW_PIN1: &[u8] = b"2468";
+    const SYNTHETIC_PIN2: &[u8] = b"135790";
+    const SYNTHETIC_NEW_PIN2: &[u8] = b"246802";
+    const SERVED_RETRIES: u8 = 3;
+    const BELOW_FLOOR_RETRIES: u8 = 2;
+    const LAST_RETRY: u8 = 1;
+    const NO_RETRIES: u8 = 0;
+
+    /// Answers public commands from a script and records every credential
+    /// command without answering it.
+    struct ScriptedTransport {
+        responses: VecDeque<StatusWord>,
+        credential_calls: usize,
+    }
+
+    impl ScriptedTransport {
+        fn new(statuses: &[StatusWord]) -> Self {
+            Self {
+                responses: statuses.iter().copied().collect(),
+                credential_calls: 0,
+            }
+        }
+    }
+
+    impl CardTransport for ScriptedTransport {
+        type Error = &'static str;
+
+        fn transmit(&mut self, _command: &CommandApdu) -> Result<TransportOutcome, Self::Error> {
+            let status = self
+                .responses
+                .pop_front()
+                .ok_or("missing scripted response")?;
+            let [sw1, sw2] = status.as_u16().to_be_bytes();
+            Ok(TransportOutcome::Response(ResponseApdu {
+                body: Vec::new(),
+                sw1,
+                sw2,
+            }))
+        }
+
+        fn transmit_credential(
+            &mut self,
+            _command: CredentialCommand,
+        ) -> Result<TransportOutcome, Self::Error> {
+            self.credential_calls += 1;
+            Err("a refused change must not present a credential")
+        }
+    }
+
+    fn remaining(value: u8) -> StatusWord {
+        StatusWord::PinIncorrect {
+            retries: PinRetries::from_nibble(value).expect("test retry value fits a nibble"),
+        }
+    }
+
+    fn refused_statuses() -> [StatusWord; 5] {
+        [
+            remaining(BELOW_FLOOR_RETRIES),
+            remaining(LAST_RETRY),
+            remaining(NO_RETRIES),
+            StatusWord::AuthenticationBlocked,
+            StatusWord::AuthenticationFailed,
+        ]
+    }
+
+    #[test]
+    fn change_pin1_is_refused_below_the_retry_floor_without_presenting_it() {
+        for status in refused_statuses() {
+            let mut transport = ScriptedTransport::new(&[status]);
+
+            let result = change_pin1(
+                &mut transport,
+                SYNTHETIC_PIN1.to_vec(),
+                SYNTHETIC_NEW_PIN1.to_vec(),
+            );
+
+            assert_eq!(result, Err(CardManagementFailure::SafetyRefused));
+            assert_eq!(transport.credential_calls, 0);
+        }
+    }
+
+    #[test]
+    fn change_pin2_is_refused_below_the_retry_floor_without_presenting_it() {
+        for status in refused_statuses() {
+            let mut transport = ScriptedTransport::new(&[remaining(SERVED_RETRIES), status]);
+
+            let result = change_pin2(
+                &mut transport,
+                SYNTHETIC_PIN2.to_vec(),
+                SYNTHETIC_NEW_PIN2.to_vec(),
+            );
+
+            assert_eq!(result, Err(CardManagementFailure::SafetyRefused));
+            assert_eq!(transport.credential_calls, 0);
+        }
+    }
+
+    #[test]
+    fn change_pin1_at_the_floor_reaches_the_card() {
+        let mut transport =
+            ScriptedTransport::new(&[remaining(SERVED_RETRIES), remaining(SERVED_RETRIES)]);
+
+        let result = change_pin1(
+            &mut transport,
+            SYNTHETIC_PIN1.to_vec(),
+            SYNTHETIC_NEW_PIN1.to_vec(),
+        );
+
+        assert_eq!(result, Err(CardManagementFailure::TransportError));
+        assert_eq!(transport.credential_calls, 1);
+    }
 
     #[test]
     fn encodes_credential_health_success() {
