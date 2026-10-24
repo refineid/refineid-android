@@ -22,7 +22,6 @@
     <string name="unlock">Lås upp</string>
     <string name="wrong_can" tools:ignore="Typos">Fel CAN</string>
     <string name="access_number_required" tools:ignore="Typos">CAN krävs</string>
-    <string name="can_rejected_cooldown" tools:ignore="Typos,PluralsCandidate">Kortet avvisade CAN. Försök igen om %1$d sekunder eller ange rätt CAN.</string>
     <string name="card_primed">Kort sparat för tryck</string>
     <string name="forget">Glöm</string>
     <string name="present">Närvarande</string>

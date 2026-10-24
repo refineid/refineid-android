@@ -22,7 +22,6 @@
     <string name="unlock">Avaa</string>
     <string name="wrong_can" tools:ignore="Typos">Väärä CAN</string>
     <string name="access_number_required" tools:ignore="Typos">CAN vaaditaan</string>
-    <string name="can_rejected_cooldown" tools:ignore="Typos,PluralsCandidate">Kortti hylkäsi CAN-koodin. Yritä uudelleen %1$d sekunnin kuluttua tai anna oikea CAN.</string>
     <string name="card_primed">Kortti tallennettu napautusta varten</string>
     <string name="forget">Unohda</string>
     <string name="present">Paikalla</string>

@@ -100,7 +100,10 @@ card presented during any wait completes that request. A wait ends after
 ## Failure story
 
 A wrong CAN never consumes a PIN retry; the holder corrects it and
-reconnects. Card loss at any stage closes the session, zeroizes the CAN,
+reconnects. The rejected number is dropped without a trace: the next
+entry opens with an empty field, with no cooldown, no countdown and no
+prefilled digits, because a card that refused a CAN has nothing left to
+say about it. Card loss at any stage closes the session, zeroizes the CAN,
 and returns the reader to waiting; the resting card is rediscovered by
 another tap. The signer's counter-safe gate is unchanged: preflight
 refusal at the retry floor, exactly one VERIFY, no automatic credential

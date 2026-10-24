@@ -792,8 +792,7 @@ internal class NfcReaderController(
         currentAuthCertDer = null
         pin1?.close()
         if (status == NfcReaderStatus.WRONG_CAN) {
-            val rejected = String(canBytes, Charsets.US_ASCII)
-            CanSessionStore.recordRejected(rejected)
+            CanSessionStore.drop()
             primedCanStore.clear()
             primedCardStored = false
             rememberedHolderName = null
