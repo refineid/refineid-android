@@ -100,7 +100,11 @@ ready, which proves the changed-record read survives the secure channel,
 and a card awaiting activation was routed to activation; in a USB reader,
 a card awaiting activation answered at reset as a fifth-generation MultiApp
 and its changed records reported both PINs waiting under the preset
-scheme, which is the table's row and the probe's reading. The activation
+scheme, which is the table's row and the probe's reading; the same card
+over NFC, once its access number was entered, was classified from the
+historical bytes the NFC stack reports and opened as awaiting activation
+in half a second, with no certificate read in the exchange, and the
+activation form's own health probe read none either. The activation
 itself, which each card serves once, is not yet observed on Android.
 
 ## Open question
