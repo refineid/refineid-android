@@ -120,7 +120,7 @@
   the pull request once CI is green, then remove the worktree and branch and
   fast-forward `main`. Full workflow: `doc/process/agent-worktrees.md`.
 - Never poll background commands or set rapid check timers (e.g. 10s-30s). When running builds, tests, or async tasks, execute asynchronously and wait strictly for system completion notifications.
-- Whenever modifying Android application code or UI, proactively build and install the debug APK to any connected physical test device (`adb install -r app/build/outputs/apk/debug/app-debug.apk`) without waiting for explicit user instructions. When a device is attached over USB, also configure and maintain Wi-Fi debugging (`adb tcpip 5555 && adb connect <ip>:5555`) so deployment and verification continue smoothly if the cable is detached. Always verify installation success. If no device is attached or reachable, notify the user immediately.
+- After modifying application code or UI, install the debug build on the test phone with `Scripts/install-device.sh` without being asked, reach the phone over Wi-Fi debugging always, and verify the install; see `doc/process/test-devices.md`.
 - When stuck, research with fellow AI available.
 
 ## Licensing
@@ -243,13 +243,24 @@ record for RAPP and its applications.
 - Update every caller, hook, CI job and document to the replacement in that
   same change instead of keeping the old entry point alive for them.
 
+## Rules live here, not in an agent's memory
+
+Every rule, decision and finding an agent should remember lives in this
+repository, never only in an agent's memory: a design rule in `doc/`, a
+defect in an issue, a working rule in this file. This file states each
+rule in a line and points to the reading behind it; the readings live in
+`doc/`, not here.
+
 ## Independent review
 
-- Before a pull request merges, review its diff independently with the `agy`
-  CLI and the `gemini-3.8-flash-high` model.
-- Run `agy` headless in its sandbox and plan mode, from an empty directory,
-  with the diff pasted into the prompt and no tool use. Frame the request as
-  a code review from the project's author.
+- Before a pull request merges, review its diff independently with a model
+  from a different family than the one that wrote it: either the `agy` CLI
+  with the `gemini-3.8-flash-high` model or the Muse agent with the options
+  above, chosen at random, one review per branch. OpenCode's free models are
+  the last resort when both fail; their daily quota is small.
+- Run the reviewer headless in its sandbox and plan mode, from an empty
+  directory, with the diff pasted into the prompt and no tool use. Frame
+  the request as a code review from the project's author.
 - Check every finding against the code. Fix the real ones and list the
   rejected ones, with the reason, in the pull request description.
 
