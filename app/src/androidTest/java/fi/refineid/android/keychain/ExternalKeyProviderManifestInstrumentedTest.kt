@@ -80,14 +80,21 @@ class ExternalKeyProviderManifestInstrumentedTest {
     }
 
     @Test
-    fun theMainScreenStaysInPortrait() {
+    fun theMainScreenRequestsPortraitAndThePinPromptFollowsTheActivityBeneath() {
         val context = ApplicationProvider.getApplicationContext<RefineIdApplication>()
-        val activityInfo =
-            context.packageManager.getActivityInfo(
-                ComponentName(context, MainActivity::class.java),
-                PackageManager.ComponentInfoFlags.of(NO_PACKAGE_MANAGER_FLAGS),
+        val requested =
+            listOf(
+                MainActivity::class.java to ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                ExternalKeyPinActivity::class.java to ActivityInfo.SCREEN_ORIENTATION_BEHIND,
             )
-        assertEquals(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, activityInfo.screenOrientation)
+        for ((activity, orientation) in requested) {
+            val activityInfo =
+                context.packageManager.getActivityInfo(
+                    ComponentName(context, activity),
+                    PackageManager.ComponentInfoFlags.of(NO_PACKAGE_MANAGER_FLAGS),
+                )
+            assertEquals(activity.simpleName, orientation, activityInfo.screenOrientation)
+        }
     }
 
     private companion object {
