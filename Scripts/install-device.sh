@@ -18,9 +18,16 @@ cd "$(dirname "$0")/.."
 # shellcheck source=Scripts/gradle-environment.sh
 source Scripts/gradle-environment.sh
 
+# Without an argument, a device reached over Wi-Fi (an address:port serial)
+# is preferred to one on the cable: the phone's one USB-C port carries the
+# card reader whenever a reader is under test, so the cable comes and goes.
 device="${1:-}"
 if [[ -z "$device" ]]; then
-  device=$(adb devices | grep -v "List of devices" | grep -w "device" | awk '{print $1}' | head -n 1 || true)
+  connected=$(adb devices | grep -v "List of devices" | grep -w "device" | awk '{print $1}' || true)
+  device=$(printf '%s\n' "$connected" | grep -E '^[0-9.]+:[0-9]+$' | head -n 1 || true)
+  if [[ -z "$device" ]]; then
+    device=$(printf '%s\n' "$connected" | head -n 1 || true)
+  fi
 fi
 
 read -r yy mm dd hh mn <<<"$(date -u '+%y %m %d %H %M')"
