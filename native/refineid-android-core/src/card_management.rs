@@ -383,6 +383,9 @@ mod tests {
     const BELOW_FLOOR_RETRIES: u8 = 2;
     const LAST_RETRY: u8 = 1;
     const NO_RETRIES: u8 = 0;
+    /// Public commands a PIN 2 change sends before it presents the current
+    /// PIN, each answered here with a served retry count.
+    const PIN2_CHANGE_PUBLIC_COMMANDS: usize = 3;
 
     /// Answers public commands from a script and records every credential
     /// command without answering it.
@@ -486,6 +489,23 @@ mod tests {
 
         assert_eq!(result, Err(CardManagementFailure::TransportError));
         assert_eq!(transport.credential_calls, 1);
+        assert!(transport.responses.is_empty());
+    }
+
+    #[test]
+    fn change_pin2_at_the_floor_reaches_the_card() {
+        let mut transport =
+            ScriptedTransport::new(&[remaining(SERVED_RETRIES); PIN2_CHANGE_PUBLIC_COMMANDS]);
+
+        let result = change_pin2(
+            &mut transport,
+            SYNTHETIC_PIN2.to_vec(),
+            SYNTHETIC_NEW_PIN2.to_vec(),
+        );
+
+        assert_eq!(result, Err(CardManagementFailure::TransportError));
+        assert_eq!(transport.credential_calls, 1);
+        assert!(transport.responses.is_empty());
     }
 
     #[test]

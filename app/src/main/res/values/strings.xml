@@ -100,7 +100,7 @@
     <string name="spent_attempts_notice" tools:ignore="PluralsCandidate">%1$s: %2$d of %3$d attempts left.</string>
     <string name="refuse_low_attempts_pin">RefineID will not use a credential with two or fewer attempts left. The PUK can set a new one here.</string>
     <string name="refuse_low_attempts_puk">RefineID will not use either of the final two PUK attempts.</string>
-    <string name="rapp_retry_floor">RefineID will not use the last two PIN attempts. The PUK can set a new PIN.</string>
+    <string name="rapp_retry_floor">RefineID will not use a PIN with two or fewer attempts left. The PUK can set a new PIN.</string>
     <string name="recovery_guidance_pin1">PIN 1 requires recovery\nReset PIN 1 with your PUK.</string>
     <string name="recovery_guidance_pin2">PIN 2 requires recovery\nReset PIN 2 with your PUK.</string>
     <string name="unrecoverable_card">The PUK is blocked\nThis card cannot be recovered with software.</string>

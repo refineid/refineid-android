@@ -433,6 +433,8 @@ val generateRappBinding =
         dependsOn(buildRappHostDebug)
         workingDir(rappCrateDirectory)
         inputs.file(rappHostLibrary)
+        inputs.file(rappCrateDirectory.file("Cargo.lock"))
+        inputs.dir(rappCrateDirectory.dir("src"))
         val bindingDirectory = outputDirectory
         doFirst { bindingDirectory.get().asFile.deleteRecursively() }
         commandLine(
