@@ -26,6 +26,7 @@
 //! no activation decision from it. This mirrors the Apple reference's
 //! `ActivationScheme.classify`.
 
+use refineid_atr::Atr;
 use refineid_auth::ActivationScheme;
 use refineid_ber::{BerTlvAny, BerTlvIter};
 
@@ -95,9 +96,46 @@ const MAX_HOUR: i64 = 23;
 const MAX_MINUTE: i64 = 59;
 const MAX_SECOND: i64 = 59;
 
+/// The card-capability bytes every Gemalto and Thales MultiApp answer to
+/// reset opens with, shared by the three generations DVV has issued
+/// (opaque, externally specified; the Apple reference's
+/// `FineidCardTypeValues`).
+const MULTIAPP_CAPABILITIES: [u8; 6] = [0x80, 0x31, 0xB8, 0x65, 0xB0, 0x85];
+/// The generation byte that follows them: Gemalto MultiApp v3.
+const MULTIAPP_THIRD_GENERATION: u8 = 0x03;
+/// Gemalto MultiApp v4.
+const MULTIAPP_FOURTH_GENERATION: u8 = 0x04;
+/// Thales MultiApp v5, which implements FINEID S4-1 v4.0 and ships with
+/// the seven-digit activation PIN.
+const MULTIAPP_FIFTH_GENERATION: u8 = 0x05;
+
+/// Classifies a card's activation procedure from what it answered at
+/// reset, before anything is read from it: a full answer to reset as a
+/// contact reader reports it, or the historical bytes alone as a phone's
+/// NFC stack reports them. MultiApp v5 uses the preset activation PIN;
+/// v3 and v4 use the activation code. An unfamiliar answer is never
+/// rounded to either, and the card is then opened as an activated one.
+#[must_use]
+pub(crate) fn classify_by_card_answer(answer: &[u8]) -> Option<ActivationScheme> {
+    let historical: Vec<u8> = match Atr::new(answer) {
+        Ok(atr) => atr.historical_bytes().as_bytes().to_vec(),
+        Err(_) => answer.to_vec(),
+    };
+    let generation = historical.strip_prefix(&MULTIAPP_CAPABILITIES)?.first()?;
+    match *generation {
+        MULTIAPP_FIFTH_GENERATION => Some(ActivationScheme::PresetActivationPin),
+        MULTIAPP_THIRD_GENERATION | MULTIAPP_FOURTH_GENERATION => {
+            Some(ActivationScheme::ActivationCodeIsPuk)
+        }
+        _ => None,
+    }
+}
+
 /// Classifies a citizen card's activation procedure from its
 /// authentication certificate, or answers nothing for a card whose
-/// procedure this code must not guess.
+/// procedure this code must not guess. Used for an activated card only;
+/// a card awaiting activation is classified from its answer to reset and
+/// its certificate is never read.
 #[must_use]
 pub(crate) fn classify_activation_scheme(certificate_der: &[u8]) -> Option<ActivationScheme> {
     let tbs = tbs_certificate(certificate_der)?;
@@ -298,9 +336,16 @@ mod tests {
     use refineid_ber::{BerEncoder, tlv};
 
     use super::{
-        OID_COMMON_NAME, SECONDS_PER_DAY, TAG_GENERALIZED_TIME, TAG_OID, TAG_SEQUENCE, TAG_SET,
-        TAG_UTC_TIME, TAG_VERSION_EXPLICIT, classify_activation_scheme, days_from_civil,
+        MULTIAPP_CAPABILITIES, MULTIAPP_FIFTH_GENERATION, MULTIAPP_FOURTH_GENERATION,
+        MULTIAPP_THIRD_GENERATION, OID_COMMON_NAME, SECONDS_PER_DAY, TAG_GENERALIZED_TIME, TAG_OID,
+        TAG_SEQUENCE, TAG_SET, TAG_UTC_TIME, TAG_VERSION_EXPLICIT, classify_activation_scheme,
+        classify_by_card_answer, days_from_civil,
     };
+
+    /// ISO 7816-3 TS byte of the direct convention.
+    const TS_DIRECT_CONVENTION: u8 = 0x3B;
+    /// A MultiApp generation byte no card has carried.
+    const UNKNOWN_GENERATION: u8 = 0x09;
 
     /// ASN.1 INTEGER, NULL and PrintableString, used only to build fixtures.
     const TAG_INTEGER: u8 = 0x02;
@@ -360,6 +405,60 @@ mod tests {
         let tbs = [version, serial, algorithm, issuer, validity].concat();
         let tbs = tlv(tag8(TAG_SEQUENCE), tbs).expect("tbs");
         tlv(tag8(TAG_SEQUENCE), tbs).expect("certificate")
+    }
+
+    #[test]
+    fn the_answer_to_reset_names_the_generation() {
+        let v5 = [
+            MULTIAPP_CAPABILITIES.as_slice(),
+            &[MULTIAPP_FIFTH_GENERATION, 0],
+        ]
+        .concat();
+        let v4 = [
+            MULTIAPP_CAPABILITIES.as_slice(),
+            &[MULTIAPP_FOURTH_GENERATION],
+        ]
+        .concat();
+        let v3 = [
+            MULTIAPP_CAPABILITIES.as_slice(),
+            &[MULTIAPP_THIRD_GENERATION],
+        ]
+        .concat();
+        assert_eq!(
+            classify_by_card_answer(&v5),
+            Some(ActivationScheme::PresetActivationPin)
+        );
+        assert_eq!(
+            classify_by_card_answer(&v4),
+            Some(ActivationScheme::ActivationCodeIsPuk)
+        );
+        assert_eq!(
+            classify_by_card_answer(&v3),
+            Some(ActivationScheme::ActivationCodeIsPuk)
+        );
+        // A full answer to reset carrying the same historical bytes.
+        let atr = full_answer_to_reset(&v5);
+        assert_eq!(
+            classify_by_card_answer(&atr),
+            Some(ActivationScheme::PresetActivationPin)
+        );
+    }
+
+    #[test]
+    fn an_unfamiliar_answer_to_reset_names_nothing() {
+        assert_eq!(classify_by_card_answer(&[]), None);
+        assert_eq!(classify_by_card_answer(&MULTIAPP_CAPABILITIES), None);
+        let unknown_generation = [MULTIAPP_CAPABILITIES.as_slice(), &[UNKNOWN_GENERATION]].concat();
+        assert_eq!(classify_by_card_answer(&unknown_generation), None);
+        assert_eq!(classify_by_card_answer(&MULTIAPP_CAPABILITIES[..3]), None);
+    }
+
+    /// A direct-convention T=0 answer to reset carrying `historical`
+    /// (ISO 7816-3 section 8): TS, then T0 with the historical byte count
+    /// in its low nibble and no interface bytes.
+    fn full_answer_to_reset(historical: &[u8]) -> Vec<u8> {
+        let count = u8::try_from(historical.len()).expect("fits the T0 nibble");
+        [&[TS_DIRECT_CONVENTION, count], historical].concat()
     }
 
     #[test]

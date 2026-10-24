@@ -21,7 +21,7 @@ use refineid_auth::{
     PinSlot, PinStatus, Puk, UnvalidatedSecret, check_retry_floor,
 };
 
-use crate::activation_scheme::classify_activation_scheme;
+use crate::activation_scheme::{classify_activation_scheme, classify_by_card_answer};
 use crate::card_certificate::read_authentication_certificate;
 
 pub(crate) const MANAGEMENT_TAG_BRIDGE_ERROR: u8 = 0;
@@ -123,10 +123,26 @@ pub(crate) const fn activation_needs_byte(needs: CardActivationNeeds) -> u8 {
 }
 
 /// Execute credential health probe on `transport`.
+/// The activation scheme a wire byte names, or none.
+pub(crate) const fn activation_scheme_from_byte(byte: u8) -> Option<ActivationScheme> {
+    match byte {
+        ACTIVATION_SCHEME_PUK => Some(ActivationScheme::ActivationCodeIsPuk),
+        ACTIVATION_SCHEME_PRESET => Some(ActivationScheme::PresetActivationPin),
+        _ => None,
+    }
+}
+
+/// The health probe under the activation scheme the card's answer to
+/// reset names, so a card awaiting activation has nothing read beyond its
+/// counters. An answer that names none belongs to a card opened as an
+/// activated one, and the scheme is then read from its certificate for
+/// the report's sake.
 pub(crate) fn probe_credential_health<T: CardTransport>(
     transport: &mut T,
+    card_answer: &[u8],
 ) -> Result<CredentialHealthReport, CardManagementFailure> {
-    let scheme = detect_activation_scheme(transport);
+    let scheme =
+        classify_by_card_answer(card_answer).or_else(|| detect_activation_scheme(transport));
     transport
         .probe_credential_health(scheme)
         .map_err(map_auth_error)
@@ -296,26 +312,19 @@ pub(crate) fn activate_card<T: CardTransport>(
     mut new_pin1_bytes: Option<Vec<u8>>,
     mut new_pin2_bytes: Option<Vec<u8>>,
 ) -> Result<ActivationReport, CardManagementFailure> {
-    // A scheme the caller does not name is read from the card; a card that
-    // names none gets no activation attempt, since the entry's length and
-    // the command it rides on both depend on the scheme and a wrong guess
-    // spends a try.
-    let scheme = match scheme_byte {
-        ACTIVATION_SCHEME_PUK => ActivationScheme::ActivationCodeIsPuk,
-        ACTIVATION_SCHEME_PRESET => ActivationScheme::PresetActivationPin,
-        _ => {
-            let Some(detected) = detect_activation_scheme(transport) else {
-                code_bytes.fill(0);
-                if let Some(bytes) = new_pin1_bytes.as_mut() {
-                    bytes.fill(0);
-                }
-                if let Some(bytes) = new_pin2_bytes.as_mut() {
-                    bytes.fill(0);
-                }
-                return Err(CardManagementFailure::SafetyRefused);
-            };
-            detected
+    // The caller names the scheme the open found; without one there is no
+    // activation attempt, since the entry's length and the command it rides
+    // on both depend on the scheme and a wrong guess spends a try, and a
+    // card awaiting activation has nothing read to find it.
+    let Some(scheme) = activation_scheme_from_byte(scheme_byte) else {
+        code_bytes.fill(0);
+        if let Some(bytes) = new_pin1_bytes.as_mut() {
+            bytes.fill(0);
         }
+        if let Some(bytes) = new_pin2_bytes.as_mut() {
+            bytes.fill(0);
+        }
+        return Err(CardManagementFailure::SafetyRefused);
     };
 
     let code_sec = UnvalidatedSecret::from_owned_bytes(code_bytes.clone());

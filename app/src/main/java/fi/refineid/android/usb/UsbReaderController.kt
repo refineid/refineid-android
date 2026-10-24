@@ -588,7 +588,7 @@ internal class UsbReaderController(
             val certificate =
                 when (result) {
                     is NativeContactlessOpenResult.Success -> result.certificate
-                    is NativeContactlessOpenResult.ActivationRequired -> result.certificate
+                    is NativeContactlessOpenResult.ActivationRequired -> null
                     is NativeContactlessOpenResult.Failure -> null
                 }
             val holderNameFromCert = certificate?.let(CertificateHolderName::fromCertificate)
@@ -620,8 +620,8 @@ internal class UsbReaderController(
                         UsbReaderSnapshot(
                             status = ReaderConnectionStatus.ACTIVATION_REQUIRED,
                             cardPresence = CardPresence.PRESENT,
-                            holderName = effectiveHolder,
-                            cardDetails = cardDetails ?: previousCardDetails,
+                            holderName = null,
+                            cardDetails = null,
                         )
                     }
 

@@ -27,54 +27,48 @@ class NativeContactlessOpenReplyTest {
     }
 
     @Test
-    fun decodesActivationRequiredWithSchemeNeedsAndCertificate() {
-        val reply =
-            byteArrayOf(
-                CERTIFICATE_ACTIVATION_REQUIRED,
-                ACTIVATION_SCHEME_PRESET,
-                ACTIVATION_NEEDS_PIN2_ONLY,
-                KEY_PROFILE_RSA_3072,
-                *SYNTHETIC_DER,
-            )
-        val result = NativeContactlessOpenReply.decode(reply) as NativeContactlessOpenResult.ActivationRequired
-        assertEquals(CardManagementScheme.PRESET_PIN, result.scheme)
-        assertEquals(CardActivationNeeds(pin1 = false, pin2 = true), result.needs)
-        assertEquals(NativeCardKeyProfile.RSA_3072, result.certificate.keyProfile)
-        assertArrayEquals(SYNTHETIC_DER, result.certificate.copyDer())
+    fun decodesActivationRequiredWithSchemeAndNeedsAlone() {
+        val reply = byteArrayOf(CERTIFICATE_ACTIVATION_REQUIRED, ACTIVATION_SCHEME_PRESET, ACTIVATION_NEEDS_PIN2_ONLY)
+        assertEquals(
+            NativeContactlessOpenResult.ActivationRequired(
+                CardManagementScheme.PRESET_PIN,
+                CardActivationNeeds(pin1 = false, pin2 = true),
+            ),
+            NativeContactlessOpenReply.decode(reply),
+        )
         assertTrue(reply.all { it == ZERO_BYTE })
-        result.certificate.close()
     }
 
     @Test
-    fun refusesActivationRequiredWithoutASchemeOrWithoutNeeds() {
-        val unknownScheme =
-            byteArrayOf(
-                CERTIFICATE_ACTIVATION_REQUIRED,
-                ACTIVATION_SCHEME_UNKNOWN,
-                ACTIVATION_NEEDS_BOTH,
-                KEY_PROFILE_RSA_3072,
-                *SYNTHETIC_DER,
-            )
+    fun refusesActivationRequiredWithoutASchemeWithoutNeedsOrOfAnotherShape() {
+        val bridgeError = NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR)
         assertEquals(
-            NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR),
-            NativeContactlessOpenReply.decode(unknownScheme),
+            bridgeError,
+            NativeContactlessOpenReply.decode(
+                byteArrayOf(CERTIFICATE_ACTIVATION_REQUIRED, ACTIVATION_SCHEME_UNKNOWN, ACTIVATION_NEEDS_BOTH),
+            ),
         )
-        val noNeeds =
-            byteArrayOf(
-                CERTIFICATE_ACTIVATION_REQUIRED,
-                ACTIVATION_SCHEME_PUK,
-                ACTIVATION_NEEDS_NONE,
-                KEY_PROFILE_RSA_3072,
-                *SYNTHETIC_DER,
-            )
         assertEquals(
-            NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR),
-            NativeContactlessOpenReply.decode(noNeeds),
+            bridgeError,
+            NativeContactlessOpenReply.decode(
+                byteArrayOf(CERTIFICATE_ACTIVATION_REQUIRED, ACTIVATION_SCHEME_PUK, ACTIVATION_NEEDS_NONE),
+            ),
         )
-        val truncated = byteArrayOf(CERTIFICATE_ACTIVATION_REQUIRED, ACTIVATION_SCHEME_PUK)
         assertEquals(
-            NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR),
-            NativeContactlessOpenReply.decode(truncated),
+            bridgeError,
+            NativeContactlessOpenReply.decode(byteArrayOf(CERTIFICATE_ACTIVATION_REQUIRED, ACTIVATION_SCHEME_PUK)),
+        )
+        assertEquals(
+            bridgeError,
+            NativeContactlessOpenReply.decode(
+                byteArrayOf(
+                    CERTIFICATE_ACTIVATION_REQUIRED,
+                    ACTIVATION_SCHEME_PUK,
+                    ACTIVATION_NEEDS_BOTH,
+                    KEY_PROFILE_RSA_3072,
+                    *SYNTHETIC_DER,
+                ),
+            ),
         )
     }
 

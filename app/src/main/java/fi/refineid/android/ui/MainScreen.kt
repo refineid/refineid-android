@@ -238,8 +238,13 @@ internal fun MainScreen(
             nfcSnapshot.status != NfcReaderStatus.NOT_AVAILABLE &&
             nfcSnapshot.status != NfcReaderStatus.TURNED_OFF
     val remoteSigningAvailable = !hasNfc && remoteHolderName != null
+    // Signing needs an identity this phone has read from an activated card,
+    // as on the iPhone, where the drop area appears with the identity: a
+    // reader with an open card, a contactless card whose holder is known,
+    // or a remote card with a holder.
     val signingAvailable =
-        (usbCardReady || nfcSigningAvailable || remoteSigningAvailable) && !isActivationRequired
+        !isActivationRequired &&
+            (usbCardReady || (nfcSigningAvailable && nfcSnapshot.holderName != null) || remoteSigningAvailable)
 
     val permissionContext = LocalContext.current
     val notificationPermissionLauncher =

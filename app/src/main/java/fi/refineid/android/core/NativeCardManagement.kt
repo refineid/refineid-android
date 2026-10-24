@@ -130,15 +130,22 @@ private const val OUTCOME_REPLY_LENGTH = 4
 private const val ACTIVATION_REPLY_LENGTH = 6
 
 internal object NativeCardManagement {
+    /**
+     * The credential health under the activation scheme the card's answer
+     * to reset names, so a card awaiting activation has nothing read beyond
+     * its counters; an answer that names none has the scheme read from the
+     * certificate, as an activated card's may be.
+     */
     fun probeCredentialHealth(
         exchangeLevel: NativeCardExchangeLevel,
+        cardAnswer: ByteArray,
         exchange: NativeBlockExchange,
     ): CardManagementResult<CredentialHealth> {
         if (!NativeCore.isLoaded) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
         return try {
-            val reply = probeCredentialHealthNative(exchangeLevel.wireValue, exchange)
+            val reply = probeCredentialHealthNative(exchangeLevel.wireValue, cardAnswer, exchange)
             decodeCredentialHealth(reply)
         } catch (_: Throwable) {
             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
@@ -249,13 +256,14 @@ internal object NativeCardManagement {
     // Contactless operations
     fun contactlessProbeCredentialHealth(
         can: ByteArray,
+        cardAnswer: ByteArray,
         exchange: NativeBlockExchange,
     ): CardManagementResult<CredentialHealth> {
         if (!NativeCore.isLoaded) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
         return try {
-            val reply = contactlessProbeCredentialHealthNative(can, exchange)
+            val reply = contactlessProbeCredentialHealthNative(can, cardAnswer, exchange)
             decodeCredentialHealth(reply)
         } catch (_: Throwable) {
             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
@@ -518,6 +526,7 @@ internal object NativeCardManagement {
     @JvmStatic
     private external fun probeCredentialHealthNative(
         exchangeLevel: Int,
+        cardAnswer: ByteArray,
         callback: Any,
     ): ByteArray
 
@@ -566,6 +575,7 @@ internal object NativeCardManagement {
     @JvmStatic
     private external fun contactlessProbeCredentialHealthNative(
         can: ByteArray,
+        cardAnswer: ByteArray,
         callback: Any,
     ): ByteArray
 

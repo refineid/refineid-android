@@ -25,26 +25,31 @@ PIN's value the moment that PIN is changed.
 
 ## Decision
 
-- **Scheme from the certificate.** `activation_scheme` in the native crate
-  reads the authentication certificate's validity start and applies the
-  core's cutover rule (`ActivationScheme::from_validity_start`). An issuer
-  whose common name marks an organisational card answers nothing, since
-  section 4.6 covers citizen cards alone. When the validity cannot be read,
-  the issuer's generation marker and key-family letter stand in; anything
-  unfamiliar answers nothing. This is the Apple reference's
-  `ActivationScheme.classify`, line for line.
+- **No identity before activation.** A card awaiting activation has no
+  identity: nothing of it is read beyond its counters, so no name is shown,
+  nothing is stored for it but the access number, and nothing is offered
+  to a browser or a paired computer. The scheme therefore comes from what
+  the card answered at reset, before anything is read: the three MultiApp
+  generations DVV has issued name it (v3 and v4 use the activation code,
+  v5 the preset activation PIN; `activation_scheme`, after the Apple
+  reference's `FineidCardTypeValues`), from the historical bytes the NFC
+  stack reports or from the full answer a reader reports. An unfamiliar
+  answer names nothing, and the card is opened as an activated one.
 - **Needs from the card.** With a scheme in hand, the open asks the core's
   `activation_needs`: for the activation-code scheme a counter-safe VERIFY
   probe per PIN, where a blocked PIN is a factory-fresh one; for the preset
   scheme the changed-since-manufacture record per PIN. Both run inside the
-  secure channel after the PKCS#15 selection and the certificate read, as
-  on the iPhone. A probe the card refuses leaves the card treated as
-  activated, so a transient fault never routes an activated card to
-  activation.
+  secure channel after the PKCS#15 selection and before any identity read,
+  on a phone and on a reader alike. A probe the card refuses leaves the
+  card treated as activated, so a transient fault never routes an activated
+  card to activation. The health probe behind the activation form takes
+  the same answer to reset, so it reads no certificate either; for an
+  activated card whose answer names no scheme it reads the certificate, as
+  the card is activated.
 - **The reply names the procedure.** The contactless open reply for a card
-  awaiting activation carries the scheme byte and the needs byte ahead of
-  the certificate, with the management reply's vocabulary; Kotlin refuses a
-  reply with no scheme or no needs. Card management derives the entry
+  awaiting activation is the scheme byte and the needs byte and nothing
+  else, with the management reply's vocabulary; Kotlin refuses a reply with
+  no scheme, no needs, or any other shape. Card management derives the entry
   length from the scheme and never submits an activation for a scheme it
   does not know; the native side refuses the same, instead of guessing the
   newer procedure as it did.
@@ -55,14 +60,14 @@ PIN's value the moment that PIN is changed.
   leading back to it; the home screen carries no banner. The identity row
   shows a chevron only where a tap opens a page, so the card-reading prompt
   has none.
-- **The access number stays; the certificate does not.** PACE proved the
-  card access number against the card, so the open keeps it for a card
-  awaiting activation as for an activated one: the holder types it once,
-  and a mismatch on a later tap forgets it as for any card. The
-  authentication certificate is kept neither in memory nor in the store
-  until an activated open reads it: the identity a paired computer is
-  offered over RAPP comes from that certificate, and a card is offered only
-  once it is activated.
+- **The access number stays.** PACE proved the card access number against
+  the card, so the open keeps it for a card awaiting activation as for an
+  activated one: the holder types it once, and a mismatch on a later tap
+  forgets it as for any card. Whatever an earlier card left in memory or
+  in the store, a name or a certificate, goes with it.
+- **Signing waits for an identity.** The home screen offers document
+  signing only with an identity read from an activated card, as the
+  iPhone's drop area appears with the identity.
 - **Every build.** Activation is in release builds as in debug builds, as
   on the Apple platforms.
 
@@ -87,12 +92,27 @@ Feedback: the certificate and the per-PIN probes.
 
 Scripted: the classifier against synthetic certificates on both sides of
 the cutover, organisational and unfamiliar issuers, unreadable validity, and
-malformed or truncated DER; the open reply encoding and the Kotlin decoder
-with scheme and needs, and the decoder's refusals. Hardware, observed by
-the owner on 2026-10-24 on a phone over NFC: an activated card opened as
+malformed or truncated DER; the answer-to-reset table against the three
+generations, a full answer and an unfamiliar one; the open reply encoding
+and the Kotlin decoder with scheme and needs, and the decoder's refusals.
+Hardware, observed on 2026-10-24: over NFC, an activated card opened as
 ready, which proves the changed-record read survives the secure channel,
-and a card awaiting activation was routed to activation. The activation
+and a card awaiting activation was routed to activation; in a USB reader,
+a card awaiting activation answered at reset as a fifth-generation MultiApp
+and its changed records reported both PINs waiting under the preset
+scheme, which is the table's row and the probe's reading. The activation
 itself, which each card serves once, is not yet observed on Android.
+
+## Open question
+
+For the activation-code scheme the core reads a PIN as factory-fresh when
+the counter-safe probe answers "blocked" (FINEID S4-1 v4.2 section 4.6.1:
+"PIN1 and PIN2 have been blocked"), while the Apple reference records
+"reference data invalidated" as the answer a factory-fresh PIN gives and
+counts a blocked PIN as one written to since manufacture. Android follows
+the core. Which answer such a card gives at the probe is a hardware
+observation still to be made on Android; until then the old scheme's
+detection is covered by scripted tests only.
 
 ## Consequences
 

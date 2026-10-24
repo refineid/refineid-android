@@ -8,14 +8,14 @@ internal sealed interface NativeContactlessOpenResult {
         override fun toString(): String = "Success(" + certificate + ", " + preflight + ")"
     }
 
-    /** The card still awaits activation: its scheme, and which PINs. */
-    class ActivationRequired(
-        val certificate: NativeAuthenticationCertificate,
+    /**
+     * The card still awaits activation: its scheme, and which PINs. It has
+     * no identity yet, so nothing of it was read or returned.
+     */
+    data class ActivationRequired(
         val scheme: CardManagementScheme,
         val needs: CardActivationNeeds,
-    ) : NativeContactlessOpenResult {
-        override fun toString(): String = "ActivationRequired(" + certificate + ", " + scheme + ", " + needs + ")"
-    }
+    ) : NativeContactlessOpenResult
 
     data class Failure(
         val kind: NativeCertificateReadFailure,
@@ -25,8 +25,8 @@ internal sealed interface NativeContactlessOpenResult {
 /**
  * Strict decoder for the nested contactless open reply:
  * `[succeeded tag, preflight-reply length, preflight reply, certificate
- * reply]`, `[activation-required tag, activation scheme, activation needs,
- * key profile, certificate DER]`, or one certificate-vocabulary failure
+ * reply]`, `[activation-required tag, activation scheme, activation needs]`
+ * for a card awaiting activation, or one certificate-vocabulary failure
  * byte. The nested parts reuse the established strict sub-decoders
  * wholesale.
  */
@@ -38,7 +38,7 @@ internal object NativeContactlessOpenReply {
             } else if (reply[TAG_OFFSET].toUnsignedInt() == OPEN_SUCCEEDED) {
                 decodeSuccess(reply)
             } else if (reply[TAG_OFFSET].toUnsignedInt() == OPEN_ACTIVATION_REQUIRED &&
-                reply.size >= MINIMUM_ACTIVATION_REPLY_LENGTH
+                reply.size == ACTIVATION_REPLY_LENGTH
             ) {
                 decodeActivationRequired(reply)
             } else {
@@ -88,28 +88,7 @@ internal object NativeContactlessOpenReply {
         if (scheme == CardManagementScheme.UNKNOWN || !needs.any) {
             return bridgeFailure()
         }
-        val certPayload =
-            byteArrayOf(OPEN_SUCCEEDED.toByte()) +
-                reply.copyOfRange(ACTIVATION_HEADER_LENGTH, reply.size)
-        val certificateResult =
-            NativeCertificateReply.decode(
-                reply = certPayload,
-                certificate = { profile, der ->
-                    NativeAuthenticationCertificate(
-                        keyProfile = profile,
-                        ownedDer = der,
-                    )
-                },
-            )
-        return when (certificateResult) {
-            is NativeCertificateReadResult.Success -> {
-                NativeContactlessOpenResult.ActivationRequired(certificateResult.certificate, scheme, needs)
-            }
-
-            is NativeCertificateReadResult.Failure -> {
-                NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.ACTIVATION_REQUIRED)
-            }
-        }
+        return NativeContactlessOpenResult.ActivationRequired(scheme, needs)
     }
 
     private fun decodeFailure(reply: ByteArray): NativeContactlessOpenResult =
@@ -152,9 +131,7 @@ internal object NativeContactlessOpenReply {
 
     private const val ACTIVATION_SCHEME_OFFSET = 1
     private const val ACTIVATION_NEEDS_OFFSET = 2
-    private const val ACTIVATION_HEADER_LENGTH = 3
-    private const val MINIMUM_ACTIVATION_REPLY_LENGTH =
-        ACTIVATION_HEADER_LENGTH + MINIMUM_CERTIFICATE_REPLY_LENGTH - 1
+    private const val ACTIVATION_REPLY_LENGTH = 3
     private const val MINIMUM_SUCCESS_REPLY_LENGTH =
         HEADER_LENGTH + PREFLIGHT_REPLY_LENGTH + MINIMUM_CERTIFICATE_REPLY_LENGTH
     private const val UNSIGNED_BYTE_MASK = 0xFF
