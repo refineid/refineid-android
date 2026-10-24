@@ -44,13 +44,16 @@
         android:theme="@style/Theme.RefineID"
         android:networkSecurityConfig="@xml/network_security_config"
         android:usesCleartextTraffic="false">
+        <!-- The PIN prompt takes the orientation of the browser beneath it (design record 0045). -->
         <activity
             android:name=".keychain.ExternalKeyPinActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboardHidden"
             android:excludeFromRecents="true"
             android:exported="false"
             android:finishOnTaskLaunch="true"
-            android:launchMode="singleTop" />
+            android:launchMode="singleTop"
+            android:screenOrientation="behind"
+            tools:ignore="DiscouragedApi,LockedOrientationActivity" />
 
         <service
             android:name=".keychain.ExternalKeyProviderService"
@@ -62,13 +65,19 @@
         </service>
 
         <!-- MainActivity is the system launcher entrypoint and must be exported for the OS launcher -->
+        <!-- The main screen stays in portrait on phones; large screens running
+             Android 16 or later ignore the request and lay the screen out as the
+             platform prefers (design record 0045), so lint's discouraged-API finding
+             is accepted here. -->
         <!-- nosemgrep: java.android.security.exported_activity.exported_activity -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboardHidden"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            tools:ignore="DiscouragedApi,LockedOrientationActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

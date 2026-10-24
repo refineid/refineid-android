@@ -79,6 +79,24 @@ class ExternalKeyProviderManifestInstrumentedTest {
         }
     }
 
+    @Test
+    fun theMainScreenRequestsPortraitAndThePinPromptFollowsTheActivityBeneath() {
+        val context = ApplicationProvider.getApplicationContext<RefineIdApplication>()
+        val requested =
+            listOf(
+                MainActivity::class.java to ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                ExternalKeyPinActivity::class.java to ActivityInfo.SCREEN_ORIENTATION_BEHIND,
+            )
+        for ((activity, orientation) in requested) {
+            val activityInfo =
+                context.packageManager.getActivityInfo(
+                    ComponentName(context, activity),
+                    PackageManager.ComponentInfoFlags.of(NO_PACKAGE_MANAGER_FLAGS),
+                )
+            assertEquals(activity.simpleName, orientation, activityInfo.screenOrientation)
+        }
+    }
+
     private companion object {
         const val ROTATION_CONFIG_CHANGES =
             ActivityInfo.CONFIG_ORIENTATION or
