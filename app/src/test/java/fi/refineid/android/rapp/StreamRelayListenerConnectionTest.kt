@@ -384,13 +384,15 @@ class StreamRelayListenerConnectionTest {
                     peerB.sendFrame(FROM_B)
                     awaitCondition("peer B's frame never arrived") { FROM_B in events }
                 }
+                // Peer B's close ends its read loop, which reports the disconnect while the listener is open.
+                awaitCondition("peer B's close was never reported") { events.count { it == DISCONNECTED } == 2 }
             }
         } finally {
             listener.close()
         }
         settle()
 
-        assertEquals(listOf(CONNECTED, DISCONNECTED, CONNECTED, FROM_B), events.toList())
+        assertEquals(listOf(CONNECTED, DISCONNECTED, CONNECTED, FROM_B, DISCONNECTED), events.toList())
         assertEquals(emptyList<Throwable>(), uncaught)
     }
 
