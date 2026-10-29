@@ -38,7 +38,7 @@ import kotlin.concurrent.thread
  * The stream listener's connections end quietly whoever closes them, and
  * its sends never write on the calling thread: the frames queued for a
  * connection leave in order before it closes, whatever the listener does
- * next (RAPP v26.10.22 section 4.5 item 3).
+ * next (RAPP v26.10.29 section 4.5 item 3).
  */
 class StreamRelayListenerConnectionTest {
     private companion object {

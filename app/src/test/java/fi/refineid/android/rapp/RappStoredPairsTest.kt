@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * The served set: the start-up sweep revokes every vault record no catalogue
- * entry names (RAPP v26.10.22 section 4.3 item 4), and every load destroys a
+ * entry names (RAPP v26.10.29 section 4.3 item 4), and every load destroys a
  * forgotten record whose close did not reach its peer within 30 days of the
  * forgetting (section 4.6 item 3).
  */

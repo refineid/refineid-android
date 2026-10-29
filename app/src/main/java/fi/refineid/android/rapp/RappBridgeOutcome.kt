@@ -24,7 +24,7 @@ import java.security.cert.X509Certificate
 
 /**
  * The identifier of one operation: a fresh random value of the size the
- * engine draws (RAPP v26.10.22 section 8.1 item 1).
+ * engine draws (RAPP v26.10.29 section 8.1 item 1).
  */
 internal class RappOperationId private constructor(
     private val bytes: ByteArray,
@@ -61,7 +61,7 @@ internal class RappOperationId private constructor(
     }
 }
 
-/** The SHA-256 digest of a card's authentication certificate in DER (RAPP v26.10.22 section 8.4 item 2). */
+/** The SHA-256 digest of a card's authentication certificate in DER (RAPP v26.10.29 section 8.4 item 2). */
 internal class RappCertificateFingerprint private constructor(
     private val digest: ByteArray,
 ) {
@@ -117,7 +117,7 @@ internal class RappCertificate private constructor(
     }
 }
 
-/** The card a custodian reports on a session (RAPP v26.10.22 section 8.4 item 1). */
+/** The card a custodian reports on a session (RAPP v26.10.29 section 8.4 item 1). */
 internal sealed interface RappCardStatus {
     /** A card can answer now; [fingerprint] names it. */
     class Present(
@@ -128,7 +128,7 @@ internal sealed interface RappCardStatus {
     data object Absent : RappCardStatus
 }
 
-/** The card this custodian can serve now (RAPP v26.10.22 section 8.4 item 1). */
+/** The card this custodian can serve now (RAPP v26.10.29 section 8.4 item 1). */
 internal sealed interface RappOfferedCard {
     /** A card coupled in a reader, or a primed card the holder can present, with its authentication certificate. */
     class Present(
@@ -150,7 +150,7 @@ internal class RappDocument(
     val digest: ByteArray,
 )
 
-/** What a requester asked of the card (RAPP v26.10.22 section 9). */
+/** What a requester asked of the card (RAPP v26.10.29 section 9). */
 internal sealed interface RappRequest {
     data object InspectCard : RappRequest
 

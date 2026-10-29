@@ -2,7 +2,7 @@ package fi.refineid.android.rapp
 
 import java.security.SecureRandom
 
-/** Generates, formats, and validates 6-character Crockford Base32 pairing codes for RAPP v26.10.22. */
+/** Generates, formats, and validates 6-character Crockford Base32 pairing codes for RAPP v26.10.29. */
 internal object RappPairingCode {
     const val CODE_LENGTH = 6
     const val GROUP_SIZE = 2
@@ -23,7 +23,7 @@ internal object RappPairingCode {
     private const val SEPARATORS = " -"
 
     /**
-     * Applies the entry rule of RAPP v26.10.22 section 3.1: the 32 alphabet
+     * Applies the entry rule of RAPP v26.10.29 section 3.1: the 32 alphabet
      * characters, an ASCII lowercase letter folded to its uppercase form, and
      * spaces and hyphens ignored. Returns the canonical string, which may be
      * shorter or longer than a code, or an empty string when any other

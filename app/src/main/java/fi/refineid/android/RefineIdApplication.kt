@@ -63,7 +63,7 @@ class RefineIdApplication : Application() {
 
     /**
      * Forgets the held PIN1 once the card in the USB reader is removed or the
-     * reader disconnects (RAPP v26.10.22 section 11 item 2).
+     * reader disconnects (RAPP v26.10.29 section 11 item 2).
      */
     private fun forgetReaderPin1() {
         synchronized(authenticationCustodyLock) {
@@ -232,7 +232,7 @@ class RefineIdApplication : Application() {
         rappProxyDispatcher.startIdleExpiry(rappVault)
         // Either reader's card arriving or leaving, and the USB reader's
         // attachment or detachment, are reported on the open RAPP session
-        // (RAPP v26.10.22 section 8.4 item 1).
+        // (RAPP v26.10.29 section 8.4 item 1).
         readerController.addStateListener { rappProxyDispatcher.cardChanged() }
         nfcReaderController.addStateListener { rappProxyDispatcher.cardChanged() }
         startRappProxyListening()
@@ -249,7 +249,7 @@ class RefineIdApplication : Application() {
             return
         }
         // Forgotten pairings are served too, until their close reaches the
-        // peer (RAPP v26.10.22 section 4.6 item 2).
+        // peer (RAPP v26.10.29 section 4.6 item 2).
         val served =
             fi.refineid.android.rapp.RappStoredPairs
                 .served(rappPairCatalog, rappVault)
@@ -339,7 +339,7 @@ class RefineIdApplication : Application() {
         )
 
     /**
-     * The card this phone holds for a paired computer (RAPP v26.10.22
+     * The card this phone holds for a paired computer (RAPP v26.10.29
      * section 8.4 item 1): a card ready in the USB reader, a card open on NFC,
      * or an NFC card the holder added to the phone and has not removed,
      * named by its authentication certificate. A reader that does not hand

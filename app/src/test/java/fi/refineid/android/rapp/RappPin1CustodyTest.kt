@@ -22,7 +22,7 @@ import org.junit.Test
 /**
  * The custodian's PIN 1 across browser authentications, step by step as
  * the proxy dispatcher takes it: asked once, then spent with no prompt
- * until the card leaves or refuses it (RAPP v26.10.22 section 11 item 2).
+ * until the card leaves or refuses it (RAPP v26.10.29 section 11 item 2).
  */
 class RappPin1CustodyTest {
     @Test

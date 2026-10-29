@@ -8,7 +8,7 @@ import uniffi.refineid_rapp.RappRoute
 import uniffi.refineid_rapp.RappSessionRouter
 
 /**
- * Routes a session connection by its routing preamble (RAPP v26.10.22
+ * Routes a session connection by its routing preamble (RAPP v26.10.29
  * section 2.2.1).
  *
  * The custodian serves every stored custodian pairing on each transport. A

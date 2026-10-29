@@ -14,7 +14,7 @@ import uniffi.refineid_rapp.RappBleSarReassembler
 import uniffi.refineid_rapp.rappBleSarSegment
 
 /**
- * The custodian's GATT links (RAPP v26.10.22 sections 5.2 and 5.3) against a
+ * The custodian's GATT links (RAPP v26.10.29 sections 5.2 and 5.3) against a
  * fake platform: subscription, the MTU floor, routing, refusal, reassembly,
  * indications one at a time, the owner's close, and the server's shutdown.
  * Every refusal is `writeNotPermitted`, never an authentication or

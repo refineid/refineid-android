@@ -8,7 +8,7 @@ import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappPairVault
 
 /**
- * Forgets and revokes stored pairings the way RAPP v26.10.22 section 4.6
+ * Forgets and revokes stored pairings the way RAPP v26.10.29 section 4.6
  * requires. Forgetting with no session to the peer open keeps the record's
  * key only to deliver the `pairing_revoked` close on the next session;
  * revoking destroys the key at once. A record the core no longer decodes is

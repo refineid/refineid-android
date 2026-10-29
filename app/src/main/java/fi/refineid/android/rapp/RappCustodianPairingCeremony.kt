@@ -8,7 +8,7 @@ import uniffi.refineid_rapp.RappPeerHello
 
 /**
  * The custodian's side of one pairing ceremony over one connected candidate,
- * after the offer bootstrap, in the order RAPP v26.10.22 sections 4.3 and
+ * after the offer bootstrap, in the order RAPP v26.10.29 sections 4.3 and
  * 6.1.3 fix:
  *
  * 1. read the requester's Y_A, answer with Y_B and T_B;

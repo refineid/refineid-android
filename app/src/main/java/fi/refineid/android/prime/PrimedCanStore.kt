@@ -18,7 +18,7 @@ import javax.crypto.spec.GCMParameterSpec
  * Blocking custody of the primed card's access number, mirroring the Apple
  * reference: priming once lets every later tap reopen the card without
  * re-entry. PIN 1 is never stored; it is held only in memory (RAPP
- * v26.10.22 section 11 item 2). Digits rest only as app-private ciphertext
+ * v26.10.29 section 11 item 2). Digits rest only as app-private ciphertext
  * under one non-exportable Android Keystore key, and a read that fails to
  * decrypt clears the prime instead of surfacing broken state. Every call
  * must run away from the main thread.

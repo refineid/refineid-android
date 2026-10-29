@@ -15,7 +15,7 @@ internal object RappClock {
     fun wallMs(): ULong = System.currentTimeMillis().toULong()
 
     /**
-     * Milliseconds of the continuous clock (RAPP v26.10.22 section 8.1 item
+     * Milliseconds of the continuous clock (RAPP v26.10.29 section 8.1 item
      * 2): never moves backwards and keeps counting through device sleep and
      * process suspension, so offer, liveness and operation deadlines track
      * real elapsed time. `SystemClock.uptimeMillis` pauses in deep sleep and

@@ -72,7 +72,7 @@ internal class StreamRelayListener(
 
         /**
          * How long a closing connection's queued frames have to leave before
-         * its socket closes regardless: the bound RAPP v26.10.22 section 4.5
+         * its socket closes regardless: the bound RAPP v26.10.29 section 4.5
          * item 8 sets on a quitting Requester's closes.
          */
         const val CLOSE_DRAIN_BOUND_MS = 1_000L

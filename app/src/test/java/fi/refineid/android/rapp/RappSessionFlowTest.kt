@@ -28,7 +28,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * One RAPP v26.10.22 session between a requester and a custodian bridge,
+ * One RAPP v26.10.29 session between a requester and a custodian bridge,
  * read through the app's typed binding border: the custodian's ready, card
  * status, consent, reads, the retry floor, deadlines, liveness and the
  * pairing_revoked close either end sends.

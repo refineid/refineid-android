@@ -17,7 +17,7 @@ internal class RappServedSession(
 )
 
 /**
- * Idle expiry of the pairings this phone serves (RAPP v26.10.22 section 4.6
+ * Idle expiry of the pairings this phone serves (RAPP v26.10.29 section 4.6
  * item 5; core STPA CC-103).
  *
  * A pairing with no established session for 30 days expires: the core

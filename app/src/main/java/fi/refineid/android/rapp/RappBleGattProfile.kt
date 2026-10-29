@@ -6,7 +6,7 @@ import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.rappBleSarPayloadCapacity
 import java.util.UUID
 
-/** The `fi.refineid.rapp.ble` GATT profile (RAPP v26.10.22 sections 2.2, 5.1 and 5.3). */
+/** The `fi.refineid.rapp.ble` GATT profile (RAPP v26.10.29 sections 2.2, 5.1 and 5.3). */
 internal object RappBleGattProfile {
     /** The registered transport profile name (section 2.2). */
     const val PROFILE_NAME = "fi.refineid.rapp.ble"
@@ -51,7 +51,7 @@ private const val CCCD_NOTHING = 0
 
 /**
  * A Client Characteristic Configuration value the channel accepts: disabled
- * or indications (RAPP v26.10.22 section 5.1). The value is a 16-bit
+ * or indications (RAPP v26.10.29 section 5.1). The value is a 16-bit
  * little-endian bit field; notifications, or both, are not permitted.
  */
 internal enum class RappBleCccd(
@@ -75,7 +75,7 @@ internal enum class RappBleCccd(
 
 /**
  * The SAR fragment payload capacity of one link, which only an ATT MTU of
- * at least 512 has (RAPP v26.10.22 sections 5.2 and 5.3). The engine
+ * at least 512 has (RAPP v26.10.29 sections 5.2 and 5.3). The engine
  * computes it.
  */
 @JvmInline

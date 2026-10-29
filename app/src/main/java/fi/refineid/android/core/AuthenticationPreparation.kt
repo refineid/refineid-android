@@ -74,7 +74,7 @@ internal enum class AuthenticationPurpose(
     /**
      * Serving paired computers: the card is held, read with its access
      * number when it needs one, and PIN 1 waits for the first
-     * authentication a computer asks for (RAPP v26.10.22 section 11 item 2).
+     * authentication a computer asks for (RAPP v26.10.29 section 11 item 2).
      */
     REMOTE_ACCESS(needsPin1 = false),
 }

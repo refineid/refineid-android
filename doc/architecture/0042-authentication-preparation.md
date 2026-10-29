@@ -21,7 +21,7 @@ opens the card: a card ready in the reader, or a primed certificate, continues
 at once, and a phone with no reader that can reach a card serves at once.
 Remote Access never asks for, verifies, or holds PIN1 when the page opens or
 serving starts; PIN1 is asked at the first authentication a computer requests
-and held from then on (RAPP v26.10.22 section 11 item 2). Reader
+and held from then on (RAPP v26.10.29 section 11 item 2). Reader
 availability, rather than the colour of a feature icon, determines whether an
 action can start.
 

@@ -14,7 +14,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Bounded reads from a card for RAPP: its authentication certificate and the
  * attempts its PIN 2 allows; [AuthenticationCardReads] reads PIN 1's. A card
  * service that does not answer in time counts as a card that cannot answer
- * now, so no wait on it can stall what a session reports (RAPP v26.10.22 section 8.4 item 1) or what a PIN command
+ * now, so no wait on it can stall what a session reports (RAPP v26.10.29 section 8.4 item 1) or what a PIN command
  * decides (section 10.2).
  */
 internal object RappCardRead {

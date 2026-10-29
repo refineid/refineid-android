@@ -10,7 +10,7 @@ package fi.refineid.android.rapp
  * it, or after the card counted it. The request waits for the card as any
  * other request does and reads the PIN's attempts again; it runs the command
  * once more only when the count it read before the first run shows the card
- * did not count it (credential custody, RAPP v26.10.22 section 10.2). A
+ * did not count it (credential custody, RAPP v26.10.29 section 10.2). A
  * second miss is the answer.
  */
 internal object RappCardRetry {

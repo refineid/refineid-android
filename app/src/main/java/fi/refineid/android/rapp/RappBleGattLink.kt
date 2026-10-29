@@ -20,7 +20,7 @@ internal enum class RappBleLinkFailure {
     /** The server's owner closed it. */
     CANCELLED,
 
-    /** The negotiated ATT MTU is below 512 (RAPP v26.10.22 section 5.2 step 1). */
+    /** The negotiated ATT MTU is below 512 (RAPP v26.10.29 section 5.2 step 1). */
     ATT_MTU_TOO_SMALL,
 
     /** The routing preamble named no pairing this phone serves now (section 2.2.1). */
@@ -87,7 +87,7 @@ internal sealed interface RappBleReceipt {
 
 /**
  * One link's state: whether it serves, its reassembly and its queue of
- * fragments to indicate (RAPP v26.10.22 sections 5.2 and 5.3).
+ * fragments to indicate (RAPP v26.10.29 sections 5.2 and 5.3).
  *
  * A link without a capacity, because its ATT MTU is below the minimum,
  * starts closed. Confined to the server's lane.

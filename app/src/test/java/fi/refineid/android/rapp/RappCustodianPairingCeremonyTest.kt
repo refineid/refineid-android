@@ -16,7 +16,7 @@ import java.security.SecureRandom
 
 /**
  * Drives [RappCustodianPairingCeremony] against a requester bridge in the
- * order RAPP v26.10.22 section 6.1.3 fixes, after the requester decoded the
+ * order RAPP v26.10.29 section 6.1.3 fixes, after the requester decoded the
  * custodian's offer bootstrap (section 4.2).
  */
 class RappCustodianPairingCeremonyTest {
@@ -25,7 +25,9 @@ class RappCustodianPairingCeremonyTest {
         const val CPACE_RANDOM_BYTES = 64
         const val OFFER_STARTED_AT_MS = 1_000UL
         const val ATTEMPT_SPACING_MS = 1_000UL
-        const val ATTEMPTS_PER_OFFER = 3
+
+        /** Wrong codes tried against one offer, more than any count could allow. */
+        const val WRONG_ATTEMPTS = 8
         const val WALL_CLOCK_MS = 1_700_000_000_000UL
         val OFFERED_PROFILES =
             listOf(
@@ -162,7 +164,7 @@ class RappCustodianPairingCeremonyTest {
     }
 
     @Test
-    fun aWrongCodeFailsAtTagBOnTheRequesterAndSpendsOneCustodianAttempt() {
+    fun aWrongCodeFailsAtTagBOnTheRequesterAndKeepsTheOffer() {
         val code = RappPairingCode.generate()
         val (custodianBridge, requester) = bridges(code, requesterCode = otherCode(code))
         val custodian = ceremony(custodianBridge)
@@ -171,17 +173,18 @@ class RappCustodianPairingCeremonyTest {
         val stepTwo = custodian.receive(requester.writeCpaceFrame(now)).frames().single()
         assertThrows(RappBindingException::class.java) { requester.readCpaceFrame(stepTwo, now) }
 
-        // The requester never sends T_A and disconnects; the attempt is spent
-        // and the offer stays for another connection (section 3.3).
+        // The requester never sends T_A and disconnects; the attempt ends and
+        // the offer stays as it was (section 3.3 item 4).
         assertTrue(custodianBridge.candidateFailed(now))
     }
 
     @Test
-    fun threeWrongCodesExhaustTheOffer() {
+    fun wrongCodesNeverExhaustTheOffer() {
         val code = RappPairingCode.generate()
         val (custodianBridge, _) = RappTestOffers.custodianAndRequester(OFFERED_PROFILES, OFFER_STARTED_AT_MS)
         var now = OFFER_STARTED_AT_MS
-        repeat(ATTEMPTS_PER_OFFER) { attempt ->
+
+        fun requester(requesterCode: String): RappPairingBridge {
             val requester =
                 RappPairingBridge.fromBootstrap(
                     custodianBridge.bootstrapBytes(now),
@@ -189,19 +192,20 @@ class RappCustodianPairingCeremonyTest {
                     now,
                 )
             begin(custodianBridge, code, now)
-            begin(requester, otherCode(code), now)
+            begin(requester, requesterCode, now)
             custodianBridge.readCpaceFrame(requester.writeCpaceFrame(now), now)
+            return requester
+        }
+        repeat(WRONG_ATTEMPTS) {
+            requester(otherCode(code))
             custodianBridge.writeCpaceFrame(now)
-            val kept =
-                try {
-                    custodianBridge.candidateFailed(now)
-                } catch (_: RappBindingException.AttemptsExhausted) {
-                    false
-                }
-            assertEquals(attempt < ATTEMPTS_PER_OFFER - 1, kept)
+            assertTrue(custodianBridge.candidateFailed(now))
             now += ATTEMPT_SPACING_MS
         }
-        assertThrows(RappBindingException::class.java) { begin(custodianBridge, code, now) }
+        // The offer admits the right code after any number of wrong ones
+        // (section 3.3 item 4): T_B verifies on the requester.
+        val honest = requester(code)
+        honest.readCpaceFrame(custodianBridge.writeCpaceFrame(now), now)
     }
 
     @Test
