@@ -1,5 +1,7 @@
 package fi.refineid.android.rapp
 
+import java.io.DataInputStream
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -17,6 +19,20 @@ internal object StreamRelayFraming {
         buffer.putShort(payload.size.toShort())
         buffer.put(payload)
         return buffer.array()
+    }
+
+    /**
+     * Reads one frame from [input]: a nonzero length prefix and that many
+     * payload bytes.
+     *
+     * @throws IOException on an empty frame, a failed read or the end of the stream.
+     */
+    fun read(input: DataInputStream): ByteArray {
+        val length = input.readUnsignedShort()
+        if (length == 0) {
+            throw IOException("empty stream frame")
+        }
+        return ByteArray(length).also(input::readFully)
     }
 
     fun payloadByteCount(lengthPrefix: ByteArray): Int? {

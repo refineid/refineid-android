@@ -658,10 +658,6 @@ internal class RappPhoneProxyDispatcher(
             when (event) {
                 is StreamRelayEvent.Connected -> {
                     if (served == RappServedTransport.Stream) endSession()
-                    if (!preAuthenticationLimiter.admit(RappClock.monotonicMs())) {
-                        AppTrace.rappDialRefused(RappTransportProfile.STREAM, RappDialRefusal.RATE_LIMITED)
-                        activeListener?.disconnectClient()
-                    }
                 }
 
                 is StreamRelayEvent.Frame -> {
@@ -707,15 +703,21 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * The stream connection's first frame must be the session preamble of a
-     * served pairing, and the session this phone serves must admit it;
-     * anything else closes the connection and changes no stored state (RAPP
-     * v26.10.29 section 2.2.1).
+     * served pairing, read before the pre-authentication bound (section 3.3
+     * item 6) applies, and the session this phone serves must admit it;
+     * anything else closes the connection unanswered and changes no stored
+     * state (RAPP v26.10.29 section 2.2.1).
      */
     private fun routeStream(
         vault: AndroidRappVault,
         preamble: ByteArray,
     ) {
         val transport = RappServedTransport.Stream
+        if (!preAuthenticationLimiter.admit(RappClock.monotonicMs())) {
+            AppTrace.rappDialRefused(transport.profile, RappDialRefusal.RATE_LIMITED)
+            activeListener?.disconnectClient()
+            return
+        }
         val pair = routeServed(vault, transport.profile, preamble)
         if (pair == null) {
             activeListener?.disconnectClient()

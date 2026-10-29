@@ -23,6 +23,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -58,6 +59,11 @@ internal sealed interface StreamRelayEvent {
  * [StreamRelayEvent.Disconnected], its frames only while it is current,
  * and the next connection is taken only after every event of the
  * previous one was delivered.
+ *
+ * A connection that arrives while another is current is refused: with
+ * [answerWhileHeld] set, its first frame is read and answered as that
+ * callback says before it closes, at most [CONCURRENT_HELD_ANSWERS] at a
+ * time; otherwise it closes unanswered. It reports no event.
  */
 internal class StreamRelayListener(
     private val context: Context,
@@ -84,6 +90,15 @@ internal class StreamRelayListener(
          * its last events have as long again to be delivered.
          */
         private const val READ_HANDOFF_BOUND_MS = 2 * CLOSE_DRAIN_BOUND_MS
+
+        /**
+         * How many connections refused while another is current may wait for
+         * their first frame at once; more are closed unanswered.
+         */
+        const val CONCURRENT_HELD_ANSWERS = 4
+
+        /** Why a connection was refused while another is current. */
+        private const val ALREADY_CONNECTED = "already_connected"
 
         /** Runs the bounded closes of every listener's connections; never cancelled. */
         private val closeDeadlines = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -142,6 +157,28 @@ internal class StreamRelayListener(
             }
         }
 
+        /**
+         * Reads this connection's first frame, sends what [answer] returns
+         * for it unless [stopped], and closes the connection; a failed read
+         * closes it unanswered.
+         */
+        fun answerFirstFrame(
+            scope: CoroutineScope,
+            stopped: () -> Boolean,
+            answer: (ByteArray) -> ByteArray?,
+        ): Job =
+            scope
+                .launch(Dispatchers.IO) {
+                    try {
+                        val frame = StreamRelayFraming.read(DataInputStream(socket.getInputStream()))
+                        val reply = if (stopped()) null else answer(frame)
+                        reply?.let(StreamRelayFraming::encode)?.let(::write)
+                    } catch (_: IOException) {
+                    } finally {
+                        close()
+                    }
+                }.also { job -> job.invokeOnCompletion { cause -> if (cause != null) closeNow() } }
+
         fun closeNow() {
             try {
                 socket.close()
@@ -192,6 +229,17 @@ internal class StreamRelayListener(
     /** Called with the instance name each time the responder confirms a registration. */
     @Volatile
     var onRegistered: ((String) -> Unit)? = null
+
+    /**
+     * The answer to the first frame of a connection that arrives while
+     * another is current, sent before that connection closes; null closes
+     * it unanswered. Runs off the event lane.
+     */
+    @Volatile
+    var answerWhileHeld: ((ByteArray) -> ByteArray?)? = null
+
+    /** The refused connections that may wait for their first frame at once. */
+    private val heldAnswers = Semaphore(CONCURRENT_HELD_ANSWERS)
 
     val port: Int?
         get() = serverSocket?.localPort
@@ -284,7 +332,14 @@ internal class StreamRelayListener(
         val refusal = handOff(accepted)
         if (refusal != null) {
             AppTrace.rappConnectionRejected(socket.remoteSocketAddress?.toString() ?: "unknown", refusal)
-            accepted.closeNow()
+            val answer = answerWhileHeld
+            if (refusal == ALREADY_CONNECTED && answer != null && heldAnswers.tryAcquire()) {
+                accepted.answerFirstFrame(scope, { isClosed.get() || isWithdrawn }, answer).invokeOnCompletion {
+                    heldAnswers.release()
+                }
+            } else {
+                accepted.closeNow()
+            }
             return
         }
         AppTrace.rappConnectionAccepted(socket.remoteSocketAddress.toString())
@@ -304,7 +359,7 @@ internal class StreamRelayListener(
     private fun handOff(accepted: StreamConnection): String? {
         val previous =
             synchronized(this) {
-                if (connection?.isOpen == true) return "already_connected"
+                if (connection?.isOpen == true) return ALREADY_CONNECTED
                 reader
             }
         if (previous?.finished?.await(READ_HANDOFF_BOUND_MS, TimeUnit.MILLISECONDS) == false) {
@@ -312,7 +367,7 @@ internal class StreamRelayListener(
         }
         synchronized(this) {
             if (isClosed.get() || isWithdrawn) return "listener_stopped"
-            if (connection?.isOpen == true) return "already_connected"
+            if (connection?.isOpen == true) return ALREADY_CONNECTED
             connection = accepted
             reader = accepted
             post(StreamRelayEvent.Connected)
@@ -351,16 +406,11 @@ internal class StreamRelayListener(
         try {
             val input = DataInputStream(socket.getInputStream())
             while (scope.isActive) {
-                val length = input.readUnsignedShort()
-                if (length == 0) {
-                    throw IOException("empty stream frame")
-                }
-                val buffer = ByteArray(length)
-                input.readFully(buffer)
+                val buffer = StreamRelayFraming.read(input)
                 if (BuildConfig.DEBUG) {
                     android.util.Log.d(
                         "STREAM_LISTENER",
-                        "Received frame length=$length from ${socket.remoteSocketAddress}",
+                        "Received frame length=${buffer.size} from ${socket.remoteSocketAddress}",
                     )
                 }
                 val delivered =
