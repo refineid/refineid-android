@@ -68,7 +68,9 @@ private val DEFAULT_PAIRING_PROFILES =
  *
  * [mainDispatcher] runs the offer's countdown and deadlines; [pairVault]
  * stands in for the application's vault, [connectedPeers] for the
- * custodian's open session, and [monotonicMs] for the continuous clock.
+ * custodian's open session, and [monotonicMs] for the continuous clock; a
+ * connection that has not completed its handshake within
+ * [handshakeDeadlineMs] of connecting is closed.
  */
 internal class RappPairingModel(
     private val context: Context,
@@ -76,6 +78,7 @@ internal class RappPairingModel(
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     private val pairVault: RappPairVault? = null,
     connectedPeers: StateFlow<PairedPeer?>? = null,
+    private val handshakeDeadlineMs: Long = HANDSHAKE_DEADLINE_MS,
     private val monotonicMs: () -> ULong = RappClock::monotonicMs,
 ) : AutoCloseable {
     private val catalog = RappPairCatalog(context)
@@ -90,6 +93,7 @@ internal class RappPairingModel(
     private var awaitingPreamble = false
 
     /** The live offer's answers to pairing connections; null without an offer. */
+    @Volatile
     private var pairingBootstrap: RappPairingBootstrap? = null
 
     /** The connection's CPace start was refused, so its step 1 is answered busy. */
@@ -182,8 +186,7 @@ internal class RappPairingModel(
                     startedAtMonotonicMs = startedAtMonotonicMs,
                 )
             pairingBridge = proxyBridge
-            val bootstrap = RappPairingBootstrap(proxyBridge, preAuthenticationLimiter, rappStreamProfileName())
-            pairingBootstrap = bootstrap
+            pairingBootstrap = RappPairingBootstrap(proxyBridge, preAuthenticationLimiter, rappStreamProfileName())
             ceremony = null
             offerSeconds = (proxyBridge.offerTtlMs().toLong() / MILLISECONDS_PER_SECOND).toInt()
             secondsRemaining = offerSeconds
@@ -192,12 +195,13 @@ internal class RappPairingModel(
                 StreamRelayListener(
                     context = context,
                     scope = scope,
-                    handshakeTimeoutMs = HANDSHAKE_DEADLINE_MS,
+                    handshakeTimeoutMs = handshakeDeadlineMs,
                 ) { event ->
                     handleProxyListenerEvent(event, proxyBridge, code)
                 }
             relayListener.answerWhileHeld = { preamble ->
-                (bootstrap.answerWhileHeld(preamble, monotonicMs()) as? RappPairingBootstrap.Answer.Busy)?.frame
+                val answer = pairingBootstrap?.answerWhileHeld(preamble, monotonicMs())
+                (answer as? RappPairingBootstrap.Answer.Busy)?.frame
             }
             listener = relayListener
             relayListener.start(
@@ -240,11 +244,15 @@ internal class RappPairingModel(
         }
     }
 
-    /** A new connection opens with its routing preamble, which [beginCandidate] answers. */
+    /**
+     * A new connection opens with its routing preamble, which
+     * [beginCandidate] answers; its handshake deadline runs from now.
+     */
     private fun handleProxyConnected() {
         ceremony = null
         refusingStepOne = false
         awaitingPreamble = true
+        startHandshakeDeadline()
     }
 
     /**
@@ -298,7 +306,6 @@ internal class RappPairingModel(
                 persistUnconfirmed = { record -> record.persistDeviceOnly(vault) },
             )
         phase = PairingPhase.Connecting("Connected! Starting security handshake...")
-        startHandshakeDeadline()
     }
 
     /**
@@ -452,12 +459,18 @@ internal class RappPairingModel(
         offerWhileOn()
     }
 
+    /**
+     * Closes the connection [handshakeDeadlineMs] from now unless it reached
+     * the next step meanwhile: while it owes its preamble, its step 1 after
+     * a refused CPace start, or the next frame of its ceremony. The close
+     * ends the candidate as a lost connection does, showing nothing new.
+     */
     private fun startHandshakeDeadline() {
         handshakeDeadlineJob?.cancel()
         handshakeDeadlineJob =
             scope.launch(mainDispatcher) {
-                delay(HANDSHAKE_DEADLINE_MS)
-                if (phase is PairingPhase.Connecting) {
+                delay(handshakeDeadlineMs)
+                if (awaitingPreamble || refusingStepOne || phase is PairingPhase.Connecting) {
                     listener?.disconnectClient()
                 }
             }

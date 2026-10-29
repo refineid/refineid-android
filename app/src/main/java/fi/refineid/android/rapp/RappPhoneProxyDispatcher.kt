@@ -104,7 +104,7 @@ internal class RappPhoneProxyDispatcher(
     private var idleExpiryJob: Job? = null
     private var vault: AndroidRappVault? = null
     private val catalog = RappPairCatalog(context)
-    private val preAuthenticationLimiter = RappPreAuthenticationLimiter()
+    private val dialGate = RappSessionDialGate(RappPreAuthenticationLimiter())
     private val pin1Custody = RappPin1Custody(pinCache)
 
     @Volatile
@@ -595,14 +595,13 @@ internal class RappPhoneProxyDispatcher(
             val refusal =
                 when {
                     bleServer !== server || vlt == null || withdrawing || isClosed -> RappDialRefusal.NOT_SERVING
-                    !preAuthenticationLimiter.admit(RappClock.monotonicMs()) -> RappDialRefusal.RATE_LIMITED
                     else -> null
                 }
             if (refusal != null || vlt == null) {
                 AppTrace.rappDialRefused(transport.profile, refusal ?: RappDialRefusal.NOT_SERVING)
                 return false
             }
-            val pair = routeServed(vlt, transport.profile, preamble) ?: return false
+            val pair = admitRouted(vlt, transport.profile, preamble) ?: return false
             if (!admit(pair, transport)) {
                 pair.record.close()
                 return false
@@ -703,8 +702,9 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * The stream connection's first frame must be the session preamble of a
-     * served pairing, read before the pre-authentication bound (section 3.3
-     * item 6) applies, and the session this phone serves must admit it;
+     * served pairing, which alone counts against the pre-authentication
+     * bound (section 3.3 item 6), and the session this phone serves must
+     * admit it;
      * anything else closes the connection unanswered and changes no stored
      * state (RAPP v26.10.29 section 2.2.1).
      */
@@ -713,12 +713,7 @@ internal class RappPhoneProxyDispatcher(
         preamble: ByteArray,
     ) {
         val transport = RappServedTransport.Stream
-        if (!preAuthenticationLimiter.admit(RappClock.monotonicMs())) {
-            AppTrace.rappDialRefused(transport.profile, RappDialRefusal.RATE_LIMITED)
-            activeListener?.disconnectClient()
-            return
-        }
-        val pair = routeServed(vault, transport.profile, preamble)
+        val pair = admitRouted(vault, transport.profile, preamble)
         if (pair == null) {
             activeListener?.disconnectClient()
             return
@@ -730,6 +725,23 @@ internal class RappPhoneProxyDispatcher(
         }
         open(vault, pair, transport)
     }
+
+    /**
+     * The served pairing [preamble] routes to on [profile], admitted under
+     * the pre-authentication bound; null when it routes to none or the bound
+     * refuses it.
+     */
+    private fun admitRouted(
+        vault: AndroidRappVault,
+        profile: RappTransportProfile,
+        preamble: ByteArray,
+    ): RappStoredPair? =
+        dialGate.admit(
+            nowMonotonicMs = RappClock.monotonicMs(),
+            route = { routeServed(vault, profile, preamble) },
+            release = { it.record.close() },
+            onRateLimited = { AppTrace.rappDialRefused(profile, RappDialRefusal.RATE_LIMITED) },
+        )
 
     /** The served pairing [preamble] routes to on [profile], or null when it routes to none. */
     private fun routeServed(

@@ -60,6 +60,15 @@ class RappPairingOfferTest {
         /** What a stream read returns once the peer closed the connection. */
         const val END_OF_STREAM = -1
 
+        /** The custodian's handshake deadline, longer than any test here runs. */
+        const val HANDSHAKE_DEADLINE_MS = 60_000L
+
+        /** A handshake deadline short enough for a test to wait out. */
+        const val SHORT_HANDSHAKE_DEADLINE_MS = 200L
+
+        /** How long the offer is served (RAPP v26.10.29 section 3.3 item 7). */
+        const val OFFER_TTL_MS = 300_000L
+
         /** How often a requester asks a busy custodian again before the test gives up. */
         const val BUSY_REOPENINGS = 8
     }
@@ -112,10 +121,14 @@ class RappPairingOfferTest {
         return id.key
     }
 
-    private fun model(remoteAccessOn: Boolean): RappPairingModel {
+    private fun model(
+        remoteAccessOn: Boolean,
+        handshakeDeadlineMs: Long = HANDSHAKE_DEADLINE_MS,
+    ): RappPairingModel {
         RappSettings(context).isCardRemoteAccessEnabled = remoteAccessOn
-        return RappPairingModel(context, scope, Dispatchers.Unconfined, vault, connected) { clock.get().toULong() }
-            .also { model = it }
+        return RappPairingModel(context, scope, Dispatchers.Unconfined, vault, connected, handshakeDeadlineMs) {
+            clock.get().toULong()
+        }.also { model = it }
     }
 
     private fun RappPairingModel.code(): String = (phase as PairingPhase.Offering).code
@@ -255,6 +268,40 @@ class RappPairingOfferTest {
         } catch (_: RappBindingException) {
             null
         }
+
+    @Test
+    fun aConnectionThatSendsNothingIsClosedAtTheDeadlineAndTheNextIsServedTheOffer() {
+        val model = model(remoteAccessOn = true, handshakeDeadlineMs = SHORT_HANDSHAKE_DEADLINE_MS)
+        model.offerWhileOn()
+        val code = model.code()
+        val port = checkNotNull(model.offerPort)
+
+        StreamPeer(port).use { silent ->
+            assertEquals(END_OF_STREAM, silent.input.read())
+        }
+        awaitOffering(model)
+        assertEquals(code, model.code())
+
+        RappPairingBridge.fromBootstrap(bootstrapAnswer(port), RappTestOffers.STREAM_PROFILE, NOW).close()
+    }
+
+    @Test
+    fun withoutALiveOfferAConnectionWhileAnotherIsHeldIsClosedUnanswered() {
+        val model = model(remoteAccessOn = true)
+        model.offerWhileOn()
+        val port = checkNotNull(model.offerPort)
+
+        StreamPeer(port).use { first ->
+            first.send(rappPairingPreamble(rappStreamProfileName()))
+            first.receive()
+            clock.addAndGet(OFFER_TTL_MS)
+
+            StreamPeer(port).use { second ->
+                second.send(rappPairingPreamble(rappStreamProfileName()))
+                assertEquals(END_OF_STREAM, second.input.read())
+            }
+        }
+    }
 
     private fun awaitOffering(model: RappPairingModel) {
         val deadline = System.currentTimeMillis() + SETTLE_LIMIT_MS
