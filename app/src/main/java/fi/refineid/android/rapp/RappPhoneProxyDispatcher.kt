@@ -63,7 +63,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The custodian side of RAPP v26.10.22: serves the paired computers' sessions
+ * The custodian side of RAPP v26.10.29: serves the paired computers' sessions
  * over the stream transport and over Bluetooth (`fi.refineid.rapp.ble`,
  * section 5), asks the holder for PINs on this phone, and runs the card
  * commands through the card services.
@@ -292,7 +292,7 @@ internal class RappPhoneProxyDispatcher(
         RappCustodianService.ensureRunning(context)
         hintRefreshJob?.cancel()
         // Each hint window rebuilds the served set, which also destroys a
-        // forgotten record past its notice window (RAPP v26.10.22 section 4.6
+        // forgotten record past its notice window (RAPP v26.10.29 section 4.6
         // item 3); the listener stops once nothing is left to serve.
         hintRefreshJob =
             scope.launch {
@@ -329,7 +329,7 @@ internal class RappPhoneProxyDispatcher(
      * Session-mode TXT attributes carrying the current rotating discovery
      * hints of the most recently used custodian pairings (discovery
      * hierarchy section 4.3), forgotten ones included: their peers keep
-     * dialing until the close reaches them (RAPP v26.10.22 section 4.6 item
+     * dialing until the close reaches them (RAPP v26.10.29 section 4.6 item
      * 2).
      */
     private fun sessionAttributes(vault: AndroidRappVault): Map<String, String> {
@@ -362,7 +362,7 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Ends the session to [pairId] because the local user forgot the pairing
-     * (RAPP v26.10.22 section 4.6 item 1). Returns true when the session was
+     * (RAPP v26.10.29 section 4.6 item 1). Returns true when the session was
      * established and carried the `pairing_revoked` close, so the caller
      * destroys the record at once; false when no session to the pairing was
      * open. A session still in its handshake is dropped, and the next one
@@ -389,7 +389,7 @@ internal class RappPhoneProxyDispatcher(
     /**
      * Sweeps the pairings for idle expiry every
      * [RappIdleExpiry.SWEEP_INTERVAL_MS] until this dispatcher closes,
-     * whether or not the phone serves (RAPP v26.10.22 section 4.6 item 5);
+     * whether or not the phone serves (RAPP v26.10.29 section 4.6 item 5);
      * the start's sweep is [RappStoredPairs.cleanAtStartup]'s.
      */
     fun startIdleExpiry(vault: RappPairVault) {
@@ -423,7 +423,7 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * The card this phone holds, or its card reader, may have changed:
-     * reports both on the open session (RAPP v26.10.22 section 8.4 item 1).
+     * reports both on the open session (RAPP v26.10.29 section 8.4 item 1).
      * Present is a card in the reader, from insertion until removal or the
      * reader's detachment, or an NFC card the holder added to the phone,
      * until the holder removes it; a card busy with an operation, or one
@@ -458,7 +458,7 @@ internal class RappPhoneProxyDispatcher(
         }
 
     /**
-     * Withdraws the service the user switched off (RAPP v26.10.22 section
+     * Withdraws the service the user switched off (RAPP v26.10.29 section
      * 4.5): the open session, on either transport, is closed as withdrawn;
      * the listener and the Bluetooth server stop accepting and the
      * advertisement stops; the instance is advertised as withdrawn for a few
@@ -580,7 +580,7 @@ internal class RappPhoneProxyDispatcher(
     /**
      * Admits the routing preamble of [link] on [server]'s lane: a session
      * preamble routed to a pairing this phone serves (section 2.2.1), within
-     * the pre-authentication bound (section 3.3 item 8) and the one-session
+     * the pre-authentication bound (section 3.3 item 6) and the one-session
      * rule (CC-67). The session opens here; its handshake must complete
      * within [BLUETOOTH_HANDSHAKE_DEADLINE_MS].
      */
@@ -709,7 +709,7 @@ internal class RappPhoneProxyDispatcher(
      * The stream connection's first frame must be the session preamble of a
      * served pairing, and the session this phone serves must admit it;
      * anything else closes the connection and changes no stored state (RAPP
-     * v26.10.22 section 2.2.1).
+     * v26.10.29 section 2.2.1).
      */
     private fun routeStream(
         vault: AndroidRappVault,
@@ -842,7 +842,7 @@ internal class RappPhoneProxyDispatcher(
     /**
      * The first and only message of a session to a forgotten pairing: the
      * `pairing_revoked` close, after which the record's key is destroyed
-     * (RAPP v26.10.22 section 4.6 items 2 and 3).
+     * (RAPP v26.10.29 section 4.6 items 2 and 3).
      */
     private fun deliverRevocationNotice(
         vault: AndroidRappVault,
@@ -952,7 +952,7 @@ internal class RappPhoneProxyDispatcher(
     /**
      * The session closed, and with it its operation and any prompt for it.
      * A requester that forgot this phone closes it with `pairing_revoked`,
-     * and the pairing is revoked here at once (RAPP v26.10.22 section 4.6
+     * and the pairing is revoked here at once (RAPP v26.10.29 section 4.6
      * item 4). One that withdrew closes it with `service_withdrawn`: this
      * phone sends no close of its own and keeps the pairing (section 4.5
      * item 9).

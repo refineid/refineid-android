@@ -4,7 +4,7 @@ package fi.refineid.android.rapp
 
 import uniffi.refineid_rapp.rappStreamProfileName
 
-/** The transport profiles this custodian serves sessions on (RAPP v26.10.22 section 2.2). */
+/** The transport profiles this custodian serves sessions on (RAPP v26.10.29 section 2.2). */
 internal enum class RappTransportProfile {
     STREAM,
     BLUETOOTH,
@@ -92,7 +92,7 @@ internal enum class RappDialRefusal {
     /** Remote Access is off or being withdrawn, or the server that took the dial was replaced. */
     NOT_SERVING,
 
-    /** Within the pre-authentication spacing (RAPP v26.10.22 section 3.3 item 8). */
+    /** Within the pre-authentication spacing (RAPP v26.10.29 section 3.3 item 6). */
     RATE_LIMITED,
 
     /** The preamble named no pairing this phone serves, or was replayed (section 2.2.1). */

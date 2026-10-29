@@ -7,7 +7,7 @@ import fi.refineid.android.usb.UsbReaderSnapshot
 import uniffi.refineid_rapp.RappCardReader
 
 /**
- * What `card.status` says on a session (RAPP v26.10.22 section 8.4 item 1):
+ * What `card.status` says on a session (RAPP v26.10.29 section 8.4 item 1):
  * the card this phone holds, and whether a card reader is connected to it.
  * A session is sent one right after `session.ready` and another whenever
  * either part changes.

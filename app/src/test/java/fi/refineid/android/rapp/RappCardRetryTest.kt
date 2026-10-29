@@ -11,7 +11,7 @@ import org.junit.Test
 /**
  * A PIN command the card did not answer runs again only when the PIN's
  * attempts, read before and after, show the card did not count it
- * (credential custody; RAPP v26.10.22 section 10.2).
+ * (credential custody; RAPP v26.10.29 section 10.2).
  */
 class RappCardRetryTest {
     private enum class Answer { SIGNED, CARD_LEFT }

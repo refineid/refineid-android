@@ -609,7 +609,7 @@ internal object AppTrace {
         debug("rapp:peer-withdrawn")
     }
 
-    /** Idle expiry forgot a pairing (RAPP v26.10.22 section 4.6 item 5). */
+    /** Idle expiry forgot a pairing (RAPP v26.10.29 section 4.6 item 5). */
     fun rappPairingExpired() {
         debug("rapp:pairing-expired")
     }

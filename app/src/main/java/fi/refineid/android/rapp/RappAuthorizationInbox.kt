@@ -21,10 +21,10 @@ internal sealed interface RappAuthRequest {
     val action: RappAuthAction
     val onDenied: () -> Unit
 
-    /** Called once the PIN prompt is on screen (RAPP v26.10.22 section 8.2 item 3). */
+    /** Called once the PIN prompt is on screen (RAPP v26.10.29 section 8.2 item 3). */
     val onShown: () -> Unit
 
-    /** Set when this prompt asks again after a wrong PIN (RAPP v26.10.22 section 10.2). */
+    /** Set when this prompt asks again after a wrong PIN (RAPP v26.10.29 section 10.2). */
     val wrongPin: RappCardAnswer.WrongPin?
 
     data class BrowserAuth(

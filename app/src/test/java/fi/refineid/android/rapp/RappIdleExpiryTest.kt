@@ -19,7 +19,7 @@ import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 
 /**
- * Idle expiry of the pairings this phone serves (RAPP v26.10.22 section 4.6
+ * Idle expiry of the pairings this phone serves (RAPP v26.10.29 section 4.6
  * item 5; core STPA CC-103): a session is recorded when it is established
  * and when it ends, a pairing with no established session for 30 days is
  * forgotten silently and owes its computer only the `pairing_revoked`

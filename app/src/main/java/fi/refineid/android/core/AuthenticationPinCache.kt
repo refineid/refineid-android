@@ -5,7 +5,7 @@ import java.security.SecureRandom
 
 /**
  * Process-lifetime PIN1 custody for repeated authentication (credential
- * custody; RAPP v26.10.22 section 11 item 2).
+ * custody; RAPP v26.10.29 section 11 item 2).
  *
  * A positively verified PIN1 is held only in scrubbed memory, bound to the
  * card that accepted it, and only when that card's PIN 1 counter read

@@ -9,7 +9,7 @@ Accepted.
 A paired computer reaches the phone over the local network (`fi.refineid.stream`,
 ADR 0041) while it sees the phone's DNS-SD record. With the screen off or in
 power saving, the record can stay out of sight, and a Mac requester then dials
-Bluetooth (`fi.refineid.rapp.ble`, RAPP v26.10.22 section 5). The phone must
+Bluetooth (`fi.refineid.rapp.ble`, RAPP v26.10.29 section 5). The phone must
 answer there too, also with RefineID in the background. A stored pairing serves
 any registered transport (section 2.1, phase 4), so Bluetooth needs no pairing
 of its own and no link-layer bond.
@@ -44,7 +44,7 @@ of its own and no link-layer bond.
 - **Routing.** One `RappSessionRouting` serves both transports: a preamble
   routes only on the transport whose domain it carries (`rapp-ble` or
   `rapp-stream`, section 2.2.1), and a nonce routed on either is refused on
-  both. The pre-authentication limiter (section 3.3 item 8) is shared too.
+  both. The pre-authentication limiter (section 3.3 item 6) is shared too.
 - **One session.** The phone serves one session at a time, whichever transport
   carries it (CC-67). `RappSessionAdmission` admits a routed dial when no
   session is open; never while the open one is coming up or carries an

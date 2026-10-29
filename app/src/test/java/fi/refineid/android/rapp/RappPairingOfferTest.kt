@@ -176,7 +176,7 @@ class RappPairingOfferTest {
         assertNotEquals(first, model.code())
     }
 
-    /** A requester pairing with [code] over the stream on [port], frame by frame (RAPP v26.10.22 section 2.1). */
+    /** A requester pairing with [code] over the stream on [port], frame by frame (RAPP v26.10.29 section 2.1). */
     private fun pairOverLoopback(
         port: Int,
         code: String,

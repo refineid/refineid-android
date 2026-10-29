@@ -5,7 +5,7 @@ import java.security.MessageDigest
 /**
  * The card a held PIN 1 belongs to: the SHA-256 digest of the canonical DER
  * encoding of its authentication certificate, the fingerprint RAPP reports
- * the card by (RAPP v26.10.22 section 8.4). Each card carries its own
+ * the card by (RAPP v26.10.29 section 8.4). Each card carries its own
  * certificate, so two cards never share an identity; the held PIN 1 is
  * bound to it (credential custody: the held entry is bound to the card
  * token).

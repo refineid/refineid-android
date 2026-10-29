@@ -49,7 +49,7 @@ internal enum class RappBleServerStep(
 }
 
 /**
- * The custodian's GATT server of `fi.refineid.rapp.ble` (RAPP v26.10.22
+ * The custodian's GATT server of `fi.refineid.rapp.ble` (RAPP v26.10.29
  * section 5): the RAPP service published once, the advertisement carrying
  * only its UUID, and one link per subscribed central, kept by
  * [RappBleGattLinks].
@@ -520,7 +520,7 @@ internal class RappBleGattServer(
 }
 
 /**
- * Adds the RAPP service to [server] (RAPP v26.10.22 section 5.1) and returns
+ * Adds the RAPP service to [server] (RAPP v26.10.29 section 5.1) and returns
  * its channel characteristic, or null when the platform refused. Every
  * attribute is a plain read or write: none asks for encryption or
  * authentication (STPA CC-54).

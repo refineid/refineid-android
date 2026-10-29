@@ -30,7 +30,7 @@ import org.junit.Test
 
 /**
  * A card service that never answers cannot stall a session: a bounded read
- * ends with nothing, which the custodian reports as no card (RAPP v26.10.22
+ * ends with nothing, which the custodian reports as no card (RAPP v26.10.29
  * section 8.4 item 1) or as a count it cannot compare (section 10.2).
  */
 class RappCardReadTest {

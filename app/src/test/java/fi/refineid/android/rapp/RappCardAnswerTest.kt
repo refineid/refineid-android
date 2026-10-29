@@ -11,7 +11,7 @@ import org.junit.Test
 /**
  * A wrong PIN is the holder's to correct while the card allows at least the
  * floor; every other refusal ends the operation with its registered error
- * (RAPP v26.10.22 sections 10.2 and 10.3).
+ * (RAPP v26.10.29 sections 10.2 and 10.3).
  */
 class RappCardAnswerTest {
     private companion object {

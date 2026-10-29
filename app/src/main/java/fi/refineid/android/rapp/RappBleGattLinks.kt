@@ -65,7 +65,7 @@ internal interface RappBleGattPort<D : Any> {
 }
 
 /**
- * The custodian's GATT links of `fi.refineid.rapp.ble` (RAPP v26.10.22
+ * The custodian's GATT links of `fi.refineid.rapp.ble` (RAPP v26.10.29
  * sections 5.2 and 5.3).
  *
  * Each central that enables indications on the channel opens a link of its

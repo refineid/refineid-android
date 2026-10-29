@@ -3,7 +3,7 @@
 package fi.refineid.android.rapp
 
 /**
- * Signs the documents of one signing request in order (RAPP v26.10.22
+ * Signs the documents of one signing request in order (RAPP v26.10.29
  * section 9.3); a single document is a batch of one.
  *
  * Each signature is recorded before the next document is signed. The run

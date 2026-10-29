@@ -11,7 +11,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import uniffi.refineid_rapp.RappCardReader
 
-/** Whether `card.status` reports a card reader on the phone (RAPP v26.10.22 section 8.4 item 1). */
+/** Whether `card.status` reports a card reader on the phone (RAPP v26.10.29 section 8.4 item 1). */
 class RappCardReportTest {
     @Test
     fun aDetachedOrMissingReaderIsAbsent() {

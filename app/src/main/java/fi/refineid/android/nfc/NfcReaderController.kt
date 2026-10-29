@@ -707,7 +707,7 @@ internal class NfcReaderController(
         val previous = currentAuthCertDer ?: primedCanStore.readAuthCertificateDer()
         if (previous != null && !previous.contentEquals(certDer)) {
             // Another card replaced the one a held PIN 1 belongs to (RAPP
-            // v26.10.22 section 11 item 2).
+            // v26.10.29 section 11 item 2).
             pinCache.clear()
         }
         currentAuthCertDer = certDer.copyOf()

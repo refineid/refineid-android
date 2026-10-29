@@ -22,7 +22,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * A paired computer that withdraws (RAPP v26.10.22 section 4.5 items 8 and
+ * A paired computer that withdraws (RAPP v26.10.29 section 4.5 items 8 and
  * 9): its `service_withdrawn` close reaches this phone as the computer's
  * withdrawal, never as a violation, and this phone sends no close of its
  * own; the session and its operation end, the pairing stays, and the

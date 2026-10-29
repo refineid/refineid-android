@@ -8,7 +8,7 @@ import fi.refineid.android.core.Pin1Retention
 import fi.refineid.android.core.Pin1Submission
 
 /**
- * The custodian's PIN 1 for browser authentications (RAPP v26.10.22 section
+ * The custodian's PIN 1 for browser authentications (RAPP v26.10.29 section
  * 11 item 2): asked at the first authentication that needs it, held only in
  * [cache]'s memory for the card that accepted it, and spent with no prompt
  * on every later authentication of that card.
