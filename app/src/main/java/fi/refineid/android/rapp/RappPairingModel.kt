@@ -15,10 +15,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappPairVault
 import uniffi.refineid_rapp.RappPairingBridge
 import uniffi.refineid_rapp.RappPreAuthenticationLimiter
-import uniffi.refineid_rapp.rappPairingPreamble
 import uniffi.refineid_rapp.rappStreamProfileName
 
 internal sealed interface PairingPhase {
@@ -67,8 +67,10 @@ private val DEFAULT_PAIRING_PROFILES =
  * while the page is open: leaving it calls [reset].
  *
  * [mainDispatcher] runs the offer's countdown and deadlines; [pairVault]
- * stands in for the application's vault and [connectedPeers] for the
- * custodian's open session.
+ * stands in for the application's vault, [connectedPeers] for the
+ * custodian's open session, and [monotonicMs] for the continuous clock; a
+ * connection that has not completed its handshake within
+ * [handshakeDeadlineMs] of connecting is closed.
  */
 internal class RappPairingModel(
     private val context: Context,
@@ -76,6 +78,8 @@ internal class RappPairingModel(
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     private val pairVault: RappPairVault? = null,
     connectedPeers: StateFlow<PairedPeer?>? = null,
+    private val handshakeDeadlineMs: Long = HANDSHAKE_DEADLINE_MS,
+    private val monotonicMs: () -> ULong = RappClock::monotonicMs,
 ) : AutoCloseable {
     private val catalog = RappPairCatalog(context)
     private var listener: StreamRelayListener? = null
@@ -87,6 +91,13 @@ internal class RappPairingModel(
     private var secondsRemaining = NO_SECONDS_REMAINING
     private var ceremony: RappCustodianPairingCeremony? = null
     private var awaitingPreamble = false
+
+    /** The live offer's answers to pairing connections; null without an offer. */
+    @Volatile
+    private var pairingBootstrap: RappPairingBootstrap? = null
+
+    /** The connection's CPace start was refused, so its step 1 is answered busy. */
+    private var refusingStepOne = false
     private val preAuthenticationLimiter = RappPreAuthenticationLimiter()
     private val app = context.applicationContext as? RefineIdApplication
 
@@ -161,7 +172,7 @@ internal class RappPairingModel(
             settings.isCardRemoteAccessEnabled = true
             _isRemoteAccessEnabled = true
         }
-        val startedAtMonotonicMs = RappClock.monotonicMs()
+        val startedAtMonotonicMs = monotonicMs()
         val code = RappPairingCode.generate()
         activeOfferingCode = code
         val offerId = ByteArray(OFFER_ID_BYTES).also { java.security.SecureRandom().nextBytes(it) }
@@ -175,6 +186,7 @@ internal class RappPairingModel(
                     startedAtMonotonicMs = startedAtMonotonicMs,
                 )
             pairingBridge = proxyBridge
+            pairingBootstrap = RappPairingBootstrap(proxyBridge, preAuthenticationLimiter, rappStreamProfileName())
             ceremony = null
             offerSeconds = (proxyBridge.offerTtlMs().toLong() / MILLISECONDS_PER_SECOND).toInt()
             secondsRemaining = offerSeconds
@@ -183,10 +195,14 @@ internal class RappPairingModel(
                 StreamRelayListener(
                     context = context,
                     scope = scope,
-                    handshakeTimeoutMs = HANDSHAKE_DEADLINE_MS,
+                    handshakeTimeoutMs = handshakeDeadlineMs,
                 ) { event ->
                     handleProxyListenerEvent(event, proxyBridge, code)
                 }
+            relayListener.answerWhileHeld = { preamble ->
+                val answer = pairingBootstrap?.answerWhileHeld(preamble, monotonicMs())
+                (answer as? RappPairingBootstrap.Answer.Busy)?.frame
+            }
             listener = relayListener
             relayListener.start(
                 StreamRendezvousName.ephemeralName(),
@@ -229,25 +245,23 @@ internal class RappPairingModel(
     }
 
     /**
-     * A new connection must be admitted by the pre-authentication limiter
-     * (RAPP v26.10.29 section 3.3) and then open with the pairing preamble.
+     * A new connection opens with its routing preamble, which
+     * [beginCandidate] answers; its handshake deadline runs from now.
      */
     private fun handleProxyConnected() {
         ceremony = null
-        if (!preAuthenticationLimiter.admit(RappClock.monotonicMs())) {
-            awaitingPreamble = false
-            listener?.disconnectClient()
-            return
-        }
+        refusingStepOne = false
         awaitingPreamble = true
-        phase = PairingPhase.Connecting("Connected! Starting security handshake...")
         startHandshakeDeadline()
     }
 
     /**
-     * Serves the offer bootstrap (section 4.2) and starts CPace after the
-     * requester's pairing preamble; any other first frame closes the
-     * connection without touching the offer.
+     * Answers the connection's routing preamble (RAPP v26.10.29 section
+     * 4.2): a pairing preamble the offer can admit gets the offer, and CPace
+     * starts; one it cannot admit, through the limiter of section 3.3 item 6
+     * or because an attempt holds the offer, gets `pairing-busy` and the
+     * connection closes. Any other first frame closes the connection
+     * without touching the offer. Only a started attempt changes the screen.
      */
     private fun beginCandidate(
         preamble: ByteArray,
@@ -255,13 +269,14 @@ internal class RappPairingModel(
         code: String,
     ) {
         awaitingPreamble = false
-        if (!preamble.contentEquals(rappPairingPreamble(rappStreamProfileName()))) {
-            listener?.disconnectClient()
-            return
-        }
-        val now = RappClock.monotonicMs()
+        val now = monotonicMs()
+        val offer =
+            when (val answer = pairingBootstrap?.answer(preamble, now) ?: RappPairingBootstrap.Answer.Close) {
+                is RappPairingBootstrap.Answer.Offer -> answer.frame
+                else -> return refuse(answer)
+            }
         val candidateId = bridge.offerCandidates().first { it.profile == rappStreamProfileName() }.candidateId
-        listener?.send(bridge.bootstrapBytes(now))
+        listener?.send(offer)
         val random64 = ByteArray(CPACE_RANDOM_BYTES).apply { java.security.SecureRandom().nextBytes(this) }
         try {
             bridge.beginCpace(
@@ -270,6 +285,12 @@ internal class RappPairingModel(
                 randomBytes64 = random64,
                 nowMonotonicMs = now,
             )
+        } catch (_: RappBindingException.RateLimited) {
+            refusingStepOne = true
+            return
+        } catch (_: RappBindingException.WrongPhase) {
+            refusingStepOne = true
+            return
         } finally {
             random64.fill(0)
         }
@@ -280,10 +301,20 @@ internal class RappPairingModel(
                 offeredProfiles = DEFAULT_PAIRING_PROFILES,
                 displayName = localDeviceDisplayName(),
                 platform = "Android",
-                monotonicMs = RappClock::monotonicMs,
+                monotonicMs = monotonicMs,
                 wallMs = RappClock::wallMs,
                 persistUnconfirmed = { record -> record.persistDeviceOnly(vault) },
             )
+        phase = PairingPhase.Connecting("Connected! Starting security handshake...")
+    }
+
+    /**
+     * Sends a busy answer and closes the connection, or closes it unanswered
+     * (section 4.2, "Busy Refusal"); the offer and the screen stay as they are.
+     */
+    private fun refuse(answer: RappPairingBootstrap.Answer) {
+        if (answer is RappPairingBootstrap.Answer.Busy) listener?.send(answer.frame)
+        listener?.disconnectClient()
     }
 
     private fun vault(): RappPairVault = pairVault ?: app?.rappVault ?: AndroidRappVault(context)
@@ -321,7 +352,7 @@ internal class RappPairingModel(
             nextOffer()
             return
         }
-        val now = RappClock.monotonicMs()
+        val now = monotonicMs()
         val offerKept =
             try {
                 bridge.candidateFailed(now)
@@ -343,6 +374,12 @@ internal class RappPairingModel(
         try {
             if (awaitingPreamble) {
                 beginCandidate(event.data, bridge, code)
+                return
+            }
+            if (refusingStepOne) {
+                refusingStepOne = false
+                val answer = pairingBootstrap?.answerInPlaceOfStepTwo(monotonicMs())
+                refuse(answer ?: RappPairingBootstrap.Answer.Close)
                 return
             }
             val active = ceremony ?: return
@@ -422,12 +459,18 @@ internal class RappPairingModel(
         offerWhileOn()
     }
 
+    /**
+     * Closes the connection [handshakeDeadlineMs] from now unless it reached
+     * the next step meanwhile: while it owes its preamble, its step 1 after
+     * a refused CPace start, or the next frame of its ceremony. The close
+     * ends the candidate as a lost connection does, showing nothing new.
+     */
     private fun startHandshakeDeadline() {
         handshakeDeadlineJob?.cancel()
         handshakeDeadlineJob =
             scope.launch(mainDispatcher) {
-                delay(HANDSHAKE_DEADLINE_MS)
-                if (phase is PairingPhase.Connecting) {
+                delay(handshakeDeadlineMs)
+                if (awaitingPreamble || refusingStepOne || phase is PairingPhase.Connecting) {
                     listener?.disconnectClient()
                 }
             }
@@ -530,9 +573,11 @@ internal class RappPairingModel(
         } catch (_: Exception) {
         }
         pairingBridge = null
+        pairingBootstrap = null
         revokeUnconfirmedRecord()
         ceremony = null
         awaitingPreamble = false
+        refusingStepOne = false
         phase = PairingPhase.Idle
         pairedDevices = catalog.listPairs()
     }

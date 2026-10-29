@@ -12,10 +12,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappPairingBridge
+import uniffi.refineid_rapp.rappPairingBusyRetryAfterMs
 import uniffi.refineid_rapp.rappPairingPreamble
 import uniffi.refineid_rapp.rappRandomByteCounts
 import uniffi.refineid_rapp.rappStreamProfileName
@@ -24,6 +27,7 @@ import java.io.DataOutputStream
 import java.net.InetAddress
 import java.net.Socket
 import java.security.SecureRandom
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * While Remote Access is on, the Remote Access page always shows a pairing
@@ -46,6 +50,27 @@ class RappPairingOfferTest {
         const val SOCKET_TIMEOUT_MS = 5_000
         val PROFILES = listOf("fi.refineid.card-status")
         val CPACE_RANDOM_BYTES = rappRandomByteCounts().cpaceRandom.toInt()
+
+        /** How long an admitted attempt may run (RAPP v26.10.29 section 3.3 item 3). */
+        const val ATTEMPT_WINDOW_MS = 5_000L
+
+        /** How far into the first computer's attempt the second one connects. */
+        const val ATTEMPT_ELAPSED_MS = 1_000L
+
+        /** What a stream read returns once the peer closed the connection. */
+        const val END_OF_STREAM = -1
+
+        /** The custodian's handshake deadline, longer than any test here runs. */
+        const val HANDSHAKE_DEADLINE_MS = 60_000L
+
+        /** A handshake deadline short enough for a test to wait out. */
+        const val SHORT_HANDSHAKE_DEADLINE_MS = 200L
+
+        /** How long the offer is served (RAPP v26.10.29 section 3.3 item 7). */
+        const val OFFER_TTL_MS = 300_000L
+
+        /** How often a requester asks a busy custodian again before the test gives up. */
+        const val BUSY_REOPENINGS = 8
     }
 
     /** A context whose preferences live in memory and which offers no system service. */
@@ -71,6 +96,9 @@ class RappPairingOfferTest {
         MutableStateFlow<PairedPeer?>(PairedPeer(CONNECTED_PAIR_ID, PEER_NAME, PEER_PLATFORM, CREATED_AT_MS))
     private var model: RappPairingModel? = null
 
+    /** The custodian's continuous clock, which only the test moves. */
+    private val clock = AtomicLong(NOW.toLong())
+
     @Before
     fun setUp() {
         RappNativeTestLibrary.require()
@@ -93,9 +121,14 @@ class RappPairingOfferTest {
         return id.key
     }
 
-    private fun model(remoteAccessOn: Boolean): RappPairingModel {
+    private fun model(
+        remoteAccessOn: Boolean,
+        handshakeDeadlineMs: Long = HANDSHAKE_DEADLINE_MS,
+    ): RappPairingModel {
         RappSettings(context).isCardRemoteAccessEnabled = remoteAccessOn
-        return RappPairingModel(context, scope, Dispatchers.Unconfined, vault, connected).also { model = it }
+        return RappPairingModel(context, scope, Dispatchers.Unconfined, vault, connected, handshakeDeadlineMs) {
+            clock.get().toULong()
+        }.also { model = it }
     }
 
     private fun RappPairingModel.code(): String = (phase as PairingPhase.Offering).code
@@ -174,6 +207,125 @@ class RappPairingOfferTest {
         }
         assertEquals(listOf(PEER_NAME), model.pairedDevices.map { it.displayName })
         assertNotEquals(first, model.code())
+    }
+
+    @Test
+    fun aSecondComputerIsAnsweredBusyWhileTheFirstHoldsTheAttemptAndTheScreenStays() {
+        val model = model(remoteAccessOn = true)
+        model.offerWhileOn()
+        val code = model.code()
+        val port = checkNotNull(model.offerPort)
+
+        StreamPeer(port).use { first ->
+            first.send(rappPairingPreamble(rappStreamProfileName()))
+            val requester = RappPairingBridge.fromBootstrap(first.receive(), RappTestOffers.STREAM_PROFILE, NOW)
+            val random = ByteArray(CPACE_RANDOM_BYTES).also(SecureRandom()::nextBytes)
+            requester.beginCpace(RappTestOffers.STREAM_CANDIDATE_ID, code, random, NOW)
+            first.send(requester.writeCpaceFrame(NOW))
+            requester.readCpaceFrame(first.receive(), NOW)
+            val during = model.phase
+            clock.addAndGet(ATTEMPT_ELAPSED_MS)
+
+            StreamPeer(port).use { second ->
+                second.send(rappPairingPreamble(rappStreamProfileName()))
+                val busy = second.receive()
+                assertThrows(RappBindingException.CustodianBusy::class.java) {
+                    RappPairingBridge.fromBootstrap(busy, RappTestOffers.STREAM_PROFILE, NOW)
+                }
+                assertEquals((ATTEMPT_WINDOW_MS - ATTEMPT_ELAPSED_MS).toULong(), rappPairingBusyRetryAfterMs(busy))
+                assertEquals(END_OF_STREAM, second.input.read())
+            }
+            assertEquals(during, model.phase)
+            requester.close()
+        }
+
+        awaitOffering(model)
+        assertEquals(code, model.code())
+        var answer = bootstrapAnswer(port)
+        var openings = 1
+        while (busyWait(answer) != null && openings < BUSY_REOPENINGS) {
+            assertEquals(code, model.code())
+            clock.addAndGet(checkNotNull(busyWait(answer)).toLong())
+            answer = bootstrapAnswer(port)
+            openings++
+        }
+        RappPairingBridge.fromBootstrap(answer, RappTestOffers.STREAM_PROFILE, NOW).close()
+        awaitOffering(model)
+        assertEquals(code, model.code())
+    }
+
+    /** The custodian's bootstrap answer to a new pairing connection on [port], which then closes. */
+    private fun bootstrapAnswer(port: Int): ByteArray =
+        StreamPeer(port).use { peer ->
+            peer.send(rappPairingPreamble(rappStreamProfileName()))
+            peer.receive()
+        }
+
+    /** The wait [answer] asks for when it is a busy answer, or null for an offer. */
+    private fun busyWait(answer: ByteArray): ULong? =
+        try {
+            rappPairingBusyRetryAfterMs(answer)
+        } catch (_: RappBindingException) {
+            null
+        }
+
+    @Test
+    fun aConnectionThatSendsNothingIsClosedAtTheDeadlineAndTheNextIsServedTheOffer() {
+        val model = model(remoteAccessOn = true, handshakeDeadlineMs = SHORT_HANDSHAKE_DEADLINE_MS)
+        model.offerWhileOn()
+        val code = model.code()
+        val port = checkNotNull(model.offerPort)
+
+        StreamPeer(port).use { silent ->
+            assertEquals(END_OF_STREAM, silent.input.read())
+        }
+        awaitOffering(model)
+        assertEquals(code, model.code())
+
+        RappPairingBridge.fromBootstrap(bootstrapAnswer(port), RappTestOffers.STREAM_PROFILE, NOW).close()
+    }
+
+    @Test
+    fun withoutALiveOfferAConnectionWhileAnotherIsHeldIsClosedUnanswered() {
+        val model = model(remoteAccessOn = true)
+        model.offerWhileOn()
+        val port = checkNotNull(model.offerPort)
+
+        StreamPeer(port).use { first ->
+            first.send(rappPairingPreamble(rappStreamProfileName()))
+            first.receive()
+            clock.addAndGet(OFFER_TTL_MS)
+
+            StreamPeer(port).use { second ->
+                second.send(rappPairingPreamble(rappStreamProfileName()))
+                assertEquals(END_OF_STREAM, second.input.read())
+            }
+        }
+    }
+
+    private fun awaitOffering(model: RappPairingModel) {
+        val deadline = System.currentTimeMillis() + SETTLE_LIMIT_MS
+        while (model.phase !is PairingPhase.Offering && System.currentTimeMillis() < deadline) {
+            Thread.sleep(SETTLE_STEP_MS)
+        }
+    }
+
+    /** A requester's stream connection to the custodian on [port] (RAPP v26.10.29 section 2.1). */
+    private class StreamPeer(
+        port: Int,
+    ) : AutoCloseable {
+        private val socket = Socket(InetAddress.getLoopbackAddress(), port).apply { soTimeout = SOCKET_TIMEOUT_MS }
+        val input = DataInputStream(socket.getInputStream())
+        private val output = DataOutputStream(socket.getOutputStream())
+
+        fun send(frame: ByteArray) {
+            output.write(checkNotNull(StreamRelayFraming.encode(frame)))
+            output.flush()
+        }
+
+        fun receive(): ByteArray = ByteArray(input.readUnsignedShort()).also(input::readFully)
+
+        override fun close() = socket.close()
     }
 
     /** A requester pairing with [code] over the stream on [port], frame by frame (RAPP v26.10.29 section 2.1). */

@@ -2,6 +2,7 @@
 
 package fi.refineid.android.rapp
 
+import uniffi.refineid_rapp.RappPreAuthenticationLimiterInterface
 import uniffi.refineid_rapp.rappStreamProfileName
 
 /** The transport profiles this custodian serves sessions on (RAPP v26.10.29 section 2.2). */
@@ -106,4 +107,32 @@ internal enum class RappDialRefusal {
 
     /** The routed link did not complete its handshake in time. */
     HANDSHAKE_DEADLINE,
+}
+
+/**
+ * Applies the pre-authentication bound (RAPP v26.10.29 section 3.3 item 6)
+ * to session dials after their routing preamble: only a preamble that routed
+ * to a served pairing counts against [limiter], so a first frame that routes
+ * nowhere does not hold off the next dial.
+ */
+internal class RappSessionDialGate(
+    private val limiter: RappPreAuthenticationLimiterInterface,
+) {
+    /**
+     * The pairing [route] found, when the limiter admits it at
+     * [nowMonotonicMs]; null when it found none, or when the limiter refused
+     * it, which [release]s it and reports [onRateLimited].
+     */
+    fun <P> admit(
+        nowMonotonicMs: ULong,
+        route: () -> P?,
+        release: (P) -> Unit,
+        onRateLimited: () -> Unit,
+    ): P? {
+        val routed = route() ?: return null
+        if (limiter.admit(nowMonotonicMs)) return routed
+        release(routed)
+        onRateLimited()
+        return null
+    }
 }
