@@ -25,7 +25,9 @@ class RappCustodianPairingCeremonyTest {
         const val CPACE_RANDOM_BYTES = 64
         const val OFFER_STARTED_AT_MS = 1_000UL
         const val ATTEMPT_SPACING_MS = 1_000UL
-        const val ATTEMPTS_PER_OFFER = 3
+
+        /** More wrong codes than the lockout the specification once had after three. */
+        const val WRONG_CODES_TRIED = 4
         const val WALL_CLOCK_MS = 1_700_000_000_000UL
         val OFFERED_PROFILES =
             listOf(
@@ -177,11 +179,11 @@ class RappCustodianPairingCeremonyTest {
     }
 
     @Test
-    fun threeWrongCodesExhaustTheOffer() {
+    fun wrongCodesLeaveTheOfferForTheNextAttempt() {
         val code = RappPairingCode.generate()
         val (custodianBridge, _) = RappTestOffers.custodianAndRequester(OFFERED_PROFILES, OFFER_STARTED_AT_MS)
         var now = OFFER_STARTED_AT_MS
-        repeat(ATTEMPTS_PER_OFFER) { attempt ->
+        repeat(WRONG_CODES_TRIED) {
             val requester =
                 RappPairingBridge.fromBootstrap(
                     custodianBridge.bootstrapBytes(now),
@@ -192,16 +194,12 @@ class RappCustodianPairingCeremonyTest {
             begin(requester, otherCode(code), now)
             custodianBridge.readCpaceFrame(requester.writeCpaceFrame(now), now)
             custodianBridge.writeCpaceFrame(now)
-            val kept =
-                try {
-                    custodianBridge.candidateFailed(now)
-                } catch (_: RappBindingException.AttemptsExhausted) {
-                    false
-                }
-            assertEquals(attempt < ATTEMPTS_PER_OFFER - 1, kept)
+            // No count of failed attempts ends the offer (RAPP v26.10.29 section 3.3, "Guessing Bound").
+            assertTrue(custodianBridge.candidateFailed(now))
             now += ATTEMPT_SPACING_MS
         }
-        assertThrows(RappBindingException::class.java) { begin(custodianBridge, code, now) }
+        // The offer still takes the right code.
+        begin(custodianBridge, code, now)
     }
 
     @Test

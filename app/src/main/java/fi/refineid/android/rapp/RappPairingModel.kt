@@ -15,9 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappPairVault
-import uniffi.refineid_rapp.RappPairingBackoff
 import uniffi.refineid_rapp.RappPairingBridge
 import uniffi.refineid_rapp.RappPreAuthenticationLimiter
 import uniffi.refineid_rapp.rappPairingPreamble
@@ -64,10 +62,9 @@ private val DEFAULT_PAIRING_PROFILES =
  * While Remote Access is on, the page always shows a pairing code, whatever
  * computers are connected: on opening, on turning Remote Access on, when an
  * offer expires, after a pairing completes or fails, and after a pairing is
- * removed. The only gap is the lockout after three wrong codes (RAPP
- * v26.10.22 section 3.3 item 7), which shows until it lifts and is followed
- * by a code. The offer lives only while the page is open: leaving it calls
- * [reset].
+ * removed. A failed attempt leaves the code on screen: no count of failures
+ * ends an offer (RAPP v26.10.29 section 3.3, "Guessing Bound"). The offer
+ * lives only while the page is open: leaving it calls [reset].
  *
  * [mainDispatcher] runs the offer's countdown and deadlines; [pairVault]
  * stands in for the application's vault and [connectedPeers] for the
@@ -148,7 +145,7 @@ internal class RappPairingModel(
         if (isRemoteAccessEnabled && phase is PairingPhase.Idle) createOffer()
     }
 
-    /** A ceremony ended: while Remote Access is on, the next code follows, or the lockout until it lifts. */
+    /** A ceremony ended: while Remote Access is on, the next code follows. */
     private fun nextOffer() {
         if (isRemoteAccessEnabled) createOffer()
     }
@@ -165,18 +162,6 @@ internal class RappPairingModel(
             _isRemoteAccessEnabled = true
         }
         val startedAtMonotonicMs = RappClock.monotonicMs()
-        val backoffMs = pairingBackoff.msUntilNextOffer(startedAtMonotonicMs)
-        if (backoffMs > 0UL) {
-            val seconds = (backoffMs.toLong() + MILLISECONDS_PER_SECOND - 1) / MILLISECONDS_PER_SECOND
-            phase = PairingPhase.Failed("Too many attempts. Try again in $seconds s")
-            // The code follows once the lockout lifts.
-            timerJob =
-                scope.launch(mainDispatcher) {
-                    delay(backoffMs.toLong())
-                    if (phase is PairingPhase.Failed) nextOffer()
-                }
-            return
-        }
         val code = RappPairingCode.generate()
         activeOfferingCode = code
         val offerId = ByteArray(OFFER_ID_BYTES).also { java.security.SecureRandom().nextBytes(it) }
@@ -322,9 +307,10 @@ internal class RappPairingModel(
     }
 
     /**
-     * Spends the connection's attempt. Before T_A the offer stays for another
-     * connection while attempts and lifetime remain; after T_A, or once the
-     * third attempt failed, the ceremony is over.
+     * Ends the connection's attempt. Before T_A the offer stays for another
+     * connection while its lifetime remains: no count of failed attempts
+     * ends it (RAPP v26.10.29 section 3.3, "Guessing Bound"). After T_A, or
+     * once the offer is gone, the ceremony is over and the next code follows.
      */
     private fun candidateEnded(bridge: RappPairingBridge) {
         val pastOffer = ceremony?.isPastOfferPhase == true
@@ -335,20 +321,16 @@ internal class RappPairingModel(
             nextOffer()
             return
         }
-        val now = RappClock.monotonicMs()
         val offerKept =
             try {
-                bridge.candidateFailed(now)
-            } catch (_: RappBindingException.AttemptsExhausted) {
-                false
+                bridge.candidateFailed(RappClock.monotonicMs())
             } catch (_: Exception) {
                 false
             }
         if (offerKept) {
             restoreOfferingOrWaiting()
         } else {
-            pairingBackoff.recordLockout(now)
-            phase = PairingPhase.Failed("Too many attempts")
+            phase = PairingPhase.Failed("Peer disconnected")
             reset(keepPhase = true)
             nextOffer()
         }
@@ -427,7 +409,6 @@ internal class RappPairingModel(
             certificateDerBase64 = null,
         )
         pairedDevices = catalog.listPairs()
-        pairingBackoff.recordSuccess()
         phase = PairingPhase.Idle
 
         val oldListener = listener
@@ -572,11 +553,6 @@ internal class RappPairingModel(
         pairedDevices = catalog.listPairs()
         activeConnectedPeer = null
         app?.rappProxyDispatcher?.pairingsChanged()
-    }
-
-    companion object {
-        /** Post-lockout backoff shared by every offer this process creates. */
-        private val pairingBackoff = RappPairingBackoff()
     }
 
     private fun localDeviceDisplayName(): String {
