@@ -71,6 +71,14 @@ class RappPairingOfferTest {
 
         /** How often a requester asks a busy custodian again before the test gives up. */
         const val BUSY_REOPENINGS = 8
+
+        const val SECOND_PEER_NAME = "Laptop"
+
+        /** The spacing between admitted pairing connections (RAPP v26.10.29 section 3.3 item 6). */
+        const val ADMISSION_SPACING_MS = 500L
+
+        /** How long a drained listener has to report a close on loopback. */
+        const val CLOSE_REPORT_MS = 500L
     }
 
     /** A context whose preferences live in memory and which offers no system service. */
@@ -303,6 +311,47 @@ class RappPairingOfferTest {
         }
     }
 
+    @Test
+    fun theCompletedPairingsConnectionEndingLeavesTheNextOffersAttemptRunning() {
+        val model = model(remoteAccessOn = true)
+        model.offerWhileOn()
+        val first = model.code()
+
+        StreamPeer(checkNotNull(model.offerPort)).use { firstPeer ->
+            finishPairing(firstPeer, startPairing(firstPeer, first), PEER_NAME)
+            awaitPaired(model, 1)
+            val next = model.code()
+            assertNotEquals(first, next)
+            clock.addAndGet(ADMISSION_SPACING_MS)
+
+            StreamPeer(checkNotNull(model.offerPort)).use { secondPeer ->
+                val requester = startPairing(secondPeer, next)
+                assertTrue(model.phase is PairingPhase.Connecting)
+
+                firstPeer.close()
+                Thread.sleep(CLOSE_REPORT_MS)
+
+                assertTrue(model.phase is PairingPhase.Connecting)
+                finishPairing(secondPeer, requester, SECOND_PEER_NAME)
+            }
+        }
+        awaitPaired(model, 2)
+        assertEquals(setOf(PEER_NAME, SECOND_PEER_NAME), model.pairedDevices.map { it.displayName }.toSet())
+    }
+
+    private fun awaitPaired(
+        model: RappPairingModel,
+        count: Int,
+    ) {
+        val deadline = System.currentTimeMillis() + SETTLE_LIMIT_MS
+        while ((model.pairedDevices.size < count || model.phase !is PairingPhase.Offering) &&
+            System.currentTimeMillis() < deadline
+        ) {
+            Thread.sleep(SETTLE_STEP_MS)
+        }
+        assertEquals(count, model.pairedDevices.size)
+    }
+
     private fun awaitOffering(model: RappPairingModel) {
         val deadline = System.currentTimeMillis() + SETTLE_LIMIT_MS
         while (model.phase !is PairingPhase.Offering && System.currentTimeMillis() < deadline) {
@@ -333,38 +382,42 @@ class RappPairingOfferTest {
         port: Int,
         code: String,
     ) {
-        Socket(InetAddress.getLoopbackAddress(), port).use { socket ->
-            socket.soTimeout = SOCKET_TIMEOUT_MS
-            val input = DataInputStream(socket.getInputStream())
-            val output = DataOutputStream(socket.getOutputStream())
+        StreamPeer(port).use { peer -> finishPairing(peer, startPairing(peer, code), PEER_NAME) }
+    }
 
-            fun send(frame: ByteArray) {
-                output.write(checkNotNull(StreamRelayFraming.encode(frame)))
-                output.flush()
-            }
+    /** A requester's pairing with [code] on [peer] through the custodian's CPace step 2. */
+    private fun startPairing(
+        peer: StreamPeer,
+        code: String,
+    ): RappPairingBridge {
+        peer.send(rappPairingPreamble(rappStreamProfileName()))
+        val requester = RappPairingBridge.fromBootstrap(peer.receive(), RappTestOffers.STREAM_PROFILE, NOW)
+        val random = ByteArray(CPACE_RANDOM_BYTES).also(SecureRandom()::nextBytes)
+        requester.beginCpace(RappTestOffers.STREAM_CANDIDATE_ID, code, random, NOW)
+        peer.send(requester.writeCpaceFrame(NOW))
+        requester.readCpaceFrame(peer.receive(), NOW)
+        return requester
+    }
 
-            fun receive(): ByteArray = ByteArray(input.readUnsignedShort()).also(input::readFully)
-
-            send(rappPairingPreamble(rappStreamProfileName()))
-            val requester = RappPairingBridge.fromBootstrap(receive(), RappTestOffers.STREAM_PROFILE, NOW)
-            val random = ByteArray(CPACE_RANDOM_BYTES).also(SecureRandom()::nextBytes)
-            requester.beginCpace(RappTestOffers.STREAM_CANDIDATE_ID, code, random, NOW)
-            send(requester.writeCpaceFrame(NOW))
-            requester.readCpaceFrame(receive(), NOW)
-            send(requester.writeCpaceFrame(NOW))
-            send(requester.writeHandshakeFrame(NOW))
-            requester.readHandshakeFrame(receive(), NOW)
-            send(requester.writeHandshakeFrame(NOW))
-            requester.enterConfirmation(NOW)
-            send(requester.sendHello(PEER_NAME, PEER_PLATFORM, NOW))
-            requester.receiveHello(receive(), NOW)
-            val granted = requester.receiveConfirmation(receive(), NOW)
-            send(requester.sendConfirmation(granted, NOW))
-            requester.buildPairRecord(WALL_MS, NOW).close()
-            send(requester.sendStored(NOW))
-            requester.receiveStored(receive(), NOW)
-            checkNotNull(requester.activatePairing(NOW)).close()
-            requester.close()
-        }
+    /** The rest of [requester]'s pairing on [peer], as [displayName], until both ends hold the pairing. */
+    private fun finishPairing(
+        peer: StreamPeer,
+        requester: RappPairingBridge,
+        displayName: String,
+    ) {
+        peer.send(requester.writeCpaceFrame(NOW))
+        peer.send(requester.writeHandshakeFrame(NOW))
+        requester.readHandshakeFrame(peer.receive(), NOW)
+        peer.send(requester.writeHandshakeFrame(NOW))
+        requester.enterConfirmation(NOW)
+        peer.send(requester.sendHello(displayName, PEER_PLATFORM, NOW))
+        requester.receiveHello(peer.receive(), NOW)
+        val granted = requester.receiveConfirmation(peer.receive(), NOW)
+        peer.send(requester.sendConfirmation(granted, NOW))
+        requester.buildPairRecord(WALL_MS, NOW).close()
+        peer.send(requester.sendStored(NOW))
+        requester.receiveStored(peer.receive(), NOW)
+        checkNotNull(requester.activatePairing(NOW)).close()
+        requester.close()
     }
 }

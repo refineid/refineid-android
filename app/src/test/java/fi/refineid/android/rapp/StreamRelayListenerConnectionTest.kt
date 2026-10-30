@@ -18,6 +18,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.DataInputStream
@@ -387,6 +388,40 @@ class StreamRelayListenerConnectionTest {
                 // Peer B's close ends its read loop, which reports the disconnect while the listener is open.
                 awaitCondition("peer B's close was never reported") { events.count { it == DISCONNECTED } == 2 }
             }
+        } finally {
+            listener.close()
+        }
+        settle()
+
+        assertEquals(listOf(CONNECTED, DISCONNECTED, CONNECTED, FROM_B, DISCONNECTED), events.toList())
+        assertEquals(emptyList<Throwable>(), uncaught)
+    }
+
+    @Test
+    fun aDropNamingAnEndedConnectionLeavesTheNextPeerConnected() {
+        val events = CopyOnWriteArrayList<String>()
+        val listener = listener { events += label(it) }
+        try {
+            val first =
+                peer(listener).use {
+                    awaitCondition("peer A never connected") { events == listOf(CONNECTED) }
+                    checkNotNull(listener.currentConnection)
+                }
+            awaitCondition("peer A's close was never reported") { events == listOf(CONNECTED, DISCONNECTED) }
+
+            peer(listener).use { peerB ->
+                awaitCondition("peer B never connected") { events == listOf(CONNECTED, DISCONNECTED, CONNECTED) }
+                assertNotSame(first, listener.currentConnection)
+
+                first.disconnect()
+
+                peerB.sendFrame(FROM_B)
+                awaitCondition("peer B's frame never arrived") { FROM_B in events }
+                listener.send(FROM_B.encodeToByteArray())
+                val input = DataInputStream(peerB.getInputStream())
+                assertEquals(FROM_B, ByteArray(input.readUnsignedShort()).also(input::readFully).decodeToString())
+            }
+            awaitCondition("peer B's close was never reported") { events.count { it == DISCONNECTED } == 2 }
         } finally {
             listener.close()
         }
