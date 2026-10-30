@@ -5,8 +5,12 @@ package fi.refineid.android.rapp
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Delay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
@@ -27,7 +31,10 @@ import java.io.DataOutputStream
 import java.net.InetAddress
 import java.net.Socket
 import java.security.SecureRandom
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.resume
 
 /**
  * While Remote Access is on, the Remote Access page always shows a pairing
@@ -132,9 +139,10 @@ class RappPairingOfferTest {
     private fun model(
         remoteAccessOn: Boolean,
         handshakeDeadlineMs: Long = HANDSHAKE_DEADLINE_MS,
+        mainDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): RappPairingModel {
         RappSettings(context).isCardRemoteAccessEnabled = remoteAccessOn
-        return RappPairingModel(context, scope, Dispatchers.Unconfined, vault, connected, handshakeDeadlineMs) {
+        return RappPairingModel(context, scope, mainDispatcher, vault, connected, handshakeDeadlineMs) {
             clock.get().toULong()
         }.also { model = it }
     }
@@ -291,6 +299,84 @@ class RappPairingOfferTest {
         assertEquals(code, model.code())
 
         RappPairingBridge.fromBootstrap(bootstrapAnswer(port), RappTestOffers.STREAM_PROFILE, NOW).close()
+    }
+
+    /**
+     * Runs what it is given at once and holds every delay until the test
+     * fires it, so the custodian's own handshake deadline expires while the
+     * listener's, which runs on the clock, is far off.
+     */
+    @OptIn(InternalCoroutinesApi::class)
+    private class HeldDelays :
+        CoroutineDispatcher(),
+        Delay {
+        private val held = CopyOnWriteArrayList<Pair<Long, CancellableContinuation<Unit>>>()
+
+        override fun dispatch(
+            context: CoroutineContext,
+            block: Runnable,
+        ) = block.run()
+
+        override fun scheduleResumeAfterDelay(
+            timeMillis: Long,
+            continuation: CancellableContinuation<Unit>,
+        ) {
+            held += timeMillis to continuation
+        }
+
+        /** Ends every running delay of [timeMillis]; how many there were. */
+        fun expire(timeMillis: Long): Int {
+            val due = held.filter { (time, continuation) -> time == timeMillis && continuation.isActive }
+            held.removeAll(due.toSet())
+            due.forEach { (_, continuation) -> continuation.resume(Unit) }
+            return due.size
+        }
+    }
+
+    /** Expires the custodian's one running handshake deadline once it runs. */
+    private fun expireHandshakeDeadline(delays: HeldDelays) {
+        val deadline = System.currentTimeMillis() + SETTLE_LIMIT_MS
+        while (delays.expire(HANDSHAKE_DEADLINE_MS) == 0) {
+            assertTrue("no handshake deadline ran", System.currentTimeMillis() < deadline)
+            Thread.sleep(SETTLE_STEP_MS)
+        }
+    }
+
+    @Test
+    fun theCustodiansHandshakeDeadlineClosesASilentConnectionAndTheNextIsServedTheOffer() {
+        val delays = HeldDelays()
+        val model = model(remoteAccessOn = true, mainDispatcher = delays)
+        model.offerWhileOn()
+        val code = model.code()
+        val port = checkNotNull(model.offerPort)
+
+        StreamPeer(port).use { silent ->
+            expireHandshakeDeadline(delays)
+            assertEquals(END_OF_STREAM, silent.input.read())
+        }
+        awaitOffering(model)
+        assertEquals(code, model.code())
+
+        RappPairingBridge.fromBootstrap(bootstrapAnswer(port), RappTestOffers.STREAM_PROFILE, NOW).close()
+    }
+
+    @Test
+    fun theCustodiansHandshakeDeadlineClosesAStalledAttempt() {
+        val delays = HeldDelays()
+        val model = model(remoteAccessOn = true, mainDispatcher = delays)
+        model.offerWhileOn()
+
+        StreamPeer(checkNotNull(model.offerPort)).use { stalled ->
+            val requester = startPairing(stalled, model.code())
+            assertTrue(model.phase is PairingPhase.Connecting)
+
+            expireHandshakeDeadline(delays)
+
+            assertEquals(END_OF_STREAM, stalled.input.read())
+            requester.close()
+        }
+        awaitOffering(model)
+        assertTrue(model.phase is PairingPhase.Offering)
     }
 
     @Test

@@ -19,10 +19,12 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -398,7 +400,7 @@ class StreamRelayListenerConnectionTest {
     }
 
     @Test
-    fun aDropNamingAnEndedConnectionLeavesTheNextPeerConnected() {
+    fun anEndedConnectionNeitherWritesToNorDropsTheNextPeer() {
         val events = CopyOnWriteArrayList<String>()
         val listener = listener { events += label(it) }
         try {
@@ -413,6 +415,7 @@ class StreamRelayListenerConnectionTest {
                 awaitCondition("peer B never connected") { events == listOf(CONNECTED, DISCONNECTED, CONNECTED) }
                 assertNotSame(first, listener.currentConnection)
 
+                assertThrows(IOException::class.java) { first.send(FROM_A.encodeToByteArray()) }
                 first.disconnect()
 
                 peerB.sendFrame(FROM_B)

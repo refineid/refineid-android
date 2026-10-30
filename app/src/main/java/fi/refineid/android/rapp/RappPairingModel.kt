@@ -95,6 +95,13 @@ internal class RappPairingModel(
     private var ceremony: RappCustodianPairingCeremony? = null
     private var awaitingPreamble = false
 
+    /**
+     * The connection the listener's events are of, taken when it connects;
+     * null once it ended. The listener delivers every event of a connection
+     * before it takes the next.
+     */
+    private var candidate: StreamRelayConnection? = null
+
     /** The live offer's answers to pairing connections; null without an offer. */
     @Volatile
     private var pairingBootstrap: RappPairingBootstrap? = null
@@ -239,7 +246,7 @@ internal class RappPairingModel(
             }
 
             is StreamRelayEvent.Frame -> {
-                handleProxyFrame(source, event, bridge, code)
+                candidate?.let { handleProxyFrame(source, it, event, bridge, code) }
             }
 
             is StreamRelayEvent.Disconnected -> {
@@ -256,13 +263,16 @@ internal class RappPairingModel(
 
     /**
      * A new connection opens with its routing preamble, which
-     * [beginCandidate] answers; its handshake deadline runs from now.
+     * [beginCandidate] answers; its handshake deadline runs from now. A
+     * connection that ended before this event is not taken.
      */
     private fun handleProxyConnected(source: StreamRelayListener) {
         ceremony = null
         refusingStepOne = false
-        awaitingPreamble = true
-        startHandshakeDeadline(source)
+        val connection = source.currentConnection
+        candidate = connection
+        awaitingPreamble = connection != null
+        connection?.let(::startHandshakeDeadline)
     }
 
     /**
@@ -274,7 +284,7 @@ internal class RappPairingModel(
      * without touching the offer. Only a started attempt changes the screen.
      */
     private fun beginCandidate(
-        source: StreamRelayListener,
+        connection: StreamRelayConnection,
         preamble: ByteArray,
         bridge: RappPairingBridge,
         code: String,
@@ -284,10 +294,10 @@ internal class RappPairingModel(
         val offer =
             when (val answer = pairingBootstrap?.answer(preamble, now) ?: RappPairingBootstrap.Answer.Close) {
                 is RappPairingBootstrap.Answer.Offer -> answer.frame
-                else -> return refuse(source, answer)
+                else -> return refuse(connection, answer)
             }
         val candidateId = bridge.offerCandidates().first { it.profile == rappStreamProfileName() }.candidateId
-        source.send(offer)
+        connection.send(offer)
         val random64 = ByteArray(CPACE_RANDOM_BYTES).apply { java.security.SecureRandom().nextBytes(this) }
         try {
             bridge.beginCpace(
@@ -324,11 +334,11 @@ internal class RappPairingModel(
      * (section 4.2, "Busy Refusal"); the offer and the screen stay as they are.
      */
     private fun refuse(
-        source: StreamRelayListener,
+        connection: StreamRelayConnection,
         answer: RappPairingBootstrap.Answer,
     ) {
-        if (answer is RappPairingBootstrap.Answer.Busy) source.send(answer.frame)
-        source.disconnectClient()
+        if (answer is RappPairingBootstrap.Answer.Busy) connection.send(answer.frame)
+        connection.disconnect()
     }
 
     private fun vault(): RappPairVault = pairVault ?: app?.rappVault ?: AndroidRappVault(context)
@@ -345,6 +355,7 @@ internal class RappPairingModel(
     private fun handleProxyDisconnected(bridge: RappPairingBridge) {
         handshakeDeadlineJob?.cancel()
         handshakeDeadlineJob = null
+        candidate = null
         awaitingPreamble = false
         if (phase is PairingPhase.Connecting) {
             candidateEnded(bridge)
@@ -382,26 +393,27 @@ internal class RappPairingModel(
 
     private fun handleProxyFrame(
         source: StreamRelayListener,
+        connection: StreamRelayConnection,
         event: StreamRelayEvent.Frame,
         bridge: RappPairingBridge,
         code: String,
     ) {
         try {
             if (awaitingPreamble) {
-                beginCandidate(source, event.data, bridge, code)
+                beginCandidate(connection, event.data, bridge, code)
                 return
             }
             if (refusingStepOne) {
                 refusingStepOne = false
                 val answer = pairingBootstrap?.answerInPlaceOfStepTwo(monotonicMs())
-                refuse(source, answer ?: RappPairingBootstrap.Answer.Close)
+                refuse(connection, answer ?: RappPairingBootstrap.Answer.Close)
                 return
             }
             val active = ceremony ?: return
             when (val outcome = active.receive(event.data)) {
                 is RappCustodianPairingCeremony.Outcome.Send -> {
-                    outcome.frames.forEach { frame -> source.send(frame) }
-                    startHandshakeDeadline(source)
+                    outcome.frames.forEach { frame -> connection.send(frame) }
+                    startHandshakeDeadline(connection)
                 }
 
                 is RappCustodianPairingCeremony.Outcome.Paired -> {
@@ -417,7 +429,7 @@ internal class RappPairingModel(
                 phase = PairingPhase.Failed("Pairing error: ${e.javaClass.simpleName}")
                 nextOffer()
             } else {
-                source.disconnectClient()
+                connection.disconnect()
             }
         }
     }
@@ -477,15 +489,14 @@ internal class RappPairingModel(
     }
 
     /**
-     * Closes [source]'s current connection [handshakeDeadlineMs] from now
-     * unless it reached the next step meanwhile: while it owes its preamble,
-     * its step 1 after a refused CPace start, or the next frame of its
-     * ceremony. The close ends the candidate as a lost connection does,
-     * showing nothing new; a connection that followed it is left alone.
+     * Closes [connection] [handshakeDeadlineMs] from now unless it reached
+     * the next step meanwhile: while it owes its preamble, its step 1 after
+     * a refused CPace start, or the next frame of its ceremony. The close
+     * ends the candidate as a lost connection does, showing nothing new; a
+     * connection that followed it is left alone.
      */
-    private fun startHandshakeDeadline(source: StreamRelayListener) {
+    private fun startHandshakeDeadline(connection: StreamRelayConnection) {
         handshakeDeadlineJob?.cancel()
-        val connection = source.currentConnection ?: return
         handshakeDeadlineJob =
             scope.launch(mainDispatcher) {
                 delay(handshakeDeadlineMs)
@@ -595,6 +606,7 @@ internal class RappPairingModel(
         pairingBootstrap = null
         revokeUnconfirmedRecord()
         ceremony = null
+        candidate = null
         awaitingPreamble = false
         refusingStepOne = false
         phase = PairingPhase.Idle

@@ -41,14 +41,24 @@ internal sealed interface StreamRelayEvent {
     ) : StreamRelayEvent
 }
 
-/** One accepted connection of a [StreamRelayListener]; it names no peer. */
+/**
+ * One accepted connection of a [StreamRelayListener]; it names no peer. It
+ * acts only while it is the listener's current connection: a later
+ * connection is left alone.
+ */
 internal class StreamRelayConnection(
+    private val write: (ByteArray) -> Unit,
     private val drop: () -> Unit,
 ) {
     /**
+     * Queues [frame] as [StreamRelayListener.send] does while this is the
+     * listener's current connection; otherwise throws [IOException].
+     */
+    fun send(frame: ByteArray) = write(frame)
+
+    /**
      * Drops this connection as [StreamRelayListener.disconnectClient] does
-     * if it is still the listener's current connection; a later connection
-     * is left alone.
+     * if it is still the listener's current connection.
      */
     fun disconnect() = drop()
 }
@@ -333,7 +343,18 @@ internal class StreamRelayListener(
         lateinit var accepted: StreamConnection
         accepted =
             try {
-                StreamConnection(socket, StreamRelayConnection { disconnect(accepted) })
+                StreamConnection(
+                    socket,
+                    StreamRelayConnection(
+                        write = { frame ->
+                            synchronized(this) {
+                                if (connection !== accepted) throw IOException("Connection ended")
+                                send(frame)
+                            }
+                        },
+                        drop = { disconnect(accepted) },
+                    ),
+                )
             } catch (_: IOException) {
                 try {
                     socket.close()
