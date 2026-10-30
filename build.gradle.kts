@@ -70,6 +70,19 @@ spotless {
 val rustCrateDirectory = layout.projectDirectory.dir("native/refineid-android-core")
 val rappCrateDirectory = layout.projectDirectory.dir("native/refineid-rapp-android")
 
+// A repository shell script as a command line. Windows cannot start a
+// script as a process, so there it runs under the bash of Git for Windows,
+// whose launcher puts the tools the scripts use (awk, cmp, sed) on the PATH;
+// the hooks run in the same shell. Any bash on the PATH is the last resort.
+val hostIsWindows = System.getProperty("os.name").startsWith("Windows")
+val gitForWindowsBash: String =
+    listOfNotNull(System.getenv("ProgramFiles"), System.getenv("ProgramW6432"), System.getenv("LOCALAPPDATA"))
+        .flatMap { listOf(File(it, "Git/bin/bash.exe"), File(it, "Programs/Git/bin/bash.exe")) }
+        .firstOrNull { it.isFile }
+        ?.absolutePath ?: "bash"
+
+fun shellScript(script: String): List<String> = if (hostIsWindows) listOf(gitForWindowsBash, script) else listOf(script)
+
 // Both native crates build against the latest refineid-core main. Updating one
 // core package moves the whole core git source in the crate's Cargo.lock to the
 // current main commit; third-party crates keep their locked versions, so every
@@ -164,7 +177,7 @@ val verifyAospProviderContract =
             "app/src/main/java/com/android/keychain/external/ExternalKeyProviderResult.java",
             aospProviderContractPatch,
         )
-        commandLine(aospProviderContractVerifier)
+        commandLine(shellScript(aospProviderContractVerifier))
     }
 
 tasks.named("check") {
