@@ -42,6 +42,28 @@ internal sealed interface StreamRelayEvent {
 }
 
 /**
+ * One accepted connection of a [StreamRelayListener]; it names no peer. It
+ * acts only while it is the listener's current connection: a later
+ * connection is left alone.
+ */
+internal class StreamRelayConnection(
+    private val write: (ByteArray) -> Unit,
+    private val drop: () -> Unit,
+) {
+    /**
+     * Queues [frame] as [StreamRelayListener.send] does while this is the
+     * listener's current connection; otherwise throws [IOException].
+     */
+    fun send(frame: ByteArray) = write(frame)
+
+    /**
+     * Drops this connection as [StreamRelayListener.disconnectClient] does
+     * if it is still the listener's current connection.
+     */
+    fun disconnect() = drop()
+}
+
+/**
  * Listens for incoming RAPP stream connections and advertises via mDNS/NSD.
  *
  * It holds one connection at a time. [send] and [disconnectClient] return
@@ -64,6 +86,10 @@ internal sealed interface StreamRelayEvent {
  * [answerWhileHeld] set, its first frame is read and answered as that
  * callback says before it closes, at most [CONCURRENT_HELD_ANSWERS] at a
  * time; otherwise it closes unanswered. It reports no event.
+ *
+ * A connection whose read loop stops because [scope] was cancelled is
+ * cleared without a [StreamRelayEvent.Disconnected]: the scope belongs to
+ * the listener's owner, which ended it and handles no further event.
  */
 internal class StreamRelayListener(
     private val context: Context,
@@ -111,6 +137,7 @@ internal class StreamRelayListener(
      */
     private class StreamConnection(
         val socket: Socket,
+        val handle: StreamRelayConnection,
     ) {
         private val output: OutputStream = socket.getOutputStream()
         private val lane: Executor = Dispatchers.IO.limitedParallelism(1).asExecutor()
@@ -313,9 +340,21 @@ internal class StreamRelayListener(
 
     /** Takes [socket] as the connection unless it is refused, then reads it until it ends. */
     private fun admit(socket: Socket) {
-        val accepted =
+        lateinit var accepted: StreamConnection
+        accepted =
             try {
-                StreamConnection(socket)
+                StreamConnection(
+                    socket,
+                    StreamRelayConnection(
+                        write = { frame ->
+                            synchronized(this) {
+                                if (connection !== accepted) throw IOException("Connection ended")
+                                send(frame)
+                            }
+                        },
+                        drop = { disconnect(accepted) },
+                    ),
+                )
             } catch (_: IOException) {
                 try {
                     socket.close()
@@ -579,6 +618,10 @@ internal class StreamRelayListener(
     fun disconnectClient() {
         disconnect(null)
     }
+
+    /** The current connection, or null without one. */
+    val currentConnection: StreamRelayConnection?
+        get() = synchronized(this) { connection?.handle }
 
     /**
      * Drops [expected], or whichever connection is current when null, if it
