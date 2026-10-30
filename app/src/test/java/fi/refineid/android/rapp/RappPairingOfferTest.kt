@@ -5,8 +5,12 @@ package fi.refineid.android.rapp
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Delay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
@@ -27,7 +31,10 @@ import java.io.DataOutputStream
 import java.net.InetAddress
 import java.net.Socket
 import java.security.SecureRandom
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.resume
 
 /**
  * While Remote Access is on, the Remote Access page always shows a pairing
@@ -71,6 +78,14 @@ class RappPairingOfferTest {
 
         /** How often a requester asks a busy custodian again before the test gives up. */
         const val BUSY_REOPENINGS = 8
+
+        const val SECOND_PEER_NAME = "Laptop"
+
+        /** The spacing between admitted pairing connections (RAPP v26.10.29 section 3.3 item 6). */
+        const val ADMISSION_SPACING_MS = 500L
+
+        /** How long a drained listener has to report a close on loopback. */
+        const val CLOSE_REPORT_MS = 500L
     }
 
     /** A context whose preferences live in memory and which offers no system service. */
@@ -124,9 +139,10 @@ class RappPairingOfferTest {
     private fun model(
         remoteAccessOn: Boolean,
         handshakeDeadlineMs: Long = HANDSHAKE_DEADLINE_MS,
+        mainDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): RappPairingModel {
         RappSettings(context).isCardRemoteAccessEnabled = remoteAccessOn
-        return RappPairingModel(context, scope, Dispatchers.Unconfined, vault, connected, handshakeDeadlineMs) {
+        return RappPairingModel(context, scope, mainDispatcher, vault, connected, handshakeDeadlineMs) {
             clock.get().toULong()
         }.also { model = it }
     }
@@ -285,6 +301,84 @@ class RappPairingOfferTest {
         RappPairingBridge.fromBootstrap(bootstrapAnswer(port), RappTestOffers.STREAM_PROFILE, NOW).close()
     }
 
+    /**
+     * Runs what it is given at once and holds every delay until the test
+     * fires it, so the custodian's own handshake deadline expires while the
+     * listener's, which runs on the clock, is far off.
+     */
+    @OptIn(InternalCoroutinesApi::class)
+    private class HeldDelays :
+        CoroutineDispatcher(),
+        Delay {
+        private val held = CopyOnWriteArrayList<Pair<Long, CancellableContinuation<Unit>>>()
+
+        override fun dispatch(
+            context: CoroutineContext,
+            block: Runnable,
+        ) = block.run()
+
+        override fun scheduleResumeAfterDelay(
+            timeMillis: Long,
+            continuation: CancellableContinuation<Unit>,
+        ) {
+            held += timeMillis to continuation
+        }
+
+        /** Ends every running delay of [timeMillis]; how many there were. */
+        fun expire(timeMillis: Long): Int {
+            val due = held.filter { (time, continuation) -> time == timeMillis && continuation.isActive }
+            held.removeAll(due.toSet())
+            due.forEach { (_, continuation) -> continuation.resume(Unit) }
+            return due.size
+        }
+    }
+
+    /** Expires the custodian's one running handshake deadline once it runs. */
+    private fun expireHandshakeDeadline(delays: HeldDelays) {
+        val deadline = System.currentTimeMillis() + SETTLE_LIMIT_MS
+        while (delays.expire(HANDSHAKE_DEADLINE_MS) == 0) {
+            assertTrue("no handshake deadline ran", System.currentTimeMillis() < deadline)
+            Thread.sleep(SETTLE_STEP_MS)
+        }
+    }
+
+    @Test
+    fun theCustodiansHandshakeDeadlineClosesASilentConnectionAndTheNextIsServedTheOffer() {
+        val delays = HeldDelays()
+        val model = model(remoteAccessOn = true, mainDispatcher = delays)
+        model.offerWhileOn()
+        val code = model.code()
+        val port = checkNotNull(model.offerPort)
+
+        StreamPeer(port).use { silent ->
+            expireHandshakeDeadline(delays)
+            assertEquals(END_OF_STREAM, silent.input.read())
+        }
+        awaitOffering(model)
+        assertEquals(code, model.code())
+
+        RappPairingBridge.fromBootstrap(bootstrapAnswer(port), RappTestOffers.STREAM_PROFILE, NOW).close()
+    }
+
+    @Test
+    fun theCustodiansHandshakeDeadlineClosesAStalledAttempt() {
+        val delays = HeldDelays()
+        val model = model(remoteAccessOn = true, mainDispatcher = delays)
+        model.offerWhileOn()
+
+        StreamPeer(checkNotNull(model.offerPort)).use { stalled ->
+            val requester = startPairing(stalled, model.code())
+            assertTrue(model.phase is PairingPhase.Connecting)
+
+            expireHandshakeDeadline(delays)
+
+            assertEquals(END_OF_STREAM, stalled.input.read())
+            requester.close()
+        }
+        awaitOffering(model)
+        assertTrue(model.phase is PairingPhase.Offering)
+    }
+
     @Test
     fun withoutALiveOfferAConnectionWhileAnotherIsHeldIsClosedUnanswered() {
         val model = model(remoteAccessOn = true)
@@ -301,6 +395,47 @@ class RappPairingOfferTest {
                 assertEquals(END_OF_STREAM, second.input.read())
             }
         }
+    }
+
+    @Test
+    fun theCompletedPairingsConnectionEndingLeavesTheNextOffersAttemptRunning() {
+        val model = model(remoteAccessOn = true)
+        model.offerWhileOn()
+        val first = model.code()
+
+        StreamPeer(checkNotNull(model.offerPort)).use { firstPeer ->
+            finishPairing(firstPeer, startPairing(firstPeer, first), PEER_NAME)
+            awaitPaired(model, 1)
+            val next = model.code()
+            assertNotEquals(first, next)
+            clock.addAndGet(ADMISSION_SPACING_MS)
+
+            StreamPeer(checkNotNull(model.offerPort)).use { secondPeer ->
+                val requester = startPairing(secondPeer, next)
+                assertTrue(model.phase is PairingPhase.Connecting)
+
+                firstPeer.close()
+                Thread.sleep(CLOSE_REPORT_MS)
+
+                assertTrue(model.phase is PairingPhase.Connecting)
+                finishPairing(secondPeer, requester, SECOND_PEER_NAME)
+            }
+        }
+        awaitPaired(model, 2)
+        assertEquals(setOf(PEER_NAME, SECOND_PEER_NAME), model.pairedDevices.map { it.displayName }.toSet())
+    }
+
+    private fun awaitPaired(
+        model: RappPairingModel,
+        count: Int,
+    ) {
+        val deadline = System.currentTimeMillis() + SETTLE_LIMIT_MS
+        while ((model.pairedDevices.size < count || model.phase !is PairingPhase.Offering) &&
+            System.currentTimeMillis() < deadline
+        ) {
+            Thread.sleep(SETTLE_STEP_MS)
+        }
+        assertEquals(count, model.pairedDevices.size)
     }
 
     private fun awaitOffering(model: RappPairingModel) {
@@ -333,38 +468,42 @@ class RappPairingOfferTest {
         port: Int,
         code: String,
     ) {
-        Socket(InetAddress.getLoopbackAddress(), port).use { socket ->
-            socket.soTimeout = SOCKET_TIMEOUT_MS
-            val input = DataInputStream(socket.getInputStream())
-            val output = DataOutputStream(socket.getOutputStream())
+        StreamPeer(port).use { peer -> finishPairing(peer, startPairing(peer, code), PEER_NAME) }
+    }
 
-            fun send(frame: ByteArray) {
-                output.write(checkNotNull(StreamRelayFraming.encode(frame)))
-                output.flush()
-            }
+    /** A requester's pairing with [code] on [peer] through the custodian's CPace step 2. */
+    private fun startPairing(
+        peer: StreamPeer,
+        code: String,
+    ): RappPairingBridge {
+        peer.send(rappPairingPreamble(rappStreamProfileName()))
+        val requester = RappPairingBridge.fromBootstrap(peer.receive(), RappTestOffers.STREAM_PROFILE, NOW)
+        val random = ByteArray(CPACE_RANDOM_BYTES).also(SecureRandom()::nextBytes)
+        requester.beginCpace(RappTestOffers.STREAM_CANDIDATE_ID, code, random, NOW)
+        peer.send(requester.writeCpaceFrame(NOW))
+        requester.readCpaceFrame(peer.receive(), NOW)
+        return requester
+    }
 
-            fun receive(): ByteArray = ByteArray(input.readUnsignedShort()).also(input::readFully)
-
-            send(rappPairingPreamble(rappStreamProfileName()))
-            val requester = RappPairingBridge.fromBootstrap(receive(), RappTestOffers.STREAM_PROFILE, NOW)
-            val random = ByteArray(CPACE_RANDOM_BYTES).also(SecureRandom()::nextBytes)
-            requester.beginCpace(RappTestOffers.STREAM_CANDIDATE_ID, code, random, NOW)
-            send(requester.writeCpaceFrame(NOW))
-            requester.readCpaceFrame(receive(), NOW)
-            send(requester.writeCpaceFrame(NOW))
-            send(requester.writeHandshakeFrame(NOW))
-            requester.readHandshakeFrame(receive(), NOW)
-            send(requester.writeHandshakeFrame(NOW))
-            requester.enterConfirmation(NOW)
-            send(requester.sendHello(PEER_NAME, PEER_PLATFORM, NOW))
-            requester.receiveHello(receive(), NOW)
-            val granted = requester.receiveConfirmation(receive(), NOW)
-            send(requester.sendConfirmation(granted, NOW))
-            requester.buildPairRecord(WALL_MS, NOW).close()
-            send(requester.sendStored(NOW))
-            requester.receiveStored(receive(), NOW)
-            checkNotNull(requester.activatePairing(NOW)).close()
-            requester.close()
-        }
+    /** The rest of [requester]'s pairing on [peer], as [displayName], until both ends hold the pairing. */
+    private fun finishPairing(
+        peer: StreamPeer,
+        requester: RappPairingBridge,
+        displayName: String,
+    ) {
+        peer.send(requester.writeCpaceFrame(NOW))
+        peer.send(requester.writeHandshakeFrame(NOW))
+        requester.readHandshakeFrame(peer.receive(), NOW)
+        peer.send(requester.writeHandshakeFrame(NOW))
+        requester.enterConfirmation(NOW)
+        peer.send(requester.sendHello(displayName, PEER_PLATFORM, NOW))
+        requester.receiveHello(peer.receive(), NOW)
+        val granted = requester.receiveConfirmation(peer.receive(), NOW)
+        peer.send(requester.sendConfirmation(granted, NOW))
+        requester.buildPairRecord(WALL_MS, NOW).close()
+        peer.send(requester.sendStored(NOW))
+        requester.receiveStored(peer.receive(), NOW)
+        checkNotNull(requester.activatePairing(NOW)).close()
+        requester.close()
     }
 }
