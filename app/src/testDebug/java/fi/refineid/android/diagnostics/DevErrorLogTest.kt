@@ -7,6 +7,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
+import java.util.concurrent.CountDownLatch
+import kotlin.concurrent.thread
 
 class DevErrorLogTest {
     private companion object {
@@ -20,6 +22,10 @@ class DevErrorLogTest {
         const val CONTROL_SEPARATED = "first\nsecond\tthird"
         const val SPACE_SEPARATED = "first second third"
         val REPORTED_AT: Instant = Instant.EPOCH
+
+        /** Threads reporting at once, and how many distinct errors each reports; together within the capacity. */
+        const val REPORTERS = 8
+        const val REPORTS_EACH = 6
     }
 
     @After
@@ -53,6 +59,24 @@ class DevErrorLogTest {
             listOf(EVENT, OTHER_EVENT, "$EVENT (x$REPEATS)"),
             DevErrorLog.entries.value.map { it.text },
         )
+    }
+
+    @Test
+    fun concurrentReportsAreListedInTheOrderTheyWereNumbered() {
+        val start = CountDownLatch(1)
+        val reporters =
+            List(REPORTERS) { reporter ->
+                thread {
+                    start.await()
+                    repeat(REPORTS_EACH) { report -> DevErrorLog.report("$EVENT-$reporter-$report") }
+                }
+            }
+        start.countDown()
+        reporters.forEach(Thread::join)
+
+        val serials = DevErrorLog.entries.value.map { it.serial }
+        assertEquals(REPORTERS * REPORTS_EACH, serials.size)
+        assertEquals(serials.sortedDescending(), serials)
     }
 
     @Test

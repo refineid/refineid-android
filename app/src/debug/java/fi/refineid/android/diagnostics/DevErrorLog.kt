@@ -52,28 +52,31 @@ internal object DevErrorLog {
     /** Every entry held, newest first. */
     val entries: StateFlow<List<Entry>> = mutableEntries.asStateFlow()
 
-    /** Records [event] with its [cause], a case or type name, and writes it to logcat. */
+    /**
+     * Records [event] with its [cause], a case or type name, and writes it to
+     * logcat. Concurrent reports are numbered, logged and listed one at a
+     * time, so the list and logcat hold them in the same order.
+     */
     fun report(
         event: String,
         cause: String? = null,
     ) {
         val message = sanitized(if (cause == null) event else "$event cause=$cause")
-        try {
-            Log.e(TAG, message)
-        } catch (_: RuntimeException) {
-            // Local JVM tests use the Android stub; a device implementation logs.
-        }
-        val entry =
-            synchronized(this) {
-                reported++
-                Entry(reported, Instant.now(), message)
+        synchronized(this) {
+            try {
+                Log.e(TAG, message)
+            } catch (_: RuntimeException) {
+                // Local JVM tests use the Android stub; a device implementation logs.
             }
-        mutableEntries.update { held -> prepending(entry, held) }
+            reported++
+            val entry = Entry(reported, Instant.now(), message)
+            mutableEntries.update { held -> prepending(entry, held) }
+        }
     }
 
     /** Forgets every entry. */
     fun clear() {
-        mutableEntries.value = emptyList()
+        synchronized(this) { mutableEntries.value = emptyList() }
     }
 
     /**

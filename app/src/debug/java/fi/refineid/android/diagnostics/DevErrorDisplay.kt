@@ -10,12 +10,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -50,10 +53,11 @@ private const val PILL_ELEVATION_DP = 6
 private const val CLIP_LABEL = "RefineID errors"
 
 /**
- * The debug build's error pill, drawn over the app: hidden until the first
- * error, then a count that can be dragged anywhere. It opens on each new
- * error and on a tap, listing the errors newest first with Copy all and
- * Clear.
+ * The debug build's error pill, drawn over the app inside the system bars
+ * and cutouts: hidden until the first error, then a count that can be
+ * dragged anywhere. It opens on each new error and on a tap, listing the
+ * errors newest first in a list of bounded height that scrolls, with Copy
+ * all and Clear.
  */
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
@@ -66,7 +70,14 @@ internal fun DevErrorOverlay() {
         if (newest != null) isOpen = true
     }
     if (entries.isEmpty()) return
-    Box(modifier = Modifier.fillMaxSize().padding(PILL_MARGIN), contentAlignment = Alignment.BottomEnd) {
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(PILL_MARGIN),
+        contentAlignment = Alignment.BottomEnd,
+    ) {
         Surface(
             modifier =
                 Modifier
@@ -84,7 +95,10 @@ internal fun DevErrorOverlay() {
         ) {
             if (isOpen) {
                 Column(modifier = Modifier.widthIn(max = LIST_MAXIMUM_WIDTH).padding(LIST_PADDING)) {
-                    DevErrorEntries(entries, Modifier.heightIn(max = LIST_MAXIMUM_HEIGHT))
+                    DevErrorEntries(
+                        entries,
+                        Modifier.heightIn(max = LIST_MAXIMUM_HEIGHT).verticalScroll(rememberScrollState()),
+                    )
                     DevErrorActions(entries, onClose = { isOpen = false })
                 }
             } else {
@@ -96,7 +110,10 @@ internal fun DevErrorOverlay() {
     }
 }
 
-/** The error list for the diagnostics screen, newest first, with Copy all and Clear. */
+/**
+ * The error list for the diagnostics screen, newest first, with Copy all
+ * and Clear; it takes the height of its entries and scrolls with the screen.
+ */
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 internal fun DevErrorSection() {
@@ -118,9 +135,9 @@ private fun DevErrorEntries(
     entries: List<DevErrorLog.Entry>,
     modifier: Modifier,
 ) {
-    SelectionContainer(modifier = modifier) {
+    SelectionContainer {
         Column(
-            modifier = Modifier.verticalScroll(rememberScrollState()),
+            modifier = modifier,
             verticalArrangement = Arrangement.spacedBy(LIST_SPACING),
         ) {
             entries.forEach { entry ->
