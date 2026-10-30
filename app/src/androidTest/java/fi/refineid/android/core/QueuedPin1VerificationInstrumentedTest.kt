@@ -30,7 +30,7 @@ internal class QueuedPin1VerificationInstrumentedTest {
             }
             assertTrue(busy.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
             val result =
-                caller.submit<Pin1VerificationResult> {
+                caller.submit<Pin1Verification> {
                     verifyQueuedPin1(
                         candidate,
                         owner,
@@ -43,14 +43,17 @@ internal class QueuedPin1VerificationInstrumentedTest {
                         expectedGeneration = 0,
                         verify = {
                             verified = true
-                            Pin1VerificationResult.VERIFIED
+                            Pin1Verification(Pin1VerificationResult.VERIFIED)
                         },
                     )
                 }
             assertTrue(captured.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
             generation.incrementAndGet()
             release.countDown()
-            assertEquals(Pin1VerificationResult.CARD_UNAVAILABLE, result.get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            assertEquals(
+                Pin1VerificationResult.CARD_UNAVAILABLE,
+                result.get(TIMEOUT_SECONDS, TimeUnit.SECONDS).result,
+            )
             assertFalse(verified)
             assertTrue(runCatching { candidate.copyBytes() }.isFailure)
         } finally {
@@ -69,7 +72,7 @@ internal class QueuedPin1VerificationInstrumentedTest {
         var verified = false
         try {
             val result =
-                caller.submit<Pin1VerificationResult> {
+                caller.submit<Pin1Verification> {
                     verifyQueuedPin1(
                         candidate,
                         owner,
@@ -78,11 +81,14 @@ internal class QueuedPin1VerificationInstrumentedTest {
                         expectedGeneration = 0,
                         verify = {
                             verified = true
-                            Pin1VerificationResult.VERIFIED
+                            Pin1Verification(Pin1VerificationResult.VERIFIED)
                         },
                     )
                 }
-            assertEquals(Pin1VerificationResult.CARD_UNAVAILABLE, result.get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            assertEquals(
+                Pin1VerificationResult.CARD_UNAVAILABLE,
+                result.get(TIMEOUT_SECONDS, TimeUnit.SECONDS).result,
+            )
             assertFalse(verified)
             assertTrue(runCatching { candidate.copyBytes() }.isFailure)
         } finally {

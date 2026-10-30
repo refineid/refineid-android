@@ -844,6 +844,8 @@ val verifyReleaseAbis =
 
 tasks.named("check").configure {
     dependsOn(verifyDebugTraceParameters, verifyReleaseNoLogging, verifyReleaseNetworkIsolation, verifyReleaseAbis)
+    // Instrumented tests run on a device; check compiles them.
+    dependsOn("compileDebugAndroidTestKotlin")
 }
 
 play {
