@@ -9,11 +9,13 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.diagnostics.BuildDiagnostics
+import fi.refineid.android.diagnostics.DevErrorOverlay
 import fi.refineid.android.nfc.NfcReaderController
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.ui.MainScreen
@@ -78,35 +80,38 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             RefineIdTheme {
-                MainScreen(
-                    snapshot = readerSnapshot,
-                    authenticationPreparation = preparation,
-                    onAuthenticationRejected = app::invalidateAuthentication,
-                    onRequestPermission = readerController::requestPermission,
-                    onSelectUsbDevice = readerController::selectDevice,
-                    onReaderConnect = readerController::connect,
-                    browserCardService = readerController,
-                    qualifiedCardService = readerController.qualifiedCardService,
-                    nfcQualifiedCardService = nfcReaderController.qualifiedCardService,
-                    cardManagementService = readerController.cardManagementService,
-                    nfcCardManagementService = nfcReaderController.cardManagementService,
-                    timestampAuthorityRepository =
-                        (application as RefineIdApplication).timestampAuthorityStore,
-                    hasNfc = nfcReaderController.hasNfc,
-                    nfcSnapshot = nfcSnapshot,
-                    onOpenNfcSettings = ::openNfcSettings,
-                    onNfcConnect = nfcReaderController::connect,
-                    onForgetPrimedCard = nfcReaderController::forgetPrimedCard,
-                    onCancelAwaitingCard = nfcReaderController::cancelAwaitingCard,
-                    nfcCardService = nfcReaderController.authenticationCardService,
-                    onSignBeginTap = nfcReaderController.tapToSign::begin,
-                    onSignEndTap = nfcReaderController.tapToSign::end,
-                    pinCache = (application as RefineIdApplication).authenticationPinCache,
-                    onPin1Changed = nfcReaderController::forgetPin1,
-                    rappPairingModel = model,
-                    rappInbox = rappInbox,
-                    remoteCardModel = (application as RefineIdApplication).remoteCardModel,
-                )
+                Box {
+                    MainScreen(
+                        snapshot = readerSnapshot,
+                        authenticationPreparation = preparation,
+                        onAuthenticationRejected = app::invalidateAuthentication,
+                        onRequestPermission = readerController::requestPermission,
+                        onSelectUsbDevice = readerController::selectDevice,
+                        onReaderConnect = readerController::connect,
+                        browserCardService = readerController,
+                        qualifiedCardService = readerController.qualifiedCardService,
+                        nfcQualifiedCardService = nfcReaderController.qualifiedCardService,
+                        cardManagementService = readerController.cardManagementService,
+                        nfcCardManagementService = nfcReaderController.cardManagementService,
+                        timestampAuthorityRepository =
+                            (application as RefineIdApplication).timestampAuthorityStore,
+                        hasNfc = nfcReaderController.hasNfc,
+                        nfcSnapshot = nfcSnapshot,
+                        onOpenNfcSettings = ::openNfcSettings,
+                        onNfcConnect = nfcReaderController::connect,
+                        onForgetPrimedCard = nfcReaderController::forgetPrimedCard,
+                        onCancelAwaitingCard = nfcReaderController::cancelAwaitingCard,
+                        nfcCardService = nfcReaderController.authenticationCardService,
+                        onSignBeginTap = nfcReaderController.tapToSign::begin,
+                        onSignEndTap = nfcReaderController.tapToSign::end,
+                        pinCache = (application as RefineIdApplication).authenticationPinCache,
+                        onPin1Changed = nfcReaderController::forgetPin1,
+                        rappPairingModel = model,
+                        rappInbox = rappInbox,
+                        remoteCardModel = (application as RefineIdApplication).remoteCardModel,
+                    )
+                    DevErrorOverlay()
+                }
             }
         }
     }

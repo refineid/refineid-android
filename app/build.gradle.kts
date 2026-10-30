@@ -650,6 +650,8 @@ val verifyReleaseNoLogging =
                     "DiagnosticsDumpReceiver",
                     "Lfi/refineid/android/diagnostics/AppTrace;",
                     "Lfi/refineid/android/diagnostics/DiagnosticsDumpReceiver;",
+                    "Lfi/refineid/android/diagnostics/DevErrorLog;",
+                    "RefineIDErrors",
                 )
             val forbiddenMethods: Map<String, Set<String>?> =
                 mapOf(
