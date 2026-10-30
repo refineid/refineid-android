@@ -24,7 +24,11 @@ if (!localProps.exists()) {
             File(System.getProperty("user.home"), "Android/Sdk"),
         )
     candidates.firstOrNull { it.isDirectory }?.let { sdkDir ->
-        localProps.writeText("sdk.dir=${sdkDir.absolutePath}\n")
+        // A properties file reads a backslash as an escape and Android Lint
+        // wants the drive colon escaped, so a Windows path is written as
+        // C\:/..., which the SDK locator reads back as C:/...
+        val sdkPath = sdkDir.absolutePath.replace('\\', '/').replace(":", "\\:")
+        localProps.writeText("sdk.dir=$sdkPath\n")
     }
 }
 
