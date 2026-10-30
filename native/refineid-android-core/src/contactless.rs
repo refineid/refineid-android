@@ -676,7 +676,8 @@ fn map_pace_error<E>(error: &PaceError<E>) -> SecureChannelFailure {
         )
         | PaceError::Ber(_)
         | PaceError::UnexpectedResponse(_)
-        | PaceError::InvalidPoint => SecureChannelFailure::Transport,
+        | PaceError::InvalidPoint
+        | PaceError::ReflectedKey => SecureChannelFailure::Transport,
         PaceError::Encoding | PaceError::Random(_) => SecureChannelFailure::Bridge,
     }
 }
@@ -853,6 +854,10 @@ mod tests {
         );
         assert_eq!(
             map_pace_error::<&str>(&PaceError::Outcome(TransportOutcome::ProtocolDesync)),
+            SecureChannelFailure::Transport
+        );
+        assert_eq!(
+            map_pace_error::<&str>(&PaceError::ReflectedKey),
             SecureChannelFailure::Transport
         );
         assert_eq!(
