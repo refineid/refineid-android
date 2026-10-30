@@ -321,6 +321,8 @@ internal object AppTrace {
 
     fun rappPairRecordRefused() = Unit
 
+    fun rappPairingFailed(cause: String) = Unit
+
     fun rappBleServer(
         step: RappBleServerStep,
         code: Int? = null,

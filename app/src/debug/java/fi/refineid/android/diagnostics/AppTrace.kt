@@ -287,6 +287,12 @@ internal object AppTrace {
             "native:contactless-sign result=" + result +
                 " duration-us=" + elapsedMicroseconds(startedAt),
         )
+        if (result is NativeAuthenticationSignResult.Failure) {
+            DevErrorLog.report(
+                "native:contactless-sign-failed",
+                result.kind.toString(),
+            )
+        }
     }
 
     fun nativeAuthenticationSignStarted(
@@ -321,6 +327,12 @@ internal object AppTrace {
             "native:authentication-sign " + outcome +
                 " duration-us=" + elapsedMicroseconds(startedAt),
         )
+        if (result is NativeAuthenticationSignResult.Failure) {
+            DevErrorLog.report(
+                "native:authentication-sign-failed",
+                result.kind.toString(),
+            )
+        }
     }
 
     fun nativeQualifiedSignStarted(
@@ -353,6 +365,12 @@ internal object AppTrace {
             "native:qualified-sign " + outcome +
                 " duration-us=" + elapsedMicroseconds(startedAt),
         )
+        if (result is NativeQualifiedSignResult.Failure) {
+            DevErrorLog.report(
+                "native:qualified-sign-failed",
+                result.kind.toString(),
+            )
+        }
     }
 
     fun qualifiedSignatureVerificationCompleted(isVerified: Boolean) {
@@ -382,6 +400,12 @@ internal object AppTrace {
             "qualified-pdf:signing-completed " + outcome +
                 " duration-us=" + elapsedMicroseconds(startedAt),
         )
+        if (result is QualifiedPdfSigningResult.Failure) {
+            DevErrorLog.report(
+                "qualified-pdf:signing-failed",
+                result.kind.toString(),
+            )
+        }
     }
 
     fun qualifiedPdfPreparationStarted(documentLength: Int): Long =
@@ -510,6 +534,7 @@ internal object AppTrace {
 
     fun authenticationRequestCompleted(status: AuthenticationStatus) {
         debug("authentication:request-completed status=" + status)
+        if (status in FAILED_AUTHENTICATION) DevErrorLog.report("authentication:request-failed", status.toString())
     }
 
     fun usbContactlessConnectIgnored() {
@@ -534,6 +559,7 @@ internal object AppTrace {
 
     fun rappListenerFailed(error: String) {
         debug("rapp:listener-failed error=" + error)
+        DevErrorLog.report("rapp:listener-failed", error)
     }
 
     fun rappConnectionAccepted() {
@@ -542,10 +568,12 @@ internal object AppTrace {
 
     fun rappConnectionRejected(reason: String) {
         debug("rapp:connection-rejected reason=" + reason)
+        DevErrorLog.report("rapp:connection-rejected", reason)
     }
 
     fun rappConnectionDropped(reason: String) {
         debug("rapp:connection-dropped reason=" + reason)
+        DevErrorLog.report("rapp:connection-dropped", reason)
     }
 
     fun rappOperationReceived(opType: String) {
@@ -568,6 +596,7 @@ internal object AppTrace {
         failureKind: String,
     ) {
         debug("rapp:operation-failed type=" + opType + " failure=" + failureKind)
+        DevErrorLog.report("rapp:operation-failed", opType + " " + failureKind)
     }
 
     fun rappCardPromptShown(action: String) {
@@ -599,11 +628,19 @@ internal object AppTrace {
     /** An idle-expiry sweep failed and changed nothing; the next sweep repeats it. */
     fun rappIdleSweepFailed(failure: Exception) {
         debug("rapp:error idle-sweep-failed failure=" + failure.javaClass.simpleName)
+        DevErrorLog.report("rapp:idle-sweep-failed", failure.javaClass.simpleName)
     }
 
     /** The core refused a stored pair record; it is removed with its catalogue entry. */
     fun rappPairRecordRefused() {
         debug("rapp:error pair-record-refused")
+        DevErrorLog.report("rapp:pair-record-refused")
+    }
+
+    /** A pairing attempt failed on this phone; [cause] names the step or the exception type. */
+    fun rappPairingFailed(cause: String) {
+        debug("rapp:error pairing-failed cause=" + cause)
+        DevErrorLog.report("rapp:pairing-failed", cause)
     }
 
     /** A step of the Bluetooth server; a failure is written as an error line. */
@@ -613,6 +650,7 @@ internal object AppTrace {
     ) {
         val line = "ble-server=" + step + (if (code != null) " code=" + code else "")
         debug(if (step.isFailure) "rapp:error " + line else "rapp:ble " + line)
+        if (step.isFailure) DevErrorLog.report("rapp:ble-server", step.toString())
     }
 
     /** A link event; a refused or broken link is written as an error line with its cause. */
@@ -627,6 +665,7 @@ internal object AppTrace {
                         "rapp:error " + line + " below=" + RappBleGattProfile.MINIMUM_ATT_MTU
                     },
                 )
+                if (!event.accepted) DevErrorLog.report("rapp:ble-link-refused", "att-mtu-below-minimum")
             }
 
             is RappBleGattEvent.Routed -> {
@@ -640,6 +679,12 @@ internal object AppTrace {
             is RappBleGattEvent.Closed -> {
                 val line = "ble-link=" + event.link.serial + " closed=" + event.failure
                 debug(if (event.failure in ORDERLY_LINK_ENDS) "rapp:ble " + line else "rapp:error " + line)
+                if (event.failure !in ORDERLY_LINK_ENDS) {
+                    DevErrorLog.report(
+                        "rapp:ble-link-closed",
+                        event.failure.toString(),
+                    )
+                }
             }
 
             is RappBleGattEvent.Unsubscribed -> {
@@ -654,6 +699,7 @@ internal object AppTrace {
         refusal: RappDialRefusal,
     ) {
         debug("rapp:error dial-refused transport=" + transport + " refusal=" + refusal)
+        DevErrorLog.report("rapp:dial-refused", transport.toString() + " " + refusal)
     }
 
     fun browserOpened() {
@@ -680,6 +726,7 @@ internal object AppTrace {
 
     fun browserTlsError(primaryError: Int) {
         debug("browser:tls-error primary-error=" + primaryError)
+        DevErrorLog.report("browser:tls-error")
     }
 
     fun browserClientCertificateRequested(
@@ -774,6 +821,7 @@ internal object AppTrace {
 
     fun usbPermissionRequestFailed() {
         debug("usb:permission-request-failed")
+        DevErrorLog.report("usb:permission-request-failed")
     }
 
     fun usbSessionOpenStarted() {
@@ -820,6 +868,7 @@ internal object AppTrace {
 
     fun nfcSessionOpenFailed() {
         debug("nfc:session-open-failed")
+        DevErrorLog.report("nfc:session-open-failed")
     }
 
     fun nfcSessionClosed() {
@@ -832,6 +881,7 @@ internal object AppTrace {
 
     fun nfcTransceiveFailed() {
         debug("nfc:transceive-failed")
+        DevErrorLog.report("nfc:transceive-failed")
     }
 
     /**
@@ -939,6 +989,7 @@ internal object AppTrace {
 
     fun ccidOpenFailed() {
         debug("ccid:open-failed")
+        DevErrorLog.report("ccid:open-failed")
     }
 
     fun ccidDescriptorRejected(
@@ -950,6 +1001,7 @@ internal object AppTrace {
             line += " " + detail
         }
         debug(line)
+        DevErrorLog.report("ccid:descriptor-rejected", kind.toString())
     }
 
     fun ccidDescriptorAccepted(
@@ -989,10 +1041,12 @@ internal object AppTrace {
 
     fun ccidClaimFailed() {
         debug("ccid:claim-failed")
+        DevErrorLog.report("ccid:claim-failed")
     }
 
     fun ccidSecurityFailure() {
         debug("ccid:security-failure")
+        DevErrorLog.report("ccid:security-failure")
     }
 
     fun ccidSessionClosed(interfaceReleased: Boolean) {
@@ -1001,10 +1055,12 @@ internal object AppTrace {
 
     fun ccidSlotExchangeFailed(kind: CcidExchangeFailureKind) {
         debug("ccid:slot-failed kind=" + kind)
+        DevErrorLog.report("ccid:slot-failed", kind.toString())
     }
 
     fun ccidPowerExchangeFailed(kind: CcidExchangeFailureKind) {
         debug("ccid:power-failed kind=" + kind)
+        DevErrorLog.report("ccid:power-failed", kind.toString())
     }
 
     fun ccidParameters(
@@ -1016,10 +1072,12 @@ internal object AppTrace {
 
     fun ccidParametersFailure(errorCode: Int) {
         debug("ccid:parameters-failure error=" + errorCode)
+        DevErrorLog.report("ccid:parameters-failure")
     }
 
     fun ccidParametersExchangeFailed(kind: CcidExchangeFailureKind) {
         debug("ccid:parameters-exchange-failed kind=" + kind)
+        DevErrorLog.report("ccid:parameters-exchange-failed", kind.toString())
     }
 
     fun ccidSetParametersResult(
@@ -1054,6 +1112,7 @@ internal object AppTrace {
             "ccid:command-failed error=" + errorCode +
                 " card=" + cardStatus,
         )
+        DevErrorLog.report("ccid:command-failed", cardStatus.toString())
     }
 
     /**
@@ -1110,6 +1169,7 @@ internal object AppTrace {
             line += " " + detail
         }
         debug(line)
+        DevErrorLog.report("ccid:response-rejected", kind.toString())
     }
 
     /**
@@ -1142,6 +1202,7 @@ internal object AppTrace {
             line += " cmd=" + hexByte(messageType) + " slot=" + slot + " seq=" + sequence
         }
         debug(line)
+        DevErrorLog.report("ccid:exchange-failed", kind.toString())
     }
 
     /**
@@ -1250,6 +1311,7 @@ internal object AppTrace {
             "card:public failed kind=" + kind +
                 " duration-us=" + elapsedMicroseconds(startedAt),
         )
+        DevErrorLog.report("card:public-failed", kind.toString())
     }
 
     fun cardSensitiveCommandStarted(): Long =
@@ -1275,6 +1337,7 @@ internal object AppTrace {
             "card:sensitive failed kind=" + kind +
                 " duration-us=" + elapsedMicroseconds(startedAt),
         )
+        DevErrorLog.report("card:sensitive-failed", kind.toString())
     }
 
     fun cardCredentialCommandStarted(): Long =
@@ -1300,6 +1363,7 @@ internal object AppTrace {
             "card:credential failed kind=" + kind +
                 " duration-us=" + elapsedMicroseconds(startedAt),
         )
+        DevErrorLog.report("card:credential-failed", kind.toString())
     }
 
     private fun elapsedMicroseconds(startedAt: Long): Long =
@@ -1338,6 +1402,15 @@ internal object AppTrace {
 
     /** Link ends nobody needs to act on: the central left, or this phone closed the link. */
     private val ORDERLY_LINK_ENDS = setOf(RappBleLinkFailure.DISCONNECTED, RappBleLinkFailure.CANCELLED)
+
+    /** Authentication outcomes that are failures. */
+    private val FAILED_AUTHENTICATION =
+        setOf(
+            AuthenticationStatus.WRONG_PIN,
+            AuthenticationStatus.PIN_LOCKED,
+            AuthenticationStatus.REFUSED,
+            AuthenticationStatus.ERROR,
+        )
     private val traceLogBuffer = ArrayDeque<String>(MAX_TRACE_LINES)
 
     fun getTraceLog(): List<String> =
