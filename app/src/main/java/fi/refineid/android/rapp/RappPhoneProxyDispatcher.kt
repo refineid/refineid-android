@@ -889,7 +889,7 @@ internal class RappPhoneProxyDispatcher(
         cardChanged()
         catalog.markUsed(pair.peer.pairIdHex, System.currentTimeMillis())
         _connectedPeer.value = pair.peer
-        AppTrace.rappPairingCompleted(pair.peer.displayName)
+        AppTrace.rappPairingCompleted()
     }
 
     /** Queues one frame on the connection, before the session's bridge exists. */
@@ -1162,7 +1162,7 @@ internal class RappPhoneProxyDispatcher(
         operationId: RappOperationId,
         request: RappRequest,
     ) {
-        AppTrace.rappOperationReceived(request.javaClass.simpleName, operationId.key)
+        AppTrace.rappOperationReceived(request.javaClass.simpleName)
         when (request) {
             is RappRequest.BrowserAuthenticate -> {
                 authenticate(bridge, operationId, request)
@@ -1196,7 +1196,7 @@ internal class RappPhoneProxyDispatcher(
         operationId: RappOperationId,
         failure: RappCardFailure,
     ) {
-        AppTrace.rappOperationFailed("remote_operation", operationId.key, failure.name)
+        AppTrace.rappOperationFailed("remote_operation", failure.name)
         when (failure) {
             RappCardFailure.RETRY_FLOOR -> {
                 scope.launch(Dispatchers.Main) { inbox.tell(R.string.rapp_retry_floor) }
@@ -1229,7 +1229,7 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
         operationId: RappOperationId,
     ): RappRequest? {
-        AppTrace.rappOperationApproved(operationId.key)
+        AppTrace.rappOperationApproved()
         val command = act(bridge) { it.approve(operationId.toWire(), RappClock.monotonicMs()) }
         return (command as? RappBridgeOutcome.ExecuteCommand)?.request
     }
@@ -1318,7 +1318,7 @@ internal class RappPhoneProxyDispatcher(
     ): RappCardFailure? {
         if (!forcePrompt && isCardReady()) return null
         val cancelled = AtomicBoolean(false)
-        AppTrace.rappCardPromptShown(operationId.key, action.name)
+        AppTrace.rappCardPromptShown(action.name)
         act(bridge) { it.reportProgress(operationId.toWire(), RappProgressEvent.WAITING_FOR_CARD) }
         withContext(Dispatchers.Main) {
             inbox.showTapPrompt(
@@ -1332,7 +1332,7 @@ internal class RappPhoneProxyDispatcher(
             try {
                 awaitCardReady()
             } finally {
-                AppTrace.rappCardPromptDismissed(operationId.key)
+                AppTrace.rappCardPromptDismissed()
                 withContext(NonCancellable + Dispatchers.Main) { inbox.dismissTapPrompt(operationId.key) }
                 act(bridge) { it.reportProgress(operationId.toWire(), RappProgressEvent.CARD_WAIT_ENDED) }
             }
@@ -1375,7 +1375,7 @@ internal class RappPhoneProxyDispatcher(
     ) {
         val startedNs = System.nanoTime()
         val name = request.javaClass.simpleName
-        AppTrace.rappOperationReceived(name, operationId.key)
+        AppTrace.rappOperationReceived(name)
         val completed =
             when (request) {
                 // The card services expose neither the answer to reset nor its
@@ -1422,7 +1422,7 @@ internal class RappPhoneProxyDispatcher(
                     return
                 }
             }
-        if (completed != null) AppTrace.rappOperationCompleted(name, operationId.key, elapsedMicros(startedNs))
+        if (completed != null) AppTrace.rappOperationCompleted(name, elapsedMicros(startedNs))
     }
 
     /**
@@ -1740,7 +1740,7 @@ internal class RappPhoneProxyDispatcher(
                     rawSignature
                 }
             act(bridge) { it.completeSignature(operationId.toWire(), wireSignature) }
-            AppTrace.rappOperationCompleted("browser_auth", operationId.key, elapsedMicros(startedNs))
+            AppTrace.rappOperationCompleted("browser_auth", elapsedMicros(startedNs))
             return RappCardAnswer.Done
         } finally {
             result.signature.close()
@@ -1843,7 +1843,7 @@ internal class RappPhoneProxyDispatcher(
             when (outcome) {
                 RappBatchSignatureRun.Outcome.Completed -> {
                     act(bridge) { signatures.complete(it) }
-                    AppTrace.rappOperationCompleted("document_sign", operationId.key, elapsedMicros(startedNs))
+                    AppTrace.rappOperationCompleted("document_sign", elapsedMicros(startedNs))
                 }
 
                 is RappBatchSignatureRun.Outcome.Stopped -> {

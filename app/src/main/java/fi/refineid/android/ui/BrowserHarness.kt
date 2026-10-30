@@ -748,19 +748,9 @@ private class RefineIdWebViewClient(
     ) {
         // The WebView trust store plus the debug network security config (which adds the
         // public Telia Root CA v2 that DVV's Suomi.fi identification hosts chain to)
-        // validate legitimate chains; anything the WebView still rejects is logged with
-        // its host and issuer, then refused.
-        val host = runCatching { Uri.parse(error.url).host }.getOrNull().orEmpty()
-        AppTrace.browserTlsError(
-            host = host,
-            primaryError = error.primaryError,
-            issuedBy =
-                error.certificate.issuedBy.dName
-                    .orEmpty(),
-            issuedTo =
-                error.certificate.issuedTo.dName
-                    .orEmpty(),
-        )
+        // validate legitimate chains; anything the WebView still rejects is traced by
+        // its error code, then refused.
+        AppTrace.browserTlsError(error.primaryError)
         handler.cancel()
     }
 

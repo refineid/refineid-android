@@ -37,7 +37,10 @@
 - Shipped code collects PIN and CAN on device, holds them only as mutable
   short-lived memory, and zeroizes them after use.
 - Debug tracing serves development and may record whatever protocol detail the
-  work needs; keep credential values out of anything persisted or committed.
+  work needs, but never a name, address or identifier of a peer, holder, device
+  or operation. A USB reader is traced by the vendor and product ids of its
+  model only. `verifyDebugTraceParameters` checks the debug trace signatures.
+  Keep credential values out of anything persisted or committed.
   Release builds emit no logs, zero telemetry, and zero third-party network egress.
   Network access (android.permission.INTERNET) in release builds is strictly reserved
   for RAPP (local-network TCP stream relay to paired requesters) and the user-directed
