@@ -14,6 +14,7 @@ import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationPreparation
 import fi.refineid.android.core.AuthenticationPreparationBackend
+import fi.refineid.android.core.AuthenticationPurpose
 import fi.refineid.android.core.AuthenticationReadiness
 import fi.refineid.android.core.AuthenticationSignResult
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
@@ -115,7 +116,7 @@ internal class AuthenticationPreparationDialogTest {
                 val state by preparation.state.collectAsState()
                 RefineIdTheme { AuthenticationPreparationDialog(preparation, state) }
             }
-            composeRule.runOnIdle { preparation.start {} }
+            composeRule.runOnIdle { preparation.start(AuthenticationPurpose.SIGN_IN) {} }
             composeRule.onNodeWithTag("AuthenticationPreparationCan").assertDoesNotExist()
             composeRule.onNodeWithTag("AuthenticationPreparationPin1").assertIsDisplayed()
         } finally {
