@@ -2,8 +2,10 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.io.StringReader
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
+import java.time.temporal.ChronoUnit
 import java.util.Properties
 import java.util.zip.ZipFile
 
@@ -21,6 +23,7 @@ val androidAbis = listOf("arm64-v8a", "x86_64")
 val abiTargetArgs = androidAbis.flatMap { abi -> listOf("-t", abi) }
 val javaToolchainVersion = 25
 val calendarYearBase = 2000
+val twoDigitYearModulus = 100
 val maximumUtcHour = 23
 val minutesPerHour = 60
 val buildNumberHourScale = 100
@@ -56,17 +59,31 @@ val versionProperties =
             )
         }
     }
-val liveUtcDate = ZonedDateTime.now(ZoneOffset.UTC)
-val defaultLiveVersionName =
-    "${liveUtcDate.year % 100}.${liveUtcDate.monthValue}.${liveUtcDate.dayOfMonth}"
-val defaultLiveBuildNumber =
-    (liveUtcDate.hour * buildNumberHourScale + liveUtcDate.minute).toString()
+
+// The UTC clock, to the minute, read through a value source: the configuration
+// cache records the value and is reused only while the clock still reads it.
+// It is read only when versionName or buildNumber is not given.
+abstract class LiveUtcMinute : ValueSource<String, ValueSourceParameters.None> {
+    override fun obtain(): String =
+        ZonedDateTime
+            .now(ZoneOffset.UTC)
+            .truncatedTo(ChronoUnit.MINUTES)
+            .toLocalDateTime()
+            .toString()
+}
+
+val liveUtcDate by lazy { LocalDateTime.parse(providers.of(LiveUtcMinute::class) {}.get()) }
+
+fun defaultLiveVersionName() =
+    "${liveUtcDate.year % twoDigitYearModulus}.${liveUtcDate.monthValue}.${liveUtcDate.dayOfMonth}"
+
+fun defaultLiveBuildNumber() = (liveUtcDate.hour * buildNumberHourScale + liveUtcDate.minute).toString()
 
 val refineIdVersionName =
     (
         providers.gradleProperty("versionName").orNull
             ?: providers.environmentVariable("VERSION_NAME").orNull
-            ?: defaultLiveVersionName
+            ?: defaultLiveVersionName()
     ).trim()
 
 val calendarVersionPattern =
@@ -84,7 +101,7 @@ val calendarVersionDate =
 val rawBuildNumber =
     providers.gradleProperty("buildNumber").orNull
         ?: providers.environmentVariable("BUILD_NUMBER").orNull
-        ?: defaultLiveBuildNumber
+        ?: defaultLiveBuildNumber()
 
 val refineIdBuildNumber =
     rawBuildNumber.trim().toIntOrNull()
