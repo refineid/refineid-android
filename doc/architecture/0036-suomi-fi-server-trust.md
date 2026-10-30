@@ -63,8 +63,8 @@ against Telia-issued Suomi.fi hosts, move the anchor to the `main` source set.
 - The certificate-card handshake completes, the card client-certificate
   authentication runs, and Suomi.fi returns the identified holder to the
   service. Verified end to end on a physical device with an EC card.
-- `AppTrace.browserTlsError` logs the rejected host and its issuer, so the next
-  missing certificate authority is a one-line diagnosis rather than a network
-  capture.
+- `AppTrace.browserTlsError` records the `SslError` primary error code only,
+  which tells an untrusted-authority rejection apart from the other TLS
+  failures; the host and the certificate names are not traced.
 - The trust addition is scoped to a single pinned public root; any other
   untrusted certificate is still refused.

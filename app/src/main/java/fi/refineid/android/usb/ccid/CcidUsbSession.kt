@@ -1033,7 +1033,6 @@ internal class CcidUsbSessionOpener(
                 interfaceNumber = endpoints.usbInterface.id,
                 vendorId = device.vendorId,
                 productId = device.productId,
-                productName = device.productName,
             )
             AppTrace.ccidEndpoints(
                 interfaceNumber = endpoints.usbInterface.id,

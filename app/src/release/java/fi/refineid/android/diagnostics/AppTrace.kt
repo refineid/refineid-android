@@ -232,12 +232,7 @@ internal object AppTrace {
 
     fun browserNavigationBlocked() = Unit
 
-    fun browserTlsError(
-        host: String,
-        primaryError: Int,
-        issuedBy: String,
-        issuedTo: String,
-    ) = Unit
+    fun browserTlsError(primaryError: Int) = Unit
 
     fun browserClientCertificateRequested(
         originAllowed: Boolean,
@@ -286,53 +281,37 @@ internal object AppTrace {
 
     fun rappListenerStarted(port: Int) = Unit
 
-    fun rappListenerServiceRegistered(serviceName: String) = Unit
+    fun rappListenerServiceRegistered() = Unit
 
     fun rappListenerFailed(error: String) = Unit
 
-    fun rappConnectionAccepted(remoteAddress: String) = Unit
+    fun rappConnectionAccepted() = Unit
 
-    fun rappConnectionRejected(
-        remoteAddress: String,
-        reason: String,
-    ) = Unit
+    fun rappConnectionRejected(reason: String) = Unit
 
     fun rappConnectionDropped(reason: String) = Unit
 
-    fun rappOperationReceived(
-        opType: String,
-        opIdHex: String,
-    ) = Unit
+    fun rappOperationReceived(opType: String) = Unit
 
-    fun rappOperationApproved(opIdHex: String) = Unit
-
-    fun rappOperationDenied(
-        opIdHex: String,
-        reason: String,
-    ) = Unit
+    fun rappOperationApproved() = Unit
 
     fun rappOperationCompleted(
         opType: String,
-        opIdHex: String,
         durationUs: Long,
     ) = Unit
 
     fun rappOperationFailed(
         opType: String,
-        opIdHex: String,
         failureKind: String,
     ) = Unit
 
-    fun rappCardPromptShown(
-        opIdHex: String,
-        action: String,
-    ) = Unit
+    fun rappCardPromptShown(action: String) = Unit
 
-    fun rappCardPromptDismissed(opIdHex: String) = Unit
+    fun rappCardPromptDismissed() = Unit
 
     fun rappPairingCodeDisplayed() = Unit
 
-    fun rappPairingCompleted(peerName: String) = Unit
+    fun rappPairingCompleted() = Unit
 
     fun rappPeerWithdrew() = Unit
 
@@ -341,15 +320,6 @@ internal object AppTrace {
     fun rappIdleSweepFailed(failure: Exception) = Unit
 
     fun rappPairRecordRefused() = Unit
-
-    fun rappOperationApproveFailed(error: String) = Unit
-
-    fun rappOperationDenyFailed(error: String) = Unit
-
-    fun rappProgressReportFailed(
-        stage: String,
-        error: String,
-    ) = Unit
 
     fun rappBleServer(
         step: RappBleServerStep,
@@ -461,7 +431,6 @@ internal object AppTrace {
         interfaceNumber: Int = -1,
         vendorId: Int = -1,
         productId: Int = -1,
-        productName: String? = null,
     ) = Unit
 
     fun credentialHealth(health: CredentialHealth) = Unit
