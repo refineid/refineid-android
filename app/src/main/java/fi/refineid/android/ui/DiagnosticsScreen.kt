@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fi.refineid.android.R
+import fi.refineid.android.diagnostics.DevErrorSection
 import fi.refineid.android.diagnostics.DiagnosticsSnapshot
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
@@ -126,6 +127,8 @@ internal fun DiagnosticsScreen(
             title = "Card & Identity",
             content = snapshot.cardStatus,
         )
+
+        DevErrorSection()
 
         val traceContent =
             if (snapshot.traceLogs.isEmpty()) {

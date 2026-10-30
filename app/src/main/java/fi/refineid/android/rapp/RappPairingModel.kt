@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import fi.refineid.android.RefineIdApplication
+import fi.refineid.android.diagnostics.AppTrace
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -223,6 +224,7 @@ internal class RappPairingModel(
             phase = PairingPhase.Offering(code = code, secondsRemaining = offerSeconds)
             startCountdown()
         } catch (_: Throwable) {
+            AppTrace.rappPairingFailed("offer-not-created")
             phase = PairingPhase.Failed("Failed to initialize remote pairing offer")
         } finally {
             offerId.fill(0)
@@ -256,6 +258,7 @@ internal class RappPairingModel(
             is StreamRelayEvent.Error -> {
                 handshakeDeadlineJob?.cancel()
                 handshakeDeadlineJob = null
+                AppTrace.rappPairingFailed("connection-error " + event.cause.javaClass.simpleName)
                 phase = PairingPhase.Failed("Connection error")
             }
         }
@@ -373,6 +376,7 @@ internal class RappPairingModel(
         revokeUnconfirmedRecord()
         ceremony = null
         if (pastOffer) {
+            AppTrace.rappPairingFailed("peer-disconnected")
             phase = PairingPhase.Failed("Peer disconnected")
             nextOffer()
             return
@@ -426,9 +430,11 @@ internal class RappPairingModel(
             if (ceremony?.isPastOfferPhase == true) {
                 revokeUnconfirmedRecord()
                 ceremony = null
+                AppTrace.rappPairingFailed("ceremony " + e.javaClass.simpleName)
                 phase = PairingPhase.Failed("Pairing error: ${e.javaClass.simpleName}")
                 nextOffer()
             } else {
+                AppTrace.rappPairingFailed("attempt " + e.javaClass.simpleName)
                 connection.disconnect()
             }
         }
