@@ -331,7 +331,7 @@ internal class StreamRelayListener(
         }
         val refusal = handOff(accepted)
         if (refusal != null) {
-            AppTrace.rappConnectionRejected(socket.remoteSocketAddress?.toString() ?: "unknown", refusal)
+            AppTrace.rappConnectionRejected(refusal)
             val answer = answerWhileHeld
             if (refusal == ALREADY_CONNECTED && answer != null && heldAnswers.tryAcquire()) {
                 accepted.answerFirstFrame(scope, { isClosed.get() || isWithdrawn }, answer).invokeOnCompletion {
@@ -342,9 +342,9 @@ internal class StreamRelayListener(
             }
             return
         }
-        AppTrace.rappConnectionAccepted(socket.remoteSocketAddress.toString())
+        AppTrace.rappConnectionAccepted()
         if (BuildConfig.DEBUG) {
-            android.util.Log.i("STREAM_LISTENER", "Accepted connection from ${socket.remoteSocketAddress}")
+            android.util.Log.i("STREAM_LISTENER", "Accepted connection")
         }
     }
 
@@ -408,10 +408,7 @@ internal class StreamRelayListener(
             while (scope.isActive) {
                 val buffer = StreamRelayFraming.read(input)
                 if (BuildConfig.DEBUG) {
-                    android.util.Log.d(
-                        "STREAM_LISTENER",
-                        "Received frame length=${buffer.size} from ${socket.remoteSocketAddress}",
-                    )
+                    android.util.Log.d("STREAM_LISTENER", "Received frame length=${buffer.size}")
                 }
                 val delivered =
                     synchronized(this) {
@@ -514,7 +511,7 @@ internal class StreamRelayListener(
                 override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
                     registeredName = serviceInfo.serviceName
                     advertisedName = serviceInfo.serviceName
-                    AppTrace.rappListenerServiceRegistered(serviceInfo.serviceName)
+                    AppTrace.rappListenerServiceRegistered()
                     onRegistered?.invoke(serviceInfo.serviceName)
                     if (BuildConfig.DEBUG) {
                         android.util.Log.i("STREAM_LISTENER", "onServiceRegistered")

@@ -719,6 +719,40 @@ val verifyReleaseNoLogging =
         }
     }
 
+val debugTraceSource =
+    layout.projectDirectory.file("src/debug/java/fi/refineid/android/diagnostics/AppTrace.kt")
+val verifyDebugTraceParameters =
+    tasks.register("verifyDebugTraceParameters") {
+        group = "verification"
+        description = "Reject debug trace functions that take a name, address or identifier."
+        inputs.file(debugTraceSource)
+
+        doLast {
+            val functionSignature = Regex("""fun\s+(\w+)\s*\(([^)]*)\)""")
+            val parameterName = Regex("""(\w+)\s*:""")
+            val identifierVocabulary =
+                Regex(
+                    """[Nn]ame|[Aa]ddress|[Rr]emote|[Hh]ost|[Pp]eer|[Ss]erial|[Ss]ubject|[Ii]ssued|[Uu]rl|[Ll]abel|""" +
+                        """[Mm]odel|[Uu]id|Id(?![a-z])|^id(?![a-z])""",
+                )
+            // USB vendor and product ids of the reader model.
+            val readerModelParameters = setOf("vendorId", "productId")
+            val offenders =
+                functionSignature
+                    .findAll(inputs.files.singleFile.readText())
+                    .flatMap { signature ->
+                        parameterName
+                            .findAll(signature.groupValues[2])
+                            .map { it.groupValues[1] }
+                            .filter { it !in readerModelParameters && identifierVocabulary.containsMatchIn(it) }
+                            .map { signature.groupValues[1] + "(" + it + ")" }
+                    }.toList()
+            check(offenders.isEmpty()) {
+                "debug trace functions take a name, address or identifier: " + offenders.joinToString()
+            }
+        }
+    }
+
 val verifyReleaseNetworkIsolation =
     tasks.register("verifyReleaseNetworkIsolation") {
         group = "verification"
@@ -792,7 +826,7 @@ val verifyReleaseAbis =
     }
 
 tasks.named("check").configure {
-    dependsOn(verifyReleaseNoLogging, verifyReleaseNetworkIsolation, verifyReleaseAbis)
+    dependsOn(verifyDebugTraceParameters, verifyReleaseNoLogging, verifyReleaseNetworkIsolation, verifyReleaseAbis)
 }
 
 play {

@@ -528,80 +528,62 @@ internal object AppTrace {
         debug("rapp:listener-started port=" + port)
     }
 
-    fun rappListenerServiceRegistered(serviceName: String) {
-        debug("rapp:service-registered name=" + serviceName)
+    fun rappListenerServiceRegistered() {
+        debug("rapp:service-registered")
     }
 
     fun rappListenerFailed(error: String) {
         debug("rapp:listener-failed error=" + error)
     }
 
-    fun rappConnectionAccepted(remoteAddress: String) {
-        debug("rapp:connection-accepted remote=" + remoteAddress)
+    fun rappConnectionAccepted() {
+        debug("rapp:connection-accepted")
     }
 
-    fun rappConnectionRejected(
-        remoteAddress: String,
-        reason: String,
-    ) {
-        debug("rapp:connection-rejected remote=" + remoteAddress + " reason=" + reason)
+    fun rappConnectionRejected(reason: String) {
+        debug("rapp:connection-rejected reason=" + reason)
     }
 
     fun rappConnectionDropped(reason: String) {
         debug("rapp:connection-dropped reason=" + reason)
     }
 
-    fun rappOperationReceived(
-        opType: String,
-        opIdHex: String,
-    ) {
-        debug("rapp:operation-received type=" + opType + " id=" + opIdHex)
+    fun rappOperationReceived(opType: String) {
+        debug("rapp:operation-received type=" + opType)
     }
 
-    fun rappOperationApproved(opIdHex: String) {
-        debug("rapp:operation-approved id=" + opIdHex)
-    }
-
-    fun rappOperationDenied(
-        opIdHex: String,
-        reason: String,
-    ) {
-        debug("rapp:operation-denied id=" + opIdHex + " reason=" + reason)
+    fun rappOperationApproved() {
+        debug("rapp:operation-approved")
     }
 
     fun rappOperationCompleted(
         opType: String,
-        opIdHex: String,
         durationUs: Long,
     ) {
-        debug("rapp:operation-completed type=" + opType + " id=" + opIdHex + " duration-us=" + durationUs)
+        debug("rapp:operation-completed type=" + opType + " duration-us=" + durationUs)
     }
 
     fun rappOperationFailed(
         opType: String,
-        opIdHex: String,
         failureKind: String,
     ) {
-        debug("rapp:operation-failed type=" + opType + " id=" + opIdHex + " failure=" + failureKind)
+        debug("rapp:operation-failed type=" + opType + " failure=" + failureKind)
     }
 
-    fun rappCardPromptShown(
-        opIdHex: String,
-        action: String,
-    ) {
-        debug("rapp:card-prompt-shown id=" + opIdHex + " action=" + action)
+    fun rappCardPromptShown(action: String) {
+        debug("rapp:card-prompt-shown action=" + action)
     }
 
-    fun rappCardPromptDismissed(opIdHex: String) {
-        debug("rapp:card-prompt-dismissed id=" + opIdHex)
+    fun rappCardPromptDismissed() {
+        debug("rapp:card-prompt-dismissed")
     }
 
     fun rappPairingCodeDisplayed() {
         debug("rapp:pairing-code-displayed")
     }
 
-    fun rappPairingCompleted(peerName: String) {
-        debug("rapp:pairing-completed peer=" + peerName)
+    fun rappPairingCompleted() {
+        debug("rapp:pairing-completed")
     }
 
     /** The paired computer closed its session as withdrawn: it is off, not failed. */
@@ -622,21 +604,6 @@ internal object AppTrace {
     /** The core refused a stored pair record; it is removed with its catalogue entry. */
     fun rappPairRecordRefused() {
         debug("rapp:error pair-record-refused")
-    }
-
-    fun rappOperationApproveFailed(error: String) {
-        debug("rapp:approve-failed error=" + error)
-    }
-
-    fun rappOperationDenyFailed(error: String) {
-        debug("rapp:deny-failed error=" + error)
-    }
-
-    fun rappProgressReportFailed(
-        stage: String,
-        error: String,
-    ) {
-        debug("rapp:progress-failed stage=" + stage + " error=" + error)
     }
 
     /** A step of the Bluetooth server; a failure is written as an error line. */
@@ -711,18 +678,8 @@ internal object AppTrace {
         debug("browser:navigation-blocked")
     }
 
-    fun browserTlsError(
-        host: String,
-        primaryError: Int,
-        issuedBy: String,
-        issuedTo: String,
-    ) {
-        debug(
-            "browser:tls-error host=" + host +
-                " primary-error=" + primaryError +
-                " issued-by=" + issuedBy +
-                " issued-to=" + issuedTo,
-        )
+    fun browserTlsError(primaryError: Int) {
+        debug("browser:tls-error primary-error=" + primaryError)
     }
 
     fun browserClientCertificateRequested(
@@ -1002,7 +959,6 @@ internal object AppTrace {
         interfaceNumber: Int = -1,
         vendorId: Int = -1,
         productId: Int = -1,
-        productName: String? = null,
     ) {
         var line =
             "ccid:descriptor-accepted level=" + level +
@@ -1015,9 +971,6 @@ internal object AppTrace {
         }
         if (vendorId >= 0 && productId >= 0) {
             line += " vid=" + hexShort(vendorId) + " pid=" + hexShort(productId)
-        }
-        if (!productName.isNullOrBlank()) {
-            line += " reader=" + productName.take(READER_NAME_TRACE_LIMIT)
         }
         debug(line)
     }
@@ -1382,7 +1335,6 @@ internal object AppTrace {
     }
 
     private const val MAX_TRACE_LINES = 500
-    private const val READER_NAME_TRACE_LIMIT = 48
 
     /** Link ends nobody needs to act on: the central left, or this phone closed the link. */
     private val ORDERLY_LINK_ENDS = setOf(RappBleLinkFailure.DISCONNECTED, RappBleLinkFailure.CANCELLED)
