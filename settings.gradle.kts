@@ -22,6 +22,7 @@ if (!localProps.exists()) {
             System.getenv("ANDROID_SDK_ROOT")?.let { File(it) },
             File(System.getProperty("user.home"), "Library/Android/sdk"),
             File(System.getProperty("user.home"), "Android/Sdk"),
+            System.getenv("LOCALAPPDATA")?.let { File(it, "Android/Sdk") },
         )
     candidates.firstOrNull { it.isDirectory }?.let { sdkDir ->
         // A properties file reads a backslash as an escape and Android Lint

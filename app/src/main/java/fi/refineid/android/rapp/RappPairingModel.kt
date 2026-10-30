@@ -330,8 +330,8 @@ internal class RappPairingModel(
         if (offerKept) {
             restoreOfferingOrWaiting()
         } else {
-            phase = PairingPhase.Failed("Peer disconnected")
-            reset(keepPhase = true)
+            // The core ended the offer; while Remote Access is on the next code follows at once.
+            reset()
             nextOffer()
         }
     }
