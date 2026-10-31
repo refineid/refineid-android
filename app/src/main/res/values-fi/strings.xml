@@ -18,6 +18,7 @@
     <string name="turn_on">Ota käyttöön</string>
     <string name="card_recognized">Kortti tunnistettu</string>
     <string name="card_not_supported">Korttia ei tueta</string>
+    <string name="can">Kortin pääsykoodi (CAN)</string>
     <string name="sign_in">Kirjaudu</string>
     <string name="unlock">Avaa</string>
     <string name="wrong_can" tools:ignore="Typos">Väärä CAN</string>

@@ -18,6 +18,7 @@
     <string name="turn_on">Slå på</string>
     <string name="card_recognized">Kortet igenkänt</string>
     <string name="card_not_supported">Kortet stöds inte</string>
+    <string name="can">Kortets åtkomstkod (CAN)</string>
     <string name="sign_in">Logga in</string>
     <string name="unlock">Lås upp</string>
     <string name="wrong_can" tools:ignore="Typos">Fel CAN</string>

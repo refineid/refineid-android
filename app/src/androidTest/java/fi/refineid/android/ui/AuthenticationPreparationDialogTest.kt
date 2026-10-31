@@ -3,7 +3,6 @@ package fi.refineid.android.ui
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -53,7 +52,7 @@ internal class AuthenticationPreparationDialogTest {
     }
 
     @Test
-    fun browserWithoutIdentityStartsPreparationWithBothMissingFields() {
+    fun browserWithoutIdentityIsNotOffered() {
         val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
         val preparation = AuthenticationPreparation(scope, Backend(), AuthenticationPinCache())
         try {
@@ -69,17 +68,17 @@ internal class AuthenticationPreparationDialogTest {
                     )
                 }
             }
-            composeRule.onNodeWithTag(UiAutomationIds.BROWSER_ACTION).performScrollTo().performClick()
-            composeRule.onNodeWithTag("AuthenticationPreparationCan").assertIsDisplayed()
-            composeRule.onNodeWithTag("AuthenticationPreparationPin1").assertIsDisplayed()
-            composeRule.onNodeWithTag("AuthenticationPreparationSubmit").assertIsNotEnabled()
+            composeRule.onNodeWithTag(UiAutomationIds.BROWSER_ACTION).assertDoesNotExist()
+            composeRule.onNodeWithTag(UiAutomationIds.SIGN_ROW).assertDoesNotExist()
+            composeRule.onNodeWithTag(UiAutomationIds.VERIFY_ROW).assertIsDisplayed()
+            composeRule.onNodeWithTag(UiAutomationIds.IDENTITY_ROW).performScrollTo().assertIsDisplayed()
         } finally {
             scope.cancel()
         }
     }
 
     @Test
-    fun presentUsbCardCanStartBrowserPreparationWithoutNfc() {
+    fun usbCardAwaitingItsAccessNumberOffersNoBrowser() {
         val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
         val preparation = AuthenticationPreparation(scope, Backend(), AuthenticationPinCache())
         try {
@@ -99,9 +98,8 @@ internal class AuthenticationPreparationDialogTest {
                 }
             }
             composeRule.onNodeWithTag(UiAutomationIds.READER_CANCEL_ACTION).performClick()
-            composeRule.onNodeWithTag(UiAutomationIds.BROWSER_ACTION).performScrollTo().performClick()
-            composeRule.onNodeWithTag("AuthenticationPreparationCan").assertIsDisplayed()
-            composeRule.onNodeWithTag("AuthenticationPreparationPin1").assertIsDisplayed()
+            composeRule.onNodeWithTag(UiAutomationIds.BROWSER_ACTION).assertDoesNotExist()
+            composeRule.onNodeWithTag(UiAutomationIds.IDENTITY_ROW).performScrollTo().assertIsDisplayed()
         } finally {
             scope.cancel()
         }

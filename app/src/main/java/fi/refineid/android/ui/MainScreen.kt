@@ -418,11 +418,18 @@ internal fun MainScreen(
                 (hasNfc && nfcSnapshot.status != NfcReaderStatus.TURNED_OFF)
         ) &&
             !isActivationRequired
+    // The Card rows act on a known card, as on the iPhone, where Remote
+    // Access and PINs appear once a card has been read or sits in a reader;
+    // before that the home offers Verify and Read card alone.
+    val cardAvailable =
+        !isActivationRequired &&
+            (usbCardReady || effectiveHolderName != null || remoteSigningAvailable)
 
     when (shownDestination) {
         MainDestination.HOME -> {
             HomeScreen(
                 signingAvailable = signingAvailable,
+                cardAvailable = cardAvailable,
                 browserAvailable = browserAvailable,
                 holderName = effectiveHolderName,
                 hasNfc = hasNfc,
@@ -637,12 +644,13 @@ internal fun MainScreen(
 /**
  * The reference home: terse grouped navigation — the Document rows
  * first, then the card, then the browser — every workflow on its own
- * pushed screen.
+ * pushed screen. A row is listed only while its workflow can run.
  */
 @Suppress("FunctionName", "ktlint:standard:function-naming", "LongParameterList")
 @Composable
 private fun HomeScreen(
     signingAvailable: Boolean,
+    cardAvailable: Boolean,
     browserAvailable: Boolean = false,
     onPrepareAuthentication: ((() -> Unit, () -> Unit) -> Unit)? = null,
     holderName: String?,
@@ -701,20 +709,19 @@ private fun HomeScreen(
                         tag = UiAutomationIds.VERIFY_ROW,
                         onClick = onOpenVerify,
                     )
-                    if (!isActivationRequired) {
+                    if (signingAvailable) {
                         HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
                         NavigationRow(
                             icon = Icons.Outlined.Create,
                             label = stringResource(R.string.sign),
                             tag = UiAutomationIds.SIGN_ROW,
-                            enabled = signingAvailable,
                             onClick = onOpenSign,
                         )
                     }
                 }
             }
 
-            if (!isActivationRequired) {
+            if (cardAvailable) {
                 Section(stringResource(R.string.card)) {
                     NavigationGroup {
                         val isRemoteEnabled = rappPairingModel?.isRemoteAccessEnabled ?: false
