@@ -291,6 +291,11 @@ kotlin {
 
 dependencies {
     implementation(libs.androidx.activity.compose)
+    constraints {
+        // Raises the lifecycle that activity and Compose bring in to one whose
+        // bundled lint checks run under AGP 9.5's lint.
+        implementation(libs.androidx.lifecycle.runtime)
+    }
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
