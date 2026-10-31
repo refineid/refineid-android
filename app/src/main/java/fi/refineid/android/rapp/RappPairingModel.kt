@@ -48,6 +48,12 @@ private const val OFFER_ID_BYTES = 32
 /** The countdown of an offer that has no time left, or of no offer. */
 private const val NO_SECONDS_REMAINING = 0
 
+/** Why no code shows while Android 17's local network permission is not granted (ADR 0041 section 2.3). */
+private const val LOCAL_NETWORK_CLOSED_REASON = "Allow local network access"
+
+/** The offer failure the debug trace names when the local network is closed. */
+private const val LOCAL_NETWORK_CLOSED_FAILURE = "local_network_permission_missing"
+
 /** The credential profiles every offer grants (RAPP v26.10.29 section 9). */
 private val DEFAULT_PAIRING_PROFILES =
     listOf(
@@ -184,6 +190,13 @@ internal class RappPairingModel(
             _isRemoteAccessEnabled = true
         }
         val startedAtMonotonicMs = monotonicMs()
+        // Without the local network the stream cannot be found or reached;
+        // the page says so where the code would be, and the retry asks again.
+        if (!LocalNetworkPermission.isGranted(context)) {
+            AppTrace.rappOfferFailed(LOCAL_NETWORK_CLOSED_FAILURE)
+            phase = PairingPhase.Failed(LOCAL_NETWORK_CLOSED_REASON)
+            return
+        }
         val code = RappPairingCode.generate()
         activeOfferingCode = code
         val offerId = ByteArray(OFFER_ID_BYTES).also { java.security.SecureRandom().nextBytes(it) }
@@ -223,12 +236,24 @@ internal class RappPairingModel(
 
             phase = PairingPhase.Offering(code = code, secondsRemaining = offerSeconds)
             startCountdown()
-        } catch (_: Throwable) {
-            AppTrace.rappPairingFailed("offer-not-created")
+        } catch (e: Throwable) {
+            AppTrace.rappOfferFailed(e.javaClass.simpleName)
             phase = PairingPhase.Failed("Failed to initialize remote pairing offer")
         } finally {
             offerId.fill(0)
         }
+    }
+
+    /**
+     * The holder answered the permissions turning Remote Access on asked
+     * for. A local network the holder opened serves the paired computers
+     * again and starts the offer that waited for it; any other answer
+     * changes nothing here.
+     */
+    fun permissionsAnswered(answers: Map<String, Boolean>) {
+        if (answers[LocalNetworkPermission.NAME] != true) return
+        app?.startRappProxyListening()
+        if (phase is PairingPhase.Failed) createOffer()
     }
 
     /**

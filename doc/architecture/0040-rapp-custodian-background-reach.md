@@ -62,7 +62,9 @@ held against it unless the card is on the contactless interface.
 - **Permissions.** RefineID asks for `POST_NOTIFICATIONS` when Remote Access
   is on with a pairing, and again when the holder turns Remote Access on. While
   notifications are off, the Remote Access screen offers one row that opens
-  the app's notification settings.
+  the app's notification settings. Turning Remote Access on also asks for
+  nearby devices and, on Android 17 and later, the local network
+  (ADR 0041 section 2.3); nothing else asks for those.
 - **Card wait.** The card prompt during a remote operation follows the
   available reader. With a USB reader attached it asks the holder to insert the
   card. Otherwise it asks the holder to hold the card against the phone.

@@ -562,6 +562,10 @@ internal object AppTrace {
         DevErrorLog.report("rapp:listener-failed", error)
     }
 
+    fun rappOfferFailed(error: String) {
+        debug("rapp:offer-failed error=" + error)
+    }
+
     fun rappConnectionAccepted() {
         debug("rapp:connection-accepted")
     }

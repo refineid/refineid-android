@@ -285,6 +285,8 @@ internal object AppTrace {
 
     fun rappListenerFailed(error: String) = Unit
 
+    fun rappOfferFailed(error: String) = Unit
+
     fun rappConnectionAccepted() = Unit
 
     fun rappConnectionRejected(reason: String) = Unit
