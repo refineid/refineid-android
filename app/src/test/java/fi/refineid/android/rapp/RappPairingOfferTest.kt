@@ -171,6 +171,30 @@ class RappPairingOfferTest {
     }
 
     @Test
+    fun aLocalNetworkOpenedWhileACodeShowsKeepsThatCode() {
+        storePairing()
+        val model = model(remoteAccessOn = true)
+        model.offerWhileOn()
+        val code = model.code()
+
+        model.permissionsAnswered(mapOf(LocalNetworkPermission.NAME to true))
+
+        assertEquals(code, model.code())
+    }
+
+    @Test
+    fun aDeclinedPermissionChangesNothingOnThePage() {
+        storePairing()
+        val model = model(remoteAccessOn = true)
+        model.offerWhileOn()
+        val code = model.code()
+
+        model.permissionsAnswered(mapOf(LocalNetworkPermission.NAME to false))
+
+        assertEquals(code, model.code())
+    }
+
+    @Test
     fun aShownCodeStaysUntilItExpiresAndTheNextFollows() {
         val model = model(remoteAccessOn = true)
         model.offerWhileOn()

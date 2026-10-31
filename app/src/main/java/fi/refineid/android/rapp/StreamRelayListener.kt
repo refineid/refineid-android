@@ -294,7 +294,25 @@ internal class StreamRelayListener(
             }
 
             advertisedName = instanceName
-            register(instanceName, server.localPort, attributes)
+            try {
+                register(instanceName, server.localPort, attributes)
+            } catch (e: RuntimeException) {
+                // The system refused the record, as Android 17 does without
+                // the local network permission (ADR 0041 section 2.3): a
+                // socket nobody can find does not listen, and the failure is
+                // reported like one the socket itself raised.
+                AppTrace.rappListenerFailed("registration_refused_${e.javaClass.simpleName}")
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.e("STREAM_LISTENER", "registration refused", e)
+                }
+                try {
+                    server.close()
+                } catch (_: IOException) {
+                }
+                serverSocket = null
+                post(StreamRelayEvent.Error(e))
+                return
+            }
 
             listenerJob =
                 scope.launch(Dispatchers.IO) {

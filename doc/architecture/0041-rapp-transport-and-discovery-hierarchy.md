@@ -93,6 +93,13 @@ When remote reader proxying is enabled, RefineID implements a strict fallback hi
 
 ---
 
+### 2.3 Android 17 Local Network Permission (`ACCESS_LOCAL_NETWORK`)
+- Android 17 (API 37) gates the local network behind the runtime `ACCESS_LOCAL_NETWORK` permission for apps that target it. The gate sits in the networking stack: without the permission the system refuses the `NsdManager` registration of `_refineid-stream._tcp.` and blocks the stream's inbound connections, so the phone can neither be found nor reached over Wi-Fi. Earlier Androids grant the local network with `INTERNET` and know no such permission; the app asks for it only on Android 17 and later (`LocalNetworkPermission`).
+- The permission belongs to the `NEARBY_DEVICES` group with `BLUETOOTH_ADVERTISE` and `BLUETOOTH_CONNECT`, so a holder who granted nearby devices is not prompted again.
+- **When it is asked** (`RemoteAccessAction`): only when the holder turns Remote Access on, beside notifications and nearby devices. Opening the page, the app's start and the paired computers' sessions never ask.
+- **Declined**: the phone serves over Bluetooth alone. The Remote Access page shows *Allow local network access* where the pairing code would be, with a retry that asks again; the debug trace records `rapp:offer-failed error=local_network_permission_missing`. A registration the system refuses while a listener starts is reported like a socket failure (`rapp:listener-failed error=registration_refused_<exception>`), never thrown at the caller.
+- **Granted later**: the answer restarts the session listener and the pairing offer that waited for it.
+
 ## 3. Privacy, Battery & Forensic Constraints
 
 1. **Explicit Toggle Control**:

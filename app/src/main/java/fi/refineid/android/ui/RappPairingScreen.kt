@@ -49,6 +49,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import fi.refineid.android.R
 import fi.refineid.android.RefineIdApplication
+import fi.refineid.android.rapp.LocalNetworkPermission
 import fi.refineid.android.rapp.PairedPeer
 import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappCustodianService
@@ -81,7 +82,11 @@ internal fun RappPairingScreen(
             (context.applicationContext as? RefineIdApplication)?.rappProxyDispatcher?.bluetoothPermissionsAnswered(
                 answers,
             )
+            model.permissionsAnswered(answers)
         }
+    val isGranted: (String) -> Boolean = { permission ->
+        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    }
     val settingsLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult(),
@@ -101,10 +106,7 @@ internal fun RappPairingScreen(
             enabled = model.isRemoteAccessEnabled,
             onCheckedChange = { isChecked ->
                 if (isChecked) {
-                    val missing =
-                        remoteAccessPermissions(RemoteAccessAction.TURN_ON) { permission ->
-                            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-                        }
+                    val missing = remoteAccessPermissions(RemoteAccessAction.TURN_ON, isGranted = isGranted)
                     if (missing.isNotEmpty()) remoteAccessPermissionLauncher.launch(missing.toTypedArray())
                 } else {
                     model.reset()
@@ -140,7 +142,19 @@ internal fun RappPairingScreen(
                 }
 
                 is PairingPhase.Failed -> {
-                    FailedPhaseView(reason = phase.reason, onRetry = { model.createOffer() })
+                    // A retry with the local network still closed asks for it again,
+                    // with whatever else turning Remote Access on asks for.
+                    FailedPhaseView(
+                        reason = phase.reason,
+                        onRetry = {
+                            val missing = remoteAccessPermissions(RemoteAccessAction.TURN_ON, isGranted = isGranted)
+                            if (LocalNetworkPermission.NAME in missing) {
+                                remoteAccessPermissionLauncher.launch(missing.toTypedArray())
+                            } else {
+                                model.createOffer()
+                            }
+                        },
+                    )
                 }
 
                 is PairingPhase.Idle -> {
