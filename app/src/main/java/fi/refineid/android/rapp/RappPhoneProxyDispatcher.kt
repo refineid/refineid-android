@@ -1444,6 +1444,7 @@ internal class RappPhoneProxyDispatcher(
                     readAuthCertWithTimeout()
                 }
         if (certificate == null) {
+            AppTrace.rappCardStepFailed("authentication-certificate-unreadable")
             fail(bridge, operationId, RappCardFailure.CARD_ERROR)
             return null
         }
@@ -1580,9 +1581,16 @@ internal class RappPhoneProxyDispatcher(
                 ?: awaitCard(bridge, operationId, RappAuthAction.BROWSER_AUTH, forcePrompt = true)?.let {
                     return RappCardAnswer.Ends(it)
                 } ?: authCardService()
-                ?: return RappCardAnswer.Ends(RappCardFailure.CARD_ERROR)
+                ?: run {
+                    AppTrace.rappCardStepFailed("no-card-service")
+                    return RappCardAnswer.Ends(RappCardFailure.CARD_ERROR)
+                }
         val card =
-            AuthenticationCardReads.identity(service) ?: return RappCardAnswer.Ends(RappCardFailure.CARD_ERROR)
+            AuthenticationCardReads.identity(service)
+                ?: run {
+                    AppTrace.rappCardStepFailed("identity-unreadable")
+                    return RappCardAnswer.Ends(RappCardFailure.CARD_ERROR)
+                }
         val attemptsLeft: suspend () -> Int? = { pin1AttemptsLeft(card) }
         val before = attemptsLeft()
         val retention = Pin1Retention.of(card, before)

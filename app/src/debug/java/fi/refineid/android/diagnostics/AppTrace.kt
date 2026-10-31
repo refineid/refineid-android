@@ -549,6 +549,11 @@ internal object AppTrace {
         debug("usb:contactless-connect-completed opened=" + opened)
     }
 
+    /** The PIN 1 count came from the open of the held secure channel, not from a probe. */
+    fun usbPin1PreflightFromHeldSession(known: Boolean) {
+        debug("usb:pin1-preflight source=held-session known=" + known)
+    }
+
     fun rappListenerStarted(port: Int) {
         debug("rapp:listener-started port=" + port)
     }
@@ -597,6 +602,12 @@ internal object AppTrace {
     ) {
         debug("rapp:operation-failed type=" + opType + " failure=" + failureKind)
         DevErrorLog.report("rapp:operation-failed", opType + " " + failureKind)
+    }
+
+    /** Which step of a card operation gave out, named before the operation fails. */
+    fun rappCardStepFailed(step: String) {
+        debug("rapp:card-step-failed step=" + step)
+        DevErrorLog.report("rapp:card-step-failed", step)
     }
 
     fun rappCardPromptShown(action: String) {
