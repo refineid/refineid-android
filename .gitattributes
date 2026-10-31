@@ -1,2 +1,14 @@
 # Unified diff context lines can consist solely of the required context marker.
 *.patch -whitespace
+
+# The gates run these through bash and compare these byte for byte, so they
+# keep LF on every host, Windows included.
+*.sh text eol=lf
+.githooks/** text eol=lf
+gradlew text eol=lf
+*.patch text eol=lf
+*.aidl text eol=lf
+app/src/main/java/com/android/keychain/external/*.java text eol=lf
+
+# A Windows batch file keeps the CRLF it is committed with.
+gradlew.bat -text

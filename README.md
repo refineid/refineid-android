@@ -24,6 +24,17 @@ Release APK (signed with hardware identity card, PIN 2):
 Scripts/build-release-apk.sh
 ```
 
+### Windows host
+
+The gates and the hooks run in the bash of Git for Windows; the build starts
+the repository's shell scripts under it. Set up by hand what the macOS
+bootstrap installs: a JDK (Android Studio's `jbr` serves), the SDK platform
+and the NDK pinned in `app/build.gradle.kts` through `sdkmanager`, the Rust
+Android targets with `rustup target add`, `cargo install cargo-ndk`, and
+ShellCheck (`winget install koalaman.shellcheck`). Shell scripts, patches and
+the provider contract sources check out with LF on every host
+(`.gitattributes`); the Kotlin sources follow `core.autocrlf`.
+
 ### Managing build cache
 
 During development, Cargo build artifacts (under `native/*/target`) and `rustc` incremental compilation caches can grow significantly.
