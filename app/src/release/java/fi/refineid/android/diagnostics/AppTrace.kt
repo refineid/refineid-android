@@ -207,6 +207,8 @@ internal object AppTrace {
 
     fun usbContactlessConnectCompleted(opened: Boolean) = Unit
 
+    fun usbPin1PreflightFromHeldSession(known: Boolean) = Unit
+
     fun documentInputStarted() = Unit
 
     fun documentInputCompleted(
@@ -306,6 +308,8 @@ internal object AppTrace {
         opType: String,
         failureKind: String,
     ) = Unit
+
+    fun rappCardStepFailed(step: String) = Unit
 
     fun rappCardPromptShown(action: String) = Unit
 

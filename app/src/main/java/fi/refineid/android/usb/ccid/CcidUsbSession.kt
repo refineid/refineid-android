@@ -31,6 +31,7 @@ import fi.refineid.android.core.NativeContactlessSession
 import fi.refineid.android.core.NativeCore
 import fi.refineid.android.core.NativePin1PreflightFailure
 import fi.refineid.android.core.NativePin1PreflightResult
+import fi.refineid.android.core.NativePin1State
 import fi.refineid.android.core.NativePin2PreflightResult
 import fi.refineid.android.core.NativeQualifiedCertificate
 import fi.refineid.android.core.NativeQualifiedCore
@@ -128,6 +129,11 @@ internal class CcidUsbSession(
     private var contactlessSessionActive = false
     private val sessionMaterial = NativeCardSessionMaterial()
 
+    // True once a PIN command has left on the held secure-messaging channel
+    // since the open read the PIN 1 preflight, so the count it reported is
+    // no longer known; a fresh open clears it.
+    private var attemptsStale = false
+
     fun startRemovalListener(onCardRemoved: () -> Unit) {
         checkOwnerThread()
         if (isClosed || cardRemoved || interruptIn == null) {
@@ -224,6 +230,7 @@ internal class CcidUsbSession(
         val result = NativeContactlessSession.connect(canBytes, cardAnswer, nativeExchange)
         if (result is NativeContactlessOpenResult.Success) {
             contactlessSessionActive = true
+            attemptsStale = false
             sessionMaterial.cacheAuthenticationCertificate(result.certificate)
             sessionMaterial.cachePin1Preflight(result.preflight)
         } else if (result is NativeContactlessOpenResult.ActivationRequired) {
@@ -293,14 +300,30 @@ internal class CcidUsbSession(
         }
     }
 
-    /** PIN 1 attempts the card allows now, read afresh without a VERIFY; null when the card did not say. */
+    /** PIN 1 attempts the card allows now; null when the card did not say or the count is not known. */
     fun pin1AttemptsLeft(): Int? =
         (cachePin1Preflight() as? NativePin1PreflightResult.Success)?.preflight?.state?.attemptsLeft()
 
+    /**
+     * The PIN 1 preflight. A contact card is asked afresh without a VERIFY.
+     * A card opened under PACE is not: the card refuses a plain command on
+     * its secure-messaging channel and ends the channel, so the preflight
+     * is the one the open read, and it says nothing once a PIN command has
+     * left on the channel since, as the NFC session does.
+     */
     fun cachePin1Preflight(): NativePin1PreflightResult {
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
+        }
+        if (contactlessSessionActive) {
+            val opened = sessionMaterial.cachedPin1Preflight()
+            AppTrace.usbPin1PreflightFromHeldSession(known = opened != null && !attemptsStale)
+            return when {
+                opened == null -> NativePin1PreflightResult.Failure(NativePin1PreflightFailure.CARD_UNAVAILABLE)
+                attemptsStale -> NativePin1PreflightResult.Success(opened.copy(state = NativePin1State.NoInformation))
+                else -> NativePin1PreflightResult.Success(opened)
+            }
         }
         val result =
             NativeCore.probePin1Status(
@@ -392,6 +415,7 @@ internal class CcidUsbSession(
                 fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE,
             )
         }
+        if (contactlessSessionActive) attemptsStale = true
         return fi.refineid.android.core.NativePin1Verification.verify(
             pin1 = pin1,
             exchange = nativeExchange,
@@ -442,6 +466,7 @@ internal class CcidUsbSession(
             )
         }
 
+        if (contactlessSessionActive) attemptsStale = true
         return when (
             val result =
                 if (contactlessSessionActive) {
