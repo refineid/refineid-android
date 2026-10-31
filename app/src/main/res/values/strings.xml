@@ -20,7 +20,7 @@
     <string name="turn_on">Turn on</string>
     <string name="card_recognized">Card recognized</string>
     <string name="card_not_supported">Card not supported</string>
-    <string name="can" translatable="false">CAN</string>
+    <string name="can">Card Access Number (CAN)</string>
     <string name="sign_in">Sign in</string>
     <string name="unlock">Unlock</string>
     <string name="wrong_can" tools:ignore="Typos">Wrong CAN</string>

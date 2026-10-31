@@ -619,7 +619,7 @@ internal class RappPairingModel(
         pairedDevices = catalog.listPairs()
     }
 
-    /** Forgets every pairing, each as [removePair] does. */
+    /** Forgets every pairing, each as [removePair] does, and turns Remote Access off. */
     fun terminate() {
         reset()
         for (pair in catalog.listPairs()) {
@@ -627,6 +627,8 @@ internal class RappPairingModel(
         }
         pairedDevices = catalog.listPairs()
         activeConnectedPeer = null
+        settings.isCardRemoteAccessEnabled = false
+        _isRemoteAccessEnabled = false
         app?.rappProxyDispatcher?.pairingsChanged()
     }
 
