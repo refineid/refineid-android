@@ -120,7 +120,6 @@ pub(crate) fn map_auth_error<E>(error: AuthError<E>) -> Pin1PreflightFailure {
         ) => Pin1PreflightFailure::Transport,
         AuthError::Outcome(TransportOutcome::Response(_))
         | AuthError::Command(_)
-        | AuthError::LengthUnsupported { .. }
         | AuthError::RetryFloor(_) => Pin1PreflightFailure::Bridge,
     }
 }
