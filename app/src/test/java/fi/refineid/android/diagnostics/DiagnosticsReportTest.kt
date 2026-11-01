@@ -33,7 +33,7 @@ class DiagnosticsReportTest {
                 credentialHealth = health(NativePinReferenceScheme.ORGANIZATIONAL, CardManagementScheme.PUK),
             )
         assertTrue(organization.contains("Numbering: organization (FINEID S4-2 section 4.2)"))
-        assertTrue(organization.contains("Activation scheme: activation code is the PUK (FINEID S4-1 section 4.6.1)"))
+        assertTrue(organization.contains("Activation scheme: activation PIN is the PUK (FINEID S4-1 section 4.6.1)"))
 
         val citizen =
             cardStatusText(

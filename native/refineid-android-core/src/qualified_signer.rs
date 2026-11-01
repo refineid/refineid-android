@@ -15,15 +15,17 @@
 //! One-shot PIN2 verification and qualified-key SHA-384 signing.
 //!
 //! The counter-safe preflight runs first. The public qualified certificate is
-//! then read in the same exclusive operation, which both proves the requested
-//! key profile and leaves DF.ESIGN current for organization cards. Only after
-//! exact certificate matching is one fresh PIN2 sent through the non-replayable
-//! credential path, followed immediately by one MSE/PSO signature chain.
+//! then read in the same exclusive operation, which proves the requested key
+//! profile. Only after exact certificate matching is one fresh PIN2 handed to
+//! the core's qualified-key unlock, which on an organization card makes
+//! DF.ESIGN current before it sends PIN2 through the non-replayable credential
+//! path; the key it returns signs once with one MSE/PSO chain.
 
 use refineid_apdu::{CardTransport, TransportOutcome};
-use refineid_auth::{Pin2, PinOps, PinReferenceScheme, UnvalidatedSecret, VerifyOutcome};
+use refineid_auth::{Pin2, UnvalidatedSecret, VerifyOutcome};
 use refineid_digest::Sha384;
-use refineid_sign::{KeyRef, SignError, SignOps, SignScheme};
+use refineid_pkcs15::Pkcs15Error;
+use refineid_sign::{QualifiedUnlockError, SignError, SignOps, SignScheme};
 
 use crate::card_certificate::{
     CardCertificate, CardKeyProfile, CertificateReadFailure, read_qualified_certificate,
@@ -184,30 +186,15 @@ where
         return Err(QualifiedSignFailure::KeyProfileMismatch);
     }
 
-    let outcome = transport
-        .verify_pin2_with_scheme(preflight.scheme, pin)
-        .map_err(|error| map_preflight_failure(map_auth_error(error)))?;
-    match outcome {
-        VerifyOutcome::Ok => {}
-        VerifyOutcome::WrongPin { retries_left } if retries_left.is_exhausted() => {
-            return Err(QualifiedSignFailure::PinLocked);
-        }
-        VerifyOutcome::WrongPin { retries_left } => {
-            return Err(QualifiedSignFailure::WrongPin {
-                retries_left: retries_left.get(),
-            });
-        }
-        VerifyOutcome::Locked => return Err(QualifiedSignFailure::PinLocked),
-        VerifyOutcome::Other(_) => return Err(QualifiedSignFailure::VerificationRejected),
-    }
-
-    let scheme = sign_scheme(preflight.scheme);
+    let key = transport
+        .unlock_qualified_key(SignScheme::from(preflight.scheme), pin)
+        .map_err(map_unlock_error)?;
     let bytes = match algorithm {
-        QualifiedSigningAlgorithm::RsaPkcs1Sha384 => transport
-            .sign_prehashed_sha384_rsa(scheme, KeyRef::Sign, digest.into_bytes())
+        QualifiedSigningAlgorithm::RsaPkcs1Sha384 => key
+            .sign_prehashed_sha384_rsa(digest.into_bytes())
             .map(|signature| signature.into_bytes()),
-        QualifiedSigningAlgorithm::EcdsaP384Sha384 => transport
-            .sign_prehashed_sha384_ecdsa(scheme, KeyRef::Sign, digest.into_bytes())
+        QualifiedSigningAlgorithm::EcdsaP384Sha384 => key
+            .sign_prehashed_sha384_ecdsa(digest.into_bytes())
             .map(|signature| signature.into_bytes()),
     }
     .map_err(map_sign_error)?;
@@ -215,10 +202,48 @@ where
     Ok(QualifiedSignature { algorithm, bytes })
 }
 
-const fn sign_scheme(scheme: PinReferenceScheme) -> SignScheme {
-    match scheme {
-        PinReferenceScheme::Citizen => SignScheme::Citizen,
-        PinReferenceScheme::Organizational => SignScheme::Organizational,
+fn map_unlock_error<E>(error: QualifiedUnlockError<E>) -> QualifiedSignFailure {
+    match error {
+        QualifiedUnlockError::PinRefused(VerifyOutcome::WrongPin { retries_left })
+            if retries_left.is_exhausted() =>
+        {
+            QualifiedSignFailure::PinLocked
+        }
+        QualifiedUnlockError::PinRefused(VerifyOutcome::WrongPin { retries_left }) => {
+            QualifiedSignFailure::WrongPin {
+                retries_left: retries_left.get(),
+            }
+        }
+        QualifiedUnlockError::PinRefused(VerifyOutcome::Locked) => QualifiedSignFailure::PinLocked,
+        QualifiedUnlockError::PinRefused(VerifyOutcome::Other(_)) => {
+            QualifiedSignFailure::VerificationRejected
+        }
+        // The core never reports an accepted PIN as a refusal.
+        QualifiedUnlockError::PinRefused(VerifyOutcome::Ok) => QualifiedSignFailure::Bridge,
+        QualifiedUnlockError::Verify(error) => map_preflight_failure(map_auth_error(error)),
+        QualifiedUnlockError::Directory(error) => map_directory_error(error),
+    }
+}
+
+/// DF.ESIGN would not become current, so PIN2 was never sent.
+fn map_directory_error<E>(error: Pkcs15Error<E>) -> QualifiedSignFailure {
+    match error {
+        Pkcs15Error::Outcome(TransportOutcome::NoCard | TransportOutcome::ReaderRemoved) => {
+            QualifiedSignFailure::CardUnavailable
+        }
+        Pkcs15Error::Transport(_)
+        | Pkcs15Error::Outcome(
+            TransportOutcome::TimeoutUnknownState
+            | TransportOutcome::CardReset
+            | TransportOutcome::ProtocolDesync,
+        ) => QualifiedSignFailure::Transport,
+        Pkcs15Error::Status(_) => QualifiedSignFailure::SigningRejected,
+        Pkcs15Error::Outcome(TransportOutcome::Response(_))
+        | Pkcs15Error::Aid(_)
+        | Pkcs15Error::Command(_)
+        | Pkcs15Error::Empty
+        | Pkcs15Error::TooLarge
+        | Pkcs15Error::InvalidData(_) => QualifiedSignFailure::Bridge,
     }
 }
 
@@ -268,11 +293,15 @@ fn map_sign_error<E>(error: SignError<E>) -> QualifiedSignFailure {
 mod tests {
     use std::collections::VecDeque;
 
+    use refineid_apdu::iso7816::SelectFile;
     use refineid_apdu::{
         CardTransport, CommandApdu, CredentialCommand, PinRetries, ResponseApdu, StatusWord,
         TransportOutcome,
     };
+    use refineid_auth::verify::VERIFY_INS;
+    use refineid_auth::{PinReferenceScheme, PinSlot};
     use refineid_digest::Sha384;
+    use refineid_sign::commands::{MSE_INS, PSO_INS};
     use refineid_sign::{ECDSA_P384_SIG_BYTES, RSA_3072_SIG_BYTES};
 
     use super::{
@@ -288,8 +317,11 @@ mod tests {
     const PUBLIC_PREFLIGHT_CALLS: usize = 2;
     const FULL_RSA_PUBLIC_CALLS: usize = 5;
     const PSO_HASH_PUBLIC_COMMAND_INDEX: usize = 3;
+    /// Three probes, SELECT MF and SELECT DF.ESIGN precede the PIN2.
+    const ORGANIZATION_PIN2_AFTER_PUBLIC_CALLS: usize = 5;
     const VERIFY_INSTRUCTION: u8 = 0x20;
     const INSTRUCTION_OFFSET: usize = 1;
+    const REFERENCE_OFFSET: usize = 3;
     const SYNTHETIC_PIN2: &[u8] = b"135790";
     const SYNTHETIC_CONTENT: &[u8] = b"qualified signed attributes";
     const SYNTHETIC_CERTIFICATE: &[u8] = b"typed synthetic certificate";
@@ -303,6 +335,9 @@ mod tests {
         credential_response: TransportOutcome,
         public_calls: usize,
         credential_calls: usize,
+        /// Public commands already sent, and the P2 reference, at each
+        /// credential command.
+        credentials: Vec<(usize, Option<u8>)>,
         certificate_reads: usize,
         certificate: Option<Result<CardCertificate, CertificateReadFailure>>,
     }
@@ -319,6 +354,7 @@ mod tests {
                 credential_response: response(credential_status, Vec::new()),
                 public_calls: 0,
                 credential_calls: 0,
+                credentials: Vec::new(),
                 certificate_reads: 0,
                 certificate: Some(Ok(CardCertificate::new(
                     profile,
@@ -350,12 +386,14 @@ mod tests {
             command: CredentialCommand,
         ) -> Result<TransportOutcome, Self::Error> {
             self.credential_calls += 1;
-            command.expose_wire(|wire| {
+            let reference = command.expose_wire(|wire| {
                 assert_eq!(
                     wire.get(INSTRUCTION_OFFSET).copied(),
                     Some(VERIFY_INSTRUCTION)
                 );
+                wire.get(REFERENCE_OFFSET).copied()
             });
+            self.credentials.push((self.public_calls, reference));
             Ok(self.credential_response.clone())
         }
     }
@@ -421,6 +459,78 @@ mod tests {
         assert!(transport.public_responses.is_empty());
         let digest = Sha384::of(SYNTHETIC_CONTENT).into_bytes();
         assert!(transport.public_commands[PSO_HASH_PUBLIC_COMMAND_INDEX].ends_with(&digest));
+    }
+
+    #[test]
+    fn an_organization_card_enters_esign_before_pin2_and_signs_inline() {
+        let safe = response(status(SAFE_RETRIES), Vec::new());
+        let ok = response(StatusWord::Success, Vec::new());
+        let mut transport = ScriptedTransport::new(
+            vec![
+                // The citizen PIN1 reference is absent on an organization
+                // card; the organization PIN1 and PIN2 probes answer.
+                response(StatusWord::ReferenceDataNotFound, Vec::new()),
+                safe.clone(),
+                safe,
+                ok.clone(),
+                ok.clone(),
+                ok,
+                response(
+                    StatusWord::Success,
+                    vec![SIGNATURE_FILL; RSA_3072_SIG_BYTES],
+                ),
+            ],
+            StatusWord::Success,
+            CardKeyProfile::Rsa3072,
+        );
+
+        let result = qualified_sign(
+            &mut transport,
+            QualifiedSigningAlgorithm::RsaPkcs1Sha384,
+            SYNTHETIC_PIN2.to_vec(),
+            QualifiedSigningInput::Message(SYNTHETIC_CONTENT),
+            SYNTHETIC_CERTIFICATE,
+        )
+        .expect("scripted organization qualified signature succeeds");
+
+        assert_eq!(result.bytes.len(), RSA_3072_SIG_BYTES);
+        let instructions: Vec<Option<u8>> = transport
+            .public_commands
+            .iter()
+            .map(|wire| wire.get(INSTRUCTION_OFFSET).copied())
+            .collect();
+        assert_eq!(
+            instructions,
+            [
+                VERIFY_INS,
+                VERIFY_INS,
+                VERIFY_INS,
+                SelectFile::INS,
+                SelectFile::INS,
+                MSE_INS,
+                PSO_INS
+            ]
+            .map(Some)
+            .to_vec(),
+            "probes, SELECT MF, SELECT DF.ESIGN, MSE:Set, one inline PSO:CDS"
+        );
+        // PIN2 goes out only after both SELECTs, under the organization
+        // reference.
+        assert_eq!(
+            transport.credentials,
+            vec![(
+                ORGANIZATION_PIN2_AFTER_PUBLIC_CALLS,
+                Some(PinReferenceScheme::Organizational.reference(PinSlot::Pin2))
+            )]
+        );
+        let digest = Sha384::of(SYNTHETIC_CONTENT).into_bytes();
+        let signing = transport.public_commands.last().expect("a PSO:CDS");
+        assert!(
+            signing
+                .windows(digest.len())
+                .any(|window| window == digest.as_slice()),
+            "the digest rides inline in PSO:CDS"
+        );
     }
 
     #[test]

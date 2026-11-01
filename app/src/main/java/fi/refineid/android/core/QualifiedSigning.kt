@@ -1,6 +1,7 @@
 package fi.refineid.android.core
 
-private const val PIN2_MINIMUM_LENGTH = 6
+/** Signing sends any 4 to 12 digit PIN 2 to the card, which decides; it reads no lengths from the card. */
+private const val PIN2_MINIMUM_LENGTH = 4
 internal const val PIN2_MAXIMUM_LENGTH = 12
 internal const val MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH = 1_024 * 1_024
 private const val RSA_3072_QUALIFIED_SIGNATURE_LENGTH_BYTES =

@@ -389,6 +389,7 @@ const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeCardManagement",
     static extern fn probe_credential_health_native(
         exchange_level: jint,
+        read_pin_lengths: jboolean,
         callback: JObject,
     ) -> [jbyte],
 };
@@ -449,6 +450,7 @@ const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeCardManagement",
     static extern fn contactless_probe_credential_health_native(
         can: [jbyte],
+        read_pin_lengths: jboolean,
         callback: JObject,
     ) -> [jbyte],
 };
@@ -496,6 +498,7 @@ const _: NativeMethod = jni::native_method! {
 const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeCardManagement",
     static extern fn contactless_probe_credential_health_on_session_native(
+        read_pin_lengths: jboolean,
         callback: JObject,
     ) -> [jbyte],
 };
@@ -1219,6 +1222,7 @@ fn probe_credential_health_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
     exchange_level: jint,
+    read_pin_lengths: jboolean,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
     let Some(level) = exchange_level_from_jint(exchange_level) else {
@@ -1228,7 +1232,10 @@ fn probe_credential_health_native<'local>(
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let mut transport = AndroidCardTransport::new(exchange, level);
-        let result = card_management::probe_credential_health(&mut transport);
+        let result = card_management::probe_credential_health(
+            &mut transport,
+            card_management::PinLengthsRead::from_flag(read_pin_lengths),
+        );
         let exchange = transport.into_exchange();
         (result, exchange.bridge_failed())
     };
@@ -1469,18 +1476,22 @@ fn contactless_probe_credential_health_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
     can: JByteArray<'local>,
+    read_pin_lengths: jboolean,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
     let channel = ContactlessChannel::Pace(take_secret_bytes(env, &can)?);
-    contactless_health_reply(env, channel, callback)
+    let lengths_read = card_management::PinLengthsRead::from_flag(read_pin_lengths);
+    contactless_health_reply(env, channel, lengths_read, callback)
 }
 
 fn contactless_probe_credential_health_on_session_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
+    read_pin_lengths: jboolean,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    contactless_health_reply(env, ContactlessChannel::HeldSession, callback)
+    let lengths_read = card_management::PinLengthsRead::from_flag(read_pin_lengths);
+    contactless_health_reply(env, ContactlessChannel::HeldSession, lengths_read, callback)
 }
 
 fn contactless_change_pin1_native<'local>(
@@ -1698,13 +1709,14 @@ fn wipe_optional(bytes: Option<Vec<u8>>) {
 fn contactless_health_reply<'local>(
     env: &mut Env<'local>,
     channel: ContactlessChannel,
+    lengths_read: card_management::PinLengthsRead,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
         let (result, exchange) =
-            contactless::contactless_probe_credential_health(transport, channel);
+            contactless::contactless_probe_credential_health(transport, channel, lengths_read);
         (result, exchange.bridge_failed())
     };
     let mut reply = if bridge_failed {

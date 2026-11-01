@@ -1189,7 +1189,7 @@ internal object AppTrace {
     /**
      * One CCID command submitted to bulk out. Only the message type,
      * slot, sequence, and total length are logged — never block bytes,
-     * which may carry a CAN, PIN, PUK, or activation code.
+     * which may carry a CAN, PIN, PUK, or activation PIN.
      */
     fun ccidExchangeStarted(
         messageType: Int,

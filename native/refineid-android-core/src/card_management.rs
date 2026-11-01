@@ -17,8 +17,9 @@
 use refineid_apdu::{CardTransport, TransportOutcome};
 use refineid_auth::{
     ActivationCode, ActivationReport, ActivationScheme, AuthError, CardActivationNeeds,
-    CredentialHealthReport, ManageOutcome, Pin1, Pin2, PinManageOps, PinOps, PinReferenceScheme,
-    PinSlot, PinStatus, Puk, UnvalidatedSecret, check_retry_floor,
+    CardPinLengths, CredentialHealthReport, CredentialLengths, ManageOutcome, Pin1, Pin2,
+    PinManageOps, PinOps, PinReferenceScheme, PinSlot, PinStatus, Puk, UnvalidatedSecret,
+    check_retry_floor,
 };
 
 use crate::card_certificate::read_authentication_certificate;
@@ -55,6 +56,10 @@ pub(crate) const ACTIVATION_NEEDS_BOTH: u8 = 3;
 
 pub(crate) const NO_RETRY_COUNT: u8 = 0xFF;
 
+/// Octets of a health reply without the PIN and PUK lengths.
+#[cfg(test)]
+const HEALTH_REPLY_LENGTH: usize = 10;
+
 /// Coarse failures of card management operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CardManagementFailure {
@@ -78,6 +83,7 @@ pub(crate) fn map_auth_error<E>(error: AuthError<E>) -> CardManagementFailure {
             | TransportOutcome::ProtocolDesync,
         ) => CardManagementFailure::TransportError,
         AuthError::RetryFloor(_) => CardManagementFailure::SafetyRefused,
+        AuthError::PinLength(_) => CardManagementFailure::InvalidCredential,
         AuthError::Outcome(TransportOutcome::Response(_)) | AuthError::Command(_) => {
             CardManagementFailure::BridgeError
         }
@@ -143,23 +149,73 @@ pub(crate) const fn activation_scheme_from_byte(byte: u8) -> Option<ActivationSc
     }
 }
 
-/// The health probe, with the activation scheme the core decides from the
-/// card's numbering and its authentication certificate's validity start.
-pub(crate) fn probe_credential_health<T: CardTransport>(
-    transport: &mut T,
-) -> Result<CredentialHealthReport, CardManagementFailure> {
-    let validity_start = authentication_certificate_validity_start(transport);
-    transport
-        .probe_credential_health(validity_start)
-        .map_err(map_auth_error)
+/// Whether a health probe also reads the card's PIN and PUK lengths: only
+/// the card management screen, where PINs are set, asks for them; a session
+/// open that only checks for activation does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PinLengthsRead {
+    Read,
+    Skip,
 }
 
-/// Encode `CredentialHealthReport` to native byte array.
+impl PinLengthsRead {
+    /// The read a wire flag names: non-zero reads the lengths.
+    pub(crate) const fn from_flag(flag: bool) -> Self {
+        if flag { Self::Read } else { Self::Skip }
+    }
+}
+
+/// The health probe's answer: the credential health and, when asked for,
+/// the card's PIN and PUK lengths.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CredentialHealthAnswer {
+    pub(crate) report: CredentialHealthReport,
+    pub(crate) lengths: Option<CardPinLengths>,
+}
+
+/// The health probe, with the activation scheme the core decides from the
+/// card's numbering and its authentication certificate's validity start,
+/// and the card's PIN and PUK lengths when `lengths_read` asks for them.
+pub(crate) fn probe_credential_health<T: CardTransport>(
+    transport: &mut T,
+    lengths_read: PinLengthsRead,
+) -> Result<CredentialHealthAnswer, CardManagementFailure> {
+    let validity_start = authentication_certificate_validity_start(transport);
+    let report = transport
+        .probe_credential_health(validity_start)
+        .map_err(map_auth_error)?;
+    let lengths = match lengths_read {
+        PinLengthsRead::Read => Some(read_lengths(transport)?),
+        PinLengthsRead::Skip => None,
+    };
+    Ok(CredentialHealthAnswer { report, lengths })
+}
+
+/// The PIN and PUK lengths of the card on `transport`, read where PINs are
+/// set.
+fn read_lengths<T: CardTransport>(
+    transport: &mut T,
+) -> Result<CardPinLengths, CardManagementFailure> {
+    transport.read_card_pin_lengths().map_err(map_auth_error)
+}
+
+/// The wire pair of one credential's accepted lengths: minimum and maximum,
+/// or zero and zero when the card accepts no length for it.
+fn encode_credential_lengths(lengths: CredentialLengths) -> [u8; 2] {
+    lengths.accepted().map_or([0, 0], |range| {
+        [
+            u8::try_from(range.min()).unwrap_or(0),
+            u8::try_from(range.max()).unwrap_or(0),
+        ]
+    })
+}
+
+/// Encode the health probe's answer to native byte array.
 pub(crate) fn encode_credential_health_reply(
-    result: Result<CredentialHealthReport, CardManagementFailure>,
+    result: Result<CredentialHealthAnswer, CardManagementFailure>,
 ) -> Vec<u8> {
     match result {
-        Ok(report) => {
+        Ok(CredentialHealthAnswer { report, lengths }) => {
             let (p1_state, p1_retries) = encode_pin_status(report.pin1_status);
             let (p2_state, p2_retries) = encode_pin_status(report.pin2_status);
             let (puk_state, puk_retries) = encode_pin_status(report.puk_status);
@@ -173,7 +229,7 @@ pub(crate) fn encode_credential_health_reply(
             let act_needs_byte = report
                 .activation_needs
                 .map_or(ACTIVATION_NEEDS_NONE, activation_needs_byte);
-            vec![
+            let mut reply = vec![
                 MANAGEMENT_TAG_SUCCEEDED,
                 p1_state,
                 p1_retries,
@@ -184,7 +240,13 @@ pub(crate) fn encode_credential_health_reply(
                 scheme_byte,
                 act_scheme_byte,
                 act_needs_byte,
-            ]
+            ];
+            if let Some(lengths) = lengths {
+                reply.extend_from_slice(&encode_credential_lengths(lengths.pin1()));
+                reply.extend_from_slice(&encode_credential_lengths(lengths.pin2()));
+                reply.extend_from_slice(&encode_credential_lengths(lengths.puk()));
+            }
+            reply
         }
         Err(CardManagementFailure::CardUnavailable) => vec![MANAGEMENT_TAG_CARD_UNAVAILABLE],
         Err(CardManagementFailure::TransportError) => vec![MANAGEMENT_TAG_TRANSPORT_ERROR],
@@ -221,9 +283,10 @@ pub(crate) fn change_pin1<T: CardTransport>(
     let new_pin =
         Pin1::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
 
+    let lengths = read_lengths(transport)?;
     require_retry_floor(transport, PinSlot::Pin1)?;
     transport
-        .change_pin1(current_pin, new_pin)
+        .change_pin1(&lengths, current_pin, new_pin)
         .map_err(map_auth_error)
 }
 
@@ -243,9 +306,10 @@ pub(crate) fn change_pin2<T: CardTransport>(
     let new_pin =
         Pin2::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
 
+    let lengths = read_lengths(transport)?;
     require_retry_floor(transport, PinSlot::Pin2)?;
     transport
-        .change_pin2(current_pin, new_pin)
+        .change_pin2(&lengths, current_pin, new_pin)
         .map_err(map_auth_error)
 }
 
@@ -264,7 +328,10 @@ pub(crate) fn unblock_pin1<T: CardTransport>(
     let new_pin =
         Pin1::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
 
-    transport.unblock_pin1(puk, new_pin).map_err(map_auth_error)
+    let lengths = read_lengths(transport)?;
+    transport
+        .unblock_pin1(&lengths, puk, new_pin)
+        .map_err(map_auth_error)
 }
 
 /// Execute unblock / reset PIN2.
@@ -282,7 +349,10 @@ pub(crate) fn unblock_pin2<T: CardTransport>(
     let new_pin =
         Pin2::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
 
-    transport.unblock_pin2(puk, new_pin).map_err(map_auth_error)
+    let lengths = read_lengths(transport)?;
+    transport
+        .unblock_pin2(&lengths, puk, new_pin)
+        .map_err(map_auth_error)
 }
 
 /// Encode `ManageOutcome` to native byte array.
@@ -340,8 +410,9 @@ pub(crate) fn activate_card<T: CardTransport>(
         .transpose()
         .map_err(|_| CardManagementFailure::InvalidCredential)?;
 
+    let lengths = read_lengths(transport)?;
     transport
-        .activate_card(code, new_pin1, new_pin2)
+        .activate_card(&lengths, code, new_pin1, new_pin2)
         .map_err(map_auth_error)
 }
 
@@ -392,7 +463,12 @@ mod tests {
     use std::collections::VecDeque;
 
     use super::*;
+    use refineid_apdu::iso7816::SelectFile;
     use refineid_apdu::{CommandApdu, CredentialCommand, PinRetries, ResponseApdu, StatusWord};
+    use refineid_auth::credentials::{
+        FINEID_PIN1_MIN_LENGTH, FINEID_PIN2_MIN_LENGTH, PIN_MAX_LENGTH, PUK_MAX_LENGTH,
+        PUK_MIN_LENGTH,
+    };
     use refineid_auth::{CardActivationNeeds, FlooredCredential};
 
     const SYNTHETIC_PIN1: &[u8] = b"1357";
@@ -404,12 +480,18 @@ mod tests {
     const BELOW_FLOOR_RETRIES: u8 = 2;
     const LAST_RETRY: u8 = 1;
     const NO_RETRIES: u8 = 0;
-    /// Public commands a PIN 2 change sends before it presents the current
-    /// PIN, each answered here with a served retry count.
-    const PIN2_CHANGE_PUBLIC_COMMANDS: usize = 3;
+    /// Public commands a PIN 2 change sends after the PIN length read and
+    /// before it presents the current PIN, each answered here with a served
+    /// retry count.
+    const PIN2_CHANGE_PUBLIC_COMMANDS: usize = 2;
+
+    /// Offset of the instruction byte in a command's wire bytes.
+    const INSTRUCTION_OFFSET: usize = 1;
 
     /// Answers public commands from a script and records every credential
-    /// command without answering it.
+    /// command without answering it. A SELECT is answered file not found
+    /// without taking a scripted answer, so the PIN length read finds no
+    /// EF.AOD.
     struct ScriptedTransport {
         responses: VecDeque<StatusWord>,
         credential_calls: usize,
@@ -427,11 +509,14 @@ mod tests {
     impl CardTransport for ScriptedTransport {
         type Error = &'static str;
 
-        fn transmit(&mut self, _command: &CommandApdu) -> Result<TransportOutcome, Self::Error> {
-            let status = self
-                .responses
-                .pop_front()
-                .ok_or("missing scripted response")?;
+        fn transmit(&mut self, command: &CommandApdu) -> Result<TransportOutcome, Self::Error> {
+            let status = if command.as_bytes().get(INSTRUCTION_OFFSET) == Some(&SelectFile::INS) {
+                StatusWord::FileNotFound
+            } else {
+                self.responses
+                    .pop_front()
+                    .ok_or("missing scripted response")?
+            };
             let [sw1, sw2] = status.as_u16().to_be_bytes();
             Ok(TransportOutcome::Response(ResponseApdu {
                 body: Vec::new(),
@@ -455,6 +540,32 @@ mod tests {
         }
     }
 
+    /// The answer a citizen card gives each PIN container read of the PIN
+    /// length read: no PIN policy.
+    const NO_PIN_POLICY: StatusWord = StatusWord::ReferenceDataNotFound;
+
+    /// PIN container reads of the citizen PIN length read: PIN 1, PIN 2,
+    /// the PUK.
+    const CITIZEN_PIN_POLICY_READS: usize = 3;
+
+    /// The answers of the PIN length read on a card whose numbering
+    /// `resolution` resolves: the numbering, then on a citizen card one PIN
+    /// container read per credential, as EF.AOD is not found.
+    fn lengths_read(resolution: &[StatusWord]) -> Vec<StatusWord> {
+        let mut answers = resolution.to_vec();
+        if resolution != organizational_resolution().as_slice() {
+            answers.extend([NO_PIN_POLICY; CITIZEN_PIN_POLICY_READS]);
+        }
+        answers
+    }
+
+    /// `transcript` after the PIN length read of a citizen card.
+    fn after_citizen_lengths_read(transcript: &[StatusWord]) -> Vec<StatusWord> {
+        let mut answers = lengths_read(&[remaining(SERVED_RETRIES)]);
+        answers.extend_from_slice(transcript);
+        answers
+    }
+
     fn refused_statuses() -> [StatusWord; 5] {
         [
             remaining(BELOW_FLOOR_RETRIES),
@@ -468,7 +579,7 @@ mod tests {
     #[test]
     fn change_pin1_is_refused_below_the_retry_floor_without_presenting_it() {
         for status in refused_statuses() {
-            let mut transport = ScriptedTransport::new(&[status]);
+            let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(&[status]));
 
             let result = change_pin1(
                 &mut transport,
@@ -484,7 +595,10 @@ mod tests {
     #[test]
     fn change_pin2_is_refused_below_the_retry_floor_without_presenting_it() {
         for status in refused_statuses() {
-            let mut transport = ScriptedTransport::new(&[remaining(SERVED_RETRIES), status]);
+            let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(&[
+                remaining(SERVED_RETRIES),
+                status,
+            ]));
 
             let result = change_pin2(
                 &mut transport,
@@ -500,7 +614,7 @@ mod tests {
     #[test]
     fn change_pin1_at_the_floor_reaches_the_card() {
         let mut transport =
-            ScriptedTransport::new(&[remaining(SERVED_RETRIES), remaining(SERVED_RETRIES)]);
+            ScriptedTransport::new(&after_citizen_lengths_read(&[remaining(SERVED_RETRIES)]));
 
         let result = change_pin1(
             &mut transport,
@@ -515,8 +629,9 @@ mod tests {
 
     #[test]
     fn change_pin2_at_the_floor_reaches_the_card() {
-        let mut transport =
-            ScriptedTransport::new(&[remaining(SERVED_RETRIES); PIN2_CHANGE_PUBLIC_COMMANDS]);
+        let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(
+            &[remaining(SERVED_RETRIES); PIN2_CHANGE_PUBLIC_COMMANDS],
+        ));
 
         let result = change_pin2(
             &mut transport,
@@ -571,18 +686,16 @@ mod tests {
             .chain([organizational_resolution()]);
         for resolution in resolutions {
             for counter in refused_puk_counters() {
-                let mut transcript = resolution.clone();
+                let mut transcript = lengths_read(&resolution);
                 transcript.push(counter);
                 transcripts.push(transcript);
             }
         }
         for probe in [StatusWord::Success, StatusWord::AuthenticationFailed] {
-            let mut transcript = vec![remaining(SERVED_RETRIES)];
-            transcript.extend([probe, StatusWord::Success]);
-            transcripts.push(transcript);
+            transcripts.push(after_citizen_lengths_read(&[probe, StatusWord::Success]));
         }
         for probe in [StatusWord::Success, StatusWord::AuthenticationFailed] {
-            let mut transcript = organizational_resolution();
+            let mut transcript = lengths_read(&organizational_resolution());
             transcript.push(probe);
             transcripts.push(transcript);
         }
@@ -595,7 +708,8 @@ mod tests {
         citizen_resolutions()
             .into_iter()
             .chain([organizational_resolution()])
-            .map(|mut transcript| {
+            .map(|resolution| {
+                let mut transcript = lengths_read(&resolution);
                 transcript.push(remaining(SERVED_RETRIES));
                 transcript
             })
@@ -650,11 +764,11 @@ mod tests {
         }
     }
 
-    /// Answers a citizen card awaiting activation by PUK gives before the
-    /// PUK counter read: the numbering probe, then for PIN 1 and PIN 2 the
-    /// PIN container read, which leaves the changed flag unreadable, and
-    /// the status probes, every PIN blocked.
-    const PUK_ACTIVATION_PREAMBLE: [StatusWord; 6] = [StatusWord::AuthenticationBlocked; 6];
+    /// Answers a citizen card awaiting activation by PUK gives after the
+    /// PIN length read and before the PUK counter read: for PIN 1 and
+    /// PIN 2 the PIN container read, which leaves the changed flag
+    /// unreadable, and the status probes, every PIN blocked.
+    const PUK_ACTIVATION_PREAMBLE: [StatusWord; 5] = [StatusWord::AuthenticationBlocked; 5];
 
     fn activate_by_puk(
         transport: &mut ScriptedTransport,
@@ -671,7 +785,8 @@ mod tests {
     #[test]
     fn activation_by_puk_is_refused_below_the_puk_retry_floor_without_presenting_it() {
         for counter in refused_puk_counters() {
-            let mut transcript = PUK_ACTIVATION_PREAMBLE.to_vec();
+            let mut transcript = lengths_read(&[CITIZEN_TARGET_BLOCKED]);
+            transcript.extend(PUK_ACTIVATION_PREAMBLE);
             transcript.push(counter);
             let mut transport = ScriptedTransport::new(&transcript);
 
@@ -685,7 +800,8 @@ mod tests {
 
     #[test]
     fn activation_by_puk_at_the_puk_floor_reaches_the_card() {
-        let mut transcript = PUK_ACTIVATION_PREAMBLE.to_vec();
+        let mut transcript = lengths_read(&[CITIZEN_TARGET_BLOCKED]);
+        transcript.extend(PUK_ACTIVATION_PREAMBLE);
         transcript.push(remaining(SERVED_RETRIES));
         let mut transport = ScriptedTransport::new(&transcript);
 
@@ -808,13 +924,48 @@ mod tests {
                 pin2: true,
             }),
         };
-        let encoded = encode_credential_health_reply(Ok(report));
+        let encoded = encode_credential_health_reply(Ok(CredentialHealthAnswer {
+            report,
+            lengths: None,
+        }));
+        assert_eq!(encoded.len(), HEALTH_REPLY_LENGTH);
         assert_eq!(encoded[0], MANAGEMENT_TAG_SUCCEEDED);
         assert_eq!(encoded[1], PIN_STATE_REMAINING);
         assert_eq!(encoded[2], 3);
         assert_eq!(encoded[7], SCHEME_CITIZEN);
         assert_eq!(encoded[8], ACTIVATION_SCHEME_PRESET);
         assert_eq!(encoded[9], ACTIVATION_NEEDS_BOTH);
+
+        let encoded = encode_credential_health_reply(Ok(CredentialHealthAnswer {
+            report,
+            lengths: Some(CardPinLengths::not_listed(PinReferenceScheme::Citizen)),
+        }));
+        assert_eq!(
+            encoded[HEALTH_REPLY_LENGTH..],
+            [
+                FINEID_PIN1_MIN_LENGTH,
+                PIN_MAX_LENGTH,
+                FINEID_PIN2_MIN_LENGTH,
+                PIN_MAX_LENGTH,
+                PUK_MIN_LENGTH,
+                PUK_MAX_LENGTH,
+            ]
+            .map(|length| u8::try_from(length).expect("a FINEID bound fits one octet"))
+        );
+    }
+
+    #[test]
+    fn a_length_refusal_maps_to_the_invalid_credential() {
+        let refusal = CardPinLengths::not_listed(PinReferenceScheme::Citizen)
+            .check_pin2(
+                &Pin2::reconstruct(UnvalidatedSecret::from_owned_bytes(SYNTHETIC_PIN1.to_vec()))
+                    .expect("four digits are a PIN 2 entry"),
+            )
+            .expect_err("four digits are below the FINEID PIN 2 bound");
+        assert_eq!(
+            map_auth_error::<&str>(AuthError::PinLength(refusal)),
+            CardManagementFailure::InvalidCredential
+        );
     }
 
     #[test]

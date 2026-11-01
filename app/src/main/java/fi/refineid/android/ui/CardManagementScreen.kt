@@ -65,6 +65,7 @@ import fi.refineid.android.core.CardManagementFailure
 import fi.refineid.android.core.CardManagementResult
 import fi.refineid.android.core.CardManagementScheme
 import fi.refineid.android.core.CardManagementService
+import fi.refineid.android.core.CardPinLengths
 import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativePin1State
@@ -202,9 +203,10 @@ internal fun CardManagementScreen(
     val puk = pukState.text.toString()
     val activationCode = activationCodeState.text.toString()
 
-    val pin1Bounds = 4..12
-    val pin2Bounds = 6..12
-    val pukBounds = 8..12
+    val pinLengths = health?.pinLengths ?: CardPinLengths.FINEID
+    val pin1Bounds = pinLengths.pin1
+    val pin2Bounds = pinLengths.pin2
+    val pukBounds = pinLengths.puk
     val activationCodeBounds =
         health?.activationScheme?.activationEntryDigitCount?.let { it..it } ?: IntRange.EMPTY
 
@@ -559,6 +561,7 @@ internal fun CardManagementScreen(
             if (health != null) {
                 CardActivationForm(
                     health = health,
+                    pinLengths = pinLengths,
                     needsPin1 = needsPin1,
                     needsPin2 = needsPin2,
                     activationCodeState = activationCodeState,
@@ -586,6 +589,7 @@ internal fun CardManagementScreen(
                     ManagementTask.CHANGE_PIN1, ManagementTask.CHANGE_PIN2 -> {
                         ChangePinForm(
                             task = selectedTask,
+                            pinLengths = pinLengths,
                             currentState = currentPinState,
                             newState = newPinState,
                             confirmState = newPinConfirmState,
@@ -602,6 +606,7 @@ internal fun CardManagementScreen(
                     ManagementTask.RESET_PIN1, ManagementTask.RESET_PIN2 -> {
                         ResetPinForm(
                             task = selectedTask,
+                            pinLengths = pinLengths,
                             pukState = pukState,
                             newState = newPinState,
                             confirmState = newPinConfirmState,
@@ -885,6 +890,7 @@ private fun OutcomeBanner(
 @Composable
 private fun ChangePinForm(
     task: ManagementTask,
+    pinLengths: CardPinLengths,
     currentState: TextFieldState,
     newState: TextFieldState,
     confirmState: TextFieldState,
@@ -929,12 +935,8 @@ private fun ChangePinForm(
                 } else {
                     stringResource(R.string.change_basic_pin1)
                 }
-            val lengthHint =
-                if (isPin2) {
-                    stringResource(R.string.pin2_length_hint)
-                } else {
-                    stringResource(R.string.pin1_length_hint)
-                }
+            val pinRange = if (isPin2) pinLengths.pin2 else pinLengths.pin1
+            val lengthHint = digitRangeHint(pinRange)
 
             val pinMismatch =
                 confirmState.text.isNotEmpty() &&
@@ -943,7 +945,7 @@ private fun ChangePinForm(
             ManagedPasswordField(
                 state = currentState,
                 label = currentLabel,
-                maxLength = 12,
+                maxLength = pinRange.last,
                 supportingText = lengthHint,
                 imeAction = ImeAction.Next,
                 testTag = "managementCurrentPin",
@@ -952,7 +954,7 @@ private fun ChangePinForm(
             ManagedPasswordField(
                 state = newState,
                 label = newLabel,
-                maxLength = 12,
+                maxLength = pinRange.last,
                 supportingText = lengthHint,
                 imeAction = ImeAction.Next,
                 testTag = "managementNewPin",
@@ -961,7 +963,7 @@ private fun ChangePinForm(
             ManagedPasswordField(
                 state = confirmState,
                 label = repeatLabel,
-                maxLength = 12,
+                maxLength = pinRange.last,
                 isError = pinMismatch,
                 errorMessage = if (pinMismatch) stringResource(R.string.pins_do_not_match) else null,
                 imeAction = ImeAction.Done,
@@ -990,6 +992,7 @@ private fun ChangePinForm(
 @Composable
 private fun ResetPinForm(
     task: ManagementTask,
+    pinLengths: CardPinLengths,
     pukState: TextFieldState,
     newState: TextFieldState,
     confirmState: TextFieldState,
@@ -1027,12 +1030,8 @@ private fun ResetPinForm(
                 } else {
                     stringResource(R.string.reset_pin1)
                 }
-            val lengthHint =
-                if (isPin2) {
-                    stringResource(R.string.pin2_length_hint)
-                } else {
-                    stringResource(R.string.pin1_length_hint)
-                }
+            val pinRange = if (isPin2) pinLengths.pin2 else pinLengths.pin1
+            val lengthHint = digitRangeHint(pinRange)
 
             val pinMismatch =
                 confirmState.text.isNotEmpty() &&
@@ -1041,8 +1040,8 @@ private fun ResetPinForm(
             ManagedPasswordField(
                 state = pukState,
                 label = stringResource(R.string.puk_code),
-                maxLength = 12,
-                supportingText = stringResource(R.string.puk_length_hint),
+                maxLength = pinLengths.puk.last,
+                supportingText = digitRangeHint(pinLengths.puk),
                 imeAction = ImeAction.Next,
                 testTag = "managementPuk",
             )
@@ -1050,7 +1049,7 @@ private fun ResetPinForm(
             ManagedPasswordField(
                 state = newState,
                 label = newLabel,
-                maxLength = 12,
+                maxLength = pinRange.last,
                 supportingText = lengthHint,
                 imeAction = ImeAction.Next,
                 testTag = "managementNewPin",
@@ -1059,7 +1058,7 @@ private fun ResetPinForm(
             ManagedPasswordField(
                 state = confirmState,
                 label = repeatLabel,
-                maxLength = 12,
+                maxLength = pinRange.last,
                 isError = pinMismatch,
                 errorMessage = if (pinMismatch) stringResource(R.string.pins_do_not_match) else null,
                 imeAction = ImeAction.Done,
@@ -1088,6 +1087,7 @@ private fun ResetPinForm(
 @Composable
 private fun CardActivationForm(
     health: CredentialHealth,
+    pinLengths: CardPinLengths,
     needsPin1: Boolean,
     needsPin2: Boolean,
     activationCodeState: TextFieldState,
@@ -1131,7 +1131,7 @@ private fun CardActivationForm(
                     state = activationCodeState,
                     label = stringResource(R.string.activation_pin),
                     maxLength = activationCodeLength,
-                    supportingText = stringResource(R.string.activation_code_length_hint, activationCodeLength),
+                    supportingText = digitRangeHint(activationCodeLength..activationCodeLength),
                     imeAction = ImeAction.Next,
                     testTag = UiAutomationIds.ACTIVATION_CODE_FIELD,
                 )
@@ -1155,8 +1155,8 @@ private fun CardActivationForm(
                         ManagedPasswordField(
                             state = newPin1State,
                             label = stringResource(R.string.new_pin1),
-                            maxLength = 12,
-                            supportingText = stringResource(R.string.pin1_length_hint),
+                            maxLength = pinLengths.pin1.last,
+                            supportingText = digitRangeHint(pinLengths.pin1),
                             imeAction = ImeAction.Next,
                             testTag = UiAutomationIds.ACTIVATION_NEW_PIN1_FIELD,
                         )
@@ -1164,7 +1164,7 @@ private fun CardActivationForm(
                         ManagedPasswordField(
                             state = newPin1ConfirmState,
                             label = stringResource(R.string.new_pin1_again),
-                            maxLength = 12,
+                            maxLength = pinLengths.pin1.last,
                             isError = pin1Mismatch,
                             errorMessage = if (pin1Mismatch) stringResource(R.string.pins_do_not_match) else null,
                             imeAction = if (needsPin2) ImeAction.Next else ImeAction.Done,
@@ -1198,8 +1198,8 @@ private fun CardActivationForm(
                         ManagedPasswordField(
                             state = newPin2State,
                             label = stringResource(R.string.new_pin2),
-                            maxLength = 12,
-                            supportingText = stringResource(R.string.pin2_length_hint),
+                            maxLength = pinLengths.pin2.last,
+                            supportingText = digitRangeHint(pinLengths.pin2),
                             imeAction = ImeAction.Next,
                             testTag = UiAutomationIds.ACTIVATION_NEW_PIN2_FIELD,
                         )
@@ -1207,7 +1207,7 @@ private fun CardActivationForm(
                         ManagedPasswordField(
                             state = newPin2ConfirmState,
                             label = stringResource(R.string.new_pin2_again),
-                            maxLength = 12,
+                            maxLength = pinLengths.pin2.last,
                             isError = pin2Mismatch,
                             errorMessage = if (pin2Mismatch) stringResource(R.string.pins_do_not_match) else null,
                             imeAction = ImeAction.Done,
@@ -1235,6 +1235,18 @@ private fun CardActivationForm(
         }
     }
 }
+
+/**
+ * The digit counts a field takes, as its supporting text: one count, a
+ * range, or nothing when the card accepts no length.
+ */
+@Composable
+private fun digitRangeHint(range: IntRange): String? =
+    when {
+        range.isEmpty() -> null
+        range.first == range.last -> stringResource(R.string.digit_count_hint, range.first)
+        else -> stringResource(R.string.digit_range_hint, range.first, range.last)
+    }
 
 @Composable
 private fun ManagedPasswordField(

@@ -99,10 +99,8 @@
     <string name="show_pin">Visa PIN-kod</string>
     <string name="hide_pin">Dölj PIN-kod</string>
     <string name="pins_do_not_match">PIN-koderna stämmer inte överens</string>
-    <string name="pin1_length_hint">4–12 siffror</string>
-    <string name="pin2_length_hint">6–12 siffror</string>
-    <string name="puk_length_hint">8–12 siffror</string>
-    <string name="activation_code_length_hint" tools:ignore="PluralsCandidate">%1$d siffror</string>
+    <string name="digit_count_hint" tools:ignore="PluralsCandidate">%1$d siffror</string>
+    <string name="digit_range_hint" tools:ignore="PluralsCandidate">%1$d–%2$d siffror</string>
     <string name="half_activated_pin1_needed">PIN 2 är redan aktiverad. Ange aktiveringskoden för att aktivera PIN 1.</string>
     <string name="half_activated_pin2_needed">PIN 1 är redan aktiverad. Ange aktiveringskoden för att aktivera PIN 2.</string>
     <string name="confirm_activation_dialog_msg_both">Du aktiverar både PIN 1 och PIN 2. De träder i kraft omedelbart. Se till att du har skrivit upp dem.</string>

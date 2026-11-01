@@ -21,9 +21,9 @@
 //! by exactly one credential command.
 
 use refineid_apdu::{CardTransport, StatusWord, TransportOutcome};
-use refineid_auth::{Pin1, PinOps, PinReferenceScheme, UnvalidatedSecret, VerifyOutcome};
+use refineid_auth::{Pin1, PinOps, UnvalidatedSecret, VerifyOutcome};
 use refineid_digest::{Sha256, Sha384, Sha512};
-use refineid_sign::{KeyRef, SignError, SignOps, SignScheme};
+use refineid_sign::{SignError, SignOps, SignScheme};
 
 use crate::pin1_status::{Pin1PreflightFailure, Pin1State, map_auth_error, probe_pin1_preflight};
 
@@ -150,7 +150,7 @@ where
         });
     }
 
-    let scheme = sign_scheme(preflight.scheme);
+    let scheme = SignScheme::from(preflight.scheme);
 
     if preflight.state == Pin1State::Verified {
         match sign_prepared(transport, scheme, prepared_input) {
@@ -286,13 +286,6 @@ fn sha512_input(
     }
 }
 
-fn sign_scheme(scheme: PinReferenceScheme) -> SignScheme {
-    match scheme {
-        PinReferenceScheme::Citizen => SignScheme::Citizen,
-        PinReferenceScheme::Organizational => SignScheme::Organizational,
-    }
-}
-
 fn sign_prepared<T>(
     transport: &mut T,
     scheme: SignScheme,
@@ -303,28 +296,36 @@ where
 {
     match input {
         PreparedAuthenticationSigningInput::RsaPkcs1Sha256(digest) => transport
-            .sign_prehashed_sha256_rsa(scheme, KeyRef::Auth, digest.into_bytes())
+            .authentication_key(scheme)
+            .sign_prehashed_sha256_rsa(digest.into_bytes())
             .map(|signature| signature.into_bytes()),
         PreparedAuthenticationSigningInput::RsaPssSha256(digest) => transport
-            .sign_prehashed_sha256_rsa_pss(scheme, KeyRef::Auth, digest.into_bytes())
+            .authentication_key(scheme)
+            .sign_prehashed_sha256_rsa_pss(digest.into_bytes())
             .map(|signature| signature.into_bytes()),
         PreparedAuthenticationSigningInput::EcdsaP384Sha256(digest) => transport
-            .sign_prehashed_sha256_ecdsa(scheme, KeyRef::Auth, digest.into_bytes())
+            .authentication_key(scheme)
+            .sign_prehashed_sha256_ecdsa(digest.into_bytes())
             .map(|signature| signature.into_bytes()),
         PreparedAuthenticationSigningInput::EcdsaP384Sha384(digest) => transport
-            .sign_prehashed_sha384_ecdsa(scheme, KeyRef::Auth, digest.into_bytes())
+            .authentication_key(scheme)
+            .sign_prehashed_sha384_ecdsa(digest.into_bytes())
             .map(|signature| signature.into_bytes()),
         PreparedAuthenticationSigningInput::RsaPkcs1Sha384(digest) => transport
-            .sign_prehashed_sha384_rsa(scheme, KeyRef::Auth, digest.into_bytes())
+            .authentication_key(scheme)
+            .sign_prehashed_sha384_rsa(digest.into_bytes())
             .map(|signature| signature.into_bytes()),
         PreparedAuthenticationSigningInput::RsaPssSha384(digest) => transport
-            .sign_prehashed_sha384_rsa_pss(scheme, KeyRef::Auth, digest.into_bytes())
+            .authentication_key(scheme)
+            .sign_prehashed_sha384_rsa_pss(digest.into_bytes())
             .map(|signature| signature.into_bytes()),
         PreparedAuthenticationSigningInput::RsaPkcs1Sha512(digest) => transport
-            .sign_prehashed_sha512_rsa(scheme, KeyRef::Auth, digest.into_bytes())
+            .authentication_key(scheme)
+            .sign_prehashed_sha512_rsa(digest.into_bytes())
             .map(|signature| signature.into_bytes()),
         PreparedAuthenticationSigningInput::RsaPssSha512(digest) => transport
-            .sign_prehashed_sha512_rsa_pss(scheme, KeyRef::Auth, digest.into_bytes())
+            .authentication_key(scheme)
+            .sign_prehashed_sha512_rsa_pss(digest.into_bytes())
             .map(|signature| signature.into_bytes()),
     }
 }

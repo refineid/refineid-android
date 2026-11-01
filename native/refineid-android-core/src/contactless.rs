@@ -12,7 +12,10 @@
 use std::sync::Mutex;
 
 use refineid_apdu::{CardTransport, TransportOutcome};
-use refineid_pace::{Can, PaceError, PaceSession, SmTransport, UnvalidatedCan, run_pace_with_can};
+use refineid_pace::{
+    Can, PaceError, PacePassword, PaceSession, SmTransport, UnvalidatedCan, read_card_access,
+    run_pace,
+};
 use refineid_pkcs15::{CertSlot, Pkcs15Error, Pkcs15Ops};
 
 use crate::authentication_signer::{
@@ -24,8 +27,8 @@ use crate::card_certificate::{
     map_pkcs15_error, read_authentication_certificate, read_qualified_certificate,
 };
 use crate::card_management::{
-    CardManagementFailure, activate_card, change_pin1, change_pin2, decided_activation_scheme,
-    probe_credential_health, unblock_pin1, unblock_pin2,
+    CardManagementFailure, CredentialHealthAnswer, PinLengthsRead, activate_card, change_pin1,
+    change_pin2, decided_activation_scheme, probe_credential_health, unblock_pin1, unblock_pin2,
 };
 use crate::card_transport::CardExchangeLevel;
 use crate::card_transport::{AndroidCardTransport, SingleBlockExchange};
@@ -37,8 +40,7 @@ use crate::qualified_signer::{
     QualifiedSigningAlgorithm, QualifiedSigningInput, qualified_sign,
 };
 use refineid_auth::{
-    ActivationReport, ActivationScheme, CardActivationNeeds, CredentialHealthReport, ManageOutcome,
-    PinManageOps,
+    ActivationReport, ActivationScheme, CardActivationNeeds, ManageOutcome, PinManageOps,
 };
 
 /// Coarse failures of the secure-channel front door, before any
@@ -556,17 +558,19 @@ fn management_open_failure<E>(failure: ChannelOpenFailure<E>) -> CardManagementF
     }
 }
 
-/// The credential health probe inside `channel`.
+/// The credential health probe inside `channel`, with the card's PIN and
+/// PUK lengths when `lengths_read` asks for them.
 pub(crate) fn contactless_probe_credential_health<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
     channel: ContactlessChannel,
+    lengths_read: PinLengthsRead,
 ) -> (
-    Result<CredentialHealthReport, CardManagementFailure>,
+    Result<CredentialHealthAnswer, CardManagementFailure>,
     Exchange,
 ) {
     match open_contactless_channel(transport, channel) {
         Ok(mut open) => {
-            let result = probe_credential_health(&mut open.secure);
+            let result = probe_credential_health(&mut open.secure, lengths_read);
             (result, close_contactless_channel(open))
         }
         Err((failure, exchange)) => (Err(management_open_failure(failure)), exchange),
@@ -666,7 +670,13 @@ fn open_secure_channel<Exchange: SingleBlockExchange>(
     if let Err(failure) = abort_stale_secure_messaging(&mut transport) {
         return Err((transport.into_exchange(), failure));
     }
-    match run_pace_with_can(&mut transport, can) {
+    // The PACE suite and its domain parameter come from EF.CardAccess in
+    // the master file, read in plain before the handshake. An
+    // organization card authenticating PACE with a PIN would pass
+    // `PacePassword::Pin1` or `PacePassword::Pin2` here instead of the CAN.
+    let handshake = read_card_access(&mut transport)
+        .and_then(|card_access| run_pace(&mut transport, &card_access, PacePassword::Can(&can)));
+    match handshake {
         Ok(session) => Ok(SmTransport::new(transport, session)),
         Err(error) => {
             let failure = map_pace_error(&error);
@@ -743,7 +753,35 @@ fn map_pace_error<E>(error: &PaceError<E>) -> SecureChannelFailure {
         | PaceError::UnexpectedResponse(_)
         | PaceError::InvalidPoint
         | PaceError::ReflectedKey => SecureChannelFailure::Transport,
-        PaceError::Encoding | PaceError::Random(_) => SecureChannelFailure::Bridge,
+        PaceError::CardAccessRead(error) => card_access_read_failure(error),
+        PaceError::CardAccess(_) | PaceError::NoSupportedSuite => SecureChannelFailure::Transport,
+        // The PIN outcomes answer a PIN password, which this CAN channel
+        // never sends.
+        PaceError::RetryFloor(_)
+        | PaceError::PasswordDeactivated
+        | PaceError::WrongPin { .. }
+        | PaceError::Encoding
+        | PaceError::Random(_) => SecureChannelFailure::Bridge,
+    }
+}
+
+fn card_access_read_failure<E>(error: &Pkcs15Error<E>) -> SecureChannelFailure {
+    match error {
+        Pkcs15Error::Outcome(TransportOutcome::NoCard | TransportOutcome::ReaderRemoved) => {
+            SecureChannelFailure::CardUnavailable
+        }
+        Pkcs15Error::Transport(_)
+        | Pkcs15Error::Status(_)
+        | Pkcs15Error::Empty
+        | Pkcs15Error::TooLarge
+        | Pkcs15Error::InvalidData(_)
+        | Pkcs15Error::Outcome(
+            TransportOutcome::TimeoutUnknownState
+            | TransportOutcome::CardReset
+            | TransportOutcome::ProtocolDesync
+            | TransportOutcome::Response(_),
+        ) => SecureChannelFailure::Transport,
+        Pkcs15Error::Aid(_) | Pkcs15Error::Command(_) => SecureChannelFailure::Bridge,
     }
 }
 
@@ -872,6 +910,7 @@ fn qualified_selection_failure<E>(error: Pkcs15Error<E>) -> QualifiedSignFailure
 mod tests {
     use refineid_apdu::{StatusWord, TransportOutcome};
     use refineid_pace::PaceError;
+    use refineid_pkcs15::Pkcs15Error;
 
     use super::{
         ContactlessChannel, ManagedPin, SecureChannelFailure, contactless_activate_card,
@@ -881,7 +920,7 @@ mod tests {
         qualified_channel_failure, reconstruct_can,
     };
     use crate::card_certificate::CertificateReadFailure;
-    use crate::card_management::{ACTIVATION_SCHEME_PUK, CardManagementFailure};
+    use crate::card_management::{ACTIVATION_SCHEME_PUK, CardManagementFailure, PinLengthsRead};
     use crate::card_transport::{
         AndroidCardTransport, CardExchangeLevel, SingleBlockExchange, SingleExchangeOutcome,
     };
@@ -928,8 +967,11 @@ mod tests {
         contactless_close();
         let unavailable = Err(CardManagementFailure::CardUnavailable);
 
-        let (health, exchange) =
-            contactless_probe_credential_health(transport(), ContactlessChannel::HeldSession);
+        let (health, exchange) = contactless_probe_credential_health(
+            transport(),
+            ContactlessChannel::HeldSession,
+            PinLengthsRead::Read,
+        );
         assert!(matches!(
             health,
             Err(CardManagementFailure::CardUnavailable)
@@ -1044,6 +1086,40 @@ mod tests {
         assert_eq!(
             map_pace_error::<&str>(&PaceError::Encoding),
             SecureChannelFailure::Bridge
+        );
+        assert_eq!(
+            map_pace_error::<&str>(&PaceError::NoSupportedSuite),
+            SecureChannelFailure::Transport
+        );
+        assert_eq!(
+            map_pace_error::<&str>(&PaceError::PasswordDeactivated),
+            SecureChannelFailure::Bridge
+        );
+    }
+
+    #[test]
+    fn maps_card_access_read_errors_onto_channel_failures() {
+        assert_eq!(
+            map_pace_error::<&str>(&PaceError::CardAccessRead(Pkcs15Error::Outcome(
+                TransportOutcome::ReaderRemoved
+            ))),
+            SecureChannelFailure::CardUnavailable
+        );
+        assert_eq!(
+            map_pace_error::<&str>(&PaceError::CardAccessRead(Pkcs15Error::Status(
+                StatusWord::FileNotFound
+            ))),
+            SecureChannelFailure::Transport
+        );
+        assert_eq!(
+            map_pace_error(&PaceError::CardAccessRead(Pkcs15Error::Transport(
+                "backend"
+            ))),
+            SecureChannelFailure::Transport
+        );
+        assert_eq!(
+            map_pace_error::<&str>(&PaceError::CardAccessRead(Pkcs15Error::Empty)),
+            SecureChannelFailure::Transport
         );
     }
 

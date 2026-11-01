@@ -465,7 +465,8 @@ internal class ContactlessSession(
         AppTrace.nfcSessionClosed()
     }
 
-    fun probeCredentialHealth(): CardManagementResult<CredentialHealth> {
+    /** The credential health, with the card's PIN and PUK lengths when [readPinLengths] asks for them. */
+    fun probeCredentialHealth(readPinLengths: Boolean): CardManagementResult<CredentialHealth> {
         checkOwnerThread()
         check(!isClosed) { "contactless session is closed" }
         if (!reconnect()) {
@@ -474,6 +475,7 @@ internal class ContactlessSession(
         val result =
             NativeCardManagement.contactlessProbeCredentialHealth(
                 can = can.copyOf(),
+                readPinLengths = readPinLengths,
                 exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
             )
         closeIsoDep()
