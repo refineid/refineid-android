@@ -57,6 +57,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -91,7 +92,6 @@ import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationPurpose
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
-import fi.refineid.android.core.NativePinReferenceScheme
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.QualifiedCardService
 import fi.refineid.android.diagnostics.AppTrace
@@ -217,8 +217,8 @@ internal fun MainScreen(
     var destination by rememberSaveable { mutableStateOf(MainDestination.HOME) }
 
     // A card awaiting activation shows the activation form in place of the
-    // home screen, as on the iPhone, from the first frame; a holder who
-    // leaves the form sees the home screen, whose identity row leads back.
+    // home screen, as on the iPhone; a holder who leaves the form sees the
+    // home screen, whose identity row leads back.
     var activationDismissed by rememberSaveable { mutableStateOf(false) }
     // The choice to leave the form is forgotten when the card's reading
     // stops saying activation, not on a first reading that has not said it
@@ -228,12 +228,43 @@ internal fun MainScreen(
         if (!isActivationRequired && activationWasRequired) activationDismissed = false
         activationWasRequired = isActivationRequired
     }
-    val shownDestination =
+    val wantedDestination =
         if (isActivationRequired && !activationDismissed && destination == MainDestination.HOME) {
             MainDestination.CARD_MANAGEMENT
         } else {
             destination
         }
+
+    // The card management screen's title and form depend on what the card
+    // is, so a readable card is asked first and the screen already shown
+    // stays until the card has answered; a screen already on display keeps
+    // itself while it asks.
+    val managementCardReady =
+        usbCardReady || nfcSnapshot.status == NfcReaderStatus.CARD_READY || isActivationRequired
+    val managementService =
+        if (usbCardReady || usbActivationRequired) cardManagementService else nfcCardManagementService
+    val healthReading =
+        remember(managementService, managementCardReady, isActivationRequired) { CardHealthReading() }
+    var cardManagementOnScreen by remember { mutableStateOf(false) }
+    val shownDestination =
+        if (wantedDestination == MainDestination.CARD_MANAGEMENT &&
+            !cardManagementOnScreen &&
+            cardManagementAwaitsReading(managementCardReady, healthReading)
+        ) {
+            MainDestination.HOME
+        } else {
+            wantedDestination
+        }
+    SideEffect { cardManagementOnScreen = shownDestination == MainDestination.CARD_MANAGEMENT }
+    LaunchedEffect(wantedDestination, healthReading, managementService) {
+        if (wantedDestination == MainDestination.CARD_MANAGEMENT &&
+            !cardManagementOnScreen &&
+            cardManagementAwaitsReading(managementCardReady, healthReading) &&
+            !healthReading.isProbing
+        ) {
+            managementService?.let(healthReading::probe)
+        }
+    }
 
     // Signing follows the one-transport rule: a wired reader signs on
     // its open session, while a contactless card is never assumed
@@ -310,6 +341,7 @@ internal fun MainScreen(
         rappPairingModel?.reset()
         validationUri = null
         if (isActivationRequired) activationDismissed = true
+        healthReading.forget()
         destination = MainDestination.HOME
     }
 
@@ -563,57 +595,54 @@ internal fun MainScreen(
         }
 
         MainDestination.CARD_MANAGEMENT -> {
-            var detectedNeedsActivation by remember { mutableStateOf(false) }
-            var detectedNumbering by remember { mutableStateOf<NativePinReferenceScheme?>(null) }
-            val effectiveActivationRequired = isActivationRequired || detectedNeedsActivation
+            // The title already shown stays while the card is asked again;
+            // before any answer there is none.
+            val decidedTitle = cardManagementTitle(healthReading.health)
+            var shownTitle by remember { mutableStateOf(decidedTitle) }
+            SideEffect { if (decidedTitle != null) shownTitle = decidedTitle }
             SubScreen(
                 title =
-                    stringResource(
-                        when {
-                            !effectiveActivationRequired -> {
-                                R.string.card_pins
-                            }
+                    when (decidedTitle ?: shownTitle) {
+                        null -> {
+                            ""
+                        }
 
-                            detectedNumbering == NativePinReferenceScheme.ORGANIZATIONAL -> {
-                                R.string.organisation_card_activation
-                            }
+                        CardManagementTitle.CARD_PINS -> {
+                            stringResource(R.string.card_pins)
+                        }
 
-                            else -> {
-                                R.string.identity_card_activation
-                            }
-                        },
-                    ),
+                        CardManagementTitle.IDENTITY_CARD_ACTIVATION -> {
+                            stringResource(
+                                R.string.identity_card_activation,
+                            )
+                        }
+
+                        CardManagementTitle.ORGANISATION_CARD_ACTIVATION -> {
+                            stringResource(
+                                R.string.organisation_card_activation,
+                            )
+                        }
+                    },
                 tag = "CardManagementScreen",
                 onBack = {
                     if (isActivationRequired) activationDismissed = true
+                    healthReading.forget()
                     destination = MainDestination.HOME
                 },
             ) {
                 CardManagementScreen(
-                    cardManagementService =
-                        if (usbCardReady || snapshot.status == ReaderConnectionStatus.ACTIVATION_REQUIRED) {
-                            cardManagementService
-                        } else {
-                            nfcCardManagementService
-                        },
+                    cardManagementService = managementService,
                     onConnectNfc = { can ->
                         onNfcConnect(can, null)
                     },
-                    isCardReady =
-                        usbCardReady || nfcSnapshot.status == NfcReaderStatus.CARD_READY || isActivationRequired,
-                    activationRequired = effectiveActivationRequired,
+                    isCardReady = managementCardReady,
+                    activationRequired = isActivationRequired,
                     pinCache = pinCache,
                     onPin1Changed = onPin1Changed,
                     onActivationSucceeded = {
-                        detectedNeedsActivation = false
                         destination = MainDestination.HOME
                     },
-                    onNeedsActivationChanged = { needs ->
-                        detectedNeedsActivation = needs
-                    },
-                    onNumberingRead = { numbering ->
-                        detectedNumbering = numbering
-                    },
+                    reading = healthReading,
                 )
             }
         }
