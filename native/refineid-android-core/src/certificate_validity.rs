@@ -12,27 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Which activation procedure a citizen card follows, read from its
-//! authentication certificate (FINEID S4-1 section 4.6).
-//!
-//! DVV defines the cutover by issue date alone, so the certificate's
-//! validity start is the one rule (`ActivationScheme::from_validity_start`);
-//! the issuance date is printed on the card for a human to check. The
-//! issuer common name refuses an organisational card before the date is
-//! applied, since section 4.6 covers citizen cards alone. A certificate
-//! whose validity start cannot be read answers nothing, and the caller
-//! makes no activation decision from it. This mirrors the Apple
-//! reference's `ActivationScheme.classify`.
+//! The validity start of the card's authentication certificate (RFC 5280
+//! section 4.1.2.5), the date input of the core's activation scheme
+//! decision (`ActivationScheme::from_numbering_and_validity_start`,
+//! FINEID S4-1 section 4.6). The core decides the scheme; this module only
+//! reads the date. A certificate whose validity start cannot be read
+//! answers nothing.
 
-use refineid_auth::ActivationScheme;
 use refineid_ber::{BerTlvAny, BerTlvIter};
 
 /// ASN.1 SEQUENCE (ITU-T X.690 section 8.9).
 const TAG_SEQUENCE: u16 = 0x30;
-/// ASN.1 SET (X.690 section 8.11).
-const TAG_SET: u16 = 0x31;
-/// ASN.1 OBJECT IDENTIFIER.
-const TAG_OID: u16 = 0x06;
 /// ASN.1 UTCTime (X.690 section 11.8): `YYMMDDHHMMSSZ`.
 const TAG_UTC_TIME: u16 = 0x17;
 /// ASN.1 GeneralizedTime (X.690 section 11.7): `YYYYMMDDHHMMSSZ`.
@@ -41,11 +31,6 @@ const TAG_GENERALIZED_TIME: u16 = 0x18;
 /// (RFC 5280 section 4.1).
 const TAG_VERSION_EXPLICIT: u16 = 0xA0;
 
-/// `id-at-commonName`, OID 2.5.4.3 (RFC 5280 appendix A).
-const OID_COMMON_NAME: [u8; 3] = [0x55, 0x04, 0x03];
-
-/// Common-name marker of DVV's organisational issuing CAs.
-const ORGANISATIONAL_ISSUER_MARKER: &str = "Organisational";
 /// Digits of a UTCTime up to and including the seconds.
 const UTC_TIME_DIGITS: usize = 12;
 /// Digits of a GeneralizedTime up to and including the seconds.
@@ -86,32 +71,10 @@ const MAX_HOUR: i64 = 23;
 const MAX_MINUTE: i64 = 59;
 const MAX_SECOND: i64 = 59;
 
-/// Classifies a citizen card's activation procedure from its
-/// authentication certificate, or answers nothing for a card whose
-/// procedure this code must not guess: an organisational card, or a
-/// certificate whose validity start cannot be read.
+/// The notBefore of `certificate_der` in UTC epoch seconds, or nothing
+/// when the certificate or its validity cannot be read.
 #[must_use]
-pub(crate) fn classify_activation_scheme(certificate_der: &[u8]) -> Option<ActivationScheme> {
-    let tbs = tbs_certificate(certificate_der)?;
-    if issuer_common_name(tbs.issuer)
-        .as_deref()
-        .is_some_and(|name| name.contains(ORGANISATIONAL_ISSUER_MARKER))
-    {
-        return None;
-    }
-    tbs.not_before_epoch_seconds
-        .map(ActivationScheme::from_validity_start)
-}
-
-/// The two TBSCertificate fields the classification consults.
-struct TbsFields<'a> {
-    issuer: &'a [u8],
-    not_before_epoch_seconds: Option<i64>,
-}
-
-/// Walks `Certificate ::= SEQUENCE { tbsCertificate, ... }` to the issuer
-/// and the validity start (RFC 5280 section 4.1).
-fn tbs_certificate(certificate_der: &[u8]) -> Option<TbsFields<'_>> {
+pub(crate) fn validity_start_epoch_seconds(certificate_der: &[u8]) -> Option<i64> {
     let certificate = sequence(certificate_der)?;
     let tbs = sequence(certificate.value())?;
     let mut fields = BerTlvIter::new(tbs.value());
@@ -126,18 +89,11 @@ fn tbs_certificate(certificate_der: &[u8]) -> Option<TbsFields<'_>> {
         return None;
     }
     let validity = next_field(&mut fields)?;
-    let not_before_epoch_seconds = if validity.tag() == TAG_SEQUENCE {
-        BerTlvIter::new(validity.value())
-            .next()
-            .and_then(Result::ok)
-            .and_then(|not_before| time_epoch_seconds(&not_before))
-    } else {
-        None
-    };
-    Some(TbsFields {
-        issuer: issuer.value(),
-        not_before_epoch_seconds,
-    })
+    if validity.tag() != TAG_SEQUENCE {
+        return None;
+    }
+    let not_before = BerTlvIter::new(validity.value()).next()?.ok()?;
+    time_epoch_seconds(&not_before)
 }
 
 fn sequence(bytes: &[u8]) -> Option<BerTlvAny<'_>> {
@@ -147,32 +103,6 @@ fn sequence(bytes: &[u8]) -> Option<BerTlvAny<'_>> {
 
 fn next_field<'a>(fields: &mut BerTlvIter<'a>) -> Option<BerTlvAny<'a>> {
     fields.next()?.ok()
-}
-
-/// The common name of `Name ::= SEQUENCE OF RelativeDistinguishedName`,
-/// where each RDN is a SET of `{ type OID, value }` pairs.
-fn issuer_common_name(name: &[u8]) -> Option<String> {
-    for rdn in BerTlvIter::new(name).flatten() {
-        if rdn.tag() != TAG_SET {
-            continue;
-        }
-        for attribute in BerTlvIter::new(rdn.value()).flatten() {
-            if attribute.tag() != TAG_SEQUENCE {
-                continue;
-            }
-            let mut parts = BerTlvIter::new(attribute.value());
-            let Some(Ok(attribute_type)) = parts.next() else {
-                continue;
-            };
-            let Some(Ok(attribute_value)) = parts.next() else {
-                continue;
-            };
-            if attribute_type.tag() == TAG_OID && attribute_type.value() == OID_COMMON_NAME {
-                return String::from_utf8(attribute_value.value().to_vec()).ok();
-            }
-        }
-    }
-    None
 }
 
 /// The UTC epoch seconds of a DER UTCTime or GeneralizedTime, or nothing
@@ -261,61 +191,67 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use refineid_auth::ActivationScheme;
     use refineid_ber::{BerEncoder, tlv};
 
     use super::{
-        OID_COMMON_NAME, SECONDS_PER_DAY, TAG_GENERALIZED_TIME, TAG_OID, TAG_SEQUENCE, TAG_SET,
-        TAG_UTC_TIME, TAG_VERSION_EXPLICIT, classify_activation_scheme, days_from_civil,
+        SECONDS_PER_DAY, TAG_GENERALIZED_TIME, TAG_SEQUENCE, TAG_UTC_TIME, TAG_VERSION_EXPLICIT,
+        days_from_civil, validity_start_epoch_seconds,
     };
 
-    /// ASN.1 INTEGER, NULL and PrintableString, used only to build fixtures.
+    /// ASN.1 tags used only to build fixtures (X.690).
     const TAG_INTEGER: u8 = 0x02;
-    const TAG_PRINTABLE_STRING: u8 = 0x13;
     const TAG_NULL: u8 = 0x05;
+    const TAG_OID: u8 = 0x06;
+    const TAG_PRINTABLE_STRING: u8 = 0x13;
+    const TAG_SET: u8 = 0x31;
+    /// `id-at-commonName`, OID 2.5.4.3 (RFC 5280 appendix A).
+    const OID_COMMON_NAME: [u8; 3] = [0x55, 0x04, 0x03];
+    /// TBSCertificate version v3, encoded as 2 (RFC 5280 section 4.1.2.1).
+    const VERSION_V3: u8 = 2;
+    /// A synthetic serial number.
+    const SERIAL_NUMBER: u8 = 1;
+    /// Room for one RDN attribute and for a validity pair.
+    const FIXTURE_CAPACITY: usize = 64;
     /// Days from 1970-01-01 to 2000-01-01: thirty years, seven of them leap.
     const DAYS_1970_TO_2000: i64 = 30 * 365 + 7;
-    /// 13 January 2026 00:00:00 UTC, the cutover the core pins.
+    /// 13 January 2026 00:00:00 UTC.
     const CUTOVER_EPOCH_SECONDS: i64 = 1_768_262_400;
+    const ONE_SECOND: i64 = 1;
 
-    /// Synthetic issuer names in the shape of DVV's, not DVV's own.
-    const CITIZEN_RSA_ISSUER: &str = "Test Citizen Certificates - G3R";
-    const CITIZEN_ECC_ISSUER: &str = "Test Citizen Certificates - G5E";
-    const ORGANISATIONAL_ISSUER: &str = "Test Organisational Certificates - G4R";
-    const UNFAMILIAR_ISSUER: &str = "Some Other CA";
+    /// A synthetic issuer name, not DVV's.
+    const ISSUER: &str = "Test Certificates - G0";
 
-    /// UTCTime values on either side of 13 January 2026 00:00:00 UTC.
+    /// UTCTime and GeneralizedTime values around 13 January 2026 00:00:00 UTC.
     const BEFORE_CUTOVER: &[u8] = b"260112235959Z";
     const AT_CUTOVER: &[u8] = b"260113000000Z";
-    const BEFORE_CUTOVER_GENERALIZED: &[u8] = b"20251201120000Z";
+    const AT_CUTOVER_GENERALIZED: &[u8] = b"20260113000000Z";
     const MALFORMED_TIME: &[u8] = b"2601AB000000Z";
+    const MISSING_ZULU: &[u8] = b"260113000000";
 
     fn tag8(tag: u16) -> u8 {
         u8::try_from(tag).expect("single-byte tag")
     }
 
-    fn certificate(issuer_common_name: &str, not_before_tag: u8, not_before: &[u8]) -> Vec<u8> {
+    fn certificate(not_before_tag: u8, not_before: &[u8]) -> Vec<u8> {
         let version = tlv(
             tag8(TAG_VERSION_EXPLICIT),
-            tlv(TAG_INTEGER, [2]).expect("integer"),
+            tlv(TAG_INTEGER, [VERSION_V3]).expect("integer"),
         )
         .expect("version");
-        let serial = tlv(TAG_INTEGER, [1]).expect("serial");
+        let serial = tlv(TAG_INTEGER, [SERIAL_NUMBER]).expect("serial");
         let algorithm = tlv(tag8(TAG_SEQUENCE), tlv(TAG_NULL, []).expect("null")).expect("alg");
         let attribute = {
-            let mut encoder = BerEncoder::with_capacity(64);
+            let mut encoder = BerEncoder::with_capacity(FIXTURE_CAPACITY);
+            encoder.push_tlv(TAG_OID, OID_COMMON_NAME).expect("oid");
             encoder
-                .push_tlv(tag8(TAG_OID), OID_COMMON_NAME)
-                .expect("oid");
-            encoder
-                .push_tlv(TAG_PRINTABLE_STRING, issuer_common_name.as_bytes())
+                .push_tlv(TAG_PRINTABLE_STRING, ISSUER.as_bytes())
                 .expect("cn");
             tlv(tag8(TAG_SEQUENCE), encoder.finish()).expect("attribute")
         };
-        let rdn = tlv(tag8(TAG_SET), attribute).expect("rdn");
+        let rdn = tlv(TAG_SET, attribute).expect("rdn");
         let issuer = tlv(tag8(TAG_SEQUENCE), rdn).expect("issuer");
         let validity = {
-            let mut encoder = BerEncoder::with_capacity(32);
+            let mut encoder = BerEncoder::with_capacity(FIXTURE_CAPACITY);
             encoder
                 .push_tlv(not_before_tag, not_before)
                 .expect("notBefore");
@@ -330,85 +266,47 @@ mod tests {
     }
 
     #[test]
-    fn the_validity_start_decides_the_scheme() {
+    fn the_validity_start_is_read_from_either_time_form() {
         assert_eq!(
-            classify_activation_scheme(&certificate(
-                CITIZEN_ECC_ISSUER,
-                tag8(TAG_UTC_TIME),
-                BEFORE_CUTOVER
-            )),
-            Some(ActivationScheme::ActivationCodeIsPuk)
+            validity_start_epoch_seconds(&certificate(tag8(TAG_UTC_TIME), AT_CUTOVER)),
+            Some(CUTOVER_EPOCH_SECONDS)
         );
         assert_eq!(
-            classify_activation_scheme(&certificate(
-                CITIZEN_RSA_ISSUER,
-                tag8(TAG_UTC_TIME),
-                AT_CUTOVER
-            )),
-            Some(ActivationScheme::PresetActivationPin)
+            validity_start_epoch_seconds(&certificate(tag8(TAG_UTC_TIME), BEFORE_CUTOVER)),
+            Some(CUTOVER_EPOCH_SECONDS - ONE_SECOND)
         );
         assert_eq!(
-            classify_activation_scheme(&certificate(
-                CITIZEN_RSA_ISSUER,
+            validity_start_epoch_seconds(&certificate(
                 tag8(TAG_GENERALIZED_TIME),
-                BEFORE_CUTOVER_GENERALIZED
+                AT_CUTOVER_GENERALIZED
             )),
-            Some(ActivationScheme::ActivationCodeIsPuk)
-        );
-    }
-
-    #[test]
-    fn an_organisational_issuer_is_refused_whatever_the_date() {
-        assert_eq!(
-            classify_activation_scheme(&certificate(
-                ORGANISATIONAL_ISSUER,
-                tag8(TAG_UTC_TIME),
-                AT_CUTOVER
-            )),
-            None
-        );
-    }
-
-    #[test]
-    fn an_ecc_issuer_before_the_cutover_takes_the_activation_code() {
-        assert_eq!(
-            classify_activation_scheme(&certificate(
-                CITIZEN_ECC_ISSUER,
-                tag8(TAG_UTC_TIME),
-                BEFORE_CUTOVER
-            )),
-            Some(ActivationScheme::ActivationCodeIsPuk)
-        );
-        assert_eq!(
-            classify_activation_scheme(&certificate(
-                CITIZEN_ECC_ISSUER,
-                tag8(TAG_GENERALIZED_TIME),
-                BEFORE_CUTOVER_GENERALIZED
-            )),
-            Some(ActivationScheme::ActivationCodeIsPuk)
+            Some(CUTOVER_EPOCH_SECONDS)
         );
     }
 
     #[test]
     fn an_unreadable_validity_start_answers_nothing() {
-        for issuer in [CITIZEN_RSA_ISSUER, CITIZEN_ECC_ISSUER, UNFAMILIAR_ISSUER] {
+        for time in [MALFORMED_TIME, MISSING_ZULU] {
             assert_eq!(
-                classify_activation_scheme(&certificate(
-                    issuer,
-                    tag8(TAG_UTC_TIME),
-                    MALFORMED_TIME
-                )),
+                validity_start_epoch_seconds(&certificate(tag8(TAG_UTC_TIME), time)),
                 None
             );
         }
+        assert_eq!(
+            validity_start_epoch_seconds(&certificate(tag8(TAG_SEQUENCE), AT_CUTOVER)),
+            None
+        );
     }
 
     #[test]
     fn malformed_and_truncated_certificates_answer_nothing() {
-        let whole = certificate(CITIZEN_RSA_ISSUER, tag8(TAG_UTC_TIME), AT_CUTOVER);
-        assert_eq!(classify_activation_scheme(&[]), None);
-        assert_eq!(classify_activation_scheme(&whole[..whole.len() / 2]), None);
-        assert_eq!(classify_activation_scheme(&whole[1..]), None);
+        let whole = certificate(tag8(TAG_UTC_TIME), AT_CUTOVER);
+        assert_eq!(validity_start_epoch_seconds(&[]), None);
+        assert_eq!(
+            validity_start_epoch_seconds(&whole[..whole.len() / 2]),
+            None
+        );
+        assert_eq!(validity_start_epoch_seconds(&whole[1..]), None);
     }
 
     #[test]

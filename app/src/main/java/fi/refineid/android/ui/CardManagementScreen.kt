@@ -69,6 +69,7 @@ import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativePin1State
 import fi.refineid.android.core.NativePin2State
+import fi.refineid.android.core.NativePinReferenceScheme
 
 private enum class ManagementTask {
     CHANGE_PIN1,
@@ -94,6 +95,7 @@ internal fun CardManagementScreen(
     activationRequired: Boolean = false,
     onActivationSucceeded: (() -> Unit)? = null,
     onNeedsActivationChanged: ((Boolean) -> Unit)? = null,
+    onNumberingRead: ((NativePinReferenceScheme) -> Unit)? = null,
 ) {
     var health by remember { mutableStateOf<CredentialHealth?>(null) }
     var isProbing by remember { mutableStateOf(false) }
@@ -144,6 +146,7 @@ internal fun CardManagementScreen(
                     health = result.value
                     val needsActivation = result.value.activationNeeds.any
                     onNeedsActivationChanged?.invoke(needsActivation)
+                    onNumberingRead?.invoke(result.value.scheme)
                     if (needsActivation) {
                         selectedTask = ManagementTask.ACTIVATE_CARD
                     } else if (result.value.pin1State is NativePin1State.Locked) {
@@ -548,7 +551,7 @@ internal fun CardManagementScreen(
                         pin1State = NativePin1State.Remaining(3),
                         pin2State = NativePin2State.Remaining(3),
                         pukState = NativePin1State.Remaining(3),
-                        scheme = fi.refineid.android.core.NativePinReferenceScheme.CITIZEN,
+                        scheme = NativePinReferenceScheme.CITIZEN,
                         activationScheme = CardManagementScheme.UNKNOWN,
                         activationNeeds =
                             fi.refineid.android.core.CardActivationNeeds(

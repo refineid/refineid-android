@@ -1,42 +1,54 @@
 package fi.refineid.android.diagnostics
 
+import fi.refineid.android.core.CardActivationNeeds
+import fi.refineid.android.core.CardManagementScheme
+import fi.refineid.android.core.CredentialHealth
+import fi.refineid.android.core.NativePin1State
+import fi.refineid.android.core.NativePin2State
+import fi.refineid.android.core.NativePinReferenceScheme
 import fi.refineid.android.core.PersonCardDetails
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DiagnosticsReportTest {
-    @Test
-    fun generationCutoverBoundaries() {
-        assertEquals(
-            "Older (PUK activation code, issued before 13.1.2026)",
-            cardGenerationLabel("12.1.2026"),
+    private fun health(
+        numbering: NativePinReferenceScheme,
+        scheme: CardManagementScheme,
+    ): CredentialHealth =
+        CredentialHealth(
+            pin1State = NativePin1State.Locked,
+            pin2State = NativePin2State.Locked,
+            pukState = NativePin1State.NoInformation,
+            scheme = numbering,
+            activationScheme = scheme,
+            activationNeeds = CardActivationNeeds(pin1 = true, pin2 = true),
         )
-        assertEquals(
-            "Newer (preset activation PIN, issued on/after 13.1.2026)",
-            cardGenerationLabel("13.1.2026"),
-        )
-        assertEquals(
-            "Newer (preset activation PIN, issued on/after 13.1.2026)",
-            cardGenerationLabel("14.1.2026"),
-        )
-    }
 
     @Test
-    fun generationMissingOrUnparseable() {
-        assertEquals(
-            "unknown (no issue date)",
-            cardGenerationLabel(null),
-        )
-        assertEquals(
-            "unknown (unparseable issue date)",
-            cardGenerationLabel("2026-01-14"),
-        )
-        assertEquals(
-            "unknown (unparseable issue date)",
-            cardGenerationLabel("not a date"),
-        )
+    fun reportsTheNativeNumberingAndScheme() {
+        val organization =
+            cardStatusText(
+                cardDetails = null,
+                credentialHealth = health(NativePinReferenceScheme.ORGANIZATIONAL, CardManagementScheme.PUK),
+            )
+        assertTrue(organization.contains("Numbering: organization (FINEID S4-2 section 4.2)"))
+        assertTrue(organization.contains("Activation scheme: activation code is the PUK (FINEID S4-1 section 4.6.1)"))
+
+        val citizen =
+            cardStatusText(
+                cardDetails = null,
+                credentialHealth = health(NativePinReferenceScheme.CITIZEN, CardManagementScheme.PRESET_PIN),
+            )
+        assertTrue(citizen.contains("Numbering: citizen (FINEID S1)"))
+        assertTrue(citizen.contains("Activation scheme: preset activation PIN (FINEID S4-1 section 4.6.2)"))
+
+        val undecided =
+            cardStatusText(
+                cardDetails = null,
+                credentialHealth = health(NativePinReferenceScheme.CITIZEN, CardManagementScheme.UNKNOWN),
+            )
+        assertTrue(undecided.contains("Activation scheme: none decided"))
     }
 
     @Test
@@ -51,23 +63,24 @@ class DiagnosticsReportTest {
                 signatureAlgorithm = "SHA384withECDSA",
             )
 
-        val status = cardStatusText(details)
+        val status = cardStatusText(details, credentialHealth = null)
 
         assertFalse(status.contains("Holder:"))
         assertFalse(status.contains("Valid:"))
         assertFalse(status.contains("Test Holder"))
         assertFalse(status.contains("14.1.2026"))
         assertFalse(status.contains("14.1.2031"))
-        assertTrue(status.contains("Newer (preset activation PIN, issued on/after 13.1.2026)"))
+        assertFalse(status.contains("Generation"))
         assertTrue(status.contains("Issuer: Test Issuer"))
     }
 
     @Test
-    fun cardStatusWithoutDetailsOmitsIdentity() {
-        val status = cardStatusText(null)
+    fun cardStatusWithoutDetailsOrProbeOmitsIdentity() {
+        val status = cardStatusText(cardDetails = null, credentialHealth = null)
 
         assertFalse(status.contains("Holder:"))
         assertFalse(status.contains("Valid:"))
-        assertTrue(status.contains("unknown (no issue date)"))
+        assertTrue(status.contains("Numbering: (not probed)"))
+        assertTrue(status.contains("Activation scheme: (not probed)"))
     }
 }

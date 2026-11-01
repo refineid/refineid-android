@@ -7,8 +7,8 @@ import fi.refineid.android.diagnostics.AppTrace
  *
  * Where [NativeContactlessCore] runs one PACE handshake per operation and
  * discards the channel, this surface runs PACE once at [connect] and holds
- * the live session on the reader-held field: [authenticateAndSignOnSession]
- * rebuilds that channel and signs without a second handshake, and [close]
+ * the live session on the reader-held field: the `OnSession` operations
+ * rebuild that channel and run without a second handshake, and [close]
  * drops the held keys. It suits a transport that keeps the RF field up for
  * the session's whole lifetime, such as a USB PICC reader.
  */
@@ -113,6 +113,129 @@ internal object NativeContactlessSession {
     }
 
     /**
+     * The EF.4332 read on the session a prior [connect] left open: no CAN,
+     * no PACE, only a re-select inside the retained channel.
+     */
+    fun readQualifiedCertificateOnSession(
+        exchange: NativeBlockExchange,
+    ): NativeCertificateReadResult<NativeQualifiedCertificate> {
+        val startedAt = AppTrace.nativeQualifiedCertificateReadStarted(NativeCardExchangeLevel.APDU)
+        val result =
+            if (!NativeCore.isLoaded) {
+                NativeCertificateReadResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR)
+            } else {
+                try {
+                    NativeCertificateReply.decode(
+                        reply = contactlessReadQualifiedCertificateOnSessionNative(callback = exchange),
+                        certificate = { profile, der ->
+                            NativeQualifiedCertificate(
+                                keyProfile = profile,
+                                ownedDer = der,
+                            )
+                        },
+                    )
+                } catch (_: LinkageError) {
+                    NativeCertificateReadResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR)
+                } catch (_: RuntimeException) {
+                    NativeCertificateReadResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR)
+                }
+            }
+        AppTrace.nativeQualifiedCertificateReadCompleted(
+            startedAt = startedAt,
+            result = result,
+        )
+        return result
+    }
+
+    /** The counter-safe PIN2 preflight on the session a prior [connect] left open. */
+    fun probePin2OnSession(exchange: NativeBlockExchange): NativePin2PreflightResult {
+        val startedAt = AppTrace.nativePin2StatusProbeStarted(NativeCardExchangeLevel.APDU)
+        val result =
+            if (!NativeCore.isLoaded) {
+                NativePin2PreflightResult.Failure(NativePin2PreflightFailure.BRIDGE_ERROR)
+            } else {
+                try {
+                    NativePin2PreflightReply.decode(
+                        contactlessProbePin2OnSessionNative(callback = exchange),
+                    )
+                } catch (_: LinkageError) {
+                    NativePin2PreflightResult.Failure(NativePin2PreflightFailure.BRIDGE_ERROR)
+                } catch (_: RuntimeException) {
+                    NativePin2PreflightResult.Failure(NativePin2PreflightFailure.BRIDGE_ERROR)
+                }
+            }
+        AppTrace.nativePin2StatusProbeCompleted(
+            startedAt = startedAt,
+            result = result,
+        )
+        return result
+    }
+
+    /**
+     * One qualified signature on the session a prior [connect] left open:
+     * the PIN2 preflight, VERIFY and signing inside the retained channel.
+     * The PIN transfers to exactly this call.
+     */
+    fun qualifiedSignInputOnSession(
+        algorithm: QualifiedSigningAlgorithm,
+        inputMode: QualifiedSigningInputMode,
+        pin2: Pin2Submission,
+        input: ByteArray,
+        expectedCertificate: NativeQualifiedCertificate,
+        exchange: NativeBlockExchange,
+    ): NativeQualifiedSignResult {
+        val startedAt =
+            AppTrace.nativeQualifiedSignStarted(
+                algorithm = algorithm,
+                contentLength = input.size,
+            )
+        val expectedDer =
+            if (algorithm.acceptsInputLength(inputMode, input.size)) {
+                try {
+                    expectedCertificate.copyDer()
+                } catch (_: IllegalStateException) {
+                    null
+                }
+            } else {
+                null
+            }
+        val result =
+            if (expectedDer == null) {
+                pin2.close()
+                NativeQualifiedSignResult.Failure(NativeQualifiedSignFailure.BRIDGE_ERROR)
+            } else {
+                try {
+                    pin2.consume { pinBytes ->
+                        if (!NativeCore.isLoaded) {
+                            NativeQualifiedSignResult.Failure(NativeQualifiedSignFailure.BRIDGE_ERROR)
+                        } else {
+                            NativeQualifiedSignReply.decode(
+                                contactlessQualifiedSignOnSessionNative(
+                                    algorithm = algorithm.requestWireValue(inputMode),
+                                    pin = pinBytes,
+                                    content = input,
+                                    expectedCertificate = expectedDer,
+                                    callback = exchange,
+                                ),
+                            )
+                        }
+                    }
+                } catch (_: LinkageError) {
+                    NativeQualifiedSignResult.Failure(NativeQualifiedSignFailure.BRIDGE_ERROR)
+                } catch (_: RuntimeException) {
+                    NativeQualifiedSignResult.Failure(NativeQualifiedSignFailure.BRIDGE_ERROR)
+                } finally {
+                    expectedDer.fill(0)
+                }
+            }
+        AppTrace.nativeQualifiedSignCompleted(
+            startedAt = startedAt,
+            result = result,
+        )
+        return result
+    }
+
+    /**
      * Drop the held contactless session and its keys. Best-effort: with no
      * native library there is nothing to clean, and a bridge fault leaves
      * the session to expire with the field.
@@ -141,6 +264,21 @@ internal object NativeContactlessSession {
         request: Int,
         pin: ByteArray,
         message: ByteArray,
+        callback: Any,
+    ): ByteArray
+
+    @JvmStatic
+    private external fun contactlessReadQualifiedCertificateOnSessionNative(callback: Any): ByteArray
+
+    @JvmStatic
+    private external fun contactlessProbePin2OnSessionNative(callback: Any): ByteArray
+
+    @JvmStatic
+    private external fun contactlessQualifiedSignOnSessionNative(
+        algorithm: Int,
+        pin: ByteArray,
+        content: ByteArray,
+        expectedCertificate: ByteArray,
         callback: Any,
     ): ByteArray
 

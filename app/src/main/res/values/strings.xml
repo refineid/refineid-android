@@ -72,7 +72,8 @@
     <string name="card_transport_usb">USB card</string>
     <string name="card_transport_nfc">Contactless card</string>
     <string name="card_switch_reader">Switch reader</string>
-    <string name="card_activation">Card activation</string>
+    <string name="identity_card_activation">Identity card activation</string>
+    <string name="organisation_card_activation">Organisation card activation</string>
     <string name="current_pin1">Current PIN 1</string>
     <string name="current_pin2">Current PIN 2</string>
     <string name="new_pin1">New PIN 1</string>

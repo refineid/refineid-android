@@ -91,6 +91,7 @@ import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationPurpose
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.NativePinReferenceScheme
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.QualifiedCardService
 import fi.refineid.android.diagnostics.AppTrace
@@ -563,11 +564,24 @@ internal fun MainScreen(
 
         MainDestination.CARD_MANAGEMENT -> {
             var detectedNeedsActivation by remember { mutableStateOf(false) }
+            var detectedNumbering by remember { mutableStateOf<NativePinReferenceScheme?>(null) }
             val effectiveActivationRequired = isActivationRequired || detectedNeedsActivation
             SubScreen(
                 title =
                     stringResource(
-                        if (effectiveActivationRequired) R.string.card_activation else R.string.card_pins,
+                        when {
+                            !effectiveActivationRequired -> {
+                                R.string.card_pins
+                            }
+
+                            detectedNumbering == NativePinReferenceScheme.ORGANIZATIONAL -> {
+                                R.string.organisation_card_activation
+                            }
+
+                            else -> {
+                                R.string.identity_card_activation
+                            }
+                        },
                     ),
                 tag = "CardManagementScreen",
                 onBack = {
@@ -596,6 +610,9 @@ internal fun MainScreen(
                     },
                     onNeedsActivationChanged = { needs ->
                         detectedNeedsActivation = needs
+                    },
+                    onNumberingRead = { numbering ->
+                        detectedNumbering = numbering
                     },
                 )
             }

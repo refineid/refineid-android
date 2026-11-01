@@ -5,6 +5,10 @@ import android.hardware.usb.UsbManager
 import android.nfc.NfcAdapter
 import android.os.Build
 import fi.refineid.android.BuildConfig
+import fi.refineid.android.core.CardManagementScheme
+import fi.refineid.android.core.CredentialHealth
+import fi.refineid.android.core.NativePinReferenceScheme
+import fi.refineid.android.core.ObservedCredentialHealth
 import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.usb.ReaderConnectionStatus
@@ -100,7 +104,7 @@ internal object DiagnosticsCollector {
                 }
             }.trimEnd()
 
-        val cardStatus = cardStatusText(cardDetails)
+        val cardStatus = cardStatusText(cardDetails, ObservedCredentialHealth.latest)
 
         return DiagnosticsSnapshot(
             appInfo = appInfo,
@@ -120,48 +124,33 @@ internal object DiagnosticsCollector {
 /**
  * Card and identity summary for diagnostics. Holder identity (name,
  * validity dates) is omitted: it identifies the holder without helping
- * a bug report. The generation bucket keeps the activation scheme
- * debuggable without leaking dates.
+ * a bug report. The numbering and the activation scheme are the ones the
+ * native core reported at the latest credential health probe.
  */
-internal fun cardStatusText(cardDetails: PersonCardDetails?): String =
+internal fun cardStatusText(
+    cardDetails: PersonCardDetails?,
+    credentialHealth: CredentialHealth?,
+): String =
     buildString {
         appendLine("Issuer: ${cardDetails?.issuer ?: "(none)"}")
-        appendLine("Generation: ${cardGenerationLabel(cardDetails?.issuedDate)}")
+        appendLine("Numbering: ${numberingLabel(credentialHealth)}")
+        appendLine("Activation scheme: ${activationSchemeLabel(credentialHealth)}")
         appendLine("Signature Algorithm: ${cardDetails?.signatureAlgorithm ?: "(unknown)"}")
     }.trimEnd()
 
-/**
- * Card generation from the authentication certificate's issued date
- * (FINEID S4-1 section 4.6; DVV cutover 13 January 2026). Cards issued
- * from that date use the preset activation PIN; older cards use the PUK
- * as the activation code. The date arrives formatted as d.M.yyyy.
- */
-internal fun cardGenerationLabel(issuedDate: String?): String {
-    if (issuedDate == null) return "unknown (no issue date)"
-    val parts = issuedDate.split(".")
-    if (parts.size != DATE_PART_COUNT) return "unknown (unparseable issue date)"
-    val day = parts[0].toIntOrNull()
-    val month = parts[1].toIntOrNull()
-    val year = parts[2].toIntOrNull()
-    if (day == null || month == null || year == null) return "unknown (unparseable issue date)"
-    val onOrAfterCutover =
-        year > CUTOVER_YEAR ||
-            (
-                year == CUTOVER_YEAR &&
-                    (
-                        month > CUTOVER_MONTH ||
-                            (month == CUTOVER_MONTH && day >= CUTOVER_DAY)
-                    )
-            )
-    val isNewer = onOrAfterCutover
-    return if (isNewer) {
-        "Newer (preset activation PIN, issued on/after 13.1.2026)"
-    } else {
-        "Older (PUK activation code, issued before 13.1.2026)"
+private fun numberingLabel(health: CredentialHealth?): String =
+    when (health?.scheme) {
+        null -> NOT_PROBED
+        NativePinReferenceScheme.CITIZEN -> "citizen (FINEID S1)"
+        NativePinReferenceScheme.ORGANIZATIONAL -> "organization (FINEID S4-2 section 4.2)"
     }
-}
 
-private const val DATE_PART_COUNT = 3
-private const val CUTOVER_YEAR = 2026
-private const val CUTOVER_MONTH = 1
-private const val CUTOVER_DAY = 13
+private fun activationSchemeLabel(health: CredentialHealth?): String =
+    when (health?.activationScheme) {
+        null -> NOT_PROBED
+        CardManagementScheme.PUK -> "activation code is the PUK (FINEID S4-1 section 4.6.1)"
+        CardManagementScheme.PRESET_PIN -> "preset activation PIN (FINEID S4-1 section 4.6.2)"
+        CardManagementScheme.UNKNOWN -> "none decided"
+    }
+
+private const val NOT_PROBED = "(not probed)"
