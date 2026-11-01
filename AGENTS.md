@@ -254,6 +254,13 @@ defect in an issue, a working rule in this file. This file states each
 rule in a line and points to the reading behind it; the readings live in
 `doc/`, not here.
 
+## Certificates and trust
+
+- Certificates come from the card, which carries its own, or, for external
+  ones (EU eIDAS), from trusted lists at runtime. No certificates or
+  fingerprints are shipped in the software.
+- No pinning or other trust policy is added without the owner's decision.
+
 ## Independent review
 
 - Before a pull request merges, review its diff independently with a model
