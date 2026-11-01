@@ -105,6 +105,7 @@
     <string name="pins_do_not_match">PINs do not match</string>
     <string name="pin1_length_hint">4–12 digits</string>
     <string name="pin2_length_hint">6–12 digits</string>
+    <string name="puk_length_hint">8–12 digits</string>
     <string name="activation_code_length_hint" tools:ignore="PluralsCandidate">%1$d digits</string>
     <string name="half_activated_pin1_needed">PIN 2 is already activated. Enter the activation PIN to activate PIN 1.</string>
     <string name="half_activated_pin2_needed">PIN 1 is already activated. Enter the activation PIN to activate PIN 2.</string>

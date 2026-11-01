@@ -77,7 +77,6 @@ pub(crate) fn map_auth_error<E>(error: AuthError<E>) -> CardManagementFailure {
             | TransportOutcome::CardReset
             | TransportOutcome::ProtocolDesync,
         ) => CardManagementFailure::TransportError,
-        AuthError::LengthUnsupported { .. } => CardManagementFailure::InvalidCredential,
         AuthError::RetryFloor(_) => CardManagementFailure::SafetyRefused,
         AuthError::Outcome(TransportOutcome::Response(_)) | AuthError::Command(_) => {
             CardManagementFailure::BridgeError
