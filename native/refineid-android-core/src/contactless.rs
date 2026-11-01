@@ -13,7 +13,7 @@ use std::sync::Mutex;
 
 use refineid_apdu::{CardTransport, TransportOutcome};
 use refineid_pace::{
-    Can, PaceError, PacePassword, PaceSession, SmTransport, UnvalidatedCan, read_card_access,
+    Can, OpenedByCan, PaceError, PaceSession, SmTransport, UnvalidatedCan, read_card_access,
     run_pace,
 };
 use refineid_pkcs15::{CertSlot, Pkcs15Error, Pkcs15Ops};
@@ -66,12 +66,12 @@ enum SecureChannelFailure {
 /// cheap PKCS#15 re-select. Dropping the field (close, card removed) clears
 /// the slot and the keys with it. One slot: the reader drives one card at a
 /// time, and a fresh connect supersedes whatever it held.
-static HELD_SESSION: Mutex<Option<PaceSession>> = Mutex::new(None);
+static HELD_SESSION: Mutex<Option<PaceSession<OpenedByCan>>> = Mutex::new(None);
 
 /// Adopt the live session for reuse by the next operation under the same
 /// field. A poisoned lock silently drops the session: the next operation
 /// finds no session and the holder reconnects, which is the safe outcome.
-fn store_held_session(session: PaceSession) {
+fn store_held_session(session: PaceSession<OpenedByCan>) {
     if let Ok(mut slot) = HELD_SESSION.lock() {
         *slot = Some(session);
     }
@@ -80,7 +80,7 @@ fn store_held_session(session: PaceSession) {
 /// Take the live session, leaving the slot empty. The caller either rebuilds
 /// the channel and stores the advanced session back, or lets it drop and the
 /// keys with it.
-fn take_held_session() -> Option<PaceSession> {
+fn take_held_session() -> Option<PaceSession<OpenedByCan>> {
     HELD_SESSION.lock().ok().and_then(|mut slot| slot.take())
 }
 
@@ -360,7 +360,7 @@ pub(crate) fn contactless_verify_pin1_on_session<Exchange: SingleBlockExchange>(
 /// Serve the qualified-certificate read across the PACE secure channel.
 /// Secure messaging is itself a card transport, so the reviewed
 /// EF.4332 read runs unchanged above it, exactly as on the wired path.
-impl<T: CardTransport> QualifiedCertificateSource for SmTransport<T> {
+impl<T: CardTransport> QualifiedCertificateSource for SmTransport<T, OpenedByCan> {
     fn read_qualified_certificate_for_signing(
         &mut self,
     ) -> Result<CardCertificate, CertificateReadFailure> {
@@ -477,13 +477,13 @@ pub(crate) enum ManagedPin {
 /// An open contactless channel, selected on the PKCS#15 application, and
 /// whether its session is kept after the operation.
 struct OpenContactlessChannel<Exchange: SingleBlockExchange> {
-    secure: SmTransport<AndroidCardTransport<Exchange>>,
+    secure: SmTransport<AndroidCardTransport<Exchange>, OpenedByCan>,
     keeps_session: bool,
 }
 
 /// The error of the secure-messaging transport over the Android exchange.
 type SecureTransportError<Exchange> =
-    <SmTransport<AndroidCardTransport<Exchange>> as CardTransport>::Error;
+    <SmTransport<AndroidCardTransport<Exchange>, OpenedByCan> as CardTransport>::Error;
 
 /// Why a contactless channel did not open; each operation maps it onto
 /// its own failure vocabulary.
@@ -663,7 +663,10 @@ pub(crate) fn contactless_activate_card<Exchange: SingleBlockExchange>(
 fn open_secure_channel<Exchange: SingleBlockExchange>(
     mut transport: AndroidCardTransport<Exchange>,
     can_bytes: Vec<u8>,
-) -> Result<SmTransport<AndroidCardTransport<Exchange>>, (Exchange, SecureChannelFailure)> {
+) -> Result<
+    SmTransport<AndroidCardTransport<Exchange>, OpenedByCan>,
+    (Exchange, SecureChannelFailure),
+> {
     let Some(can) = reconstruct_can(can_bytes) else {
         return Err((transport.into_exchange(), SecureChannelFailure::Bridge));
     };
@@ -673,9 +676,9 @@ fn open_secure_channel<Exchange: SingleBlockExchange>(
     // The PACE suite and its domain parameter come from EF.CardAccess in
     // the master file, read in plain before the handshake. An
     // organization card authenticating PACE with a PIN would pass
-    // `PacePassword::Pin1` or `PacePassword::Pin2` here instead of the CAN.
+    // a `Pin1` or `Pin2` here instead of the CAN.
     let handshake = read_card_access(&mut transport)
-        .and_then(|card_access| run_pace(&mut transport, &card_access, PacePassword::Can(&can)));
+        .and_then(|card_access| run_pace(&mut transport, &card_access, &can));
     match handshake {
         Ok(session) => Ok(SmTransport::new(transport, session)),
         Err(error) => {
