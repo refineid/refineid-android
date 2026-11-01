@@ -148,6 +148,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
 dependencies = [
  "hybrid-array",
+ "zeroize",
 ]
 
 [[package]]
@@ -383,6 +384,7 @@ dependencies = [
  "const-oid",
  "crypto-common 0.2.2",
  "ctutils",
+ "zeroize",
 ]
 
 [[package]]
@@ -659,7 +661,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 [[package]]
 name = "refineid-rapp"
 version = "26.11.1"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#c9873ddff8d37a733b1000bba093b233309acbeb"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#771ec5d01b76a1ff51740477fb5ca411e5bf2309"
 dependencies = [
  "chacha20poly1305",
  "curve25519-dalek",

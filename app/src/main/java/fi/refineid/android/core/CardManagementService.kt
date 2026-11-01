@@ -1,6 +1,7 @@
 package fi.refineid.android.core
 
 internal interface CardManagementService {
+    /** The credential health with the card's PIN and PUK lengths, read where PINs are set. */
     fun probeCredentialHealth(onResult: (CardManagementResult<CredentialHealth>) -> Unit)
 
     fun changePin1(

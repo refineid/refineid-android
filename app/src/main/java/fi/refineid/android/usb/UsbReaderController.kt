@@ -591,7 +591,7 @@ internal class UsbReaderController(
                     is NativeContactlessOpenResult.ActivationRequired -> null
                     is NativeContactlessOpenResult.Failure -> null
                 }
-            val holderNameFromCert = certificate?.let(CertificateHolderName::fromCertificate)
+            val holderNameFromCert = certificate?.let(CertificateHolderName::lineFromCertificate)
             var cardDetails: PersonCardDetails? = null
             val holder =
                 if (certificate != null) {
@@ -802,7 +802,7 @@ internal class UsbReaderController(
                     val cert = result.session.copyAuthenticationCertificate()
                     try {
                         cardDetails = PersonCardDetails.fromDer(cert.copyDer())
-                        holder = cardDetails?.holderName ?: CertificateHolderName.fromCertificate(cert)
+                        holder = cardDetails?.holderName ?: CertificateHolderName.lineFromCertificate(cert)
                     } finally {
                         cert.close()
                     }
@@ -822,7 +822,7 @@ internal class UsbReaderController(
                     val cert = result.session.copyAuthenticationCertificate()
                     try {
                         cardDetails = PersonCardDetails.fromDer(cert.copyDer())
-                        holder = cardDetails?.holderName ?: CertificateHolderName.fromCertificate(cert)
+                        holder = cardDetails?.holderName ?: CertificateHolderName.lineFromCertificate(cert)
                     } finally {
                         cert.close()
                     }

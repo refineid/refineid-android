@@ -774,15 +774,16 @@ internal class CcidUsbSession(
     // takes the plain exchange. A PIN-bearing command on the held channel
     // leaves the open's PIN 1 count unknown.
 
-    fun probeCredentialHealth(): CardManagementResult<CredentialHealth> {
+    /** The credential health, with the card's PIN and PUK lengths when [readPinLengths] asks for them. */
+    fun probeCredentialHealth(readPinLengths: Boolean): CardManagementResult<CredentialHealth> {
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
         }
         return if (contactlessSessionActive) {
-            NativeCardManagement.contactlessProbeCredentialHealthOnSession(nativeExchange)
+            NativeCardManagement.contactlessProbeCredentialHealthOnSession(readPinLengths, nativeExchange)
         } else {
-            NativeCardManagement.probeCredentialHealth(exchangeLevel, nativeExchange)
+            NativeCardManagement.probeCredentialHealth(exchangeLevel, readPinLengths, nativeExchange)
         }
     }
 
@@ -1188,7 +1189,7 @@ internal class CcidUsbSessionOpener(
      * identity is cached: a card awaiting activation has no identity.
      */
     private fun awaitsActivation(session: CcidUsbSession): Boolean {
-        val healthResult = session.probeCredentialHealth()
+        val healthResult = session.probeCredentialHealth(readPinLengths = false)
         if (healthResult !is fi.refineid.android.core.CardManagementResult.Success) {
             return false
         }

@@ -30,7 +30,7 @@ internal class NfcCardManagementService(
                 val result =
                     if (generation == currentGeneration()) {
                         try {
-                            activeSession()?.probeCredentialHealth()
+                            activeSession()?.probeCredentialHealth(readPinLengths = true)
                                 ?: CardManagementResult.Failure(CardManagementFailure.CARD_UNAVAILABLE)
                         } catch (_: RuntimeException) {
                             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)

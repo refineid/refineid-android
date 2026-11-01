@@ -148,7 +148,7 @@ private fun numberingLabel(health: CredentialHealth?): String =
 private fun activationSchemeLabel(health: CredentialHealth?): String =
     when (health?.activationScheme) {
         null -> NOT_PROBED
-        CardManagementScheme.PUK -> "activation code is the PUK (FINEID S4-1 section 4.6.1)"
+        CardManagementScheme.PUK -> "activation PIN is the PUK (FINEID S4-1 section 4.6.1)"
         CardManagementScheme.PRESET_PIN -> "preset activation PIN (FINEID S4-1 section 4.6.2)"
         CardManagementScheme.UNKNOWN -> "none decided"
     }

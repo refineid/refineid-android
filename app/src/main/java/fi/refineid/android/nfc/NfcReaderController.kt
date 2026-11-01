@@ -906,7 +906,7 @@ internal class NfcReaderController(
                 is NativeContactlessOpenResult.ActivationRequired -> null
                 is NativeContactlessOpenResult.Failure -> null
             }
-        val holderNameFromCert = certificate?.let(CertificateHolderName::fromCertificate)
+        val holderNameFromCert = certificate?.let(CertificateHolderName::lineFromCertificate)
         val cardDetails: PersonCardDetails? =
             certificate?.let { cert ->
                 try {

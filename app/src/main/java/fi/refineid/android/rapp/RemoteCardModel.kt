@@ -161,7 +161,7 @@ internal class RemoteCardModel(
                 if (certificate != null) {
                     val certDer = certificate.toWire()
                     setCertificateDer(certDer)
-                    val name = CertificateHolderName.fromDer(certDer)
+                    val name = CertificateHolderName.lineFromDer(certDer)
                     if (name != null) {
                         _holderName.value = name
                         _cardDetails.value =

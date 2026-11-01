@@ -20,7 +20,7 @@ internal enum class CardManagementScheme(
     PRESET_PIN(PRESET_ACTIVATION_PIN_DIGIT_COUNT),
 }
 
-/** Digits of the activation code, the PUK, under section 4.6.1. */
+/** Digits of the activation PIN, the PUK, under section 4.6.1. */
 private const val ACTIVATION_CODE_DIGIT_COUNT = 8
 
 /** Digits of the preset activation PIN under section 4.6.2. */
@@ -57,7 +57,36 @@ internal data class CredentialHealth(
     val scheme: NativePinReferenceScheme,
     val activationScheme: CardManagementScheme,
     val activationNeeds: CardActivationNeeds,
+    val pinLengths: CardPinLengths? = null,
 )
+
+/**
+ * The digit counts the card accepts for PIN 1, PIN 2 and the PUK, as the
+ * native core reads them where PINs are set: the card's EF.AOD, then the
+ * citizen PIN policy, then the FINEID bounds. An empty range is a
+ * credential for which the card accepts no length.
+ */
+internal data class CardPinLengths(
+    val pin1: IntRange,
+    val pin2: IntRange,
+    val puk: IntRange,
+) {
+    companion object {
+        /** The FINEID bounds (FINEID S4-1 v4.2 sections 4.1 and 8.1.5), before the card has listed its own. */
+        val FINEID =
+            CardPinLengths(
+                pin1 = FINEID_PIN1_MIN_LENGTH..PIN_MAX_LENGTH,
+                pin2 = FINEID_PIN2_MIN_LENGTH..PIN_MAX_LENGTH,
+                puk = PUK_MIN_LENGTH..PUK_MAX_LENGTH,
+            )
+    }
+}
+
+private const val FINEID_PIN1_MIN_LENGTH = 4
+private const val FINEID_PIN2_MIN_LENGTH = 6
+private const val PIN_MAX_LENGTH = 12
+private const val PUK_MIN_LENGTH = 8
+private const val PUK_MAX_LENGTH = 12
 
 internal sealed interface ManageOutcome {
     data object Succeeded : ManageOutcome
@@ -128,6 +157,14 @@ private const val ACTIVATION_NEEDS_PIN2_ONLY = 2
 private const val ACTIVATION_NEEDS_BOTH = 3
 
 private const val HEALTH_REPLY_LENGTH = 10
+private const val HEALTH_REPLY_WITH_LENGTHS_LENGTH = 16
+private const val HEALTH_PIN1_MIN_OFFSET = 10
+private const val HEALTH_PIN1_MAX_OFFSET = 11
+private const val HEALTH_PIN2_MIN_OFFSET = 12
+private const val HEALTH_PIN2_MAX_OFFSET = 13
+private const val HEALTH_PUK_MIN_OFFSET = 14
+private const val HEALTH_PUK_MAX_OFFSET = 15
+private const val OCTET_MASK = 0xFF
 private const val OUTCOME_REPLY_LENGTH = 4
 private const val ACTIVATION_REPLY_LENGTH = 6
 
@@ -135,17 +172,19 @@ internal object NativeCardManagement {
     /**
      * The credential health, with the activation scheme the native core
      * decides from the card's numbering and its authentication
-     * certificate's validity start.
+     * certificate's validity start, and the card's PIN and PUK lengths when
+     * [readPinLengths] asks for them: only where PINs are set.
      */
     fun probeCredentialHealth(
         exchangeLevel: NativeCardExchangeLevel,
+        readPinLengths: Boolean,
         exchange: NativeBlockExchange,
     ): CardManagementResult<CredentialHealth> {
         if (!NativeCore.isLoaded) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
         return try {
-            val reply = probeCredentialHealthNative(exchangeLevel.wireValue, exchange)
+            val reply = probeCredentialHealthNative(exchangeLevel.wireValue, readPinLengths, exchange)
             decodeCredentialHealth(reply).also(ObservedCredentialHealth::record)
         } catch (_: Throwable) {
             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
@@ -250,13 +289,14 @@ internal object NativeCardManagement {
     // Contactless operations
     fun contactlessProbeCredentialHealth(
         can: ByteArray,
+        readPinLengths: Boolean,
         exchange: NativeBlockExchange,
     ): CardManagementResult<CredentialHealth> {
         if (!NativeCore.isLoaded) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
         return try {
-            val reply = contactlessProbeCredentialHealthNative(can, exchange)
+            val reply = contactlessProbeCredentialHealthNative(can, readPinLengths, exchange)
             decodeCredentialHealth(reply).also(ObservedCredentialHealth::record)
         } catch (_: Throwable) {
             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
@@ -363,13 +403,14 @@ internal object NativeCardManagement {
     // second PACE. A card opened under PACE refuses plain commands, so a
     // reader holding that session sends management through these.
     fun contactlessProbeCredentialHealthOnSession(
+        readPinLengths: Boolean,
         exchange: NativeBlockExchange,
     ): CardManagementResult<CredentialHealth> {
         if (!NativeCore.isLoaded) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
         return try {
-            val reply = contactlessProbeCredentialHealthOnSessionNative(exchange)
+            val reply = contactlessProbeCredentialHealthOnSessionNative(readPinLengths, exchange)
             decodeCredentialHealth(reply).also(ObservedCredentialHealth::record)
         } catch (_: Throwable) {
             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
@@ -474,7 +515,7 @@ internal object NativeCardManagement {
         }
         return when (val tag = reply[0].toInt()) {
             MANAGEMENT_TAG_SUCCEEDED -> {
-                if (reply.size != HEALTH_REPLY_LENGTH) {
+                if (reply.size != HEALTH_REPLY_LENGTH && reply.size != HEALTH_REPLY_WITH_LENGTHS_LENGTH) {
                     CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
                 } else {
                     val p1State = parsePin1State(reply[1].toInt(), reply[2].toInt())
@@ -496,6 +537,7 @@ internal object NativeCardManagement {
                             scheme = scheme,
                             activationScheme = actScheme,
                             activationNeeds = needs,
+                            pinLengths = decodePinLengths(reply),
                         ),
                     )
                 }
@@ -505,6 +547,24 @@ internal object NativeCardManagement {
                 CardManagementResult.Failure(mapFailureTag(tag))
             }
         }
+    }
+
+    private fun decodePinLengths(reply: ByteArray): CardPinLengths? {
+        if (reply.size != HEALTH_REPLY_WITH_LENGTHS_LENGTH) return null
+
+        fun range(
+            minOffset: Int,
+            maxOffset: Int,
+        ): IntRange {
+            val min = reply[minOffset].toInt() and OCTET_MASK
+            val max = reply[maxOffset].toInt() and OCTET_MASK
+            return if (min == 0) IntRange.EMPTY else min..max
+        }
+        return CardPinLengths(
+            pin1 = range(HEALTH_PIN1_MIN_OFFSET, HEALTH_PIN1_MAX_OFFSET),
+            pin2 = range(HEALTH_PIN2_MIN_OFFSET, HEALTH_PIN2_MAX_OFFSET),
+            puk = range(HEALTH_PUK_MIN_OFFSET, HEALTH_PUK_MAX_OFFSET),
+        )
     }
 
     private fun decodeManageOutcome(reply: ByteArray): CardManagementResult<ManageOutcome> {
@@ -623,6 +683,7 @@ internal object NativeCardManagement {
     @JvmStatic
     private external fun probeCredentialHealthNative(
         exchangeLevel: Int,
+        readPinLengths: Boolean,
         callback: Any,
     ): ByteArray
 
@@ -671,6 +732,7 @@ internal object NativeCardManagement {
     @JvmStatic
     private external fun contactlessProbeCredentialHealthNative(
         can: ByteArray,
+        readPinLengths: Boolean,
         callback: Any,
     ): ByteArray
 
@@ -707,7 +769,10 @@ internal object NativeCardManagement {
     ): ByteArray
 
     @JvmStatic
-    private external fun contactlessProbeCredentialHealthOnSessionNative(callback: Any): ByteArray
+    private external fun contactlessProbeCredentialHealthOnSessionNative(
+        readPinLengths: Boolean,
+        callback: Any,
+    ): ByteArray
 
     @JvmStatic
     private external fun contactlessChangePin1OnSessionNative(

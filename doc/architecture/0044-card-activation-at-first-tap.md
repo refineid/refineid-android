@@ -11,7 +11,7 @@ inside the one PACE session that reads the certificate, and routed to the
 activation form before anything else, on a phone and on a reader alike.
 
 FINEID S4-1 v4.2 section 4.6 defines two procedures. Under section 4.6.1
-both PINs ship blocked, and the eight-digit activation code is the PUK: a
+both PINs ship blocked, and the eight-digit activation PIN is the PUK: a
 RESET RETRY COUNTER sets each new PIN. Under section 4.6.2 both PINs ship
 set to one seven-digit preset activation PIN: a CHANGE REFERENCE DATA sets
 each new PIN. The card enforces the entry length itself, and a wrong
@@ -55,7 +55,7 @@ PIN is changed. The rules are recorded in refineid-core's
   else, with the management reply's vocabulary; Kotlin refuses a reply with
   no scheme, no needs, or any other shape. Card management derives the entry
   length from the scheme and never submits an activation for a scheme it
-  does not know, and the native side refuses the same. The activation code
+  does not know, and the native side refuses the same. The activation PIN
   is validated against the scheme and carries it to the core's
   `activate_card`, which sends that scheme's commands.
 - **Management stays inside the secure channel.** A card opened under PACE
@@ -77,6 +77,11 @@ PIN is changed. The rules are recorded in refineid-core's
   activated one: the holder types it once, and a mismatch on a later tap
   forgets it as for any card. Whatever an earlier card left in memory or
   in the store, a name or a certificate, goes with it.
+- **One name for the entry.** The credential in DVV's activation letter
+  takes DVV's official name from the letters, under both procedures:
+  "Activation PIN", Finnish "Aktivointitunnusluku", Swedish
+  "Aktiveringskod" (definite "aktiveringskoden"). "Activation code" is
+  not used, on screen or in the diagnostics report.
 - **Signing waits for an identity.** The home screen offers document
   signing only with an identity read from an activated card.
 - **Every build.** Activation is in release builds as in debug builds.

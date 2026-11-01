@@ -36,7 +36,7 @@ internal class UsbCardManagementService(
                 val result =
                     if (isCurrentGeneration(generation)) {
                         try {
-                            activeSession()?.probeCredentialHealth()
+                            activeSession()?.probeCredentialHealth(readPinLengths = true)
                                 ?: CardManagementResult.Failure(CardManagementFailure.CARD_UNAVAILABLE)
                         } catch (_: IllegalStateException) {
                             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)

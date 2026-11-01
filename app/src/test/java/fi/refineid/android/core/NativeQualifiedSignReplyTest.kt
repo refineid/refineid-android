@@ -171,7 +171,7 @@ class NativeQualifiedSignReplyTest {
     }
 
     @Test
-    fun pin2PredicatesEnforceTheSixThroughTwelveDigitRange() {
+    fun pin2PredicatesEnforceTheFourThroughTwelveDigitRange() {
         assertTrue(Pin2Submission.acceptsEntry(TOO_SHORT_PIN2_TEXT))
         assertFalse(Pin2Submission.isComplete(TOO_SHORT_PIN2_TEXT))
         assertTrue(Pin2Submission.isComplete(SYNTHETIC_PIN2_TEXT))
@@ -208,7 +208,7 @@ class NativeQualifiedSignReplyTest {
 
     private companion object {
         const val SYNTHETIC_PIN2_TEXT = "135790"
-        const val TOO_SHORT_PIN2_TEXT = "12345"
+        const val TOO_SHORT_PIN2_TEXT = "123"
         const val NON_DIGIT_PIN2_TEXT = "12345a"
         const val OVERLENGTH_PIN2_TEXT = "0123456789012"
         const val SYNTHETIC_SIGNATURE_BYTE: Byte = 0x5A

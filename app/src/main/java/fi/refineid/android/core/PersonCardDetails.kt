@@ -79,7 +79,7 @@ internal data class PersonCardDetails(
                     }
 
                 PersonCardDetails(
-                    holderName = formattedName,
+                    holderName = CertificateHolderName.lineFromSubject(x509.subjectX500Principal) ?: formattedName,
                     fullName = formattedName,
                     identifier = idToken,
                     dateOfBirth = null,
