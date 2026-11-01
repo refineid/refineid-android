@@ -4,6 +4,7 @@ buildscript {
         resolutionStrategy {
             force(
                 "org.bitbucket.b_c:jose4j:0.9.6",
+                "com.google.guava:guava:33.7.2-jre",
                 "org.apache.httpcomponents:httpclient:4.5.14",
                 "org.apache.commons:commons-lang3:3.20.0",
                 "org.bouncycastle:bcprov-jdk18on:1.85.2",
@@ -27,6 +28,7 @@ allprojects {
     configurations.matching { !it.name.contains("detekt", ignoreCase = true) }.all {
         resolutionStrategy {
             force(
+                "com.google.guava:guava:33.7.2-jre",
                 "org.apache.httpcomponents:httpclient:4.5.14",
                 "org.apache.commons:commons-lang3:3.20.0",
                 "org.bouncycastle:bcprov-jdk18on:1.85.2",
