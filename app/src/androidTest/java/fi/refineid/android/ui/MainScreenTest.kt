@@ -8,20 +8,35 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import fi.refineid.android.R
+import fi.refineid.android.core.ActivationReport
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.AuthenticationSignFailure
 import fi.refineid.android.core.AuthenticationSignResult
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.CardActivationNeeds
+import fi.refineid.android.core.CardManagementFailure
+import fi.refineid.android.core.CardManagementResult
+import fi.refineid.android.core.CardManagementScheme
+import fi.refineid.android.core.CardManagementService
+import fi.refineid.android.core.CredentialHealth
+import fi.refineid.android.core.FINEID_PIN_TRY_LIMIT
+import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.NativeCertificateReadResult
+import fi.refineid.android.core.NativePin1State
 import fi.refineid.android.core.NativePin2PreflightResult
+import fi.refineid.android.core.NativePin2State
+import fi.refineid.android.core.NativePinReferenceScheme
 import fi.refineid.android.core.NativeQualifiedCertificate
 import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.core.Pin1Submission
@@ -84,6 +99,7 @@ internal class MainScreenTest {
 
     @Test
     fun activationRequiredReaderOpensActivationInPlaceOfHome() {
+        val management = HeldCardManagementService()
         show(
             snapshot =
                 UsbReaderSnapshot(
@@ -92,11 +108,25 @@ internal class MainScreenTest {
                     holderName = SYNTHETIC_HOLDER_NAME,
                 ),
             browserCardService = INERT_BROWSER_CARD_SERVICE,
+            cardManagementService = management,
         )
 
         composeRule
             .onNodeWithTag("CardManagementScreen")
+            .assertDoesNotExist()
+
+        composeRule.runOnIdle { management.answer(ORGANIZATION_CARD_AWAITING_ACTIVATION) }
+
+        composeRule
+            .onNodeWithTag("CardManagementScreen")
             .assertIsDisplayed()
+        composeRule
+            .onNodeWithText(
+                InstrumentationRegistry
+                    .getInstrumentation()
+                    .targetContext
+                    .getString(R.string.organisation_card_activation),
+            ).assertIsDisplayed()
 
         composeRule
             .onNodeWithTag(UiAutomationIds.BROWSER_ACTION)
@@ -419,6 +449,7 @@ internal class MainScreenTest {
         onRequestPermission: () -> Unit = {},
         onReaderConnect: (CanSubmission) -> Unit = {},
         browserCardService: AuthenticationCardService? = null,
+        cardManagementService: CardManagementService? = null,
     ) {
         composeRule.setContent {
             RefineIdTheme {
@@ -427,6 +458,7 @@ internal class MainScreenTest {
                     onRequestPermission = onRequestPermission,
                     onReaderConnect = onReaderConnect,
                     browserCardService = browserCardService,
+                    cardManagementService = cardManagementService,
                 )
             }
         }
@@ -450,7 +482,63 @@ internal class MainScreenTest {
         }
     }
 
+    /** Holds each credential probe until the test answers it. */
+    private class HeldCardManagementService : CardManagementService {
+        private var pending: ((CardManagementResult<CredentialHealth>) -> Unit)? = null
+
+        fun answer(health: CredentialHealth) {
+            pending?.invoke(CardManagementResult.Success(health))
+            pending = null
+        }
+
+        override fun probeCredentialHealth(onResult: (CardManagementResult<CredentialHealth>) -> Unit) {
+            pending = onResult
+        }
+
+        override fun changePin1(
+            currentPin: ByteArray,
+            newPin: ByteArray,
+            onResult: (CardManagementResult<ManageOutcome>) -> Unit,
+        ) = onResult(CardManagementResult.Failure(CardManagementFailure.CARD_UNAVAILABLE))
+
+        override fun changePin2(
+            currentPin: ByteArray,
+            newPin: ByteArray,
+            onResult: (CardManagementResult<ManageOutcome>) -> Unit,
+        ) = onResult(CardManagementResult.Failure(CardManagementFailure.CARD_UNAVAILABLE))
+
+        override fun unblockPin1(
+            puk: ByteArray,
+            newPin: ByteArray,
+            onResult: (CardManagementResult<ManageOutcome>) -> Unit,
+        ) = onResult(CardManagementResult.Failure(CardManagementFailure.CARD_UNAVAILABLE))
+
+        override fun unblockPin2(
+            puk: ByteArray,
+            newPin: ByteArray,
+            onResult: (CardManagementResult<ManageOutcome>) -> Unit,
+        ) = onResult(CardManagementResult.Failure(CardManagementFailure.CARD_UNAVAILABLE))
+
+        override fun activateCard(
+            scheme: CardManagementScheme,
+            code: ByteArray,
+            newPin1: ByteArray?,
+            newPin2: ByteArray?,
+            onResult: (CardManagementResult<ActivationReport>) -> Unit,
+        ) = onResult(CardManagementResult.Failure(CardManagementFailure.CARD_UNAVAILABLE))
+    }
+
     private companion object {
+        val ORGANIZATION_CARD_AWAITING_ACTIVATION =
+            CredentialHealth(
+                pin1State = NativePin1State.Remaining(FINEID_PIN_TRY_LIMIT),
+                pin2State = NativePin2State.Remaining(FINEID_PIN_TRY_LIMIT),
+                pukState = NativePin1State.Remaining(FINEID_PIN_TRY_LIMIT),
+                scheme = NativePinReferenceScheme.ORGANIZATIONAL,
+                activationScheme = CardManagementScheme.PUK,
+                activationNeeds = CardActivationNeeds(pin1 = true, pin2 = true),
+            )
+
         const val SYNTHETIC_HOLDER_NAME = "MEIKALAINEN MATTI SAKARI"
         const val EXPECTED_PERMISSION_REQUEST_COUNT = 1
 

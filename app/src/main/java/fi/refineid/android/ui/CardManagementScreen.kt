@@ -69,7 +69,6 @@ import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativePin1State
 import fi.refineid.android.core.NativePin2State
-import fi.refineid.android.core.NativePinReferenceScheme
 
 private enum class ManagementTask {
     CHANGE_PIN1,
@@ -84,6 +83,32 @@ private data class OutcomeNotice(
     val arg: String? = null,
 )
 
+/** The notice a failed credential probe shows. */
+private fun probeFailureNotice(kind: CardManagementFailure): OutcomeNotice =
+    OutcomeNotice(
+        when (kind) {
+            CardManagementFailure.CARD_UNAVAILABLE -> R.string.unavailable
+            else -> R.string.error
+        },
+    )
+
+/**
+ * The task a card's answer selects: activation while it awaits activation,
+ * the reset of a locked PIN, otherwise the task already chosen.
+ */
+private fun taskAfterAnswer(
+    health: CredentialHealth?,
+    current: ManagementTask,
+): ManagementTask =
+    when {
+        health == null -> current
+        health.activationNeeds.any -> ManagementTask.ACTIVATE_CARD
+        health.pin1State is NativePin1State.Locked -> ManagementTask.RESET_PIN1
+        health.pin2State is NativePin2State.Locked -> ManagementTask.RESET_PIN2
+        current == ManagementTask.ACTIVATE_CARD -> ManagementTask.CHANGE_PIN1
+        else -> current
+    }
+
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 internal fun CardManagementScreen(
@@ -94,18 +119,21 @@ internal fun CardManagementScreen(
     onPin1Changed: (() -> Unit)? = null,
     activationRequired: Boolean = false,
     onActivationSucceeded: (() -> Unit)? = null,
-    onNeedsActivationChanged: ((Boolean) -> Unit)? = null,
-    onNumberingRead: ((NativePinReferenceScheme) -> Unit)? = null,
+    reading: CardHealthReading = remember { CardHealthReading() },
 ) {
-    var health by remember { mutableStateOf<CredentialHealth?>(null) }
-    var isProbing by remember { mutableStateOf(false) }
+    val health = reading.health
     var isOperating by remember { mutableStateOf(false) }
     var selectedTask by
         remember(activationRequired) {
-            mutableStateOf(if (activationRequired) ManagementTask.ACTIVATE_CARD else ManagementTask.CHANGE_PIN1)
+            mutableStateOf(
+                taskAfterAnswer(
+                    health,
+                    if (activationRequired) ManagementTask.ACTIVATE_CARD else ManagementTask.CHANGE_PIN1,
+                ),
+            )
         }
-    var outcomeNotice by remember { mutableStateOf<OutcomeNotice?>(null) }
-    var outcomeIsError by remember { mutableStateOf(false) }
+    var outcomeNotice by remember { mutableStateOf(reading.failure?.let(::probeFailureNotice)) }
+    var outcomeIsError by remember { mutableStateOf(reading.failure != null) }
     var showConfirmDialog by remember { mutableStateOf(false) }
 
     val currentPinState = remember { TextFieldState() }
@@ -138,34 +166,14 @@ internal fun CardManagementScreen(
 
     fun probe() {
         if (cardManagementService == null) return
-        isProbing = true
-        cardManagementService.probeCredentialHealth { result ->
-            isProbing = false
+        reading.probe(cardManagementService) { result ->
             when (result) {
                 is CardManagementResult.Success -> {
-                    health = result.value
-                    val needsActivation = result.value.activationNeeds.any
-                    onNeedsActivationChanged?.invoke(needsActivation)
-                    onNumberingRead?.invoke(result.value.scheme)
-                    if (needsActivation) {
-                        selectedTask = ManagementTask.ACTIVATE_CARD
-                    } else if (result.value.pin1State is NativePin1State.Locked) {
-                        selectedTask = ManagementTask.RESET_PIN1
-                    } else if (result.value.pin2State is NativePin2State.Locked) {
-                        selectedTask = ManagementTask.RESET_PIN2
-                    } else if (selectedTask == ManagementTask.ACTIVATE_CARD) {
-                        selectedTask = ManagementTask.CHANGE_PIN1
-                    }
+                    selectedTask = taskAfterAnswer(result.value, selectedTask)
                 }
 
                 is CardManagementResult.Failure -> {
-                    outcomeNotice =
-                        OutcomeNotice(
-                            when (result.kind) {
-                                CardManagementFailure.CARD_UNAVAILABLE -> R.string.unavailable
-                                else -> R.string.error
-                            },
-                        )
+                    outcomeNotice = probeFailureNotice(result.kind)
                     outcomeIsError = true
                 }
             }
@@ -173,13 +181,13 @@ internal fun CardManagementScreen(
     }
 
     LaunchedEffect(isCardReady) {
-        if (isCardReady) {
+        if (isCardReady && !reading.hasAnswered && !reading.isProbing) {
             probe()
         }
     }
 
     val isActivationFlow =
-        (activationRequired && (health == null || health?.activationNeeds?.any == true)) ||
+        (activationRequired && (health == null || health.activationNeeds.any)) ||
             (health?.activationNeeds?.any == true) ||
             selectedTask == ManagementTask.ACTIVATE_CARD
 
@@ -543,33 +551,26 @@ internal fun CardManagementScreen(
             )
         }
 
-        // If card awaits activation
-        if (isActivationFlow) {
-            CardActivationForm(
-                health =
-                    health ?: CredentialHealth(
-                        pin1State = NativePin1State.Remaining(3),
-                        pin2State = NativePin2State.Remaining(3),
-                        pukState = NativePin1State.Remaining(3),
-                        scheme = NativePinReferenceScheme.CITIZEN,
-                        activationScheme = CardManagementScheme.UNKNOWN,
-                        activationNeeds =
-                            fi.refineid.android.core.CardActivationNeeds(
-                                pin1 = true,
-                                pin2 = true,
-                            ),
-                    ),
-                needsPin1 = needsPin1,
-                needsPin2 = needsPin2,
-                activationCodeState = activationCodeState,
-                newPin1State = newPinState,
-                newPin1ConfirmState = newPinConfirmState,
-                newPin2State = newPin2State,
-                newPin2ConfirmState = newPin2ConfirmState,
-                canExecute = canExecute,
-                isOperating = isOperating,
-                onSubmit = { showConfirmDialog = true },
-            )
+        // A readable card's forms wait for its answer; a card awaiting
+        // activation shows its form once the probe has named its scheme.
+        if (isCardReady && health == null) {
+            // Nothing that depends on the card is drawn before it answers.
+        } else if (isActivationFlow) {
+            if (health != null) {
+                CardActivationForm(
+                    health = health,
+                    needsPin1 = needsPin1,
+                    needsPin2 = needsPin2,
+                    activationCodeState = activationCodeState,
+                    newPin1State = newPinState,
+                    newPin1ConfirmState = newPinConfirmState,
+                    newPin2State = newPin2State,
+                    newPin2ConfirmState = newPin2ConfirmState,
+                    canExecute = canExecute,
+                    isOperating = isOperating,
+                    onSubmit = { showConfirmDialog = true },
+                )
+            }
         } else {
             // Task Form
             Section(
