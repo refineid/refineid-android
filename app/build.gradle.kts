@@ -290,6 +290,11 @@ kotlin {
 }
 
 dependencies {
+    // Compose and Activity bring lifecycle 2.9.4, whose bundled lint checks
+    // the current lint API rejects (ObsoleteLintCustomCheck).
+    constraints {
+        implementation(libs.androidx.lifecycle.runtime)
+    }
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)

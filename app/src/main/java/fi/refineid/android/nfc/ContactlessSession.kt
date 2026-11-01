@@ -139,7 +139,6 @@ internal class ContactlessSession(
                     val opened =
                         NativeContactlessSession.connect(
                             can.copyOf(),
-                            isoDep.cardAnswer(),
                             NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
                         )
                 ) {
@@ -475,7 +474,6 @@ internal class ContactlessSession(
         val result =
             NativeCardManagement.contactlessProbeCredentialHealth(
                 can = can.copyOf(),
-                cardAnswer = isoDep.cardAnswer(),
                 exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
             )
         closeIsoDep()

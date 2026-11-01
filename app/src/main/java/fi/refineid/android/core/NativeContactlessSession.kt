@@ -21,7 +21,6 @@ internal object NativeContactlessSession {
      */
     fun connect(
         canCopy: ByteArray,
-        cardAnswer: ByteArray,
         exchange: NativeBlockExchange,
     ): NativeContactlessOpenResult {
         val startedAt = AppTrace.nativeContactlessOpenStarted()
@@ -34,7 +33,6 @@ internal object NativeContactlessSession {
                     NativeContactlessOpenReply.decode(
                         contactlessConnectNative(
                             can = canCopy,
-                            cardAnswer = cardAnswer,
                             callback = exchange,
                         ),
                     )
@@ -135,7 +133,6 @@ internal object NativeContactlessSession {
     @JvmStatic
     private external fun contactlessConnectNative(
         can: ByteArray,
-        cardAnswer: ByteArray,
         callback: Any,
     ): ByteArray
 

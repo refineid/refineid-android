@@ -87,8 +87,6 @@ internal class CcidUsbSession(
     private val exchange: CcidCommandExchange,
     private val sequenceCounter: CcidSequenceCounter,
     private val interruptIn: UsbEndpoint? = null,
-    /** What the card answered at reset, for the activation classification. */
-    private val cardAnswer: ByteArray = ByteArray(0),
 ) : AutoCloseable {
     private val ownerThread = Thread.currentThread()
     private val exchangeLevel =
@@ -227,7 +225,7 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        val result = NativeContactlessSession.connect(canBytes, cardAnswer, nativeExchange)
+        val result = NativeContactlessSession.connect(canBytes, nativeExchange)
         if (result is NativeContactlessOpenResult.Success) {
             contactlessSessionActive = true
             attemptsStale = false
@@ -734,7 +732,7 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return NativeCardManagement.probeCredentialHealth(exchangeLevel, cardAnswer, nativeExchange)
+        return NativeCardManagement.probeCredentialHealth(exchangeLevel, nativeExchange)
     }
 
     fun changePin1(
@@ -1077,13 +1075,9 @@ internal class CcidUsbSessionOpener(
                         bulkIo = AndroidCcidBulkIo(this, endpoints),
                         maximumMessageLength = descriptor.maximumMessageLength,
                     )
-                var answerToReset = ByteArray(0)
                 val activation =
                     CcidCardActivator(
-                        validateAtr = { atr ->
-                            answerToReset = atr.copyOf()
-                            validateAtr(atr)
-                        },
+                        validateAtr = validateAtr,
                         sequenceCounter = sequenceCounter,
                         hostPpsRequired = descriptor.hostPpsExchangeRequired,
                     ).activate(
@@ -1100,7 +1094,6 @@ internal class CcidUsbSessionOpener(
                                 exchange = exchange,
                                 sequenceCounter = sequenceCounter,
                                 interruptIn = endpoints.interruptIn,
-                                cardAnswer = answerToReset,
                             )
                         ownsConnection = false
                         isClaimed = false
@@ -1141,9 +1134,9 @@ internal class CcidUsbSessionOpener(
     }
 
     /**
-     * Whether the card still awaits activation, asked of its counters alone
-     * before any identity is read: a card awaiting activation has no
-     * identity, and nothing of it is read beyond those counters.
+     * Whether the card still awaits activation, from the scheme its public
+     * authentication certificate names and its counters, before any
+     * identity is cached: a card awaiting activation has no identity.
      */
     private fun awaitsActivation(session: CcidUsbSession): Boolean {
         val healthResult = session.probeCredentialHealth()

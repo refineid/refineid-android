@@ -15,7 +15,7 @@ use refineid_apdu::{CardTransport, TransportOutcome};
 use refineid_pace::{Can, PaceError, PaceSession, SmTransport, UnvalidatedCan, run_pace_with_can};
 use refineid_pkcs15::{CertSlot, Pkcs15Error, Pkcs15Ops};
 
-use crate::activation_scheme::classify_by_card_answer;
+use crate::activation_scheme::classify_activation_scheme;
 use crate::authentication_signer::{
     AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
     AuthenticationSigningInput, authenticate_and_sign, verify_authentication_pin,
@@ -148,26 +148,49 @@ fn read_on_card_ca_certificates_if_needed<T: CardTransport + Pkcs15Ops>(secure: 
 
 pub(crate) enum ContactlessOpenOutcome {
     Ready(CardCertificate, Pin1Preflight),
-    /// The card still awaits activation: its scheme, and which PINs. It
-    /// has no identity yet, so nothing of it is read or returned.
+    /// The card still awaits activation: its scheme, and which PINs. Its
+    /// certificate is read for the scheme alone and is not returned.
     ActivationRequired(ActivationScheme, CardActivationNeeds),
     Failure(CertificateReadFailure),
 }
 
-/// The first-tap classification, inside the secure channel before any
-/// identity is read: the scheme from what the card answered at reset, the
-/// needs from the card by counter-safe probes alone (FINEID S4-1 section
-/// 4.6). A card whose answer names no scheme gets no activation decision
-/// and is opened as an activated card; a card the probes cannot answer
+/// The first-tap classification, inside the secure channel: the scheme
+/// from the public authentication certificate already read, the needs
+/// from the card by counter-safe probes alone (FINEID S4-1 section 4.6).
+/// A certificate that names no scheme gets no activation decision and the
+/// card is opened as an activated card; a card the probes cannot answer
 /// for is treated the same, so a transient fault never routes an
 /// activated card to activation.
 fn activation_needs<T: CardTransport>(
     transport: &mut T,
-    card_answer: &[u8],
+    certificate: &CardCertificate,
 ) -> Option<(ActivationScheme, CardActivationNeeds)> {
-    let scheme = classify_by_card_answer(card_answer)?;
+    let scheme = classify_activation_scheme(certificate.der().as_bytes())?;
     let needs = transport.activation_needs(scheme).ok()?;
     needs.any().then_some((scheme, needs))
+}
+
+/// The open sequence after the PKCS#15 selection: the authentication
+/// certificate, then the activation classification from it, then, for a
+/// card that awaits no activation, the on-card CA certificates and the
+/// counter-safe PIN1 preflight. A card awaiting activation returns no
+/// identity.
+fn open_selected<T>(secure: &mut T) -> ContactlessOpenOutcome
+where
+    T: CardTransport + Pkcs15Ops,
+{
+    let certificate = match read_authentication_certificate(secure) {
+        Ok(certificate) => certificate,
+        Err(failure) => return ContactlessOpenOutcome::Failure(failure),
+    };
+    if let Some((scheme, needs)) = activation_needs(secure, &certificate) {
+        return ContactlessOpenOutcome::ActivationRequired(scheme, needs);
+    }
+    read_on_card_ca_certificates_if_needed(secure);
+    match probe_pin1_preflight(secure) {
+        Ok(preflight) => ContactlessOpenOutcome::Ready(certificate, preflight),
+        Err(failure) => ContactlessOpenOutcome::Failure(open_preflight_failure(failure)),
+    }
 }
 
 /// One PACE handshake, then the PKCS#15 selection, authentication
@@ -177,31 +200,12 @@ fn activation_needs<T: CardTransport>(
 pub(crate) fn contactless_open<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
     can_bytes: Vec<u8>,
-    card_answer: Vec<u8>,
 ) -> (ContactlessOpenOutcome, Exchange) {
     let (outcome, transport) = match open_secure_channel(transport, can_bytes) {
         Ok(mut secure) => {
             let outcome = match secure.select_pkcs15_application().map_err(map_pkcs15_error) {
                 Err(failure) => ContactlessOpenOutcome::Failure(failure),
-                Ok(()) => match activation_needs(&mut secure, &card_answer) {
-                    Some((scheme, needs)) => {
-                        ContactlessOpenOutcome::ActivationRequired(scheme, needs)
-                    }
-                    None => match read_authentication_certificate(&mut secure) {
-                        Err(failure) => ContactlessOpenOutcome::Failure(failure),
-                        Ok(certificate) => {
-                            read_on_card_ca_certificates_if_needed(&mut secure);
-                            match probe_pin1_preflight(&mut secure) {
-                                Ok(preflight) => {
-                                    ContactlessOpenOutcome::Ready(certificate, preflight)
-                                }
-                                Err(failure) => {
-                                    ContactlessOpenOutcome::Failure(open_preflight_failure(failure))
-                                }
-                            }
-                        }
-                    },
-                },
+                Ok(()) => open_selected(&mut secure),
             };
             (outcome, secure.into_inner())
         }
@@ -254,7 +258,6 @@ pub(crate) fn contactless_authenticate_and_sign<Exchange: SingleBlockExchange>(
 pub(crate) fn contactless_connect<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
     can_bytes: Vec<u8>,
-    card_answer: Vec<u8>,
 ) -> (ContactlessOpenOutcome, Exchange) {
     // A fresh connect supersedes any session a prior card left behind.
     contactless_close();
@@ -262,25 +265,7 @@ pub(crate) fn contactless_connect<Exchange: SingleBlockExchange>(
         Ok(mut secure) => {
             let outcome = match secure.select_pkcs15_application().map_err(map_pkcs15_error) {
                 Err(failure) => ContactlessOpenOutcome::Failure(failure),
-                Ok(()) => match activation_needs(&mut secure, &card_answer) {
-                    Some((scheme, needs)) => {
-                        ContactlessOpenOutcome::ActivationRequired(scheme, needs)
-                    }
-                    None => match read_authentication_certificate(&mut secure) {
-                        Err(failure) => ContactlessOpenOutcome::Failure(failure),
-                        Ok(certificate) => {
-                            read_on_card_ca_certificates_if_needed(&mut secure);
-                            match probe_pin1_preflight(&mut secure) {
-                                Ok(preflight) => {
-                                    ContactlessOpenOutcome::Ready(certificate, preflight)
-                                }
-                                Err(failure) => {
-                                    ContactlessOpenOutcome::Failure(open_preflight_failure(failure))
-                                }
-                            }
-                        }
-                    },
-                },
+                Ok(()) => open_selected(&mut secure),
             };
             let (transport, session) = secure.into_parts();
             (outcome, transport, Some(session))
@@ -455,13 +440,11 @@ pub(crate) fn contactless_qualified_sign<Exchange: SingleBlockExchange>(
 }
 
 /// PACE, then the PKCS#15 selection and credential health probe inside
-/// secure messaging, under the activation scheme the card's answer to
-/// reset names, so a card awaiting activation has nothing read beyond its
-/// counters.
+/// secure messaging, under the activation scheme the card's public
+/// authentication certificate names.
 pub(crate) fn contactless_probe_credential_health<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
     can_bytes: Vec<u8>,
-    card_answer: Vec<u8>,
 ) -> (
     Result<CredentialHealthReport, CardManagementFailure>,
     Exchange,
@@ -475,7 +458,7 @@ pub(crate) fn contactless_probe_credential_health<Exchange: SingleBlockExchange>
     let result = secure
         .select_pkcs15_application()
         .map_err(management_selection_failure)
-        .and_then(|()| probe_credential_health(&mut secure, &card_answer));
+        .and_then(|()| probe_credential_health(&mut secure));
     (result, secure.into_inner().into_exchange())
 }
 

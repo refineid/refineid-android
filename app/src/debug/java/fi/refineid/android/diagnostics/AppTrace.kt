@@ -1087,7 +1087,6 @@ internal object AppTrace {
 
     fun ccidParametersFailure(errorCode: Int) {
         debug("ccid:parameters-failure error=" + errorCode)
-        DevErrorLog.report("ccid:parameters-failure")
     }
 
     fun ccidParametersExchangeFailed(kind: CcidExchangeFailureKind) {

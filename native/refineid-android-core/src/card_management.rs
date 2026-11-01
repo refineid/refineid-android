@@ -21,7 +21,7 @@ use refineid_auth::{
     PinSlot, PinStatus, Puk, UnvalidatedSecret, check_retry_floor,
 };
 
-use crate::activation_scheme::{classify_activation_scheme, classify_by_card_answer};
+use crate::activation_scheme::classify_activation_scheme;
 use crate::card_certificate::read_authentication_certificate;
 
 pub(crate) const MANAGEMENT_TAG_BRIDGE_ERROR: u8 = 0;
@@ -132,17 +132,13 @@ pub(crate) const fn activation_scheme_from_byte(byte: u8) -> Option<ActivationSc
     }
 }
 
-/// The health probe under the activation scheme the card's answer to
-/// reset names, so a card awaiting activation has nothing read beyond its
-/// counters. An answer that names none belongs to a card opened as an
-/// activated one, and the scheme is then read from its certificate for
-/// the report's sake.
+/// The health probe under the activation scheme the card's public
+/// authentication certificate names, or under none when the certificate
+/// names no scheme.
 pub(crate) fn probe_credential_health<T: CardTransport>(
     transport: &mut T,
-    card_answer: &[u8],
 ) -> Result<CredentialHealthReport, CardManagementFailure> {
-    let scheme =
-        classify_by_card_answer(card_answer).or_else(|| detect_activation_scheme(transport));
+    let scheme = detect_activation_scheme(transport);
     transport
         .probe_credential_health(scheme)
         .map_err(map_auth_error)
@@ -659,9 +655,10 @@ mod tests {
     }
 
     /// Answers a citizen card awaiting activation by PUK gives before the
-    /// PUK counter read: the numbering probe, the PIN 1 status, and the
-    /// numbering and PIN 2 status probes, every PIN blocked.
-    const PUK_ACTIVATION_PREAMBLE: [StatusWord; 4] = [StatusWord::AuthenticationBlocked; 4];
+    /// PUK counter read: the numbering probe, then for PIN 1 and PIN 2 the
+    /// PIN container read, which leaves the changed flag unreadable, and
+    /// the status probes, every PIN blocked.
+    const PUK_ACTIVATION_PREAMBLE: [StatusWord; 6] = [StatusWord::AuthenticationBlocked; 6];
 
     fn activate_by_puk(
         transport: &mut ScriptedTransport,

@@ -549,7 +549,7 @@ internal fun CardManagementScreen(
                         pin2State = NativePin2State.Remaining(3),
                         pukState = NativePin1State.Remaining(3),
                         scheme = fi.refineid.android.core.NativePinReferenceScheme.CITIZEN,
-                        activationScheme = CardManagementScheme.PRESET_PIN,
+                        activationScheme = CardManagementScheme.UNKNOWN,
                         activationNeeds =
                             fi.refineid.android.core.CardActivationNeeds(
                                 pin1 = true,

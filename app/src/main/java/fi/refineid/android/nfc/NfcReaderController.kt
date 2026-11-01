@@ -758,7 +758,7 @@ internal class NfcReaderController(
         // from here on, activated or not: the holder is not asked for it
         // again at the activation tap, and a mismatch on a later tap
         // forgets it as for any card. A card awaiting activation has no
-        // identity: nothing of it was read, and whatever an earlier card
+        // identity: nothing of it is kept, and whatever an earlier card
         // left in memory or in the store goes, so no name is shown and no
         // identity is offered to a paired computer until an activated open
         // reads the certificate.
@@ -866,7 +866,7 @@ internal class NfcReaderController(
             }
             val exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep))
             val material = NativeCardSessionMaterial()
-            val opened = NativeContactlessSession.connect(canBytes.copyOf(), isoDep.cardAnswer(), exchange)
+            val opened = NativeContactlessSession.connect(canBytes.copyOf(), exchange)
             when (opened) {
                 is NativeContactlessOpenResult.Success -> {
                     material.cacheAuthenticationCertificate(opened.certificate)
