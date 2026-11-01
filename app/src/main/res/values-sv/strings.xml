@@ -59,7 +59,8 @@
     <string name="reset_pin1">Återställ PIN 1</string>
     <string name="reset_pin2">Återställ PIN 2</string>
     <string name="activate_card">Aktivera kort</string>
-    <string name="card_activation">Kortaktivering</string>
+    <string name="identity_card_activation">Aktivering av identitetskortet</string>
+    <string name="organisation_card_activation">Aktivering av organisationskortet</string>
     <string name="current_pin1">Nuvarande PIN 1</string>
     <string name="current_pin2">Nuvarande PIN 2</string>
     <string name="new_pin1">Ny PIN 1</string>

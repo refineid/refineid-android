@@ -5,10 +5,12 @@ package fi.refineid.android.core
 import fi.refineid.android.diagnostics.AppTrace
 
 /**
- * How a citizen card is activated (FINEID S4-1 section 4.6), and the exact
- * digit count the card accepts for the activation entry: the card enforces
- * the length itself and a wrong length spends a try. An unknown scheme has
- * no length and gets no activation attempt.
+ * How a card is activated (FINEID S4-1 section 4.6), as the native core
+ * decides it from the card's credential numbering and its authentication
+ * certificate's validity start, and the exact digit count the card accepts
+ * for the activation entry: the card enforces the length itself and a
+ * wrong length spends a try. An unknown scheme has no length and gets no
+ * activation attempt.
  */
 internal enum class CardManagementScheme(
     val activationEntryDigitCount: Int?,
@@ -131,8 +133,9 @@ private const val ACTIVATION_REPLY_LENGTH = 6
 
 internal object NativeCardManagement {
     /**
-     * The credential health under the activation scheme the card's public
-     * authentication certificate names, or under none when it names none.
+     * The credential health, with the activation scheme the native core
+     * decides from the card's numbering and its authentication
+     * certificate's validity start.
      */
     fun probeCredentialHealth(
         exchangeLevel: NativeCardExchangeLevel,
@@ -143,7 +146,7 @@ internal object NativeCardManagement {
         }
         return try {
             val reply = probeCredentialHealthNative(exchangeLevel.wireValue, exchange)
-            decodeCredentialHealth(reply)
+            decodeCredentialHealth(reply).also(ObservedCredentialHealth::record)
         } catch (_: Throwable) {
             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
@@ -228,17 +231,11 @@ internal object NativeCardManagement {
         if (!NativeCore.isLoaded) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
-        val schemeByte =
-            when (scheme) {
-                CardManagementScheme.PUK -> ACTIVATION_SCHEME_PUK
-                CardManagementScheme.PRESET_PIN -> ACTIVATION_SCHEME_PRESET
-                CardManagementScheme.UNKNOWN -> ACTIVATION_SCHEME_UNKNOWN
-            }
         return try {
             val reply =
                 activateCardNative(
                     exchangeLevel.wireValue,
-                    schemeByte,
+                    scheme.wireValue(),
                     code,
                     newPin1 ?: ByteArray(0),
                     newPin2 ?: ByteArray(0),
@@ -260,7 +257,7 @@ internal object NativeCardManagement {
         }
         return try {
             val reply = contactlessProbeCredentialHealthNative(can, exchange)
-            decodeCredentialHealth(reply)
+            decodeCredentialHealth(reply).also(ObservedCredentialHealth::record)
         } catch (_: Throwable) {
             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
@@ -345,17 +342,11 @@ internal object NativeCardManagement {
         if (!NativeCore.isLoaded) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
-        val schemeByte =
-            when (scheme) {
-                CardManagementScheme.PUK -> ACTIVATION_SCHEME_PUK
-                CardManagementScheme.PRESET_PIN -> ACTIVATION_SCHEME_PRESET
-                CardManagementScheme.UNKNOWN -> ACTIVATION_SCHEME_UNKNOWN
-            }
         return try {
             val reply =
                 contactlessActivateCardNative(
                     can,
-                    schemeByte,
+                    scheme.wireValue(),
                     code,
                     newPin1 ?: ByteArray(0),
                     newPin2 ?: ByteArray(0),
@@ -366,6 +357,116 @@ internal object NativeCardManagement {
             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
     }
+
+    // Operations on the secure-messaging session a prior
+    // NativeContactlessSession.connect left open: no access number and no
+    // second PACE. A card opened under PACE refuses plain commands, so a
+    // reader holding that session sends management through these.
+    fun contactlessProbeCredentialHealthOnSession(
+        exchange: NativeBlockExchange,
+    ): CardManagementResult<CredentialHealth> {
+        if (!NativeCore.isLoaded) {
+            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+        return try {
+            val reply = contactlessProbeCredentialHealthOnSessionNative(exchange)
+            decodeCredentialHealth(reply).also(ObservedCredentialHealth::record)
+        } catch (_: Throwable) {
+            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+    }
+
+    fun contactlessChangePin1OnSession(
+        currentPin: ByteArray,
+        newPin: ByteArray,
+        exchange: NativeBlockExchange,
+    ): CardManagementResult<ManageOutcome> {
+        if (!NativeCore.isLoaded) {
+            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+        return try {
+            decodeManageOutcome(contactlessChangePin1OnSessionNative(currentPin, newPin, exchange))
+        } catch (_: Throwable) {
+            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+    }
+
+    fun contactlessChangePin2OnSession(
+        currentPin: ByteArray,
+        newPin: ByteArray,
+        exchange: NativeBlockExchange,
+    ): CardManagementResult<ManageOutcome> {
+        if (!NativeCore.isLoaded) {
+            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+        return try {
+            decodeManageOutcome(contactlessChangePin2OnSessionNative(currentPin, newPin, exchange))
+        } catch (_: Throwable) {
+            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+    }
+
+    fun contactlessUnblockPin1OnSession(
+        puk: ByteArray,
+        newPin: ByteArray,
+        exchange: NativeBlockExchange,
+    ): CardManagementResult<ManageOutcome> {
+        if (!NativeCore.isLoaded) {
+            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+        return try {
+            decodeManageOutcome(contactlessUnblockPin1OnSessionNative(puk, newPin, exchange))
+        } catch (_: Throwable) {
+            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+    }
+
+    fun contactlessUnblockPin2OnSession(
+        puk: ByteArray,
+        newPin: ByteArray,
+        exchange: NativeBlockExchange,
+    ): CardManagementResult<ManageOutcome> {
+        if (!NativeCore.isLoaded) {
+            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+        return try {
+            decodeManageOutcome(contactlessUnblockPin2OnSessionNative(puk, newPin, exchange))
+        } catch (_: Throwable) {
+            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+    }
+
+    fun contactlessActivateCardOnSession(
+        scheme: CardManagementScheme,
+        code: ByteArray,
+        newPin1: ByteArray?,
+        newPin2: ByteArray?,
+        exchange: NativeBlockExchange,
+    ): CardManagementResult<ActivationReport> {
+        if (!NativeCore.isLoaded) {
+            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+        return try {
+            val reply =
+                contactlessActivateCardOnSessionNative(
+                    scheme.wireValue(),
+                    code,
+                    newPin1 ?: ByteArray(0),
+                    newPin2 ?: ByteArray(0),
+                    exchange,
+                )
+            decodeActivationReport(reply)
+        } catch (_: Throwable) {
+            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        }
+    }
+
+    private fun CardManagementScheme.wireValue(): Int =
+        when (this) {
+            CardManagementScheme.PUK -> ACTIVATION_SCHEME_PUK
+            CardManagementScheme.PRESET_PIN -> ACTIVATION_SCHEME_PRESET
+            CardManagementScheme.UNKNOWN -> ACTIVATION_SCHEME_UNKNOWN
+        }
 
     private fun decodeCredentialHealth(reply: ByteArray): CardManagementResult<CredentialHealth> {
         if (reply.isEmpty()) {
@@ -606,6 +707,46 @@ internal object NativeCardManagement {
     ): ByteArray
 
     @JvmStatic
+    private external fun contactlessProbeCredentialHealthOnSessionNative(callback: Any): ByteArray
+
+    @JvmStatic
+    private external fun contactlessChangePin1OnSessionNative(
+        currentPin: ByteArray,
+        newPin: ByteArray,
+        callback: Any,
+    ): ByteArray
+
+    @JvmStatic
+    private external fun contactlessChangePin2OnSessionNative(
+        currentPin: ByteArray,
+        newPin: ByteArray,
+        callback: Any,
+    ): ByteArray
+
+    @JvmStatic
+    private external fun contactlessUnblockPin1OnSessionNative(
+        puk: ByteArray,
+        newPin: ByteArray,
+        callback: Any,
+    ): ByteArray
+
+    @JvmStatic
+    private external fun contactlessUnblockPin2OnSessionNative(
+        puk: ByteArray,
+        newPin: ByteArray,
+        callback: Any,
+    ): ByteArray
+
+    @JvmStatic
+    private external fun contactlessActivateCardOnSessionNative(
+        scheme: Int,
+        code: ByteArray,
+        newPin1: ByteArray,
+        newPin2: ByteArray,
+        callback: Any,
+    ): ByteArray
+
+    @JvmStatic
     private external fun contactlessActivateCardNative(
         can: ByteArray,
         scheme: Int,
@@ -614,4 +755,19 @@ internal object NativeCardManagement {
         newPin2: ByteArray,
         callback: Any,
     ): ByteArray
+}
+
+/**
+ * The credential health the latest probe answered, for the diagnostics
+ * report: counters, numbering and the activation scheme the native core
+ * decided. It holds no credential and no holder data.
+ */
+internal object ObservedCredentialHealth {
+    @Volatile
+    var latest: CredentialHealth? = null
+        private set
+
+    fun record(result: CardManagementResult<CredentialHealth>) {
+        if (result is CardManagementResult.Success) latest = result.value
+    }
 }

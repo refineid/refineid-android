@@ -15,7 +15,6 @@ use refineid_apdu::{CardTransport, TransportOutcome};
 use refineid_pace::{Can, PaceError, PaceSession, SmTransport, UnvalidatedCan, run_pace_with_can};
 use refineid_pkcs15::{CertSlot, Pkcs15Error, Pkcs15Ops};
 
-use crate::activation_scheme::classify_activation_scheme;
 use crate::authentication_signer::{
     AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
     AuthenticationSigningInput, authenticate_and_sign, verify_authentication_pin,
@@ -25,11 +24,12 @@ use crate::card_certificate::{
     map_pkcs15_error, read_authentication_certificate, read_qualified_certificate,
 };
 use crate::card_management::{
-    CardManagementFailure, activate_card, change_pin1, change_pin2, probe_credential_health,
-    unblock_pin1, unblock_pin2,
+    CardManagementFailure, activate_card, change_pin1, change_pin2, decided_activation_scheme,
+    probe_credential_health, unblock_pin1, unblock_pin2,
 };
 use crate::card_transport::CardExchangeLevel;
 use crate::card_transport::{AndroidCardTransport, SingleBlockExchange};
+use crate::certificate_validity::validity_start_epoch_seconds;
 use crate::pin1_status::{Pin1Preflight, Pin1PreflightFailure, probe_pin1_preflight};
 use crate::pin2_status::{Pin2Preflight, Pin2PreflightFailure, probe_pin2_preflight};
 use crate::qualified_signer::{
@@ -154,18 +154,21 @@ pub(crate) enum ContactlessOpenOutcome {
     Failure(CertificateReadFailure),
 }
 
-/// The first-tap classification, inside the secure channel: the scheme
-/// from the public authentication certificate already read, the needs
-/// from the card by counter-safe probes alone (FINEID S4-1 section 4.6).
-/// A certificate that names no scheme gets no activation decision and the
-/// card is opened as an activated card; a card the probes cannot answer
-/// for is treated the same, so a transient fault never routes an
-/// activated card to activation.
+/// The first-tap classification, inside the secure channel (FINEID S4-1
+/// section 4.6): the core decides the scheme from the card's resolved
+/// credential numbering and the validity start of the authentication
+/// certificate already read, and the needs come from the card by
+/// counter-safe probes alone. An organization card takes section 4.6.1
+/// whatever the date. A citizen card whose validity start cannot be read
+/// gets no activation decision and is opened as an activated card; a card
+/// the probes cannot answer for is treated the same, so a transient fault
+/// never routes an activated card to activation.
 fn activation_needs<T: CardTransport>(
     transport: &mut T,
     certificate: &CardCertificate,
 ) -> Option<(ActivationScheme, CardActivationNeeds)> {
-    let scheme = classify_activation_scheme(certificate.der().as_bytes())?;
+    let validity_start = validity_start_epoch_seconds(certificate.der().as_bytes());
+    let scheme = decided_activation_scheme(transport, validity_start)?;
     let needs = transport.activation_needs(scheme).ok()?;
     needs.any().then_some((scheme, needs))
 }
@@ -363,213 +366,292 @@ impl<T: CardTransport> QualifiedCertificateSource for SmTransport<T> {
     }
 }
 
-/// PACE, then the PKCS#15 selection and one qualified-certificate read
-/// inside the same secure-messaging session. The one-shot channel does
-/// not carry the wired path's context-restore step: the next operation
-/// opens a fresh handshake, so no auth-context state has to survive.
+/// The qualified-certificate read inside `channel`. The read leaves
+/// EF.4332 selected; the next operation re-selects the PKCS#15
+/// application, so no authentication context has to be restored here.
 pub(crate) fn contactless_read_qualified_certificate<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
+    channel: ContactlessChannel,
 ) -> (Result<CardCertificate, CertificateReadFailure>, Exchange) {
-    let mut secure = match open_secure_channel(transport, can_bytes) {
-        Ok(secure) => secure,
-        Err((exchange, failure)) => {
-            return (Err(certificate_channel_failure(failure)), exchange);
+    match open_contactless_channel(transport, channel) {
+        Ok(mut open) => {
+            let result = read_qualified_certificate(&mut open.secure);
+            (result, close_contactless_channel(open))
         }
-    };
-    let result = secure
-        .select_pkcs15_application()
-        .map_err(map_pkcs15_error)
-        .and_then(|()| read_qualified_certificate(&mut secure));
-    (result, secure.into_inner().into_exchange())
+        Err((failure, exchange)) => {
+            let failure = match failure {
+                ChannelOpenFailure::Handshake(failure) => certificate_channel_failure(failure),
+                ChannelOpenFailure::NoHeldSession => CertificateReadFailure::CardUnavailable,
+                ChannelOpenFailure::Selection(error) => map_pkcs15_error(error),
+            };
+            (Err(failure), exchange)
+        }
+    }
 }
 
-/// PACE, then the PKCS#15 selection and a counter-safe PIN2 preflight
-/// inside secure messaging. The session CAN was proven at connect, so
-/// a channel refusal here folds to a transport anomaly, not a CAN fault.
+/// The counter-safe PIN2 preflight inside `channel`. The session CAN was
+/// proven at connect, so a channel refusal here folds to a transport
+/// anomaly, not a CAN fault.
 pub(crate) fn contactless_probe_pin2<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
+    channel: ContactlessChannel,
 ) -> (Result<Pin2Preflight, Pin2PreflightFailure>, Exchange) {
-    let mut secure = match open_secure_channel(transport, can_bytes) {
-        Ok(secure) => secure,
-        Err((exchange, failure)) => {
-            return (Err(pin2_channel_failure(failure)), exchange);
+    match open_contactless_channel(transport, channel) {
+        Ok(mut open) => {
+            let result = probe_pin2_preflight(&mut open.secure);
+            (result, close_contactless_channel(open))
         }
-    };
-    let result = secure
-        .select_pkcs15_application()
-        .map_err(pin2_selection_failure)
-        .and_then(|()| probe_pin2_preflight(&mut secure));
-    (result, secure.into_inner().into_exchange())
+        Err((failure, exchange)) => {
+            let failure = match failure {
+                ChannelOpenFailure::Handshake(failure) => pin2_channel_failure(failure),
+                ChannelOpenFailure::NoHeldSession => Pin2PreflightFailure::CardUnavailable,
+                ChannelOpenFailure::Selection(error) => pin2_selection_failure(error),
+            };
+            (Err(failure), exchange)
+        }
+    }
 }
 
-/// PACE, then the PKCS#15 selection and one qualified signature inside
-/// secure messaging. The PIN2 is zeroized on every path that stops
-/// before the reviewed signer consumes it.
+/// One qualified signature inside `channel`. The PIN2 is zeroized on
+/// every path that stops before the reviewed signer consumes it.
 pub(crate) fn contactless_qualified_sign<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
+    channel: ContactlessChannel,
     algorithm: QualifiedSigningAlgorithm,
     mut pin_bytes: Vec<u8>,
     input: QualifiedSigningInput<'_>,
     expected_certificate: &[u8],
 ) -> (Result<QualifiedSignature, QualifiedSignFailure>, Exchange) {
-    let mut secure = match open_secure_channel(transport, can_bytes) {
-        Ok(secure) => secure,
-        Err((exchange, failure)) => {
-            pin_bytes.fill(0);
-            return (Err(qualified_channel_failure(failure)), exchange);
+    match open_contactless_channel(transport, channel) {
+        Ok(mut open) => {
+            let result = qualified_sign(
+                &mut open.secure,
+                algorithm,
+                pin_bytes,
+                input,
+                expected_certificate,
+            );
+            (result, close_contactless_channel(open))
         }
-    };
-    if let Err(error) = secure.select_pkcs15_application() {
-        pin_bytes.fill(0);
-        return (
-            Err(qualified_selection_failure(error)),
-            secure.into_inner().into_exchange(),
-        );
+        Err((failure, exchange)) => {
+            pin_bytes.fill(0);
+            let failure = match failure {
+                ChannelOpenFailure::Handshake(failure) => qualified_channel_failure(failure),
+                ChannelOpenFailure::NoHeldSession => QualifiedSignFailure::CardUnavailable,
+                ChannelOpenFailure::Selection(error) => qualified_selection_failure(error),
+            };
+            (Err(failure), exchange)
+        }
     }
-    let result = qualified_sign(
-        &mut secure,
-        algorithm,
-        pin_bytes,
-        input,
-        expected_certificate,
-    );
-    (result, secure.into_inner().into_exchange())
 }
 
-/// PACE, then the PKCS#15 selection and credential health probe inside
-/// secure messaging, under the activation scheme the card's public
-/// authentication certificate names.
+/// The secure channel one contactless operation runs in.
+pub(crate) enum ContactlessChannel {
+    /// A fresh PACE handshake with this card access number, dropped after
+    /// the operation.
+    Pace(Vec<u8>),
+    /// The session a prior `contactless_connect` left open, kept for the
+    /// next operation under the same field.
+    HeldSession,
+}
+
+/// A card access number not consumed by a handshake is wiped with the
+/// channel.
+impl Drop for ContactlessChannel {
+    fn drop(&mut self) {
+        if let Self::Pace(can_bytes) = self {
+            can_bytes.fill(0);
+        }
+    }
+}
+
+/// Which PIN a change or unblock sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ManagedPin {
+    Pin1,
+    Pin2,
+}
+
+/// An open contactless channel, selected on the PKCS#15 application, and
+/// whether its session is kept after the operation.
+struct OpenContactlessChannel<Exchange: SingleBlockExchange> {
+    secure: SmTransport<AndroidCardTransport<Exchange>>,
+    keeps_session: bool,
+}
+
+/// The error of the secure-messaging transport over the Android exchange.
+type SecureTransportError<Exchange> =
+    <SmTransport<AndroidCardTransport<Exchange>> as CardTransport>::Error;
+
+/// Why a contactless channel did not open; each operation maps it onto
+/// its own failure vocabulary.
+enum ChannelOpenFailure<E> {
+    /// The PACE handshake failed.
+    Handshake(SecureChannelFailure),
+    /// No session is held: never connected, or the field dropped.
+    NoHeldSession,
+    /// The PKCS#15 re-select inside the channel failed.
+    Selection(Pkcs15Error<E>),
+}
+
+/// Open `channel` and select the PKCS#15 application inside it. Every
+/// command of the operation then runs inside secure messaging: a card
+/// opened under PACE refuses a plain command and ends its channel. A
+/// failed re-select drops a held session so the holder reconnects. On
+/// failure the exchange is handed back so the JNI border can inspect it.
+fn open_contactless_channel<Exchange: SingleBlockExchange>(
+    transport: AndroidCardTransport<Exchange>,
+    channel: ContactlessChannel,
+) -> Result<
+    OpenContactlessChannel<Exchange>,
+    (ChannelOpenFailure<SecureTransportError<Exchange>>, Exchange),
+> {
+    let mut channel = channel;
+    let (mut secure, keeps_session) = match &mut channel {
+        ContactlessChannel::Pace(can_bytes) => {
+            match open_secure_channel(transport, core::mem::take(can_bytes)) {
+                Ok(secure) => (secure, false),
+                Err((exchange, failure)) => {
+                    return Err((ChannelOpenFailure::Handshake(failure), exchange));
+                }
+            }
+        }
+        ContactlessChannel::HeldSession => {
+            let Some(session) = take_held_session() else {
+                return Err((ChannelOpenFailure::NoHeldSession, transport.into_exchange()));
+            };
+            (SmTransport::new(transport, session), true)
+        }
+    };
+    match secure.select_pkcs15_application() {
+        Ok(()) => Ok(OpenContactlessChannel {
+            secure,
+            keeps_session,
+        }),
+        Err(error) => Err((
+            ChannelOpenFailure::Selection(error),
+            secure.into_inner().into_exchange(),
+        )),
+    }
+}
+
+/// End the operation: keep a held session for the next operation under
+/// the same field, drop a one-shot one, and hand the exchange back.
+fn close_contactless_channel<Exchange: SingleBlockExchange>(
+    channel: OpenContactlessChannel<Exchange>,
+) -> Exchange {
+    let (transport, session) = channel.secure.into_parts();
+    if channel.keeps_session {
+        store_held_session(session);
+    }
+    transport.into_exchange()
+}
+
+/// A channel that did not open, in the management vocabulary.
+fn management_open_failure<E>(failure: ChannelOpenFailure<E>) -> CardManagementFailure {
+    match failure {
+        ChannelOpenFailure::Handshake(failure) => management_channel_failure(failure),
+        ChannelOpenFailure::NoHeldSession => CardManagementFailure::CardUnavailable,
+        ChannelOpenFailure::Selection(error) => management_selection_failure(error),
+    }
+}
+
+/// The credential health probe inside `channel`.
 pub(crate) fn contactless_probe_credential_health<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
+    channel: ContactlessChannel,
 ) -> (
     Result<CredentialHealthReport, CardManagementFailure>,
     Exchange,
 ) {
-    let mut secure = match open_secure_channel(transport, can_bytes) {
-        Ok(secure) => secure,
-        Err((exchange, failure)) => {
-            return (Err(management_channel_failure(failure)), exchange);
+    match open_contactless_channel(transport, channel) {
+        Ok(mut open) => {
+            let result = probe_credential_health(&mut open.secure);
+            (result, close_contactless_channel(open))
         }
-    };
-    let result = secure
-        .select_pkcs15_application()
-        .map_err(management_selection_failure)
-        .and_then(|()| probe_credential_health(&mut secure));
-    (result, secure.into_inner().into_exchange())
+        Err((failure, exchange)) => (Err(management_open_failure(failure)), exchange),
+    }
 }
 
-/// PACE, then the PKCS#15 selection and change PIN1 inside secure messaging.
-pub(crate) fn contactless_change_pin1<Exchange: SingleBlockExchange>(
+/// Change `pin` inside `channel`, presenting the current value.
+pub(crate) fn contactless_change_pin<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
-    current_bytes: Vec<u8>,
-    new_bytes: Vec<u8>,
+    channel: ContactlessChannel,
+    pin: ManagedPin,
+    mut current_bytes: Vec<u8>,
+    mut new_bytes: Vec<u8>,
 ) -> (Result<ManageOutcome, CardManagementFailure>, Exchange) {
-    let mut secure = match open_secure_channel(transport, can_bytes) {
-        Ok(secure) => secure,
-        Err((exchange, failure)) => {
-            return (Err(management_channel_failure(failure)), exchange);
+    match open_contactless_channel(transport, channel) {
+        Ok(mut open) => {
+            let result = match pin {
+                ManagedPin::Pin1 => change_pin1(&mut open.secure, current_bytes, new_bytes),
+                ManagedPin::Pin2 => change_pin2(&mut open.secure, current_bytes, new_bytes),
+            };
+            (result, close_contactless_channel(open))
         }
-    };
-    let result = secure
-        .select_pkcs15_application()
-        .map_err(management_selection_failure)
-        .and_then(|()| change_pin1(&mut secure, current_bytes, new_bytes));
-    (result, secure.into_inner().into_exchange())
+        Err((failure, exchange)) => {
+            current_bytes.fill(0);
+            new_bytes.fill(0);
+            (Err(management_open_failure(failure)), exchange)
+        }
+    }
 }
 
-/// PACE, then the PKCS#15 selection and change PIN2 inside secure messaging.
-pub(crate) fn contactless_change_pin2<Exchange: SingleBlockExchange>(
+/// Unblock `pin` with the PUK inside `channel`, setting a new value.
+pub(crate) fn contactless_unblock_pin<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
-    current_bytes: Vec<u8>,
-    new_bytes: Vec<u8>,
+    channel: ContactlessChannel,
+    pin: ManagedPin,
+    mut puk_bytes: Vec<u8>,
+    mut new_bytes: Vec<u8>,
 ) -> (Result<ManageOutcome, CardManagementFailure>, Exchange) {
-    let mut secure = match open_secure_channel(transport, can_bytes) {
-        Ok(secure) => secure,
-        Err((exchange, failure)) => {
-            return (Err(management_channel_failure(failure)), exchange);
+    match open_contactless_channel(transport, channel) {
+        Ok(mut open) => {
+            let result = match pin {
+                ManagedPin::Pin1 => unblock_pin1(&mut open.secure, puk_bytes, new_bytes),
+                ManagedPin::Pin2 => unblock_pin2(&mut open.secure, puk_bytes, new_bytes),
+            };
+            (result, close_contactless_channel(open))
         }
-    };
-    let result = secure
-        .select_pkcs15_application()
-        .map_err(management_selection_failure)
-        .and_then(|()| change_pin2(&mut secure, current_bytes, new_bytes));
-    (result, secure.into_inner().into_exchange())
+        Err((failure, exchange)) => {
+            puk_bytes.fill(0);
+            new_bytes.fill(0);
+            (Err(management_open_failure(failure)), exchange)
+        }
+    }
 }
 
-/// PACE, then the PKCS#15 selection and unblock PIN1 inside secure messaging.
-pub(crate) fn contactless_unblock_pin1<Exchange: SingleBlockExchange>(
-    transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
-    puk_bytes: Vec<u8>,
-    new_bytes: Vec<u8>,
-) -> (Result<ManageOutcome, CardManagementFailure>, Exchange) {
-    let mut secure = match open_secure_channel(transport, can_bytes) {
-        Ok(secure) => secure,
-        Err((exchange, failure)) => {
-            return (Err(management_channel_failure(failure)), exchange);
-        }
-    };
-    let result = secure
-        .select_pkcs15_application()
-        .map_err(management_selection_failure)
-        .and_then(|()| unblock_pin1(&mut secure, puk_bytes, new_bytes));
-    (result, secure.into_inner().into_exchange())
-}
-
-/// PACE, then the PKCS#15 selection and unblock PIN2 inside secure messaging.
-pub(crate) fn contactless_unblock_pin2<Exchange: SingleBlockExchange>(
-    transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
-    puk_bytes: Vec<u8>,
-    new_bytes: Vec<u8>,
-) -> (Result<ManageOutcome, CardManagementFailure>, Exchange) {
-    let mut secure = match open_secure_channel(transport, can_bytes) {
-        Ok(secure) => secure,
-        Err((exchange, failure)) => {
-            return (Err(management_channel_failure(failure)), exchange);
-        }
-    };
-    let result = secure
-        .select_pkcs15_application()
-        .map_err(management_selection_failure)
-        .and_then(|()| unblock_pin2(&mut secure, puk_bytes, new_bytes));
-    (result, secure.into_inner().into_exchange())
-}
-
-/// PACE, then the PKCS#15 selection and card activation inside secure messaging.
+/// Card activation inside `channel`, under the scheme `scheme_byte` names.
 pub(crate) fn contactless_activate_card<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
+    channel: ContactlessChannel,
     scheme_byte: u8,
-    code_bytes: Vec<u8>,
-    new_pin1_bytes: Option<Vec<u8>>,
-    new_pin2_bytes: Option<Vec<u8>>,
+    mut code_bytes: Vec<u8>,
+    mut new_pin1_bytes: Option<Vec<u8>>,
+    mut new_pin2_bytes: Option<Vec<u8>>,
 ) -> (Result<ActivationReport, CardManagementFailure>, Exchange) {
-    let mut secure = match open_secure_channel(transport, can_bytes) {
-        Ok(secure) => secure,
-        Err((exchange, failure)) => {
-            return (Err(management_channel_failure(failure)), exchange);
-        }
-    };
-    let result = secure
-        .select_pkcs15_application()
-        .map_err(management_selection_failure)
-        .and_then(|()| {
-            activate_card(
-                &mut secure,
+    match open_contactless_channel(transport, channel) {
+        Ok(mut open) => {
+            let result = activate_card(
+                &mut open.secure,
                 scheme_byte,
                 code_bytes,
                 new_pin1_bytes,
                 new_pin2_bytes,
-            )
-        });
-    (result, secure.into_inner().into_exchange())
+            );
+            (result, close_contactless_channel(open))
+        }
+        Err((failure, exchange)) => {
+            code_bytes.fill(0);
+            for bytes in [new_pin1_bytes.as_mut(), new_pin2_bytes.as_mut()]
+                .into_iter()
+                .flatten()
+            {
+                bytes.fill(0);
+            }
+            (Err(management_open_failure(failure)), exchange)
+        }
+    }
 }
 
 /// Reconstruct the typed CAN and run the PACE handshake. On failure the
@@ -792,19 +874,135 @@ mod tests {
     use refineid_pace::PaceError;
 
     use super::{
-        SecureChannelFailure, map_pace_error, open_preflight_failure, pin2_channel_failure,
+        ContactlessChannel, ManagedPin, SecureChannelFailure, contactless_activate_card,
+        contactless_change_pin, contactless_close, contactless_probe_credential_health,
+        contactless_probe_pin2, contactless_qualified_sign, contactless_read_qualified_certificate,
+        contactless_unblock_pin, map_pace_error, open_preflight_failure, pin2_channel_failure,
         qualified_channel_failure, reconstruct_can,
     };
     use crate::card_certificate::CertificateReadFailure;
+    use crate::card_management::{ACTIVATION_SCHEME_PUK, CardManagementFailure};
+    use crate::card_transport::{
+        AndroidCardTransport, CardExchangeLevel, SingleBlockExchange, SingleExchangeOutcome,
+    };
     use crate::pin1_status::Pin1PreflightFailure;
     use crate::pin2_status::Pin2PreflightFailure;
-    use crate::qualified_signer::QualifiedSignFailure;
+    use crate::qualified_signer::{
+        QualifiedSignFailure, QualifiedSigningAlgorithm, QualifiedSigningInput,
+    };
 
     // A syntactically valid but meaningless CAN for shape tests only;
     // never a real card value.
     const SYNTHETIC_CAN_DIGITS: &[u8] = b"000000";
     const NON_DIGIT_CAN: &[u8] = b"00000A";
     const SHORT_CAN: &[u8] = b"00000";
+
+    const SYNTHETIC_PIN1: &[u8] = b"1357";
+    const SYNTHETIC_NEW_PIN1: &[u8] = b"2468";
+    const SYNTHETIC_PUK: &[u8] = b"97531864";
+
+    /// Counts every block it is asked to move and answers none.
+    #[derive(Default)]
+    struct CountingExchange {
+        blocks: usize,
+    }
+
+    impl SingleBlockExchange for CountingExchange {
+        fn exchange_public(&mut self, _block: &[u8]) -> SingleExchangeOutcome {
+            self.blocks += 1;
+            SingleExchangeOutcome::NoCard
+        }
+
+        fn exchange_credential(&mut self, _block: &[u8]) -> SingleExchangeOutcome {
+            self.blocks += 1;
+            SingleExchangeOutcome::NoCard
+        }
+    }
+
+    fn transport() -> AndroidCardTransport<CountingExchange> {
+        AndroidCardTransport::new(CountingExchange::default(), CardExchangeLevel::Apdu)
+    }
+
+    #[test]
+    fn management_without_a_held_session_sends_nothing() {
+        contactless_close();
+        let unavailable = Err(CardManagementFailure::CardUnavailable);
+
+        let (health, exchange) =
+            contactless_probe_credential_health(transport(), ContactlessChannel::HeldSession);
+        assert!(matches!(
+            health,
+            Err(CardManagementFailure::CardUnavailable)
+        ));
+        assert_eq!(exchange.blocks, 0);
+
+        let (change, exchange) = contactless_change_pin(
+            transport(),
+            ContactlessChannel::HeldSession,
+            ManagedPin::Pin1,
+            SYNTHETIC_PIN1.to_vec(),
+            SYNTHETIC_NEW_PIN1.to_vec(),
+        );
+        assert_eq!(change, unavailable);
+        assert_eq!(exchange.blocks, 0);
+
+        let (unblock, exchange) = contactless_unblock_pin(
+            transport(),
+            ContactlessChannel::HeldSession,
+            ManagedPin::Pin1,
+            SYNTHETIC_PUK.to_vec(),
+            SYNTHETIC_NEW_PIN1.to_vec(),
+        );
+        assert_eq!(unblock, unavailable);
+        assert_eq!(exchange.blocks, 0);
+
+        let (activation, exchange) = contactless_activate_card(
+            transport(),
+            ContactlessChannel::HeldSession,
+            ACTIVATION_SCHEME_PUK,
+            SYNTHETIC_PUK.to_vec(),
+            Some(SYNTHETIC_NEW_PIN1.to_vec()),
+            None,
+        );
+        assert_eq!(activation, Err(CardManagementFailure::CardUnavailable));
+        assert_eq!(exchange.blocks, 0);
+    }
+
+    /// Synthetic ASCII stand-ins for the qualified-signature inputs.
+    const SYNTHETIC_PIN2: &[u8] = b"135790";
+    const SYNTHETIC_MESSAGE: &[u8] = b"synthetic message";
+    const SYNTHETIC_CERTIFICATE: &[u8] = b"synthetic certificate";
+
+    #[test]
+    fn qualified_operations_without_a_held_session_send_nothing() {
+        contactless_close();
+
+        let (certificate, exchange) =
+            contactless_read_qualified_certificate(transport(), ContactlessChannel::HeldSession);
+        assert!(matches!(
+            certificate,
+            Err(CertificateReadFailure::CardUnavailable)
+        ));
+        assert_eq!(exchange.blocks, 0);
+
+        let (pin2, exchange) = contactless_probe_pin2(transport(), ContactlessChannel::HeldSession);
+        assert!(matches!(pin2, Err(Pin2PreflightFailure::CardUnavailable)));
+        assert_eq!(exchange.blocks, 0);
+
+        let (signature, exchange) = contactless_qualified_sign(
+            transport(),
+            ContactlessChannel::HeldSession,
+            QualifiedSigningAlgorithm::EcdsaP384Sha384,
+            SYNTHETIC_PIN2.to_vec(),
+            QualifiedSigningInput::Message(SYNTHETIC_MESSAGE),
+            SYNTHETIC_CERTIFICATE,
+        );
+        assert!(matches!(
+            signature,
+            Err(QualifiedSignFailure::CardUnavailable)
+        ));
+        assert_eq!(exchange.blocks, 0);
+    }
 
     #[test]
     fn accepts_only_six_digit_can_shapes() {

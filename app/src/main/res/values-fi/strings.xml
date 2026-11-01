@@ -59,7 +59,8 @@
     <string name="reset_pin1">Palauta PIN 1</string>
     <string name="reset_pin2">Palauta PIN 2</string>
     <string name="activate_card">Aktivoi kortti</string>
-    <string name="card_activation">Kortin aktivointi</string>
+    <string name="identity_card_activation">Henkilökortin aktivointi</string>
+    <string name="organisation_card_activation">Organisaatiokortin aktivointi</string>
     <string name="current_pin1">Nykyinen PIN 1</string>
     <string name="current_pin2">Nykyinen PIN 2</string>
     <string name="new_pin1">Uusi PIN 1</string>

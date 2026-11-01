@@ -429,7 +429,7 @@ dependencies = [
 [[package]]
 name = "refineid-apdu"
 version = "26.11.1"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4e32b090166aacde86d511fbc8cd3afe16a9ed1d"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#286356dfe23cd196daecb5c8ec6937ae2cc164f0"
 dependencies = [
  "refineid-build-number",
  "zeroize",
@@ -438,12 +438,12 @@ dependencies = [
 [[package]]
 name = "refineid-atr"
 version = "26.11.1"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4e32b090166aacde86d511fbc8cd3afe16a9ed1d"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#286356dfe23cd196daecb5c8ec6937ae2cc164f0"
 
 [[package]]
 name = "refineid-auth"
 version = "26.11.1"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4e32b090166aacde86d511fbc8cd3afe16a9ed1d"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#286356dfe23cd196daecb5c8ec6937ae2cc164f0"
 dependencies = [
  "hmac",
  "refineid-apdu",
@@ -454,17 +454,17 @@ dependencies = [
 [[package]]
 name = "refineid-ber"
 version = "26.11.1"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4e32b090166aacde86d511fbc8cd3afe16a9ed1d"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#286356dfe23cd196daecb5c8ec6937ae2cc164f0"
 
 [[package]]
 name = "refineid-build-number"
 version = "26.11.1"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4e32b090166aacde86d511fbc8cd3afe16a9ed1d"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#286356dfe23cd196daecb5c8ec6937ae2cc164f0"
 
 [[package]]
 name = "refineid-digest"
 version = "26.11.1"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4e32b090166aacde86d511fbc8cd3afe16a9ed1d"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#286356dfe23cd196daecb5c8ec6937ae2cc164f0"
 dependencies = [
  "sha1",
  "sha2",
@@ -473,7 +473,7 @@ dependencies = [
 [[package]]
 name = "refineid-pace"
 version = "26.11.1"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4e32b090166aacde86d511fbc8cd3afe16a9ed1d"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#286356dfe23cd196daecb5c8ec6937ae2cc164f0"
 dependencies = [
  "aes",
  "bp384",
@@ -490,7 +490,7 @@ dependencies = [
 [[package]]
 name = "refineid-pkcs15"
 version = "26.11.1"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4e32b090166aacde86d511fbc8cd3afe16a9ed1d"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#286356dfe23cd196daecb5c8ec6937ae2cc164f0"
 dependencies = [
  "refineid-apdu",
  "refineid-ber",
@@ -500,7 +500,7 @@ dependencies = [
 [[package]]
 name = "refineid-sign"
 version = "26.11.1"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4e32b090166aacde86d511fbc8cd3afe16a9ed1d"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#286356dfe23cd196daecb5c8ec6937ae2cc164f0"
 dependencies = [
  "refineid-apdu",
  "zeroize",
@@ -509,7 +509,7 @@ dependencies = [
 [[package]]
 name = "refineid-x509"
 version = "26.11.1"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4e32b090166aacde86d511fbc8cd3afe16a9ed1d"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#286356dfe23cd196daecb5c8ec6937ae2cc164f0"
 dependencies = [
  "refineid-ber",
 ]

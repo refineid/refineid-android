@@ -21,8 +21,8 @@ use refineid_auth::{
     PinSlot, PinStatus, Puk, UnvalidatedSecret, check_retry_floor,
 };
 
-use crate::activation_scheme::classify_activation_scheme;
 use crate::card_certificate::read_authentication_certificate;
+use crate::certificate_validity::validity_start_epoch_seconds;
 
 pub(crate) const MANAGEMENT_TAG_BRIDGE_ERROR: u8 = 0;
 pub(crate) const MANAGEMENT_TAG_SUCCEEDED: u8 = 1;
@@ -95,13 +95,26 @@ fn encode_pin_status(status: PinStatus) -> (u8, u8) {
     }
 }
 
-/// The activation scheme of the card on `transport`, from its
-/// authentication certificate (`activation_scheme`), or nothing for a card
-/// whose scheme must not be guessed.
-fn detect_activation_scheme<T: CardTransport>(transport: &mut T) -> Option<ActivationScheme> {
+/// The validity start of the authentication certificate on `transport`,
+/// or nothing when the certificate or its date cannot be read.
+fn authentication_certificate_validity_start<T: CardTransport>(transport: &mut T) -> Option<i64> {
     read_authentication_certificate(transport)
         .ok()
-        .and_then(|certificate| classify_activation_scheme(certificate.der().as_bytes()))
+        .and_then(|certificate| validity_start_epoch_seconds(certificate.der().as_bytes()))
+}
+
+/// The activation scheme the core decides for the card on `transport`
+/// from its resolved credential numbering and `validity_start`, the
+/// authentication certificate's notBefore: organization numbering is
+/// FINEID S4-1 section 4.6.1 whatever the date, citizen numbering follows
+/// the date, and a citizen card without a date has no scheme. A card whose
+/// numbering cannot be resolved has no scheme either.
+pub(crate) fn decided_activation_scheme<T: CardTransport>(
+    transport: &mut T,
+    validity_start: Option<i64>,
+) -> Option<ActivationScheme> {
+    let numbering = transport.resolve_pin_reference_scheme().ok()?;
+    ActivationScheme::from_numbering_and_validity_start(numbering, validity_start)
 }
 
 /// The wire byte of an activation scheme, or of none.
@@ -122,7 +135,6 @@ pub(crate) const fn activation_needs_byte(needs: CardActivationNeeds) -> u8 {
     }
 }
 
-/// Execute credential health probe on `transport`.
 /// The activation scheme a wire byte names, or none.
 pub(crate) const fn activation_scheme_from_byte(byte: u8) -> Option<ActivationScheme> {
     match byte {
@@ -132,15 +144,14 @@ pub(crate) const fn activation_scheme_from_byte(byte: u8) -> Option<ActivationSc
     }
 }
 
-/// The health probe under the activation scheme the card's public
-/// authentication certificate names, or under none when the certificate
-/// names no scheme.
+/// The health probe, with the activation scheme the core decides from the
+/// card's numbering and its authentication certificate's validity start.
 pub(crate) fn probe_credential_health<T: CardTransport>(
     transport: &mut T,
 ) -> Result<CredentialHealthReport, CardManagementFailure> {
-    let scheme = detect_activation_scheme(transport);
+    let validity_start = authentication_certificate_validity_start(transport);
     transport
-        .probe_credential_health(scheme)
+        .probe_credential_health(validity_start)
         .map_err(map_auth_error)
 }
 
@@ -304,48 +315,34 @@ pub(crate) fn encode_manage_outcome_reply(
 pub(crate) fn activate_card<T: CardTransport>(
     transport: &mut T,
     scheme_byte: u8,
-    mut code_bytes: Vec<u8>,
-    mut new_pin1_bytes: Option<Vec<u8>>,
-    mut new_pin2_bytes: Option<Vec<u8>>,
+    code_bytes: Vec<u8>,
+    new_pin1_bytes: Option<Vec<u8>>,
+    new_pin2_bytes: Option<Vec<u8>>,
 ) -> Result<ActivationReport, CardManagementFailure> {
-    // The caller names the scheme the open found; without one there is no
-    // activation attempt, since the entry's length and the command it rides
-    // on both depend on the scheme and a wrong guess spends a try, and a
-    // card awaiting activation has nothing read to find it.
-    let Some(scheme) = activation_scheme_from_byte(scheme_byte) else {
-        code_bytes.fill(0);
-        if let Some(bytes) = new_pin1_bytes.as_mut() {
-            bytes.fill(0);
-        }
-        if let Some(bytes) = new_pin2_bytes.as_mut() {
-            bytes.fill(0);
-        }
-        return Err(CardManagementFailure::SafetyRefused);
-    };
+    // Each entry is wrapped at once, so every early return below wipes it.
+    let code_sec = UnvalidatedSecret::from_owned_bytes(code_bytes);
+    let new_pin1_sec = new_pin1_bytes.map(UnvalidatedSecret::from_owned_bytes);
+    let new_pin2_sec = new_pin2_bytes.map(UnvalidatedSecret::from_owned_bytes);
 
-    let code_sec = UnvalidatedSecret::from_owned_bytes(code_bytes.clone());
-    code_bytes.fill(0);
+    // The caller names the scheme the health probe or the open decided;
+    // without one there is no activation attempt. The code is validated
+    // against that scheme and carries it to the core, which sends the
+    // scheme's command chain.
+    let scheme =
+        activation_scheme_from_byte(scheme_byte).ok_or(CardManagementFailure::SafetyRefused)?;
     let code = ActivationCode::reconstruct(code_sec, scheme)
         .map_err(|_| CardManagementFailure::InvalidCredential)?;
-
-    let new_pin1 = if let Some(mut bytes) = new_pin1_bytes.take() {
-        let sec = UnvalidatedSecret::from_owned_bytes(bytes.clone());
-        bytes.fill(0);
-        Some(Pin1::reconstruct(sec).map_err(|_| CardManagementFailure::InvalidCredential)?)
-    } else {
-        None
-    };
-
-    let new_pin2 = if let Some(mut bytes) = new_pin2_bytes.take() {
-        let sec = UnvalidatedSecret::from_owned_bytes(bytes.clone());
-        bytes.fill(0);
-        Some(Pin2::reconstruct(sec).map_err(|_| CardManagementFailure::InvalidCredential)?)
-    } else {
-        None
-    };
+    let new_pin1 = new_pin1_sec
+        .map(Pin1::reconstruct)
+        .transpose()
+        .map_err(|_| CardManagementFailure::InvalidCredential)?;
+    let new_pin2 = new_pin2_sec
+        .map(Pin2::reconstruct)
+        .transpose()
+        .map_err(|_| CardManagementFailure::InvalidCredential)?;
 
     transport
-        .activate_card(scheme, code, new_pin1, new_pin2)
+        .activate_card(code, new_pin1, new_pin2)
         .map_err(map_auth_error)
 }
 
@@ -698,6 +695,94 @@ mod tests {
         assert_eq!(result, Err(CardManagementFailure::TransportError));
         assert_eq!(transport.credential_calls, 1);
         assert!(transport.responses.is_empty());
+    }
+
+    /// 13 January 2026 00:00:00 UTC, the citizen cutover, and the second
+    /// before it.
+    const CUTOVER_EPOCH_SECONDS: i64 = 1_768_262_400;
+    const BEFORE_CUTOVER_EPOCH_SECONDS: i64 = CUTOVER_EPOCH_SECONDS - 1;
+
+    /// Validity starts on both sides of the cutover, and none read.
+    const VALIDITY_STARTS: [Option<i64>; 3] = [
+        Some(BEFORE_CUTOVER_EPOCH_SECONDS),
+        Some(CUTOVER_EPOCH_SECONDS),
+        None,
+    ];
+
+    #[test]
+    fn organization_numbering_takes_the_activation_code_whatever_the_date() {
+        for validity_start in VALIDITY_STARTS {
+            let mut transport = ScriptedTransport::new(&organizational_resolution());
+
+            let scheme = decided_activation_scheme(&mut transport, validity_start);
+
+            assert_eq!(
+                scheme,
+                Some(ActivationScheme::ActivationCodeIsPuk),
+                "{validity_start:?}"
+            );
+            assert!(transport.responses.is_empty());
+            assert_eq!(transport.credential_calls, 0);
+        }
+    }
+
+    #[test]
+    fn citizen_numbering_follows_the_validity_start() {
+        let expected = [
+            Some(ActivationScheme::ActivationCodeIsPuk),
+            Some(ActivationScheme::PresetActivationPin),
+            None,
+        ];
+        for (validity_start, expected) in VALIDITY_STARTS.into_iter().zip(expected) {
+            let mut transport = ScriptedTransport::new(&[remaining(SERVED_RETRIES)]);
+
+            let scheme = decided_activation_scheme(&mut transport, validity_start);
+
+            assert_eq!(scheme, expected, "{validity_start:?}");
+            assert!(transport.responses.is_empty());
+        }
+    }
+
+    #[test]
+    fn unresolved_numbering_decides_no_scheme() {
+        let mut transport = ScriptedTransport::new(&[]);
+
+        assert_eq!(
+            decided_activation_scheme(&mut transport, Some(CUTOVER_EPOCH_SECONDS)),
+            None
+        );
+    }
+
+    #[test]
+    fn activation_without_a_scheme_is_refused_without_reaching_the_card() {
+        let mut transport = ScriptedTransport::new(&[]);
+
+        let result = activate_card(
+            &mut transport,
+            ACTIVATION_SCHEME_UNKNOWN,
+            SYNTHETIC_PUK.to_vec(),
+            Some(SYNTHETIC_NEW_PIN1.to_vec()),
+            Some(SYNTHETIC_NEW_PIN2.to_vec()),
+        );
+
+        assert_eq!(result, Err(CardManagementFailure::SafetyRefused));
+        assert_eq!(transport.credential_calls, 0);
+    }
+
+    #[test]
+    fn an_activation_code_of_the_other_scheme_length_is_refused_without_reaching_the_card() {
+        let mut transport = ScriptedTransport::new(&[]);
+
+        let result = activate_card(
+            &mut transport,
+            ACTIVATION_SCHEME_PRESET,
+            SYNTHETIC_PUK.to_vec(),
+            Some(SYNTHETIC_NEW_PIN1.to_vec()),
+            Some(SYNTHETIC_NEW_PIN2.to_vec()),
+        );
+
+        assert_eq!(result, Err(CardManagementFailure::InvalidCredential));
+        assert_eq!(transport.credential_calls, 0);
     }
 
     #[test]

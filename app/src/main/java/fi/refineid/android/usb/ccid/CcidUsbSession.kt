@@ -122,8 +122,9 @@ internal class CcidUsbSession(
         get() = interruptIn != null
 
     // True once openContactless has run PACE and a live secure-messaging
-    // session is held natively. It routes signing over the retained channel
-    // (no second PACE) and asks the native side to drop the session at close.
+    // session is held natively. It routes signing and card management over
+    // the retained channel (no second PACE) and asks the native side to drop
+    // the session at close.
     private var contactlessSessionActive = false
     private val sessionMaterial = NativeCardSessionMaterial()
 
@@ -199,10 +200,18 @@ internal class CcidUsbSession(
         }
     }
 
+    /**
+     * The plain PKCS#15 select of a contact card. Under a held PACE session
+     * nothing is sent: every operation on that session re-selects inside the
+     * secure channel itself.
+     */
     fun selectPkcs15Application(): NativeCardOperationResult {
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
+        }
+        if (contactlessSessionActive) {
+            return NativeCardOperationResult.BRIDGE_ERROR
         }
         return NativeCore.selectPkcs15Application(
             exchangeLevel = exchangeLevel,
@@ -237,10 +246,18 @@ internal class CcidUsbSession(
         return result
     }
 
+    /**
+     * The plain authentication-certificate read of a contact card. Under a
+     * held PACE session nothing is sent: the open already read and cached
+     * the certificate inside the secure channel.
+     */
     fun cacheAuthenticationCertificate(): NativeCertificateReadResult<NativeAuthenticationCertificate> {
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
+        }
+        if (contactlessSessionActive) {
+            return NativeCertificateReadResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR)
         }
         val result =
             NativeCore.readAuthenticationCertificate(
@@ -253,11 +270,18 @@ internal class CcidUsbSession(
         return result
     }
 
-    /** Reads EF.4332, then restores the PKCS#15 authentication context. */
+    /**
+     * Reads EF.4332. A contact card then has its PKCS#15 authentication
+     * context restored; under a held PACE session the read runs inside the
+     * secure channel, and the next operation there re-selects itself.
+     */
     fun readQualifiedCertificate(): NativeCertificateReadResult<NativeQualifiedCertificate> {
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
+        }
+        if (contactlessSessionActive) {
+            return NativeContactlessSession.readQualifiedCertificateOnSession(nativeExchange)
         }
         val result =
             NativeQualifiedCore.readQualifiedCertificate(
@@ -338,6 +362,9 @@ internal class CcidUsbSession(
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
+        }
+        if (contactlessSessionActive) {
+            return NativeContactlessSession.probePin2OnSession(nativeExchange)
         }
         return NativeQualifiedCore.probePin2Status(
             exchangeLevel = exchangeLevel,
@@ -586,15 +613,29 @@ internal class CcidUsbSession(
         }
 
         val nativeResult =
-            NativeQualifiedCore.qualifiedSignInput(
-                exchangeLevel = exchangeLevel,
-                algorithm = algorithm,
-                inputMode = inputMode,
-                pin2 = pin2,
-                input = input,
-                expectedCertificate = expectedCertificate,
-                exchange = nativeExchange,
-            )
+            if (contactlessSessionActive) {
+                // The PICC card requires secure messaging; the qualified
+                // signature runs inside the channel proven at connect.
+                attemptsStale = true
+                NativeContactlessSession.qualifiedSignInputOnSession(
+                    algorithm = algorithm,
+                    inputMode = inputMode,
+                    pin2 = pin2,
+                    input = input,
+                    expectedCertificate = expectedCertificate,
+                    exchange = nativeExchange,
+                )
+            } else {
+                NativeQualifiedCore.qualifiedSignInput(
+                    exchangeLevel = exchangeLevel,
+                    algorithm = algorithm,
+                    inputMode = inputMode,
+                    pin2 = pin2,
+                    input = input,
+                    expectedCertificate = expectedCertificate,
+                    exchange = nativeExchange,
+                )
+            }
         val verifiedResult =
             when (nativeResult) {
                 is NativeQualifiedSignResult.Success -> {
@@ -634,7 +675,7 @@ internal class CcidUsbSession(
                     )
                 }
             }
-        if (!nativeResult.allowsQualifiedContextRestore()) {
+        if (contactlessSessionActive || !nativeResult.allowsQualifiedContextRestore()) {
             return verifiedResult
         }
         return when (selectPkcs15Application()) {
@@ -727,12 +768,22 @@ internal class CcidUsbSession(
         }
     }
 
+    // Card management. A card opened under PACE refuses a plain command and
+    // ends its secure-messaging channel, so while that session is held every
+    // management operation runs inside it, as signing does; a contact card
+    // takes the plain exchange. A PIN-bearing command on the held channel
+    // leaves the open's PIN 1 count unknown.
+
     fun probeCredentialHealth(): CardManagementResult<CredentialHealth> {
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
         }
-        return NativeCardManagement.probeCredentialHealth(exchangeLevel, nativeExchange)
+        return if (contactlessSessionActive) {
+            NativeCardManagement.contactlessProbeCredentialHealthOnSession(nativeExchange)
+        } else {
+            NativeCardManagement.probeCredentialHealth(exchangeLevel, nativeExchange)
+        }
     }
 
     fun changePin1(
@@ -743,12 +794,12 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return NativeCardManagement.changePin1(
-            exchangeLevel,
-            currentPin,
-            newPin,
-            nativeExchange,
-        )
+        return if (contactlessSessionActive) {
+            attemptsStale = true
+            NativeCardManagement.contactlessChangePin1OnSession(currentPin, newPin, nativeExchange)
+        } else {
+            NativeCardManagement.changePin1(exchangeLevel, currentPin, newPin, nativeExchange)
+        }
     }
 
     fun changePin2(
@@ -759,12 +810,12 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return NativeCardManagement.changePin2(
-            exchangeLevel,
-            currentPin,
-            newPin,
-            nativeExchange,
-        )
+        return if (contactlessSessionActive) {
+            attemptsStale = true
+            NativeCardManagement.contactlessChangePin2OnSession(currentPin, newPin, nativeExchange)
+        } else {
+            NativeCardManagement.changePin2(exchangeLevel, currentPin, newPin, nativeExchange)
+        }
     }
 
     fun unblockPin1(
@@ -775,12 +826,12 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return NativeCardManagement.unblockPin1(
-            exchangeLevel,
-            puk,
-            newPin,
-            nativeExchange,
-        )
+        return if (contactlessSessionActive) {
+            attemptsStale = true
+            NativeCardManagement.contactlessUnblockPin1OnSession(puk, newPin, nativeExchange)
+        } else {
+            NativeCardManagement.unblockPin1(exchangeLevel, puk, newPin, nativeExchange)
+        }
     }
 
     fun unblockPin2(
@@ -791,12 +842,12 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return NativeCardManagement.unblockPin2(
-            exchangeLevel,
-            puk,
-            newPin,
-            nativeExchange,
-        )
+        return if (contactlessSessionActive) {
+            attemptsStale = true
+            NativeCardManagement.contactlessUnblockPin2OnSession(puk, newPin, nativeExchange)
+        } else {
+            NativeCardManagement.unblockPin2(exchangeLevel, puk, newPin, nativeExchange)
+        }
     }
 
     fun activateCard(
@@ -809,14 +860,12 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return NativeCardManagement.activateCard(
-            exchangeLevel,
-            scheme,
-            code,
-            newPin1,
-            newPin2,
-            nativeExchange,
-        )
+        return if (contactlessSessionActive) {
+            attemptsStale = true
+            NativeCardManagement.contactlessActivateCardOnSession(scheme, code, newPin1, newPin2, nativeExchange)
+        } else {
+            NativeCardManagement.activateCard(exchangeLevel, scheme, code, newPin1, newPin2, nativeExchange)
+        }
     }
 
     override fun toString(): String = "CcidUsbSession(closed=" + isClosed + ")"
@@ -1134,8 +1183,8 @@ internal class CcidUsbSessionOpener(
     }
 
     /**
-     * Whether the card still awaits activation, from the scheme its public
-     * authentication certificate names and its counters, before any
+     * Whether the card still awaits activation, from the scheme the native
+     * core decides and the card's per-PIN records and counters, before any
      * identity is cached: a card awaiting activation has no identity.
      */
     private fun awaitsActivation(session: CcidUsbSession): Boolean {
