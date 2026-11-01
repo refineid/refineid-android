@@ -58,9 +58,6 @@ internal class ContactlessSession(
     private val ownerThread = Thread.currentThread()
     private var isClosed = false
 
-    /** True after a PIN command left on this channel without a fresh preflight since. */
-    private var attemptsStale = false
-
     /**
      * Replace the tag handle after the stack re-polled the resting
      * card; the previous handle is dead once the field cycled.
@@ -86,13 +83,14 @@ internal class ContactlessSession(
     }
 
     /**
-     * PIN 1 attempts the card reported at the last open of the channel;
-     * null when it did not say, when the session is closed, or when a PIN
+     * PIN 1 attempts the card allows: the count the last open of the channel
+     * read, or the try limit once the card accepted PIN 1 since; null when
+     * the card did not say, when the session is closed, or when another PIN
      * command has left on this channel since, so the count is not known.
      */
     override fun pin1AttemptsLeft(): Int? {
         checkOwnerThread()
-        if (isClosed || attemptsStale) return null
+        if (isClosed) return null
         return material.cachedPin1Preflight()?.state?.attemptsLeft()
     }
 
@@ -124,7 +122,7 @@ internal class ContactlessSession(
 
     private val pin1Channel =
         object : HeldPin1Channel {
-            override val isLive: Boolean get() = heldSession && isoDep.isConnected
+            override val isLive: Boolean get() = heldSession && tagReachable { isoDep.isConnected }
 
             override fun releaseHeld() = releaseHeldSession()
 
@@ -140,7 +138,6 @@ internal class ContactlessSession(
                     is fi.refineid.android.core.NativeContactlessOpenResult.Success -> {
                         opened.certificate.close()
                         material.cachePin1Preflight(opened.preflight)
-                        attemptsStale = false
                         heldSession = true
                         null
                     }
@@ -164,12 +161,17 @@ internal class ContactlessSession(
             override fun closeField() = closeIsoDep()
 
             override fun verify(pin1: Pin1Submission): fi.refineid.android.core.Pin1Verification {
-                attemptsStale = true
-                return fi.refineid.android.core.NativePin1Verification.verify(
-                    pin1 = pin1,
-                    exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
-                    heldSession = true,
-                )
+                material.pin1CountUnknown()
+                val verification =
+                    fi.refineid.android.core.NativePin1Verification.verify(
+                        pin1 = pin1,
+                        exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
+                        heldSession = true,
+                    )
+                if (verification.result == fi.refineid.android.core.Pin1VerificationResult.VERIFIED) {
+                    material.pin1Accepted()
+                }
+                return verification
             }
         }
 
@@ -199,10 +201,11 @@ internal class ContactlessSession(
             )
         }
         val nativeResult =
-            if (heldSession && isoDep.isConnected) {
+            if (heldSession && tagReachable { isoDep.isConnected }) {
                 // The PACE channel opened at connect is still live on the held
                 // field: VERIFY and sign on it with no second handshake, and
                 // leave the field up for any further operation.
+                material.pin1CountUnknown()
                 val result =
                     NativeContactlessSession.authenticateAndSignOnSession(
                         algorithm = algorithm,
@@ -215,6 +218,9 @@ internal class ContactlessSession(
                     // The native sign keeps the advanced channel even when it fails.
                     releaseHeldSession()
                     closeIsoDep()
+                } else {
+                    // A signature proves the card accepted the VERIFY that preceded it.
+                    material.pin1Accepted()
                 }
                 result
             } else {
@@ -227,6 +233,7 @@ internal class ContactlessSession(
                         AuthenticationSignFailure.CARD_UNAVAILABLE,
                     )
                 }
+                material.pin1CountUnknown()
                 val result =
                     NativeContactlessCore.authenticateAndSign(
                         canCopy = can.copyOf(),
@@ -237,6 +244,10 @@ internal class ContactlessSession(
                         exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
                     )
                 closeIsoDep()
+                if (result !is NativeAuthenticationSignResult.Failure) {
+                    // A signature proves the card accepted the VERIFY that preceded it.
+                    material.pin1Accepted()
+                }
                 result
             }
         return verifiedAuthenticationResult(certificate, inputMode, input, nativeResult)

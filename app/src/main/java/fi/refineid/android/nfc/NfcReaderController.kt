@@ -724,7 +724,7 @@ internal class NfcReaderController(
             }
         }
         val resting = latestIsoDep
-        if (resting == null || !resting.isConnected) {
+        if (resting == null || !tagReachable { resting.isConnected }) {
             latestIsoDep = null
             inMemoryCanBytes?.fill(0)
             // A PIN 1 typed before the tap waits for the card: it opens an
@@ -1151,7 +1151,7 @@ internal class NfcReaderController(
             organizationRecognized(isoDep, generation)
             return
         }
-        val keepAlive = status == NfcReaderStatus.WRONG_CAN && isoDep.isConnected
+        val keepAlive = status == NfcReaderStatus.WRONG_CAN && tagReachable { isoDep.isConnected }
         if (!keepAlive) {
             try {
                 isoDep.close()
