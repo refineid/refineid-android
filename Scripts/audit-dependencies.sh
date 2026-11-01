@@ -14,6 +14,7 @@ source Scripts/gradle-environment.sh
 echo "==> Auditing Rust crates with cargo audit..."
 (cd native/refineid-android-core && cargo audit)
 (cd native/refineid-rapp-android && cargo audit)
+(cd native/refineid-doc-sign-android && cargo audit)
 
 if command -v osv-scanner > /dev/null; then
   echo "==> Auditing lockfiles with osv-scanner..."

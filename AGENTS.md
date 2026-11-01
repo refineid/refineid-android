@@ -53,9 +53,10 @@
   Keep credential values out of anything persisted or committed.
   Release builds emit no logs, zero telemetry, and zero third-party network egress.
   Network access (android.permission.INTERNET) in release builds is strictly reserved
-  for RAPP (local-network TCP stream relay to paired requesters) and the user-directed
-  in-app browser authentication harness. Keep tracing sinks in variant source sets
-  and inspect release artifacts for trace literals.
+  for RAPP (local-network TCP stream relay to paired requesters), the user-directed
+  in-app browser authentication harness, and, for signing and verifying documents,
+  the timestamp authority and the OCSP and CRL addresses certificates name. Keep
+  tracing sinks in variant source sets and inspect release artifacts for trace literals.
 - Debug builds make every error visible: every failure path (refusal, transport
   close, card or NFC error, failed operation) reports through one debug-only error
   sink, an interface the protocol layers call and the debug source set implements.

@@ -1,0 +1,44 @@
+[package]
+name = "refineid-doc-sign-android"
+description = "Android shared library and Kotlin binding for document signing and verification on refineid-doc-sign"
+version = "26.9.24"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# Document signing and verification live in refineid-doc-sign in the shared
+# Rust repository, built here without PC/SC: the card is the one in this
+# phone, driven by the app's own card session, and the network is the
+# app's. This crate is the UniFFI surface over that core: the signer and
+# the HTTP client the Kotlin side implements, and the two calls it makes.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+refineid-doc-sign = { git = "https://github.com/RefineID/refineid-core.git", branch = "main", default-features = false }
+refineid-remote = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+uniffi = { version = "0.32", features = ["cli"] }
+
+[dev-dependencies]
+refineid-doc-sign = { git = "https://github.com/RefineID/refineid-core.git", branch = "main", default-features = false, features = ["testkit"] }
+
+[[bin]]
+name = "refineid-doc-sign-bindgen-kotlin"
+path = "src/bin/refineid-doc-sign-bindgen-kotlin.rs"
+
+# The signing and verification arithmetic lives in the refineid-core
+# dependencies; optimising them even under the dev profile keeps the debug
+# APK's signing and verification fast while this crate's own glue stays
+# debuggable.
+[profile.dev.package."*"]
+opt-level = 3
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "warn"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"

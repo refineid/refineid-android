@@ -3,12 +3,10 @@
     <string name="choose_documents">Choose documents</string>
     <string name="add_file">Add file</string>
     <string name="signing_progress">Signing %1$d/%2$d…</string>
-    <string name="finalizing_progress">Finalizing %1$d/%2$d…</string>
     <string name="saving_progress">Saving %1$d/%2$d…</string>
     <string name="sign_pdf_single">Sign document (PDF)</string>
     <string name="sign_pdf_multiple">Sign documents (PDF)</string>
     <string name="sign_container">Sign container (ASiC-E)</string>
-    <string name="default_container_name">container</string>
     <string name="saving">Saving</string>
     <string name="hold_card">Hold your identity card against the phone’s card reader</string>
     <string name="finalizing_signature">Finalizing signature…</string>
@@ -16,21 +14,16 @@
     <string name="card_left_before_read">The card left before it could be read</string>
     <string name="organization_card_read_first">Read the organisation card with Basic PIN&#160;1 first</string>
     <string name="signed_cert_revoked">Signature certificate revoked — no valid signature</string>
-    <string name="signed_at">signed at %1$s</string>
     <string name="document_valid">Document intact — revocation not checked</string>
     <string name="document_valid_revocation_checked">Document intact — revocation checked</string>
     <string name="document_invalid">Invalid signature</string>
     <string name="document_unsigned">No signature found</string>
     <string name="document_malformed">Unreadable signature</string>
     <string name="document_signature_ordinal">Signature %1$d</string>
-    <string name="document_timestamp_ordinal">Timestamp %1$d</string>
     <string name="document_partial_coverage">Covers only part of the document</string>
     <string name="signature_details_signer">Signer</string>
-    <string name="signature_details_issuer">Issuer</string>
     <string name="signature_details_time">Time</string>
     <string name="signature_status_valid">Valid</string>
     <string name="signature_status_invalid">Invalid</string>
     <string name="signature_status_trusted">Trusted</string>
-    <string name="check_revocation_online">Check revocation online</string>
-    <string name="checking_revocation_online">Checking revocation online…</string>
 </resources>

@@ -2,7 +2,10 @@
 
 package fi.refineid.android.settings
 
-import fi.refineid.android.network.SigningTimestampAuthority
+import uniffi.refineid_doc_sign_android.TimestampAuthority
+import uniffi.refineid_doc_sign_android.TimestampLogin
+import java.nio.CharBuffer
+import java.nio.charset.StandardCharsets
 
 /** One holder-configured authority with an owned, clearable Basic-auth password. */
 internal class TimestampAuthorityConfiguration private constructor(
@@ -25,18 +28,17 @@ internal class TimestampAuthorityConfiguration private constructor(
         return copyOf(address = address, username = username, password = ownedPassword)
     }
 
-    fun copySigningAuthority(): SigningTimestampAuthority {
+    /**
+     * This authority as the core takes it. The login's password is a fresh
+     * UTF-8 copy the caller clears once the core has it.
+     */
+    fun coreAuthority(): TimestampAuthority {
         requireOpen()
-        val password = ownedPassword?.copyOf()
-        return try {
-            SigningTimestampAuthority.configured(
-                address = address,
-                username = username,
-                password = password,
-            )
-        } finally {
-            password?.fill(CLEARED_CHARACTER)
-        }
+        val login =
+            username?.let { name ->
+                TimestampLogin(username = name, password = utf8(checkNotNull(ownedPassword)))
+            }
+        return TimestampAuthority(url = address, login = login)
     }
 
     override fun close() {
@@ -69,13 +71,9 @@ internal class TimestampAuthorityConfiguration private constructor(
             username: String?,
             password: CharArray?,
         ): TimestampAuthorityConfiguration {
-            val checked =
-                SigningTimestampAuthority.configured(
-                    address = address,
-                    username = username,
-                    password = password,
-                )
-            checked.close()
+            require(TimestampAuthorityRules.accepts(address, username, password)) {
+                "invalid timestamp-authority configuration"
+            }
             return TimestampAuthorityConfiguration(
                 address = address,
                 username = username,
@@ -83,6 +81,17 @@ internal class TimestampAuthorityConfiguration private constructor(
             )
         }
 
+        private fun utf8(password: CharArray): ByteArray {
+            val encoded = StandardCharsets.UTF_8.encode(CharBuffer.wrap(password))
+            val bytes = ByteArray(encoded.remaining())
+            encoded.get(bytes)
+            if (encoded.hasArray()) {
+                encoded.array().fill(CLEARED_BYTE)
+            }
+            return bytes
+        }
+
         private const val CLEARED_CHARACTER = '\u0000'
+        private const val CLEARED_BYTE: Byte = 0
     }
 }

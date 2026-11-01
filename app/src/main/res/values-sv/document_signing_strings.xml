@@ -3,12 +3,10 @@
     <string name="choose_documents">Välj dokument</string>
     <string name="add_file">Lägg till fil</string>
     <string name="signing_progress">Signerar %1$d/%2$d…</string>
-    <string name="finalizing_progress">Slutför %1$d/%2$d…</string>
     <string name="saving_progress">Sparar %1$d/%2$d…</string>
     <string name="sign_pdf_single">Signera dokument (PDF)</string>
     <string name="sign_pdf_multiple">Signera dokumenten (PDF)</string>
     <string name="sign_container">Signera portfölj (ASiC-E)</string>
-    <string name="default_container_name">portfölj</string>
     <string name="saving">Sparar</string>
     <string name="hold_card">Håll ditt identitetskort mot telefonens kortläsare</string>
     <string name="finalizing_signature">Slutför signatur…</string>
@@ -16,21 +14,16 @@
     <string name="card_left_before_read">Kortet togs bort innan det kunde läsas</string>
     <string name="organization_card_read_first">Läs först organisationskortet med grund PIN&#160;1</string>
     <string name="signed_cert_revoked">Signaturcertifikatet är spärrat — ogiltig signatur</string>
-    <string name="signed_at">signerat %1$s</string>
     <string name="document_valid">Dokument intakt — spärrlista ej kontrollerad</string>
     <string name="document_valid_revocation_checked">Dokument intakt — spärrlista kontrollerad</string>
     <string name="document_invalid">Ogiltig signatur</string>
     <string name="document_unsigned">Ingen signatur hittades</string>
     <string name="document_malformed">Oläsbar signatur</string>
     <string name="document_signature_ordinal">Signatur %1$d</string>
-    <string name="document_timestamp_ordinal">Tidsstämpel %1$d</string>
     <string name="document_partial_coverage">Täcker endast en del av dokumentet</string>
     <string name="signature_details_signer">Undertecknare</string>
-    <string name="signature_details_issuer">Utfärdare</string>
     <string name="signature_details_time">Tid</string>
     <string name="signature_status_valid">Giltig</string>
     <string name="signature_status_invalid">Ogiltig</string>
     <string name="signature_status_trusted">Betrodd</string>
-    <string name="check_revocation_online">Kontrollera spärrlista online</string>
-    <string name="checking_revocation_online">Kontrollerar spärrlista online…</string>
 </resources>

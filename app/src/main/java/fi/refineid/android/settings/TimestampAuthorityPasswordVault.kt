@@ -5,7 +5,6 @@ package fi.refineid.android.settings
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import fi.refineid.android.network.SigningNetworkLimits
 import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
@@ -241,7 +240,7 @@ internal class AndroidKeystoreTimestampAuthorityPasswordVault(
     }
 
     private fun encodePassword(password: CharArray): ByteArray {
-        if (password.size > SigningNetworkLimits.MAXIMUM_PASSWORD_CHARACTERS) {
+        if (password.size > TimestampAuthorityLimits.MAXIMUM_PASSWORD_CHARACTERS) {
             throw malformed()
         }
         val encoded = ByteArray(password.size * UTF16_CODE_UNIT_BYTES)
@@ -257,7 +256,7 @@ internal class AndroidKeystoreTimestampAuthorityPasswordVault(
     private fun decodePassword(encoded: ByteArray): CharArray {
         if (
             encoded.size % UTF16_CODE_UNIT_BYTES != NO_REMAINDER ||
-            encoded.size / UTF16_CODE_UNIT_BYTES > SigningNetworkLimits.MAXIMUM_PASSWORD_CHARACTERS
+            encoded.size / UTF16_CODE_UNIT_BYTES > TimestampAuthorityLimits.MAXIMUM_PASSWORD_CHARACTERS
         ) {
             throw malformed()
         }
@@ -313,7 +312,7 @@ internal class AndroidKeystoreTimestampAuthorityPasswordVault(
         const val UNSIGNED_BYTE_MASK = 0xFF
         const val NO_REMAINDER = 0
         const val MAXIMUM_PASSWORD_BYTES =
-            SigningNetworkLimits.MAXIMUM_PASSWORD_CHARACTERS * UTF16_CODE_UNIT_BYTES
+            TimestampAuthorityLimits.MAXIMUM_PASSWORD_CHARACTERS * UTF16_CODE_UNIT_BYTES
         const val MAXIMUM_CIPHERTEXT_BYTES = MAXIMUM_PASSWORD_BYTES + GCM_TAG_LENGTH_BYTES
         const val CLEARED_BYTE: Byte = 0
         val KEYSTORE_LOCK = Any()

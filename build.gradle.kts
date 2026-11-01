@@ -71,8 +71,9 @@ spotless {
 
 val rustCrateDirectory = layout.projectDirectory.dir("native/refineid-android-core")
 val rappCrateDirectory = layout.projectDirectory.dir("native/refineid-rapp-android")
+val docSignCrateDirectory = layout.projectDirectory.dir("native/refineid-doc-sign-android")
 
-// Both native crates build against the latest refineid-core main. Updating one
+// Every native crate builds against the latest refineid-core main. Updating one
 // core package moves the whole core git source in the crate's Cargo.lock to the
 // current main commit; third-party crates keep their locked versions, so every
 // later cargo invocation still runs with --locked.
@@ -92,6 +93,8 @@ fun registerCoreRefresh(
 val refreshAndroidCoreRevision =
     registerCoreRefresh("refreshAndroidCoreRevision", rustCrateDirectory, "refineid-apdu")
 registerCoreRefresh("refreshRappCoreRevision", rappCrateDirectory, "refineid-rapp")
+val refreshDocSignCoreRevision =
+    registerCoreRefresh("refreshDocSignCoreRevision", docSignCrateDirectory, "refineid-doc-sign")
 val repositoryShellScripts =
     listOf(
         ".githooks/pre-commit",
@@ -134,6 +137,32 @@ val rustClippy =
         commandLine("cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings")
     }
 
+val docSignRustFormatCheck =
+    tasks.register<Exec>("docSignRustFormatCheck") {
+        group = "verification"
+        description = "Check Rust formatting of the document signing crate."
+        workingDir(docSignCrateDirectory)
+        commandLine("cargo", "fmt", "--check")
+    }
+
+val docSignRustTest =
+    tasks.register<Exec>("docSignRustTest") {
+        group = "verification"
+        description = "Run the document signing crate's locked Rust tests."
+        dependsOn(docSignRustFormatCheck, refreshDocSignCoreRevision)
+        workingDir(docSignCrateDirectory)
+        commandLine("cargo", "test", "--locked")
+    }
+
+val docSignRustClippy =
+    tasks.register<Exec>("docSignRustClippy") {
+        group = "verification"
+        description = "Run Clippy for the document signing crate with warnings denied."
+        dependsOn(docSignRustTest, refreshDocSignCoreRevision)
+        workingDir(docSignCrateDirectory)
+        commandLine("cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings")
+    }
+
 val shellCheck =
     tasks.register<Exec>("shellCheck") {
         group = "verification"
@@ -143,5 +172,5 @@ val shellCheck =
     }
 
 tasks.named("check") {
-    dependsOn(":app:check", rustClippy, shellCheck)
+    dependsOn(":app:check", rustClippy, docSignRustClippy, shellCheck)
 }

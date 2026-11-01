@@ -21,11 +21,6 @@ import fi.refineid.android.core.NativePin2PreflightResult
 import fi.refineid.android.core.NativeQualifiedCertificate
 import fi.refineid.android.core.NativeQualifiedSignResult
 import fi.refineid.android.core.QualifiedSigningAlgorithm
-import fi.refineid.android.document.QualifiedPdfArchivalResult
-import fi.refineid.android.document.QualifiedPdfArchivalStage
-import fi.refineid.android.document.QualifiedPdfPreparationResult
-import fi.refineid.android.document.QualifiedPdfSigningResult
-import fi.refineid.android.network.SigningTimestampAttemptOutcome
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.nfc.SignTapClaim
 import fi.refineid.android.nfc.SignTapFailure
@@ -352,118 +347,14 @@ internal object AppTrace {
         debug("qualified-signature:local-verification verified=" + isVerified)
     }
 
-    fun qualifiedPdfSigningStarted(documentLength: Int): Long =
-        System.nanoTime().also {
-            debug("qualified-pdf:signing-started document-length=" + documentLength)
-        }
-
-    fun qualifiedPdfSigningCompleted(
-        startedAt: Long,
-        result: QualifiedPdfSigningResult,
-    ) {
-        val outcome =
-            when (result) {
-                is QualifiedPdfSigningResult.Success -> {
-                    "success document-length=" + result.document.length
-                }
-
-                is QualifiedPdfSigningResult.Failure -> {
-                    "failure kind=" + result.kind
-                }
-            }
-        debug(
-            "qualified-pdf:signing-completed " + outcome +
-                " duration-us=" + elapsedMicroseconds(startedAt),
-        )
-        if (result is QualifiedPdfSigningResult.Failure) {
-            DevErrorLog.report(
-                "qualified-pdf:signing-failed",
-                result.kind.toString(),
-            )
-        }
+    fun documentSigningFailed(failure: String) {
+        debug("document:signing-failed failure=" + failure)
+        DevErrorLog.report("document:signing-failed", failure)
     }
 
-    fun qualifiedPdfPreparationStarted(documentLength: Int): Long =
-        System.nanoTime().also {
-            debug("qualified-pdf:preparation-started document-length=" + documentLength)
-        }
-
-    fun qualifiedPdfPreparationCompleted(
-        startedAt: Long,
-        result: QualifiedPdfPreparationResult,
-    ) {
-        val outcome =
-            when (result) {
-                is QualifiedPdfPreparationResult.Success -> {
-                    "success document-length=" + result.prepared.documentLength
-                }
-
-                is QualifiedPdfPreparationResult.Failure -> {
-                    "failure kind=" + result.kind
-                }
-            }
-        debug(
-            "qualified-pdf:preparation-completed " + outcome +
-                " duration-us=" + elapsedMicroseconds(startedAt),
-        )
-    }
-
-    fun qualifiedPdfArchivalStarted(): Long =
-        System.nanoTime().also {
-            debug("qualified-pdf:archival-started")
-        }
-
-    fun qualifiedPdfArchivalStage(stage: QualifiedPdfArchivalStage) {
-        debug("qualified-pdf:archival-stage stage=" + stage)
-    }
-
-    fun qualifiedPdfArchivalCompleted(
-        startedAt: Long,
-        result: QualifiedPdfArchivalResult,
-    ) {
-        val outcome =
-            when (result) {
-                is QualifiedPdfArchivalResult.Success -> {
-                    "success document-length=" + result.document.length
-                }
-
-                is QualifiedPdfArchivalResult.BelowLongTerm -> {
-                    "below-long-term level=" + result.level + " kind=" + result.kind +
-                        " document-length=" + result.document.length
-                }
-
-                is QualifiedPdfArchivalResult.Failure -> {
-                    "failure kind=" + result.kind
-                }
-            }
-        debug(
-            "qualified-pdf:archival-completed " + outcome +
-                " duration-us=" + elapsedMicroseconds(startedAt),
-        )
-    }
-
-    fun signingTimestampAttemptStarted(
-        authorityOrdinal: Int,
-        authorityCount: Int,
-    ) {
-        debug(
-            "signing-network:timestamp-attempt-started authority=" + authorityOrdinal +
-                " of=" + authorityCount,
-        )
-    }
-
-    fun signingTimestampAttemptCompleted(
-        authorityOrdinal: Int,
-        outcome: SigningTimestampAttemptOutcome,
-    ) {
-        debug(
-            "signing-network:timestamp-attempt-completed authority=" + authorityOrdinal +
-                " outcome=" + outcome,
-        )
-    }
-
-    fun signingTimestampRetryScheduled(delaySeconds: Long) {
-        debug("signing-network:timestamp-retry-scheduled delay-seconds=" + delaySeconds)
+    fun documentVerificationFailed(failure: String) {
+        debug("document:verification-failed failure=" + failure)
+        DevErrorLog.report("document:verification-failed", failure)
     }
 
     fun documentInputStarted() {

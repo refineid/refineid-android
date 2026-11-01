@@ -2,14 +2,13 @@
 
 package fi.refineid.android.settings
 
-import fi.refineid.android.network.SigningTimestampTrust
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.util.Base64
 
 class TimestampAuthorityConfigurationTest {
     @Test
@@ -26,7 +25,7 @@ class TimestampAuthorityConfigurationTest {
     }
 
     @Test
-    fun configurationOwnsPasswordAndCreatesConfiguredTrust() {
+    fun configurationOwnsPasswordAndHandsTheCoreItsLogin() {
         val inputPassword = SYNTHETIC_PASSWORD.copyOf()
         val configuration =
             TimestampAuthorityConfiguration.copyOf(
@@ -37,17 +36,19 @@ class TimestampAuthorityConfigurationTest {
         inputPassword[FIRST_CHARACTER_INDEX] = CHANGED_CHARACTER
 
         val copiedPassword = checkNotNull(configuration.copyPassword())
-        val authority = configuration.copySigningAuthority()
+        val authority = configuration.coreAuthority()
+        val login = checkNotNull(authority.login)
         try {
             assertTrue(copiedPassword.contentEquals(SYNTHETIC_PASSWORD))
-            assertEquals(SigningTimestampTrust.TRUSTED_LISTS, authority.trust)
-            assertEquals(SYNTHETIC_AUTHORIZATION_HEADER, authority.credentials()?.authorizationHeader())
+            assertEquals(PROTECTED_AUTHORITY_ADDRESS, authority.url)
+            assertEquals(SYNTHETIC_USERNAME, login.username)
+            assertArrayEquals(SYNTHETIC_PASSWORD.concatToString().encodeToByteArray(), login.password)
             assertFalse(configuration.toString().contains(PROTECTED_AUTHORITY_ADDRESS))
             assertFalse(configuration.toString().contains(SYNTHETIC_USERNAME))
             assertFalse(configuration.toString().contains(SYNTHETIC_PASSWORD.concatToString()))
         } finally {
             copiedPassword.fill(CLEARED_CHARACTER)
-            authority.close()
+            login.password.fill(CLEARED_BYTE)
             configuration.close()
         }
 
@@ -62,12 +63,10 @@ class TimestampAuthorityConfigurationTest {
                 username = SYNTHETIC_USERNAME,
                 password = EMPTY_PASSWORD,
             )
-        val authority = configuration.copySigningAuthority()
         try {
             assertTrue(configuration.hasCredentials)
-            assertEquals(EMPTY_PASSWORD_AUTHORIZATION_HEADER, authority.credentials()?.authorizationHeader())
+            assertEquals(0, checkNotNull(configuration.coreAuthority().login).password.size)
         } finally {
-            authority.close()
             configuration.close()
         }
 
@@ -80,18 +79,54 @@ class TimestampAuthorityConfigurationTest {
         }
     }
 
+    @Test
+    fun anAuthorityWithoutALoginHandsTheCoreNone() {
+        val configuration = TimestampAuthorityConfiguration.shipped()
+        try {
+            val authority = configuration.coreAuthority()
+            assertEquals(SHIPPED_AUTHORITY_ADDRESS, authority.url)
+            assertNull(authority.login)
+        } finally {
+            configuration.close()
+        }
+    }
+
+    @Test
+    fun malformedAuthoritiesAndHalfLoginsAreRefused() {
+        listOf(NOT_A_URL, USER_INFO_ADDRESS, OTHER_SCHEME_ADDRESS).forEach { address ->
+            assertThrows(IllegalArgumentException::class.java) {
+                TimestampAuthorityConfiguration.copyOf(address = address, username = null, password = null)
+            }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TimestampAuthorityConfiguration.copyOf(
+                address = PROTECTED_AUTHORITY_ADDRESS,
+                username = SYNTHETIC_USERNAME,
+                password = null,
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TimestampAuthorityConfiguration.copyOf(
+                address = PROTECTED_AUTHORITY_ADDRESS,
+                username = SEPARATOR_USERNAME,
+                password = SYNTHETIC_PASSWORD,
+            )
+        }
+    }
+
     private companion object {
+        const val NOT_A_URL = "not a url"
+        const val USER_INFO_ADDRESS = "https://someone@timestamp.example/request"
+        const val OTHER_SCHEME_ADDRESS = "ftp://timestamp.example/request"
+        const val SEPARATOR_USERNAME = "synthetic:account"
         const val SHIPPED_AUTHORITY_ADDRESS = "https://timestamp.sectigo.com/qualified"
         const val PROTECTED_AUTHORITY_ADDRESS = "https://timestamp.example/request"
         const val PLAIN_AUTHORITY_ADDRESS = "http://timestamp.example/request"
         const val SYNTHETIC_USERNAME = "synthetic-account"
-        val SYNTHETIC_AUTHORIZATION_HEADER =
-            "Basic " + Base64.getEncoder().encodeToString("$SYNTHETIC_USERNAME:synthetic-password".toByteArray())
-        val EMPTY_PASSWORD_AUTHORIZATION_HEADER =
-            "Basic " + Base64.getEncoder().encodeToString("$SYNTHETIC_USERNAME:".toByteArray())
         const val FIRST_CHARACTER_INDEX = 0
         const val CHANGED_CHARACTER = 'X'
         const val CLEARED_CHARACTER = '\u0000'
+        const val CLEARED_BYTE: Byte = 0
         val SYNTHETIC_PASSWORD = "synthetic-password".toCharArray()
         val EMPTY_PASSWORD = CharArray(0)
     }
