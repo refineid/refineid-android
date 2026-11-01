@@ -25,27 +25,27 @@ PIN's value the moment that PIN is changed.
 
 ## Decision
 
-- **No identity before activation.** A card awaiting activation has no
-  identity: nothing of it is read beyond its counters, so no name is shown,
+- **Scheme from the issue date.** DVV defines the cutover by issue date
+  alone, so the scheme comes from the validity start of the card's public
+  authentication certificate (`activation_scheme`, through the core's
+  `ActivationScheme::from_validity_start`), as on the Apple platforms. The
+  chip generation does not name it: a Thales MultiApp v5 card with ECC
+  keys issued before the cutover uses the activation code. An
+  organisational issuer, or a validity start that cannot be read, names no
+  scheme, and the card is opened as an activated one.
+- **No identity before activation.** The open reads the authentication
+  certificate first, inside the secure channel after the PKCS#15
+  selection, and classifies it. A card awaiting activation has no identity:
+  the certificate serves the classification only, so no name is shown,
   nothing is stored for it but the access number, and nothing is offered
-  to a browser or a paired computer. The scheme therefore comes from what
-  the card answered at reset, before anything is read: the three MultiApp
-  generations DVV has issued name it (v3 and v4 use the activation code,
-  v5 the preset activation PIN; `activation_scheme`, after the Apple
-  reference's `FineidCardTypeValues`), from the historical bytes the NFC
-  stack reports or from the full answer a reader reports. An unfamiliar
-  answer names nothing, and the card is opened as an activated one.
+  to a browser or a paired computer.
 - **Needs from the card.** With a scheme in hand, the open asks the core's
-  `activation_needs`: for the activation-code scheme a counter-safe VERIFY
-  probe per PIN, where a blocked PIN is a factory-fresh one; for the preset
-  scheme the changed-since-manufacture record per PIN. Both run inside the
-  secure channel after the PKCS#15 selection and before any identity read,
-  on a phone and on a reader alike. A probe the card refuses leaves the
-  card treated as activated, so a transient fault never routes an activated
-  card to activation. The health probe behind the activation form takes
-  the same answer to reset, so it reads no certificate either; for an
-  activated card whose answer names no scheme it reads the certificate, as
-  the card is activated.
+  `activation_needs`, which reads each PIN's changed-since-manufacture
+  record and counter-safe status; an unchanged PIN awaits activation under
+  either scheme. It runs on a phone and on a reader alike. A probe the card
+  refuses leaves the card treated as activated, so a transient fault never
+  routes an activated card to activation. The health probe behind the
+  activation form classifies the same certificate the same way.
 - **The reply names the procedure.** The contactless open reply for a card
   awaiting activation is the scheme byte and the needs byte and nothing
   else, with the management reply's vocabulary; Kotlin refuses a reply with
@@ -82,7 +82,7 @@ Feedback: the certificate and the per-PIN probes.
   the card per PIN, and the form asks only for the PINs still waiting.
 - UCA-2: the app sends an entry of the wrong length, or over the wrong
   command, on a guessed scheme (H: a try spent). CC: the scheme comes from
-  what the card answered at reset; an unnamed scheme gets no attempt, on
+  the certificate's issue date; an unnamed scheme gets no attempt, on
   either side of the bridge.
 - UCA-3: the app routes an activated card to activation on a stale or
   failed reading (H: the holder enters codes for nothing). CC: a refused
@@ -92,37 +92,20 @@ Feedback: the certificate and the per-PIN probes.
 
 Scripted: the classifier against synthetic certificates on both sides of
 the cutover, organisational and unfamiliar issuers, unreadable validity, and
-malformed or truncated DER; the answer-to-reset table against the three
-generations, a full answer and an unfamiliar one; the open reply encoding
+malformed or truncated DER; the open reply encoding
 and the Kotlin decoder with scheme and needs, and the decoder's refusals.
 Hardware, observed on 2026-10-24: over NFC, an activated card opened as
 ready, which proves the changed-record read survives the secure channel,
-and a card awaiting activation was routed to activation; in a USB reader,
-a card awaiting activation answered at reset as a fifth-generation MultiApp
-and its changed records reported both PINs waiting under the preset
-scheme, which is the table's row and the probe's reading; the same card
-over NFC, once its access number was entered, was classified from the
-historical bytes the NFC stack reports and opened as awaiting activation
-in half a second, with no certificate read in the exchange, and the
-activation form's own health probe read none either. The activation
-itself, which each card serves once, is not yet observed on Android.
-
-## Open question
-
-For the activation-code scheme the core reads a PIN as factory-fresh when
-the counter-safe probe answers "blocked" (FINEID S4-1 v4.2 section 4.6.1:
-"PIN1 and PIN2 have been blocked"), while the Apple reference records
-"reference data invalidated" as the answer a factory-fresh PIN gives and
-counts a blocked PIN as one written to since manufacture. Android follows
-the core. Which answer such a card gives at the probe is a hardware
-observation still to be made on Android; until then the old scheme's
-detection is covered by scripted tests only.
+and a card awaiting activation was routed to activation. A Thales MultiApp
+v5 test card with ECC keys and an authentication certificate issued before
+the cutover answers both PIN counters exhausted with the changed flags
+unchanged, so it awaits activation under the activation-code scheme. The
+activation itself, which each card serves once, is not yet observed on
+Android.
 
 ## Consequences
 
-Android classifies a card awaiting activation from its answer to reset
-alone, where the iPhone reads the certificate's issuance date first and
-falls back to the same table; the two agree on every card the table names.
-The native crate carries a small X.509 walk for the issuer and the validity
-start, used only for an activated card's health report, which the public
-core excludes by design.
+Android and the iPhone classify every card by the same rule, the
+authentication certificate's issue date. The native crate carries a small
+X.509 walk for the issuer and the validity start, which the public core
+excludes by design.

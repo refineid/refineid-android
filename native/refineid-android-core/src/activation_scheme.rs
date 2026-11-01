@@ -15,18 +15,15 @@
 //! Which activation procedure a citizen card follows, read from its
 //! authentication certificate (FINEID S4-1 section 4.6).
 //!
-//! The validity start is the authoritative generation boundary: DVV names
-//! the cutover date itself, so the rule survives a CA renaming, and the
-//! issuance date is printed on the card for a human to check. The issuer
-//! common name refuses an organisational card before the date is applied,
-//! since section 4.6 covers citizen cards alone, and stands in when the
-//! validity cannot be read: DVV's issuing CAs end their names with a
-//! generation marker and a key-family letter. That correlation is
-//! empirical, so anything unfamiliar answers nothing and the caller makes
-//! no activation decision from it. This mirrors the Apple reference's
-//! `ActivationScheme.classify`.
+//! DVV defines the cutover by issue date alone, so the certificate's
+//! validity start is the one rule (`ActivationScheme::from_validity_start`);
+//! the issuance date is printed on the card for a human to check. The
+//! issuer common name refuses an organisational card before the date is
+//! applied, since section 4.6 covers citizen cards alone. A certificate
+//! whose validity start cannot be read answers nothing, and the caller
+//! makes no activation decision from it. This mirrors the Apple
+//! reference's `ActivationScheme.classify`.
 
-use refineid_atr::Atr;
 use refineid_auth::ActivationScheme;
 use refineid_ber::{BerTlvAny, BerTlvIter};
 
@@ -49,13 +46,6 @@ const OID_COMMON_NAME: [u8; 3] = [0x55, 0x04, 0x03];
 
 /// Common-name marker of DVV's organisational issuing CAs.
 const ORGANISATIONAL_ISSUER_MARKER: &str = "Organisational";
-/// Common-name generation markers DVV's issuing CAs carry.
-const ISSUER_GENERATION_MARKERS: [&str; 3] = ["G3", "G4", "G5"];
-/// Common-name suffix of DVV's RSA issuing CAs.
-const ISSUER_RSA_SUFFIX: &str = "R";
-/// Common-name suffix of DVV's ECC issuing CAs.
-const ISSUER_ECC_SUFFIX: &str = "E";
-
 /// Digits of a UTCTime up to and including the seconds.
 const UTC_TIME_DIGITS: usize = 12;
 /// Digits of a GeneralizedTime up to and including the seconds.
@@ -96,82 +86,21 @@ const MAX_HOUR: i64 = 23;
 const MAX_MINUTE: i64 = 59;
 const MAX_SECOND: i64 = 59;
 
-/// The card-capability bytes every Gemalto and Thales MultiApp answer to
-/// reset opens with, shared by the three generations DVV has issued
-/// (opaque, externally specified; the Apple reference's
-/// `FineidCardTypeValues`).
-const MULTIAPP_CAPABILITIES: [u8; 6] = [0x80, 0x31, 0xB8, 0x65, 0xB0, 0x85];
-/// The generation byte that follows them: Gemalto MultiApp v3.
-const MULTIAPP_THIRD_GENERATION: u8 = 0x03;
-/// Gemalto MultiApp v4.
-const MULTIAPP_FOURTH_GENERATION: u8 = 0x04;
-/// Thales MultiApp v5, which implements FINEID S4-1 v4.0 and ships with
-/// the seven-digit activation PIN.
-const MULTIAPP_FIFTH_GENERATION: u8 = 0x05;
-
-/// Classifies a card's activation procedure from what it answered at
-/// reset, before anything is read from it: a full answer to reset as a
-/// contact reader reports it, or the historical bytes alone as a phone's
-/// NFC stack reports them. MultiApp v5 uses the preset activation PIN;
-/// v3 and v4 use the activation code. An unfamiliar answer is never
-/// rounded to either, and the card is then opened as an activated one.
-#[must_use]
-pub(crate) fn classify_by_card_answer(answer: &[u8]) -> Option<ActivationScheme> {
-    let historical: Vec<u8> = match Atr::new(answer) {
-        Ok(atr) => atr.historical_bytes().as_bytes().to_vec(),
-        Err(_) => answer.to_vec(),
-    };
-    let generation = historical.strip_prefix(&MULTIAPP_CAPABILITIES)?.first()?;
-    match *generation {
-        MULTIAPP_FIFTH_GENERATION => Some(ActivationScheme::PresetActivationPin),
-        MULTIAPP_THIRD_GENERATION | MULTIAPP_FOURTH_GENERATION => {
-            Some(ActivationScheme::ActivationCodeIsPuk)
-        }
-        _ => None,
-    }
-}
-
 /// Classifies a citizen card's activation procedure from its
 /// authentication certificate, or answers nothing for a card whose
-/// procedure this code must not guess. Used for an activated card only;
-/// a card awaiting activation is classified from its answer to reset and
-/// its certificate is never read.
+/// procedure this code must not guess: an organisational card, or a
+/// certificate whose validity start cannot be read.
 #[must_use]
 pub(crate) fn classify_activation_scheme(certificate_der: &[u8]) -> Option<ActivationScheme> {
     let tbs = tbs_certificate(certificate_der)?;
-    let issuer_common_name = issuer_common_name(tbs.issuer);
-    if issuer_common_name
+    if issuer_common_name(tbs.issuer)
         .as_deref()
         .is_some_and(|name| name.contains(ORGANISATIONAL_ISSUER_MARKER))
     {
         return None;
     }
-    if let Some(not_before) = tbs.not_before_epoch_seconds {
-        return Some(ActivationScheme::from_validity_start(not_before));
-    }
-    issuer_common_name
-        .as_deref()
-        .and_then(classify_by_issuer_common_name)
-}
-
-/// Classifies by the issuer common name alone, or answers nothing.
-fn classify_by_issuer_common_name(common_name: &str) -> Option<ActivationScheme> {
-    if common_name.contains(ORGANISATIONAL_ISSUER_MARKER) {
-        return None;
-    }
-    if !ISSUER_GENERATION_MARKERS
-        .iter()
-        .any(|marker| common_name.contains(marker))
-    {
-        return None;
-    }
-    if common_name.ends_with(ISSUER_RSA_SUFFIX) {
-        return Some(ActivationScheme::ActivationCodeIsPuk);
-    }
-    if common_name.ends_with(ISSUER_ECC_SUFFIX) {
-        return Some(ActivationScheme::PresetActivationPin);
-    }
-    None
+    tbs.not_before_epoch_seconds
+        .map(ActivationScheme::from_validity_start)
 }
 
 /// The two TBSCertificate fields the classification consults.
@@ -336,16 +265,9 @@ mod tests {
     use refineid_ber::{BerEncoder, tlv};
 
     use super::{
-        MULTIAPP_CAPABILITIES, MULTIAPP_FIFTH_GENERATION, MULTIAPP_FOURTH_GENERATION,
-        MULTIAPP_THIRD_GENERATION, OID_COMMON_NAME, SECONDS_PER_DAY, TAG_GENERALIZED_TIME, TAG_OID,
-        TAG_SEQUENCE, TAG_SET, TAG_UTC_TIME, TAG_VERSION_EXPLICIT, classify_activation_scheme,
-        classify_by_card_answer, days_from_civil,
+        OID_COMMON_NAME, SECONDS_PER_DAY, TAG_GENERALIZED_TIME, TAG_OID, TAG_SEQUENCE, TAG_SET,
+        TAG_UTC_TIME, TAG_VERSION_EXPLICIT, classify_activation_scheme, days_from_civil,
     };
-
-    /// ISO 7816-3 TS byte of the direct convention.
-    const TS_DIRECT_CONVENTION: u8 = 0x3B;
-    /// A MultiApp generation byte no card has carried.
-    const UNKNOWN_GENERATION: u8 = 0x09;
 
     /// ASN.1 INTEGER, NULL and PrintableString, used only to build fixtures.
     const TAG_INTEGER: u8 = 0x02;
@@ -408,60 +330,6 @@ mod tests {
     }
 
     #[test]
-    fn the_answer_to_reset_names_the_generation() {
-        let v5 = [
-            MULTIAPP_CAPABILITIES.as_slice(),
-            &[MULTIAPP_FIFTH_GENERATION, 0],
-        ]
-        .concat();
-        let v4 = [
-            MULTIAPP_CAPABILITIES.as_slice(),
-            &[MULTIAPP_FOURTH_GENERATION],
-        ]
-        .concat();
-        let v3 = [
-            MULTIAPP_CAPABILITIES.as_slice(),
-            &[MULTIAPP_THIRD_GENERATION],
-        ]
-        .concat();
-        assert_eq!(
-            classify_by_card_answer(&v5),
-            Some(ActivationScheme::PresetActivationPin)
-        );
-        assert_eq!(
-            classify_by_card_answer(&v4),
-            Some(ActivationScheme::ActivationCodeIsPuk)
-        );
-        assert_eq!(
-            classify_by_card_answer(&v3),
-            Some(ActivationScheme::ActivationCodeIsPuk)
-        );
-        // A full answer to reset carrying the same historical bytes.
-        let atr = full_answer_to_reset(&v5);
-        assert_eq!(
-            classify_by_card_answer(&atr),
-            Some(ActivationScheme::PresetActivationPin)
-        );
-    }
-
-    #[test]
-    fn an_unfamiliar_answer_to_reset_names_nothing() {
-        assert_eq!(classify_by_card_answer(&[]), None);
-        assert_eq!(classify_by_card_answer(&MULTIAPP_CAPABILITIES), None);
-        let unknown_generation = [MULTIAPP_CAPABILITIES.as_slice(), &[UNKNOWN_GENERATION]].concat();
-        assert_eq!(classify_by_card_answer(&unknown_generation), None);
-        assert_eq!(classify_by_card_answer(&MULTIAPP_CAPABILITIES[..3]), None);
-    }
-
-    /// A direct-convention T=0 answer to reset carrying `historical`
-    /// (ISO 7816-3 section 8): TS, then T0 with the historical byte count
-    /// in its low nibble and no interface bytes.
-    fn full_answer_to_reset(historical: &[u8]) -> Vec<u8> {
-        let count = u8::try_from(historical.len()).expect("fits the T0 nibble");
-        [&[TS_DIRECT_CONVENTION, count], historical].concat()
-    }
-
-    #[test]
     fn the_validity_start_decides_the_scheme() {
         assert_eq!(
             classify_activation_scheme(&certificate(
@@ -502,31 +370,37 @@ mod tests {
     }
 
     #[test]
-    fn the_issuer_name_stands_in_for_an_unreadable_date() {
+    fn an_ecc_issuer_before_the_cutover_takes_the_activation_code() {
         assert_eq!(
             classify_activation_scheme(&certificate(
-                CITIZEN_RSA_ISSUER,
+                CITIZEN_ECC_ISSUER,
                 tag8(TAG_UTC_TIME),
-                MALFORMED_TIME
+                BEFORE_CUTOVER
             )),
             Some(ActivationScheme::ActivationCodeIsPuk)
         );
         assert_eq!(
             classify_activation_scheme(&certificate(
                 CITIZEN_ECC_ISSUER,
-                tag8(TAG_UTC_TIME),
-                MALFORMED_TIME
+                tag8(TAG_GENERALIZED_TIME),
+                BEFORE_CUTOVER_GENERALIZED
             )),
-            Some(ActivationScheme::PresetActivationPin)
+            Some(ActivationScheme::ActivationCodeIsPuk)
         );
-        assert_eq!(
-            classify_activation_scheme(&certificate(
-                UNFAMILIAR_ISSUER,
-                tag8(TAG_UTC_TIME),
-                MALFORMED_TIME
-            )),
-            None
-        );
+    }
+
+    #[test]
+    fn an_unreadable_validity_start_answers_nothing() {
+        for issuer in [CITIZEN_RSA_ISSUER, CITIZEN_ECC_ISSUER, UNFAMILIAR_ISSUER] {
+            assert_eq!(
+                classify_activation_scheme(&certificate(
+                    issuer,
+                    tag8(TAG_UTC_TIME),
+                    MALFORMED_TIME
+                )),
+                None
+            );
+        }
     }
 
     #[test]

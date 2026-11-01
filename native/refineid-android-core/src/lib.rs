@@ -294,7 +294,6 @@ const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeContactlessCore",
     static extern fn contactless_open_native(
         can: [jbyte],
-        card_answer: [jbyte],
         callback: JObject,
     ) -> [jbyte],
 };
@@ -342,7 +341,6 @@ const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeContactlessSession",
     static extern fn contactless_connect_native(
         can: [jbyte],
-        card_answer: [jbyte],
         callback: JObject,
     ) -> [jbyte],
 };
@@ -366,7 +364,6 @@ const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeCardManagement",
     static extern fn probe_credential_health_native(
         exchange_level: jint,
-        card_answer: [jbyte],
         callback: JObject,
     ) -> [jbyte],
 };
@@ -427,7 +424,6 @@ const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeCardManagement",
     static extern fn contactless_probe_credential_health_native(
         can: [jbyte],
-        card_answer: [jbyte],
         callback: JObject,
     ) -> [jbyte],
 };
@@ -616,16 +612,14 @@ fn contactless_open_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
     can: JByteArray<'local>,
-    card_answer: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
     let can_bytes = take_secret_bytes(env, &can)?;
-    let card_answer = env.convert_byte_array(&card_answer)?;
 
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
-        let (result, exchange) = contactless_open(transport, can_bytes, card_answer);
+        let (result, exchange) = contactless_open(transport, can_bytes);
         (result, exchange.bridge_failed())
     };
 
@@ -647,16 +641,14 @@ fn contactless_connect_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
     can: JByteArray<'local>,
-    card_answer: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
     let can_bytes = take_secret_bytes(env, &can)?;
-    let card_answer = env.convert_byte_array(&card_answer)?;
 
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
-        let (result, exchange) = contactless_connect(transport, can_bytes, card_answer);
+        let (result, exchange) = contactless_connect(transport, can_bytes);
         (result, exchange.bridge_failed())
     };
 
@@ -1092,10 +1084,8 @@ fn probe_credential_health_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
     exchange_level: jint,
-    card_answer: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let card_answer = env.convert_byte_array(&card_answer)?;
     let Some(level) = exchange_level_from_jint(exchange_level) else {
         return env.byte_array_from_slice(&[card_management::MANAGEMENT_TAG_BRIDGE_ERROR]);
     };
@@ -1103,7 +1093,7 @@ fn probe_credential_health_native<'local>(
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let mut transport = AndroidCardTransport::new(exchange, level);
-        let result = card_management::probe_credential_health(&mut transport, &card_answer);
+        let result = card_management::probe_credential_health(&mut transport);
         let exchange = transport.into_exchange();
         (result, exchange.bridge_failed())
     };
@@ -1344,16 +1334,14 @@ fn contactless_probe_credential_health_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
     can: JByteArray<'local>,
-    card_answer: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
     let can_bytes = take_secret_bytes(env, &can)?;
-    let card_answer = env.convert_byte_array(&card_answer)?;
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
         let (result, exchange) =
-            contactless::contactless_probe_credential_health(transport, can_bytes, card_answer);
+            contactless::contactless_probe_credential_health(transport, can_bytes);
         (result, exchange.bridge_failed())
     };
 
