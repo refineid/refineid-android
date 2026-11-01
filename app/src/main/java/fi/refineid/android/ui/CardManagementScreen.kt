@@ -204,7 +204,7 @@ internal fun CardManagementScreen(
 
     val pin1Bounds = 4..12
     val pin2Bounds = 6..12
-    val pukBounds = 8..8
+    val pukBounds = 8..12
     val activationCodeBounds =
         health?.activationScheme?.activationEntryDigitCount?.let { it..it } ?: IntRange.EMPTY
 
@@ -1041,8 +1041,8 @@ private fun ResetPinForm(
             ManagedPasswordField(
                 state = pukState,
                 label = stringResource(R.string.puk_code),
-                maxLength = 8,
-                supportingText = stringResource(R.string.activation_code_length_hint, 8),
+                maxLength = 12,
+                supportingText = stringResource(R.string.puk_length_hint),
                 imeAction = ImeAction.Next,
                 testTag = "managementPuk",
             )
