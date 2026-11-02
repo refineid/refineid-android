@@ -10,12 +10,13 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import uniffi.refineid_rapp.rappFreshInstanceName
 import uniffi.refineid_rapp.rappPairingPreamble
 import uniffi.refineid_rapp.rappStreamProfileName
 
 /**
  * Session discovery publishes no stable value, and a connection is routed
- * only by the routing tag in its preamble (RAPP v26.10.29 section 2.2.1).
+ * only by the routing tag in its preamble (RAPP v26.11.2 section 2.2.1).
  */
 class RappSessionDiscoveryTest {
     private companion object {
@@ -31,8 +32,8 @@ class RappSessionDiscoveryTest {
 
     @Test
     fun instanceNamesAreFreshAndRandom() {
-        val first = StreamRendezvousName.ephemeralName()
-        val second = StreamRendezvousName.ephemeralName()
+        val first = rappFreshInstanceName()
+        val second = rappFreshInstanceName()
         assertTrue(Regex("refineid-[0-9a-f]{8}").matches(first))
         assertNotEquals(first, second)
     }

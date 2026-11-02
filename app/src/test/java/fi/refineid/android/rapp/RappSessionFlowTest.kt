@@ -7,6 +7,7 @@ import fi.refineid.android.usb.ReaderConnectionStatus
 import fi.refineid.android.usb.UsbReaderSnapshot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -20,6 +21,7 @@ import uniffi.refineid_rapp.RappCloseReason
 import uniffi.refineid_rapp.RappForgetOutcome
 import uniffi.refineid_rapp.RappOperationBridge
 import uniffi.refineid_rapp.RappPairRecord
+import uniffi.refineid_rapp.RappRequesterSessionEnd
 import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
 import uniffi.refineid_rapp.RappTerminalReason
@@ -28,7 +30,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * One RAPP v26.10.29 session between a requester and a custodian bridge,
+ * One RAPP v26.11.2 session between a requester and a custodian bridge,
  * read through the app's typed binding border: the custodian's ready, card
  * status, consent, reads, the retry floor, deadlines, liveness and the
  * pairing_revoked close either end sends.
@@ -95,12 +97,7 @@ class RappSessionFlowTest {
         val (requester, custodian) = handshake(pairing)
         custodian.enterAuthentication()
         requester.enterAuthentication()
-        val ready = custodian.sendReady(random(RANDOM_BYTE_COUNTS.sessionReadyNonce))
-        custodian.enterEstablished()
-        assertSame(RappBridgeOutcome.Idle, RappBridgeOutcome.from(requester.receiveReady(ready, NOW)))
-        requester.enterEstablished()
-        return RappOperationBridge.beginRequester(requester, LIFETIME_MS, NOW) to
-            RappOperationBridge.beginProxy(custodian, LIFETIME_MS, NOW)
+        return RappTestOffers.establish(requester, custodian, LIFETIME_MS, NOW)
     }
 
     /** Hands a sent frame to [peer] and types what it makes of it. */
@@ -288,22 +285,68 @@ class RappSessionFlowTest {
         val (requester, custodian) = handshake(pairing)
         custodian.enterAuthentication()
         assertThrows(RappBindingException::class.java) {
-            custodian.sendReady(random(RANDOM_BYTE_COUNTS.sessionReadyNonce))
+            custodian.sendReady(random(RANDOM_BYTE_COUNTS.sessionReadyNonce), RappTestOffers.PHONE_NAME)
         }
 
         val notice = custodian.deliverRevocationNotice()
         requester.enterAuthentication()
-        val closed = RappBridgeOutcome.from(requester.receiveReady(notice, NOW))
-        assertEquals(RappCloseReason.PAIRING_REVOKED, (closed as RappBridgeOutcome.Closed).reason)
+        val echo = RappBridgeOutcome.from(requester.receiveReady(notice, NOW, RappTestOffers.COMPUTER_NAME))
+        val echoed = (echo as RappBridgeOutcome.Send).close as RappSentClose.Echo
+        assertEquals(RappCloseReason.PAIRING_REVOKED, echoed.reason)
+        assertEquals(RappRequesterSessionEnd.REVOKED, echoed.end)
+
+        val acknowledged = RappBridgeOutcome.from(custodian.receiveCloseEcho(echo.frame, NOW))
+        assertEquals(RappCloseReason.PAIRING_REVOKED, (acknowledged as RappBridgeOutcome.CloseAcknowledged).reason)
+    }
+
+    @Test
+    fun theSessionCarriesBothNamesIntoThePairRecords() {
+        val pairing = pairing()
+        establish(pairing)
+        assertEquals(RappTestOffers.PHONE_NAME, pairing.requester.metadata().peerDisplayName)
+        assertEquals(RappTestOffers.COMPUTER_NAME, pairing.custodian.metadata().peerDisplayName)
+    }
+
+    @Test
+    fun aClosingEndpointWaitsForTheEchoAndAnswersNothingElse() {
+        val (requester, custodian) = establish()
+        val close = send { custodian.closeWithReason(RappCloseReason.SERVICE_WITHDRAWN) }
+        assertTrue((close as RappBridgeOutcome.Send).close is RappSentClose.Own)
+        assertSame(RappBridgeOutcome.Idle, send { custodian.closeWithReason(RappCloseReason.NORMAL) })
+
+        val echo = close.deliverTo(requester)
+        val echoed = (echo as RappBridgeOutcome.Send).close as RappSentClose.Echo
+        assertEquals(RappRequesterSessionEnd.WITHDRAWN, echoed.end)
+        val acknowledged = echo.deliverTo(custodian)
+        assertEquals(RappCloseReason.SERVICE_WITHDRAWN, (acknowledged as RappBridgeOutcome.CloseAcknowledged).reason)
+    }
+
+    @Test
+    fun crossingClosesAcknowledgeEachOther() {
+        val (requester, custodian) = establish()
+        val fromCustodian = send { custodian.closeWithReason(RappCloseReason.SERVICE_WITHDRAWN) }
+        val fromRequester = send { requester.closeWithReason(RappCloseReason.NORMAL) }
+
+        val atRequester = fromCustodian.deliverTo(requester)
+        atRequester as RappBridgeOutcome.CloseAcknowledged
+        assertEquals(RappCloseReason.SERVICE_WITHDRAWN, atRequester.reason)
+        assertEquals(RappRequesterSessionEnd.WITHDRAWN, atRequester.end)
+        val atCustodian = fromRequester.deliverTo(custodian)
+        assertEquals(RappCloseReason.NORMAL, (atCustodian as RappBridgeOutcome.CloseAcknowledged).reason)
     }
 
     @Test
     fun forgettingDuringASessionClosesItAsRevoked() {
         val (requester, custodian) = establish()
         val close = send { custodian.closeWithReason(RappCloseReason.PAIRING_REVOKED) }
-        assertEquals(RappCloseReason.PAIRING_REVOKED, (close as RappBridgeOutcome.Send).closesWith)
-        val closed = close.deliverTo(requester)
-        assertEquals(RappCloseReason.PAIRING_REVOKED, (closed as RappBridgeOutcome.Closed).reason)
+        val own = (close as RappBridgeOutcome.Send).close as RappSentClose.Own
+        assertEquals(RappCloseReason.PAIRING_REVOKED, own.reason)
+        val echo = close.deliverTo(requester)
+        val echoed = (echo as RappBridgeOutcome.Send).close as RappSentClose.Echo
+        assertEquals(RappCloseReason.PAIRING_REVOKED, echoed.reason)
+        assertEquals(RappRequesterSessionEnd.REVOKED, echoed.end)
+        val acknowledged = echo.deliverTo(custodian)
+        assertEquals(RappCloseReason.PAIRING_REVOKED, (acknowledged as RappBridgeOutcome.CloseAcknowledged).reason)
     }
 
     @Test
@@ -315,9 +358,12 @@ class RappSessionFlowTest {
         val (requester, custodian) = establish(pairing)
 
         val close = send { requester.closeWithReason(RappCloseReason.PAIRING_REVOKED) }
-        assertEquals(RappCloseReason.PAIRING_REVOKED, (close as RappBridgeOutcome.Send).closesWith)
-        val closed = close.deliverTo(custodian)
-        assertEquals(RappCloseReason.PAIRING_REVOKED, (closed as RappBridgeOutcome.Closed).reason)
+        assertTrue((close as RappBridgeOutcome.Send).close is RappSentClose.Own)
+        val echo = close.deliverTo(custodian)
+        val echoed = (echo as RappBridgeOutcome.Send).close as RappSentClose.Echo
+        assertEquals(RappCloseReason.PAIRING_REVOKED, echoed.reason)
+        assertNull(echoed.end)
+        assertTrue(echo.deliverTo(requester) is RappBridgeOutcome.CloseAcknowledged)
 
         val routed = RappStoredPair(catalog.listPairs().single(), pairing.custodian, pairing.custodian.pairing())
         RappPairRevocation.revoke(routed, catalog, pairing.custodianVault)

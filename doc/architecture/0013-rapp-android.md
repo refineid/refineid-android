@@ -1,6 +1,6 @@
 # RAPP on Android
 
-Status date: 2026-08-16. This describes the Android side of the Remote
+Status date: 2026-11-02. This describes the Android side of the Remote
 Authorization Proxy Protocol: what exists now, why it is built this way, and
 what the next agent has to do.
 
@@ -17,21 +17,43 @@ what turns a proven pair of devices into a cross-platform one.
 
 ## Roles
 
-Android pairs only as the custodian: the phone shows the pairing code, serves
-the RAPP v26.10.29 offer over the stream transport, and holds the card. No
-screen pairs the phone as a requester, so the app never calls
-`RappPairingBridge.fromBootstrap`.
+The custodian is always a phone with NFC (owner decision). `RappDeviceRole` decides once per process: a device with NFC
+whose built-in display is narrower than the `sw600dp` bound, or that folds,
+is a phone and the custodian; a tablet, and any device without NFC, is a
+computer, a requester only. A foldable stays a phone whichever way it is
+open, and the display, not the window, decides, so split screen changes
+nothing. On a computer the app starts no custodian listener, shows no Remote
+Access row and has no pairing page; the identity row of a device without NFC
+asks for a card in a reader and opens nothing.
 
-`RemoteCardModel` and `RappRequesterClient` open sessions for a stored pairing
-whose role is requester, but the app cannot create such a pairing, so in
-practice they are idle. Each session lives for one operation and closes with
-`normal`; there is no remote-use switch and no session held open, so the
-requester's withdrawal (section 4.5 item 8) has nothing to close. Giving
-Android a requester role needs a product decision and a pairing entry point
-(dial a phone in pairing mode, read its offer, type its code); the session
-side is already in place. Idle expiry (section 4.6 item 5) sweeps only the
+Android pairs only as the custodian: the phone shows the pairing code, serves
+the offer over the stream transport, and holds the card. No screen pairs a
+tablet as a requester, so the app never calls
+`RappPairingBridge.fromBootstrap`. `RemoteCardModel` and
+`RappRequesterClient` open sessions for a stored pairing whose role is
+requester, and run only on a computer, but nothing creates such a pairing,
+so in practice they are idle. Each of their sessions lives for one
+operation and closes with `normal`; there is no remote-use switch, no
+session held open and no redial window, so the requester lifecycle of
+section 4.7 (`requester_remote_use`, `requester_view_of_custodian`) is not
+built. Giving a tablet the requester role needs a product decision and a
+pairing entry point. Idle expiry (section 4.6 item 5) sweeps only the
 pairings this phone serves as custodian, and the requester's sessions record
 no session time.
+
+## Names
+
+Every endpoint names itself on every pairing and session (section 4.3 items
+3 and 4): `pairing.hello`, then `session.ready` from the custodian and
+`session.hello` from the requester. `RappLocalName` reads the name afresh
+each time: a phone sends its device name as its user set it in the system
+settings, or its model name when none is set; a computer sends
+`Android - <name>`. `RappDisplayName` is the one border for a name, 1 to 256
+bytes of UTF-8 and not blank, shortened at a character boundary when the
+device's name is longer. The core keeps the peer's latest name in the pair
+record; the phone shows a computer under the name its pair record holds,
+refreshed in the list of paired computers and in PIN prompts when the
+computer's `session.hello` arrives. There is no nameless fallback.
 
 `RappStoredPairs` loads every catalogued pairing through the core. A record
 in a format the core no longer decodes is removed from the catalog and the
@@ -124,10 +146,32 @@ transport.
   store refused changes nothing, and the next one repeats it.
 - A received `service_withdrawn` close is the computer's withdrawal, never a
   protocol violation (section 4.5 item 9). The session ends with its
-  operation and any prompt for it, the phone sends no close of its own, and
-  the pairing stays. The phone keeps no record that the computer is off: the
-  Remote Access page shows no per-computer connection state, so nothing on
-  screen changes beyond the prompt going away.
+  operation and any prompt for it, the phone answers only with the echo,
+  and the pairing stays. The phone keeps no record that the computer is
+  off: the Remote Access page shows no per-computer connection state, so
+  nothing on screen changes beyond the prompt going away.
+- Every close is acknowledged (section 7.1 item 7). A close the computer
+  sends is acted on and answered with a close carrying the same reason, then
+  the link closes. The phone's own close, turning Remote Access off
+  (`service_withdrawn`) or forgetting a computer whose session is open
+  (`pairing_revoked`), keeps the link for at most 1 second
+  (`rapp_quit_withdrawal_bound_ms`) for the computer's echo, ignoring
+  everything but a close; the record of a forgotten computer is destroyed
+  once the echo arrived or the second passed, and a withdrawal stops
+  accepting connections and publishes the withdrawn record only then. A
+  forgotten pairing's next session carries the close as its only message and
+  waits for the echo the same way. An echo is never answered.
+- Turning Remote Access off is withdrawal: every pairing is kept, and
+  turning it on again serves at once under a fresh instance name, drawn by
+  the core. The switch starts off, moves only by the holder's action and
+  keeps its position.
+- The phone never closes a session with `card_unavailable`: a phone that
+  expects the card back reports presence through `card.status` (section 8.4
+  item 5), so it never owes the re-announcement that close requires.
+- A `sign_document` request for a package names the package and lists the
+  files it holds (`contained_files`, section 9.3); the PIN 2 prompt names
+  the package in its sentence and lists the files under it in container
+  order, as a batch lists its documents.
 
 ## The protocol is not implemented here
 

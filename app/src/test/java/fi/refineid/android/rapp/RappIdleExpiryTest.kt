@@ -19,7 +19,7 @@ import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 
 /**
- * Idle expiry of the pairings this phone serves (RAPP v26.10.29 section 4.6
+ * Idle expiry of the pairings this phone serves (RAPP v26.11.2 section 4.6
  * item 5; core STPA CC-103): a session is recorded when it is established
  * and when it ends, a pairing with no established session for 30 days is
  * forgotten silently and owes its computer only the `pairing_revoked`
@@ -126,7 +126,7 @@ class RappIdleExpiryTest {
         val served = served()
         val (computer, phone) = served.handshake(served.custodian)
         val nonce = ByteArray(rappRandomByteCounts().sessionReadyNonce.toInt()).also(SecureRandom()::nextBytes)
-        computer.receiveReady(phone.sendReady(nonce), NOW)
+        computer.receiveReady(phone.sendReady(nonce, RappTestOffers.PHONE_NAME), NOW, RappTestOffers.COMPUTER_NAME)
         phone.enterEstablished()
 
         val startMs = served.createdAtMs + SESSION_AFTER_MS
@@ -173,8 +173,12 @@ class RappIdleExpiryTest {
         val forgotten = RappStoredPairs.served(served.catalog, served.vault) { limitMs }.single()
         assertTrue(forgotten.pairing.state is RappPairState.Forgotten)
         val (computer, phone) = served.handshake(forgotten.record)
-        val closed = RappBridgeOutcome.from(computer.receiveReady(phone.deliverRevocationNotice(), NOW))
-        assertEquals(RappCloseReason.PAIRING_REVOKED, (closed as RappBridgeOutcome.Closed).reason)
+        val echo =
+            RappBridgeOutcome.from(
+                computer.receiveReady(phone.deliverRevocationNotice(), NOW, RappTestOffers.COMPUTER_NAME),
+            )
+        val echoed = (echo as RappBridgeOutcome.Send).close as RappSentClose.Echo
+        assertEquals(RappCloseReason.PAIRING_REVOKED, echoed.reason)
     }
 
     @Test

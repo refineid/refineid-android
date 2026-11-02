@@ -20,6 +20,7 @@ import uniffi.refineid_rapp.RappBindingException
 import uniffi.refineid_rapp.RappPairVault
 import uniffi.refineid_rapp.RappPairingBridge
 import uniffi.refineid_rapp.RappPreAuthenticationLimiter
+import uniffi.refineid_rapp.rappFreshInstanceName
 import uniffi.refineid_rapp.rappStreamProfileName
 
 internal sealed interface PairingPhase {
@@ -54,7 +55,7 @@ private const val LOCAL_NETWORK_CLOSED_REASON = "Allow local network access"
 /** The offer failure the debug trace names when the local network is closed. */
 private const val LOCAL_NETWORK_CLOSED_FAILURE = "local_network_permission_missing"
 
-/** The credential profiles every offer grants (RAPP v26.10.29 section 9). */
+/** The credential profiles every offer grants (RAPP v26.11.2 section 9). */
 private val DEFAULT_PAIRING_PROFILES =
     listOf(
         "fi.refineid.card-status",
@@ -70,12 +71,13 @@ private val DEFAULT_PAIRING_PROFILES =
  * computers are connected: on opening, on turning Remote Access on, when an
  * offer expires, after a pairing completes or fails, and after a pairing is
  * removed. A wrong code, or a connection lost during an attempt, leaves the
- * code on screen (RAPP v26.10.29 section 3.3 item 4). The offer lives only
+ * code on screen (RAPP v26.11.2 section 3.3 item 4). The offer lives only
  * while the page is open: leaving it calls [reset].
  *
  * [mainDispatcher] runs the offer's countdown and deadlines; [pairVault]
  * stands in for the application's vault, [connectedPeers] for the
- * custodian's open session, and [monotonicMs] for the continuous clock; a
+ * custodian's open session, [monotonicMs] for the continuous clock, and
+ * [localName] for the name this phone gives itself (section 4.3 item 3); a
  * connection that has not completed its handshake within
  * [handshakeDeadlineMs] of connecting is closed.
  */
@@ -87,6 +89,7 @@ internal class RappPairingModel(
     connectedPeers: StateFlow<PairedPeer?>? = null,
     private val handshakeDeadlineMs: Long = HANDSHAKE_DEADLINE_MS,
     private val monotonicMs: () -> ULong = RappClock::monotonicMs,
+    private val localName: () -> RappDisplayName = { RappLocalName.of(context) },
 ) : AutoCloseable {
     private val catalog = RappPairCatalog(context)
 
@@ -144,7 +147,7 @@ internal class RappPairingModel(
                 }
             }
         }
-        // A pairing that idle expiry forgot leaves the list (RAPP v26.10.29 section 4.6 item 5).
+        // A pairing that idle expiry forgot leaves the list (RAPP v26.11.2 section 4.6 item 5).
         app?.rappProxyDispatcher?.pairingsExpired?.let { expired ->
             scope.launch { expired.collect { pairedDevices = catalog.listPairs() } }
         }
@@ -230,7 +233,7 @@ internal class RappPairingModel(
             }
             listener = relayListener
             relayListener.start(
-                StreamRendezvousName.ephemeralName(),
+                rappFreshInstanceName(),
                 StreamRendezvousName.attributes(StreamRendezvousName.MODE_PAIRING),
             )
 
@@ -304,7 +307,7 @@ internal class RappPairingModel(
     }
 
     /**
-     * Answers the connection's routing preamble (RAPP v26.10.29 section
+     * Answers the connection's routing preamble (RAPP v26.11.2 section
      * 4.2): a pairing preamble the offer can admit gets the offer, and CPace
      * starts; one it cannot admit, through the limiter of section 3.3 item 6
      * or because an attempt holds the offer, gets `pairing-busy` and the
@@ -348,8 +351,8 @@ internal class RappPairingModel(
             RappCustodianPairingCeremony(
                 bridge = bridge,
                 offeredProfiles = DEFAULT_PAIRING_PROFILES,
-                displayName = localDeviceDisplayName(),
-                platform = "Android",
+                displayName = localName(),
+                platform = RappLocalName.OPERATING_SYSTEM,
                 monotonicMs = monotonicMs,
                 wallMs = RappClock::wallMs,
                 persistUnconfirmed = { record -> record.persistDeviceOnly(vault) },
@@ -373,7 +376,7 @@ internal class RappPairingModel(
 
     /**
      * Destroys the record a ceremony stored but the requester never
-     * confirmed (RAPP v26.10.29 section 4.3 item 4); nobody is told.
+     * confirmed (RAPP v26.11.2 section 4.3 item 4); nobody is told.
      */
     private fun revokeUnconfirmedRecord() {
         val stored = ceremony?.storedRecord ?: return
@@ -477,8 +480,8 @@ internal class RappPairingModel(
         val peer =
             PairedPeer(
                 pairIdHex = pairing.id.key,
-                displayName = hello.displayName.takeIf { it.isNotBlank() } ?: "Computer",
-                platform = hello.platform.takeIf { it.isNotBlank() } ?: "Unknown",
+                displayName = hello.displayName,
+                platform = hello.platform,
                 createdAtMs = System.currentTimeMillis(),
             )
 
@@ -564,7 +567,7 @@ internal class RappPairingModel(
     }
 
     /**
-     * The offer's lifetime ran out (RAPP v26.10.29 section 3.3 item 7) and
+     * The offer's lifetime ran out (RAPP v26.11.2 section 3.3 item 7) and
      * the next code follows: an unused offer and an attempt still in its
      * offer phase end with it. A ceremony past CPace is exempt from the
      * offer's lifetime; it runs to its own deadlines, and the next code
@@ -577,7 +580,7 @@ internal class RappPairingModel(
     }
 
     /**
-     * Forgets one pairing (RAPP v26.10.29 section 4.6), updates what this
+     * Forgets one pairing (RAPP v26.11.2 section 4.6), updates what this
      * phone serves, and shows a code while Remote Access stays on, the last
      * pairing's removal included.
      */
@@ -589,10 +592,11 @@ internal class RappPairingModel(
     }
 
     /**
-     * Forgets one pairing (section 4.6). An open session to it is closed
-     * with `pairing_revoked` and the record destroyed at once; otherwise the
-     * record keeps its key only to deliver that close on the next session,
-     * and leaves the list of paired devices.
+     * Forgets one pairing (section 4.6); it leaves the list of paired
+     * devices at once. An open session to it is closed with
+     * `pairing_revoked` and the record destroyed once the computer's echo
+     * arrived or the wait for it passed; otherwise the record keeps its key
+     * only to deliver that close on the next session.
      */
     private fun forgetPairing(pairIdHex: String) {
         val vault = vault()
@@ -606,7 +610,6 @@ internal class RappPairingModel(
             }
 
             app?.rappProxyDispatcher?.closePairingRevoked(pairId) == true -> {
-                RappPairRevocation.revoke(pairId, vault)
                 catalog.removePair(pairIdHex)
             }
 
@@ -655,29 +658,6 @@ internal class RappPairingModel(
         settings.isCardRemoteAccessEnabled = false
         _isRemoteAccessEnabled = false
         app?.rappProxyDispatcher?.pairingsChanged()
-    }
-
-    private fun localDeviceDisplayName(): String {
-        val deviceName =
-            try {
-                android.provider.Settings.Global
-                    .getString(
-                        context.contentResolver,
-                        android.provider.Settings.Global.DEVICE_NAME,
-                    )?.trim()
-            } catch (_: Exception) {
-                null
-            }
-        if (!deviceName.isNullOrBlank()) {
-            return deviceName
-        }
-        val model =
-            android.os.Build.MODEL
-                ?.trim()
-        if (!model.isNullOrBlank()) {
-            return model
-        }
-        return "Android"
     }
 
     override fun close() {

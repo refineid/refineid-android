@@ -102,6 +102,7 @@ import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappAuthorizationInbox
 import fi.refineid.android.rapp.RappCustodianService
+import fi.refineid.android.rapp.RappDeviceRole
 import fi.refineid.android.rapp.RappPairingCode
 import fi.refineid.android.rapp.RappPairingModel
 import fi.refineid.android.settings.TimestampAuthorityRepository
@@ -148,6 +149,7 @@ internal fun MainScreen(
     rappInbox: RappAuthorizationInbox? = null,
     remoteCardModel: fi.refineid.android.rapp.RemoteCardModel? = null,
     onPin1Changed: () -> Unit = {},
+    rappRole: RappDeviceRole = RappDeviceRole.CUSTODIAN,
 ) {
     val preparationState = authenticationPreparation?.state?.collectAsState()?.value
     val preparationActive =
@@ -466,6 +468,7 @@ internal fun MainScreen(
                 browserAvailable = browserAvailable,
                 holderName = effectiveHolderName,
                 hasNfc = hasNfc,
+                servesRemoteAccess = rappRole == RappDeviceRole.CUSTODIAN,
                 usbReaderPresent = usbReaderPresent,
                 isActivationRequired = isActivationRequired,
                 cards = cardItems,
@@ -505,7 +508,6 @@ internal fun MainScreen(
                 timestampAuthorityRepository = timestampAuthorityRepository,
                 onOpenVerify = { verifyPicker.launch(arrayOf("*/*")) },
                 onOpenSign = { destination = MainDestination.SIGN },
-                onOpenPairing = { destination = MainDestination.PAIRING },
                 onOpenRemoteAccess = {
                     destination = MainDestination.PAIRING
                     readyRemoteAccess(RemoteAccessAction.OPEN_PAGE) {}
@@ -701,6 +703,7 @@ private fun HomeScreen(
     onPrepareAuthentication: ((() -> Unit, () -> Unit) -> Unit)? = null,
     holderName: String?,
     hasNfc: Boolean = true,
+    servesRemoteAccess: Boolean = true,
     usbReaderPresent: Boolean,
     isActivationRequired: Boolean = false,
     cards: List<CardIdentityItem> = emptyList(),
@@ -716,7 +719,6 @@ private fun HomeScreen(
     timestampAuthorityRepository: TimestampAuthorityRepository?,
     onOpenVerify: () -> Unit,
     onOpenSign: () -> Unit,
-    onOpenPairing: () -> Unit,
     onOpenRemoteAccess: () -> Unit,
     onOpenCardManagement: () -> Unit,
     onRequestUsbCan: (() -> Unit)? = null,
@@ -770,22 +772,25 @@ private fun HomeScreen(
             if (cardAvailable) {
                 Section(stringResource(R.string.card)) {
                     NavigationGroup {
-                        val isRemoteEnabled = rappPairingModel?.isRemoteAccessEnabled ?: false
-                        NavigationRow(
-                            icon = painterResource(R.drawable.ic_satellite_alt),
-                            label = stringResource(R.string.pair_computer),
-                            tag = "RappPairingRow",
-                            iconTint =
-                                if (isRemoteEnabled) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            stateDescription =
-                                stringResource(if (isRemoteEnabled) R.string.on else R.string.off),
-                            onClick = onOpenRemoteAccess,
-                        )
-                        HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
+                        // Only a phone with NFC serves Remote Access; a tablet is a computer.
+                        if (servesRemoteAccess) {
+                            val isRemoteEnabled = rappPairingModel?.isRemoteAccessEnabled ?: false
+                            NavigationRow(
+                                icon = painterResource(R.drawable.ic_satellite_alt),
+                                label = stringResource(R.string.pair_computer),
+                                tag = "RappPairingRow",
+                                iconTint =
+                                    if (isRemoteEnabled) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                stateDescription =
+                                    stringResource(if (isRemoteEnabled) R.string.on else R.string.off),
+                                onClick = onOpenRemoteAccess,
+                            )
+                            HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
+                        }
                         NavigationRow(
                             icon = Icons.Outlined.Lock,
                             label = stringResource(R.string.card_pins),
@@ -823,7 +828,6 @@ private fun HomeScreen(
                 isActivationRequired = isActivationRequired,
                 onForget = onForgetIdentity,
                 onReadCard = onReadCard,
-                onOpenPairing = onOpenPairing,
                 onOpenActivation = onOpenCardManagement,
                 pinCache = pinCache,
                 cards = cards,
@@ -884,7 +888,6 @@ private fun IdentitySection(
     isActivationRequired: Boolean = false,
     onForget: (() -> Unit)?,
     onReadCard: (CanSubmission) -> Unit,
-    onOpenPairing: () -> Unit = {},
     onOpenActivation: () -> Unit = {},
     pinCache: AuthenticationPinCache? = null,
     cards: List<CardIdentityItem> = emptyList(),
@@ -923,7 +926,6 @@ private fun IdentitySection(
                     rowAction = rowAction,
                     pinCache = pinCache,
                     onForget = onForget,
-                    onOpenPairing = onOpenPairing,
                     onOpenActivation = onOpenActivation,
                     onShowNfcRead = {
                         val currentCan = CanSessionStore.currentCan
@@ -956,7 +958,6 @@ private fun SingleIdentityRow(
     rowAction: IdentityRowAction,
     pinCache: AuthenticationPinCache?,
     onForget: (() -> Unit)?,
-    onOpenPairing: () -> Unit,
     onOpenActivation: () -> Unit,
     onShowNfcRead: () -> Unit,
     onRequestUsbCan: (() -> Unit)?,
@@ -968,10 +969,9 @@ private fun SingleIdentityRow(
                 .then(
                     when (rowAction) {
                         IdentityRowAction.REQUEST_USB_CAN -> Modifier.clickable { onRequestUsbCan?.invoke() }
-                        IdentityRowAction.OPEN_PAIRING -> Modifier.clickable(onClick = onOpenPairing)
                         IdentityRowAction.ASK_NFC_READ -> Modifier.clickable(onClick = onShowNfcRead)
                         IdentityRowAction.ACTIVATE_CARD -> Modifier.clickable(onClick = onOpenActivation)
-                        IdentityRowAction.NOTHING -> Modifier
+                        IdentityRowAction.CONNECT_CARD, IdentityRowAction.NOTHING -> Modifier
                     },
                 ).padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING)
                 .testTag(UiAutomationIds.IDENTITY_ROW),
@@ -1006,7 +1006,7 @@ private fun SingleIdentityRow(
                             IdentityRowAction.REQUEST_USB_CAN -> R.string.access_number_required
                             IdentityRowAction.ASK_NFC_READ -> R.string.read_identity_card
                             IdentityRowAction.NOTHING -> R.string.no_card_in_reader
-                            else -> R.string.connect_id_card
+                            IdentityRowAction.CONNECT_CARD, IdentityRowAction.ACTIVATE_CARD -> R.string.connect_id_card
                         },
                     ),
                 style = MaterialTheme.typography.bodyLarge,
@@ -1016,7 +1016,7 @@ private fun SingleIdentityRow(
         }
         // A chevron only where a tap opens a page; a prompt is not a page.
         val opensPage =
-            rowAction == IdentityRowAction.ACTIVATE_CARD || rowAction == IdentityRowAction.OPEN_PAIRING
+            rowAction == IdentityRowAction.ACTIVATE_CARD
         if (rowAction != IdentityRowAction.ACTIVATE_CARD &&
             (holderName != null || pinCache?.hasPin == true) && onForget != null
         ) {

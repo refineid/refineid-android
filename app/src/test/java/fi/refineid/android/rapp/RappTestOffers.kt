@@ -2,13 +2,15 @@
 
 package fi.refineid.android.rapp
 
+import uniffi.refineid_rapp.RappOperationBridge
 import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappPairingBridge
+import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.rappRandomByteCounts
 import java.security.SecureRandom
 
 /**
- * Builds the two bridges of one pairing the way RAPP v26.10.29 section 4.2
+ * Builds the two bridges of one pairing the way RAPP v26.11.2 section 4.2
  * does: the custodian creates a random offer, and the requester decodes the
  * bootstrap bytes the custodian serves over the stream transport.
  */
@@ -19,6 +21,13 @@ internal object RappTestOffers {
     private val OFFER_ID_BYTES = rappRandomByteCounts().offerId.toInt()
     private val CPACE_RANDOM_BYTES = rappRandomByteCounts().cpaceRandom.toInt()
     private const val WALL_MS = 1_700_000_000_000UL
+    private val READY_NONCE_BYTES = rappRandomByteCounts().sessionReadyNonce.toInt()
+
+    /** The synthetic names the two test endpoints give themselves (section 4.3 item 3). */
+    const val COMPUTER_NAME = "Workstation"
+    const val COMPUTER_PLATFORM = "Windows"
+    const val PHONE_NAME = "Phone"
+    const val PHONE_PLATFORM = "Android"
 
     /** The custodian bridge and a requester bridge built from its bootstrap. */
     fun custodianAndRequester(
@@ -61,11 +70,36 @@ internal object RappTestOffers {
         custodian.readHandshakeFrame(requester.writeHandshakeFrame(now), now)
         requester.enterConfirmation(now)
         custodian.enterConfirmation(now)
-        custodian.receiveHello(requester.sendHello("Workstation", "Windows", now), now)
-        requester.receiveHello(custodian.sendHello("Phone", "Android", now), now)
+        custodian.receiveHello(requester.sendHello(COMPUTER_NAME, COMPUTER_PLATFORM, now), now)
+        requester.receiveHello(custodian.sendHello(PHONE_NAME, PHONE_PLATFORM, now), now)
         requester.receiveConfirmation(custodian.sendConfirmation(profiles, now), now)
         custodian.receiveConfirmation(requester.sendConfirmation(profiles, now), now)
         return confirmStorage(requester, custodian, now)
+    }
+
+    /**
+     * Opens the session of two authenticated session bridges (section 7.1
+     * items 5 and 6): the custodian's `session.ready` naming the phone, the
+     * requester's `session.hello` naming the computer, which the custodian's
+     * operation bridge reads before anything else. Returns the requester's
+     * operation bridge and the custodian's.
+     */
+    fun establish(
+        requester: RappSessionBridge,
+        custodian: RappSessionBridge,
+        lifetimeMs: ULong,
+        now: ULong,
+    ): Pair<RappOperationBridge, RappOperationBridge> {
+        val ready = custodian.sendReady(random(READY_NONCE_BYTES), PHONE_NAME)
+        custodian.enterEstablished()
+        val greeted = RappBridgeOutcome.from(requester.receiveReady(ready, now, COMPUTER_NAME))
+        check(greeted is RappBridgeOutcome.Greeted && greeted.custodianName.text == PHONE_NAME)
+        requester.enterEstablished()
+        val requesterBridge = RappOperationBridge.beginRequester(requester, lifetimeMs, now)
+        val custodianBridge = RappOperationBridge.beginProxy(custodian, lifetimeMs, now)
+        val named = RappBridgeOutcome.from(custodianBridge.receiveFrame(greeted.hello, now))
+        check(named is RappBridgeOutcome.PeerNamed && named.name.text == COMPUTER_NAME)
+        return requesterBridge to custodianBridge
     }
 
     /**

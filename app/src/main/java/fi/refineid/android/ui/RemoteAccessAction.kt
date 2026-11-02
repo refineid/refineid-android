@@ -23,7 +23,7 @@ internal enum class RemoteAccessAction {
  * the paired computers. Turning Remote Access on readies the card the phone
  * will serve when a reader can reach one, which asks for the card access
  * number only when that card needs it and has none stored. Neither asks for
- * PIN 1; the first authentication a computer requests does (RAPP v26.10.29
+ * PIN 1; the first authentication a computer requests does (RAPP v26.11.2
  * section 11 item 2).
  */
 internal fun remoteAccessPreparation(

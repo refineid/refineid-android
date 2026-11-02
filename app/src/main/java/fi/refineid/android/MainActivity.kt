@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity() {
                         rappPairingModel = model,
                         rappInbox = rappInbox,
                         remoteCardModel = (application as RefineIdApplication).remoteCardModel,
+                        rappRole = (application as RefineIdApplication).rappRole,
                     )
                     DevErrorOverlay()
                 }

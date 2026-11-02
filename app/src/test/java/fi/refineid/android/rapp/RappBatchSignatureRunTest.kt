@@ -113,15 +113,7 @@ class RappBatchSignatureRunTest {
             requester.readHandshakeFrame(custodian.writeHandshakeFrame())
             custodian.enterAuthentication()
             requester.enterAuthentication()
-            val nonce = ByteArray(RANDOM_BYTE_COUNTS.sessionReadyNonce.toInt()).also(random::nextBytes)
-            assertSame(
-                RappBridgeOutcome.Idle,
-                RappBridgeOutcome.from(requester.receiveReady(custodian.sendReady(nonce), NOW)),
-            )
-            custodian.enterEstablished()
-            requester.enterEstablished()
-            return RappOperationBridge.beginRequester(requester, LIFETIME_MS, NOW) to
-                RappOperationBridge.beginProxy(custodian, LIFETIME_MS, NOW)
+            return RappTestOffers.establish(requester, custodian, LIFETIME_MS, NOW)
         }
 
         /** Brings a batch request to the custodian's single card command. */
