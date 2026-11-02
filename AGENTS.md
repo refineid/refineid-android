@@ -36,6 +36,10 @@
   evidence stays local and contains no identifying values.
 - Shipped code collects PIN and CAN on device, holds them only as mutable
   short-lived memory, and zeroizes them after use.
+- The CAN is a secret like the PINs: never displayed back, never logged, never
+  sent over RAPP. Entry fields start empty and hidden, with a reveal control;
+  an empty field submits the remembered CAN. A personal card's CAN is stored
+  only in the Android Keystore-backed `PrimedCanStore`.
 - Debug tracing serves development and may record whatever protocol detail the
   work needs, but never a name, address or identifier of a peer, holder, device
   or operation. A USB reader is traced by the vendor and product ids of its

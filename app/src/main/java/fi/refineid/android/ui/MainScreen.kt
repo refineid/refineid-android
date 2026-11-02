@@ -1038,13 +1038,11 @@ private fun ReadCardNfcDialog(
     onDismiss: () -> Unit,
     onConnect: (CanSubmission) -> Unit,
 ) {
-    val initialCan = remember { fi.refineid.android.core.CanSessionStore.currentCan ?: "" }
-    val canState = remember { TextFieldState(initialCan) }
-    val canReady = CanSubmission.isComplete(canState.text)
+    val canState = remember { TextFieldState() }
+    val canReady = canEntryReady(canState.text)
 
     val submit = {
-        if (canReady) {
-            val can = CanSubmission.from(canState.text)
+        canEntrySubmission(canState.text)?.let { can ->
             fi.refineid.android.core.CanSessionStore
                 .remember(can)
             onConnect(can)
@@ -1068,24 +1066,11 @@ private fun ReadCardNfcDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                SecureTextField(
+                CanField(
                     state = canState,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .testTag(UiAutomationIds.NFC_CAN_FIELD),
-                    label = { Text(stringResource(R.string.can)) },
-                    inputTransformation = CanInputTransformation,
-                    textObfuscationMode = TextObfuscationMode.Visible,
-                    keyboardOptions =
-                        KeyboardOptions(
-                            autoCorrectEnabled = false,
-                            keyboardType = KeyboardType.NumberPassword,
-                            imeAction = ImeAction.Done,
-                        ),
-                    onKeyboardAction = {
-                        submit()
-                    },
+                    testTag = UiAutomationIds.NFC_CAN_FIELD,
+                    modifier = Modifier.fillMaxWidth(),
+                    onKeyboardAction = { submit() },
                 )
             }
         },
@@ -1166,21 +1151,21 @@ private fun ReaderCanDialog(
     onDismiss: () -> Unit,
     onConnect: (CanSubmission) -> Unit,
 ) {
-    val initialCan = remember { CanSessionStore.currentCan ?: "" }
-    val canState = remember { TextFieldState(initialCan) }
+    val canState = remember { TextFieldState() }
     LaunchedEffect(status) {
         if (status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER) {
             canState.clearText()
         }
     }
     val isChecking = status == ReaderConnectionStatus.CHECKING
-    val canReady = CanSubmission.isComplete(canState.text) && !isChecking
+    val canReady = canEntryReady(canState.text) && !isChecking
 
     val submit = {
         if (canReady) {
-            CanSessionStore.remember(canState.text)
-            val can = CanSubmission.from(canState.text)
-            onConnect(can)
+            canEntrySubmission(canState.text)?.let { can ->
+                CanSessionStore.remember(can)
+                onConnect(can)
+            }
         }
     }
 
@@ -1204,21 +1189,10 @@ private fun ReaderCanDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                SecureTextField(
+                CanField(
                     state = canState,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .testTag(UiAutomationIds.READER_CAN_FIELD),
-                    label = { Text(stringResource(R.string.can)) },
-                    inputTransformation = CanInputTransformation,
-                    textObfuscationMode = TextObfuscationMode.Visible,
-                    keyboardOptions =
-                        KeyboardOptions(
-                            autoCorrectEnabled = false,
-                            keyboardType = KeyboardType.NumberPassword,
-                            imeAction = ImeAction.Done,
-                        ),
+                    testTag = UiAutomationIds.READER_CAN_FIELD,
+                    modifier = Modifier.fillMaxWidth(),
                     onKeyboardAction = { submit() },
                 )
             }
@@ -1458,8 +1432,7 @@ private fun NfcCredentialEntry(
     isPrimed: Boolean,
     onConnect: (CanSubmission?, Pin1Submission) -> Unit,
 ) {
-    val initialCan = remember { fi.refineid.android.core.CanSessionStore.currentCan ?: "" }
-    val canState = remember { TextFieldState(initialCan) }
+    val canState = remember { TextFieldState() }
     val pinState = remember { TextFieldState() }
     DisposableEffect(canState, pinState) {
         onDispose {
@@ -1467,31 +1440,17 @@ private fun NfcCredentialEntry(
             pinState.clearText()
         }
     }
-    val hasRememberedCan = isPrimed || fi.refineid.android.core.CanSessionStore.hasCan
-    val canReady = hasRememberedCan || CanSubmission.isComplete(canState.text)
+    val canReady = isPrimed || canEntryReady(canState.text)
     val pinReady = Pin1Submission.isComplete(pinState.text)
     val submit = {
         if (canReady && pinReady) {
             val can =
-                when {
-                    isPrimed -> {
-                        null
-                    }
-
-                    CanSubmission.isComplete(canState.text) -> {
-                        fi.refineid.android.core.CanSessionStore
-                            .remember(canState.text)
-                        CanSubmission.from(canState.text)
-                    }
-
-                    fi.refineid.android.core.CanSessionStore.hasCan -> {
-                        fi.refineid.android.core.CanSessionStore.currentCan
-                            ?.let { CanSubmission.from(it) }
-                    }
-
-                    else -> {
-                        null
-                    }
+                if (isPrimed) {
+                    null
+                } else {
+                    fi.refineid.android.core.CanSessionStore
+                        .remember(canState.text)
+                    canEntrySubmission(canState.text)
                 }
             val pin1 = Pin1Submission.from(pinState.text)
             pinState.clearText()
@@ -1501,21 +1460,11 @@ private fun NfcCredentialEntry(
     }
 
     if (!isPrimed) {
-        SecureTextField(
+        CanField(
             state = canState,
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .testTag(UiAutomationIds.NFC_CAN_FIELD),
-            label = { Text(stringResource(R.string.can)) },
-            inputTransformation = CanInputTransformation,
-            textObfuscationMode = TextObfuscationMode.Visible,
-            keyboardOptions =
-                KeyboardOptions(
-                    autoCorrectEnabled = false,
-                    keyboardType = KeyboardType.NumberPassword,
-                    imeAction = ImeAction.Next,
-                ),
+            testTag = UiAutomationIds.NFC_CAN_FIELD,
+            modifier = Modifier.fillMaxWidth(),
+            imeAction = ImeAction.Next,
         )
     }
     SecureTextField(
@@ -1554,13 +1503,6 @@ private fun NfcCredentialEntry(
         )
     }
 }
-
-internal val CanInputTransformation =
-    InputTransformation {
-        if (!CanSubmission.acceptsEntry(asCharSequence())) {
-            revertAllChanges()
-        }
-    }
 
 @Composable
 private fun readerStatusColor(status: ReaderConnectionStatus): Color =
@@ -1738,39 +1680,26 @@ private fun ReaderCanEntry(
     status: ReaderConnectionStatus,
     onConnect: (CanSubmission) -> Unit,
 ) {
-    val initialCan = remember { fi.refineid.android.core.CanSessionStore.currentCan ?: "" }
-    val canState = remember { TextFieldState(initialCan) }
+    val canState = remember { TextFieldState() }
     LaunchedEffect(status) {
         if (status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER) {
             canState.clearText()
         }
     }
-    val canReady = CanSubmission.isComplete(canState.text)
+    val canReady = canEntryReady(canState.text)
 
     val submit = {
-        if (canReady) {
+        canEntrySubmission(canState.text)?.let { can ->
             fi.refineid.android.core.CanSessionStore
-                .remember(canState.text)
-            val can = CanSubmission.from(canState.text)
+                .remember(can)
             onConnect(can)
         }
         Unit
     }
-    SecureTextField(
+    CanField(
         state = canState,
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .testTag(UiAutomationIds.READER_CAN_FIELD),
-        label = { Text(stringResource(R.string.can)) },
-        inputTransformation = CanInputTransformation,
-        textObfuscationMode = TextObfuscationMode.Visible,
-        keyboardOptions =
-            KeyboardOptions(
-                autoCorrectEnabled = false,
-                keyboardType = KeyboardType.NumberPassword,
-                imeAction = ImeAction.Done,
-            ),
+        testTag = UiAutomationIds.READER_CAN_FIELD,
+        modifier = Modifier.fillMaxWidth(),
         onKeyboardAction = { submit() },
     )
     Button(

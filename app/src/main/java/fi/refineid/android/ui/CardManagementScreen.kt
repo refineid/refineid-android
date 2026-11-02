@@ -144,10 +144,7 @@ internal fun CardManagementScreen(
     val newPin2ConfirmState = remember { TextFieldState() }
     val pukState = remember { TextFieldState() }
     val activationCodeState = remember { TextFieldState() }
-    val canState =
-        remember {
-            TextFieldState(fi.refineid.android.core.CanSessionStore.currentCan ?: "")
-        }
+    val canState = remember { TextFieldState() }
 
     fun clearEntries() {
         currentPinState.clearText()
@@ -492,29 +489,18 @@ internal fun CardManagementScreen(
                                 .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        val canReady = CanSubmission.isComplete(canState.text)
-                        SecureTextField(
+                        val canReady = canEntryReady(canState.text)
+                        CanField(
                             state = canState,
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .testTag("managementCardAccessNumber"),
-                            label = { Text(stringResource(R.string.can)) },
-                            inputTransformation = CanInputTransformation,
-                            textObfuscationMode = TextObfuscationMode.Visible,
-                            keyboardOptions =
-                                KeyboardOptions(
-                                    autoCorrectEnabled = false,
-                                    keyboardType = KeyboardType.NumberPassword,
-                                    imeAction = ImeAction.Done,
-                                ),
+                            testTag = "managementCardAccessNumber",
+                            modifier = Modifier.fillMaxWidth(),
                         )
                         Button(
                             onClick = {
-                                if (canReady) {
+                                canEntrySubmission(canState.text)?.let { can ->
                                     fi.refineid.android.core.CanSessionStore
-                                        .remember(canState.text)
-                                    onConnectNfc(CanSubmission.from(canState.text))
+                                        .remember(can)
+                                    onConnectNfc(can)
                                 }
                             },
                             enabled = canReady,

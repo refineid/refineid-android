@@ -27,8 +27,6 @@ import fi.refineid.android.R
 import fi.refineid.android.core.AuthenticationPreparation
 import fi.refineid.android.core.AuthenticationPreparationState
 import fi.refineid.android.core.AuthenticationPurpose
-import fi.refineid.android.core.CanSessionStore
-import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationResult
 import fi.refineid.android.nfc.NfcReaderStatus
@@ -125,7 +123,7 @@ private fun PreparationCredentialsDialog(
     state: AuthenticationPreparationState.Credentials,
     title: Int,
 ) {
-    val can = remember { TextFieldState(CanSessionStore.currentCan ?: "") }
+    val can = remember { TextFieldState() }
     val pin = remember { TextFieldState() }
     DisposableEffect(can, pin) {
         onDispose {
@@ -133,7 +131,7 @@ private fun PreparationCredentialsDialog(
             pin.clearText()
         }
     }
-    val canReady = !state.needsCan || CanSubmission.isComplete(can.text)
+    val canReady = !state.needsCan || canEntryReady(can.text)
     val pinReady = !state.needsPin || Pin1Submission.isComplete(pin.text)
     AlertDialog(
         onDismissRequest = preparation::cancel,
@@ -143,13 +141,10 @@ private fun PreparationCredentialsDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 if (state.needsCan) {
-                    SecureTextField(
+                    CanField(
                         state = can,
-                        label = { Text(stringResource(R.string.can)) },
-                        inputTransformation = CanInputTransformation,
-                        textObfuscationMode = TextObfuscationMode.Visible,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        modifier = Modifier.fillMaxWidth().testTag("AuthenticationPreparationCan"),
+                        testTag = "AuthenticationPreparationCan",
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 if (state.needsPin) {
@@ -170,7 +165,7 @@ private fun PreparationCredentialsDialog(
                 enabled = canReady && pinReady,
                 modifier = Modifier.testTag("AuthenticationPreparationSubmit"),
                 onClick = {
-                    val submittedCan = if (state.needsCan) CanSubmission.from(can.text) else null
+                    val submittedCan = if (state.needsCan) canEntrySubmission(can.text) else null
                     val submittedPin = if (state.needsPin) Pin1Submission.from(pin.text) else null
                     can.clearText()
                     pin.clearText()

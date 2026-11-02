@@ -477,8 +477,7 @@ private fun BrowserCardUnlockDialog(
     onUnlock: (CanSubmission?, Pin1Submission) -> Unit,
     onCancel: () -> Unit,
 ) {
-    val initialCan = remember { fi.refineid.android.core.CanSessionStore.currentCan ?: "" }
-    val canState = remember { TextFieldState(initialCan) }
+    val canState = remember { TextFieldState() }
     val pinState = remember { TextFieldState() }
     DisposableEffect(pinState) {
         onDispose {
@@ -489,31 +488,17 @@ private fun BrowserCardUnlockDialog(
         status != NfcReaderStatus.TURNED_OFF &&
             status != NfcReaderStatus.NOT_AVAILABLE &&
             status != NfcReaderStatus.CARD_NOT_SUPPORTED
-    val hasRememberedCan = primed || fi.refineid.android.core.CanSessionStore.hasCan
-    val canReady = hasRememberedCan || CanSubmission.isComplete(canState.text)
+    val canReady = primed || canEntryReady(canState.text)
     val pinReady = Pin1Submission.isComplete(pinState.text)
     val submit = {
         if (cardEntryReady && canReady && pinReady && !isWaiting) {
             val can =
-                when {
-                    primed -> {
-                        null
-                    }
-
-                    CanSubmission.isComplete(canState.text) -> {
-                        fi.refineid.android.core.CanSessionStore
-                            .remember(canState.text)
-                        CanSubmission.from(canState.text)
-                    }
-
-                    fi.refineid.android.core.CanSessionStore.hasCan -> {
-                        fi.refineid.android.core.CanSessionStore.currentCan
-                            ?.let { CanSubmission.from(it) }
-                    }
-
-                    else -> {
-                        null
-                    }
+                if (primed) {
+                    null
+                } else {
+                    fi.refineid.android.core.CanSessionStore
+                        .remember(canState.text)
+                    canEntrySubmission(canState.text)
                 }
             val pin1 = Pin1Submission.from(pinState.text)
             pinState.clearText()
@@ -541,22 +526,12 @@ private fun BrowserCardUnlockDialog(
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 if (!primed) {
-                    SecureTextField(
+                    CanField(
                         state = canState,
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .testTag(UiAutomationIds.BROWSER_UNLOCK_CAN_FIELD),
+                        testTag = UiAutomationIds.BROWSER_UNLOCK_CAN_FIELD,
+                        modifier = Modifier.fillMaxWidth(),
                         enabled = !isWaiting,
-                        label = { Text(stringResource(R.string.can)) },
-                        inputTransformation = CanInputTransformation,
-                        textObfuscationMode = TextObfuscationMode.Visible,
-                        keyboardOptions =
-                            KeyboardOptions(
-                                autoCorrectEnabled = false,
-                                keyboardType = KeyboardType.NumberPassword,
-                                imeAction = ImeAction.Next,
-                            ),
+                        imeAction = ImeAction.Next,
                     )
                 }
                 SecureTextField(

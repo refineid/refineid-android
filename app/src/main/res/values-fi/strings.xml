@@ -98,6 +98,8 @@
     <string name="card_switch_reader">Vaihda lukijaa</string>
     <string name="show_pin">Näytä tunnusluku</string>
     <string name="hide_pin">Piilota tunnusluku</string>
+    <string name="show_can" tools:ignore="Typos">Näytä CAN</string>
+    <string name="hide_can" tools:ignore="Typos">Piilota CAN</string>
     <string name="pins_do_not_match">Tunnusluvut eivät täsmää</string>
     <string name="digit_count_hint" tools:ignore="PluralsCandidate">%1$d numeroa</string>
     <string name="digit_range_hint" tools:ignore="PluralsCandidate">%1$d–%2$d numeroa</string>
