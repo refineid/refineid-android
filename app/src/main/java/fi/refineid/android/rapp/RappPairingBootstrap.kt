@@ -10,7 +10,7 @@ import uniffi.refineid_rapp.rappPairingPreamble
 
 /**
  * The custodian's answer to a pairing connection on one transport (RAPP
- * v26.10.29 section 3.3 item 6; section 4.2, "Bootstrap Read Flow" and
+ * v26.11.2 section 3.3 item 6; section 4.2, "Bootstrap Read Flow" and
  * "Busy Refusal").
  *
  * The connection's routing preamble is read first, and only a pairing

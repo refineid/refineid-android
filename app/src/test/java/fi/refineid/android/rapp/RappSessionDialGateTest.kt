@@ -10,7 +10,7 @@ import uniffi.refineid_rapp.RappPreAuthenticationLimiter
 
 /**
  * Only a session preamble that routes to a served pairing counts against the
- * pre-authentication bound (RAPP v26.10.29 section 3.3 item 6).
+ * pre-authentication bound (RAPP v26.11.2 section 3.3 item 6).
  */
 class RappSessionDialGateTest {
     private companion object {

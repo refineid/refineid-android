@@ -37,6 +37,7 @@ class RappPairingTest {
         storageConfirmed = confirmed,
         forgottenAtMs = forgottenAtMs,
         lastSessionAtMs = null,
+        peerDisplayName = RappTestOffers.COMPUTER_NAME,
     )
 
     @Test

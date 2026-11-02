@@ -18,7 +18,7 @@ internal data class PairedPeer(
     /**
      * When the local user forgot the pairing while no session to its peer
      * was open; the record then only waits to deliver the `pairing_revoked`
-     * close (RAPP v26.10.29 section 4.6 item 2).
+     * close (RAPP v26.11.2 section 4.6 item 2).
      */
     val forgottenAtMs: Long? = null,
 )
@@ -89,6 +89,16 @@ internal class RappPairCatalog(
         )
         persistPairs(updated)
     }
+
+    /**
+     * Shows [pairIdHex] under [displayName], the name its peer last sent at
+     * the start of a session and its pair record holds (RAPP v26.11.2 section
+     * 4.3 item 4).
+     */
+    fun updateDisplayName(
+        pairIdHex: String,
+        displayName: String,
+    ) = update(pairIdHex) { it.copy(displayName = displayName) }
 
     fun updateHolderName(
         pairIdHex: String,

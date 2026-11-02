@@ -8,7 +8,7 @@ import uniffi.refineid_rapp.RappPeerHello
 
 /**
  * The custodian's side of one pairing ceremony over one connected candidate,
- * after the offer bootstrap, in the order RAPP v26.10.29 sections 4.3 and
+ * after the offer bootstrap, in the order RAPP v26.11.2 sections 4.3 and
  * 6.1.3 fix:
  *
  * 1. read the requester's Y_A, answer with Y_B and T_B;
@@ -30,7 +30,7 @@ import uniffi.refineid_rapp.RappPeerHello
 internal class RappCustodianPairingCeremony(
     private val bridge: RappPairingBridgeInterface,
     private val offeredProfiles: List<String>,
-    private val displayName: String,
+    private val displayName: RappDisplayName,
     private val platform: String,
     private val monotonicMs: () -> ULong,
     private val wallMs: () -> ULong,
@@ -128,7 +128,8 @@ internal class RappCustodianPairingCeremony(
                 peer = hello
                 val requested = hello.requestedProfiles.orEmpty()
                 val granted = offeredProfiles.filter { it in requested }
-                val ownHello = bridge.sendHello(displayName = displayName, platform = platform, nowMonotonicMs = now)
+                val ownHello =
+                    bridge.sendHello(displayName = displayName.text, platform = platform, nowMonotonicMs = now)
                 val grant = bridge.sendConfirmation(granted, now)
                 step = Step.AWAITING_CONFIRMATION
                 Outcome.Send(listOf(ownHello, grant))

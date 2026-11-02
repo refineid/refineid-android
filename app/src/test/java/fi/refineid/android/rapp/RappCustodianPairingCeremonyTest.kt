@@ -16,7 +16,7 @@ import java.security.SecureRandom
 
 /**
  * Drives [RappCustodianPairingCeremony] against a requester bridge in the
- * order RAPP v26.10.29 section 6.1.3 fixes, after the requester decoded the
+ * order RAPP v26.11.2 section 6.1.3 fixes, after the requester decoded the
  * custodian's offer bootstrap (section 4.2).
  */
 class RappCustodianPairingCeremonyTest {
@@ -81,8 +81,8 @@ class RappCustodianPairingCeremonyTest {
         RappCustodianPairingCeremony(
             bridge = bridge,
             offeredProfiles = OFFERED_PROFILES,
-            displayName = "Phone",
-            platform = "Android",
+            displayName = checkNotNull(RappDisplayName.parse(RappTestOffers.PHONE_NAME)),
+            platform = RappTestOffers.PHONE_PLATFORM,
             monotonicMs = { OFFER_STARTED_AT_MS },
             wallMs = { WALL_CLOCK_MS },
             persistUnconfirmed = { record -> persisted.add(record) },

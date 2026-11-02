@@ -5,7 +5,7 @@ package fi.refineid.android.rapp
 import uniffi.refineid_rapp.RappPreAuthenticationLimiterInterface
 import uniffi.refineid_rapp.rappStreamProfileName
 
-/** The transport profiles this custodian serves sessions on (RAPP v26.10.29 section 2.2). */
+/** The transport profiles this custodian serves sessions on (RAPP v26.11.2 section 2.2). */
 internal enum class RappTransportProfile {
     STREAM,
     BLUETOOTH,
@@ -93,7 +93,7 @@ internal enum class RappDialRefusal {
     /** Remote Access is off or being withdrawn, or the server that took the dial was replaced. */
     NOT_SERVING,
 
-    /** Within the pre-authentication spacing (RAPP v26.10.29 section 3.3 item 6). */
+    /** Within the pre-authentication spacing (RAPP v26.11.2 section 3.3 item 6). */
     RATE_LIMITED,
 
     /** The preamble named no pairing this phone serves, or was replayed (section 2.2.1). */
@@ -110,7 +110,7 @@ internal enum class RappDialRefusal {
 }
 
 /**
- * Applies the pre-authentication bound (RAPP v26.10.29 section 3.3 item 6)
+ * Applies the pre-authentication bound (RAPP v26.11.2 section 3.3 item 6)
  * to session dials after their routing preamble: only a preamble that routed
  * to a served pairing counts against [limiter], so a first frame that routes
  * nowhere does not hold off the next dial.

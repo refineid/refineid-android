@@ -58,7 +58,7 @@ class RappPairingOfferTest {
         val PROFILES = listOf("fi.refineid.card-status")
         val CPACE_RANDOM_BYTES = rappRandomByteCounts().cpaceRandom.toInt()
 
-        /** How long an admitted attempt may run (RAPP v26.10.29 section 3.3 item 3). */
+        /** How long an admitted attempt may run (RAPP v26.11.2 section 3.3 item 3). */
         const val ATTEMPT_WINDOW_MS = 5_000L
 
         /** How far into the first computer's attempt the second one connects. */
@@ -73,7 +73,7 @@ class RappPairingOfferTest {
         /** A handshake deadline short enough for a test to wait out. */
         const val SHORT_HANDSHAKE_DEADLINE_MS = 200L
 
-        /** How long the offer is served (RAPP v26.10.29 section 3.3 item 7). */
+        /** How long the offer is served (RAPP v26.11.2 section 3.3 item 7). */
         const val OFFER_TTL_MS = 300_000L
 
         /** How often a requester asks a busy custodian again before the test gives up. */
@@ -81,7 +81,7 @@ class RappPairingOfferTest {
 
         const val SECOND_PEER_NAME = "Laptop"
 
-        /** The spacing between admitted pairing connections (RAPP v26.10.29 section 3.3 item 6). */
+        /** The spacing between admitted pairing connections (RAPP v26.11.2 section 3.3 item 6). */
         const val ADMISSION_SPACING_MS = 500L
 
         /** How long a drained listener has to report a close on loopback. */
@@ -142,9 +142,16 @@ class RappPairingOfferTest {
         mainDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): RappPairingModel {
         RappSettings(context).isCardRemoteAccessEnabled = remoteAccessOn
-        return RappPairingModel(context, scope, mainDispatcher, vault, connected, handshakeDeadlineMs) {
-            clock.get().toULong()
-        }.also { model = it }
+        return RappPairingModel(
+            context,
+            scope,
+            mainDispatcher,
+            vault,
+            connected,
+            handshakeDeadlineMs,
+            monotonicMs = { clock.get().toULong() },
+            localName = { checkNotNull(RappDisplayName.parse(RappTestOffers.PHONE_NAME)) },
+        ).also { model = it }
     }
 
     private fun RappPairingModel.code(): String = (phase as PairingPhase.Offering).code
@@ -469,7 +476,7 @@ class RappPairingOfferTest {
         }
     }
 
-    /** A requester's stream connection to the custodian on [port] (RAPP v26.10.29 section 2.1). */
+    /** A requester's stream connection to the custodian on [port] (RAPP v26.11.2 section 2.1). */
     private class StreamPeer(
         port: Int,
     ) : AutoCloseable {
@@ -487,7 +494,7 @@ class RappPairingOfferTest {
         override fun close() = socket.close()
     }
 
-    /** A requester pairing with [code] over the stream on [port], frame by frame (RAPP v26.10.29 section 2.1). */
+    /** A requester pairing with [code] over the stream on [port], frame by frame (RAPP v26.11.2 section 2.1). */
     private fun pairOverLoopback(
         port: Int,
         code: String,

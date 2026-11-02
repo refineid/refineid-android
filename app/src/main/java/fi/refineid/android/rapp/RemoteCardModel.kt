@@ -95,7 +95,14 @@ internal class RemoteCardModel(
         peer: PairedPeer,
         record: RappPairRecord,
     ): RappRequesterClient =
-        RappRequesterClient(context, scope, record, vault, onPairingRevoked = { pairingRevoked(peer.pairIdHex) })
+        RappRequesterClient(
+            context,
+            scope,
+            record,
+            vault,
+            onPairingRevoked = { pairingRevoked(peer.pairIdHex) },
+            onCustodianNamed = { name -> catalog.updateDisplayName(peer.pairIdHex, name.text) },
+        )
 
     fun refresh() {
         refreshCachedIdentity()
@@ -108,16 +115,16 @@ internal class RemoteCardModel(
 
     /**
      * Dials each forgotten pairing once to deliver its `pairing_revoked`
-     * close (RAPP v26.10.29 section 4.6 item 2); one delivered is destroyed
-     * and leaves the catalog.
+     * close (RAPP v26.11.2 section 4.6 item 6); the attempt destroys the
+     * record whether or not the custodian echoed the close, and the pairing
+     * leaves the catalog.
      */
     private fun deliverRevocationNotices() {
         for (peer in catalog.forgottenPairs()) {
             val record = requesterRecord(peer) ?: continue
             scope.launch(Dispatchers.IO) {
-                if (RappRequesterClient(context, scope, record, vault).deliverRevocationNotice()) {
-                    catalog.removePair(peer.pairIdHex)
-                }
+                RappRequesterClient(context, scope, record, vault).deliverRevocationNotice()
+                catalog.removePair(peer.pairIdHex)
             }
         }
     }
@@ -179,7 +186,7 @@ internal class RemoteCardModel(
         }
     }
 
-    /** The custodian forgot the pairing: its identity is withdrawn at once (RAPP v26.10.29 section 4.6 item 4). */
+    /** The custodian forgot the pairing: its identity is withdrawn at once (RAPP v26.11.2 section 4.6 item 4). */
     private fun pairingRevoked(pairIdHex: String) {
         catalog.removePair(pairIdHex)
         withdrawIdentity()
@@ -193,7 +200,7 @@ internal class RemoteCardModel(
     }
 
     /**
-     * Forgets every pairing (RAPP v26.10.29 section 4.6): each record keeps its
+     * Forgets every pairing (RAPP v26.11.2 section 4.6): each record keeps its
      * key only to deliver the `pairing_revoked` close on its next session.
      */
     fun forget() {

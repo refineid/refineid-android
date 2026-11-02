@@ -187,13 +187,14 @@ internal data class RappPromptText(
     @param:StringRes val body: Int,
     val bodyArgs: List<String>,
     @param:StringRes val pinLabel: Int,
-    /** Documents listed under the sentence when it cannot name a single one. */
+    /** Documents listed under the sentence when it cannot name a single one, or the files a package holds. */
     val listedDocuments: List<String>,
 )
 
 /**
  * Selects the prompt text for [request]. The sentence names the paired computer (core STPA CC-85) and,
- * when exactly one document with a name is signed, that document.
+ * when exactly one document with a name is signed, that document; a package's files are listed under its
+ * name as a batch's documents are (RAPP v26.11.2 section 9.3).
  */
 internal fun rappPromptText(request: RappAuthRequest): RappPromptText =
     when (request) {
@@ -214,7 +215,8 @@ internal fun rappPromptText(request: RappAuthRequest): RappPromptText =
                 body = if (single == null) R.string.rapp_prompt_sign else R.string.rapp_prompt_sign_document,
                 bodyArgs = listOfNotNull(request.requester, single),
                 pinLabel = R.string.pin2,
-                listedDocuments = request.documentNames.takeIf { it.size > 1 } ?: emptyList(),
+                listedDocuments =
+                    request.containedFiles.ifEmpty { request.documentNames.takeIf { it.size > 1 } ?: emptyList() },
             )
         }
     }

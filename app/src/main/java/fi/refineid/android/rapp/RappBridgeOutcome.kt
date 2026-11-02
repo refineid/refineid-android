@@ -11,6 +11,7 @@ import uniffi.refineid_rapp.RappOperationDescriptor
 import uniffi.refineid_rapp.RappOperationKind
 import uniffi.refineid_rapp.RappOperationResult
 import uniffi.refineid_rapp.RappProgressEvent
+import uniffi.refineid_rapp.RappRequesterSessionEnd
 import uniffi.refineid_rapp.RappResultKind
 import uniffi.refineid_rapp.RappSignatureAlgorithm
 import uniffi.refineid_rapp.RappTerminalReason
@@ -24,7 +25,7 @@ import java.security.cert.X509Certificate
 
 /**
  * The identifier of one operation: a fresh random value of the size the
- * engine draws (RAPP v26.10.29 section 8.1 item 1).
+ * engine draws (RAPP v26.11.2 section 8.1 item 1).
  */
 internal class RappOperationId private constructor(
     private val bytes: ByteArray,
@@ -61,7 +62,7 @@ internal class RappOperationId private constructor(
     }
 }
 
-/** The SHA-256 digest of a card's authentication certificate in DER (RAPP v26.10.29 section 8.4 item 2). */
+/** The SHA-256 digest of a card's authentication certificate in DER (RAPP v26.11.2 section 8.4 item 2). */
 internal class RappCertificateFingerprint private constructor(
     private val digest: ByteArray,
 ) {
@@ -117,7 +118,7 @@ internal class RappCertificate private constructor(
     }
 }
 
-/** The card a custodian reports on a session (RAPP v26.10.29 section 8.4 item 1). */
+/** The card a custodian reports on a session (RAPP v26.11.2 section 8.4 item 1). */
 internal sealed interface RappCardStatus {
     /** A card can answer now; [fingerprint] names it. */
     class Present(
@@ -128,7 +129,7 @@ internal sealed interface RappCardStatus {
     data object Absent : RappCardStatus
 }
 
-/** The card this custodian can serve now (RAPP v26.10.29 section 8.4 item 1). */
+/** The card this custodian can serve now (RAPP v26.11.2 section 8.4 item 1). */
 internal sealed interface RappOfferedCard {
     /** A card coupled in a reader, or a primed card the holder can present, with its authentication certificate. */
     class Present(
@@ -150,7 +151,7 @@ internal class RappDocument(
     val digest: ByteArray,
 )
 
-/** What a requester asked of the card (RAPP v26.10.29 section 9). */
+/** What a requester asked of the card (RAPP v26.11.2 section 9). */
 internal sealed interface RappRequest {
     data object InspectCard : RappRequest
 
@@ -168,8 +169,14 @@ internal sealed interface RappRequest {
         val digest: ByteArray,
     ) : RappRequest
 
+    /**
+     * [document] is a single document, or a package whose name it carries;
+     * [containedFiles] lists the files a package holds, in container order,
+     * and is empty for a single document (section 9.3).
+     */
     class SignDocument(
         val document: RappDocument,
+        val containedFiles: List<String>,
         val keyProfile: RappCardKeyProfile,
         val algorithm: RappSignatureAlgorithm,
     ) : RappRequest
@@ -217,6 +224,7 @@ internal sealed interface RappRequest {
                                 checkNotNull(descriptor.displayContext),
                                 descriptor.digest.also { check(it.isNotEmpty()) },
                             ),
+                        containedFiles = descriptor.containedFiles?.also { check(it.isNotEmpty()) }.orEmpty(),
                         keyProfile = checkNotNull(descriptor.keyProfile),
                         algorithm = checkNotNull(descriptor.algorithm),
                     )
@@ -270,17 +278,73 @@ internal sealed interface RappAnswer {
 }
 
 /**
+ * The close a frame carries when it ends the session (RAPP v26.11.2 section
+ * 7.1 item 7). A close is acknowledged: the endpoint that receives one acts
+ * on it and answers with its echo, and the sender waits for that echo.
+ */
+internal sealed interface RappSentClose {
+    val reason: RappCloseReason
+
+    /** On a requester, how to treat the session's end (section 4.5 item 6); null on a custodian. */
+    val end: RappRequesterSessionEnd?
+
+    /**
+     * This endpoint's own close: keep the link and feed what arrives to the
+     * bridge until it acknowledges the echo or the wait ends.
+     */
+    class Own(
+        override val reason: RappCloseReason,
+        override val end: RappRequesterSessionEnd?,
+    ) : RappSentClose
+
+    /** The echo answering the peer's close with [reason]: act on the reason, then drop the link. */
+    class Echo(
+        override val reason: RappCloseReason,
+        override val end: RappRequesterSessionEnd?,
+    ) : RappSentClose
+}
+
+/**
  * One action of the engine's operation or session bridge, deconstructed once
  * at the binding border; the rest of the app consumes only this.
  */
 internal sealed interface RappBridgeOutcome {
     /**
      * Deliver [frame], ciphertext in transit to the transport. A non-null
-     * [closesWith] ends the session once the frame is delivered.
+     * [close] ends the session with the frame (section 7.1 item 7).
      */
     class Send(
         val frame: ByteArray,
-        val closesWith: RappCloseReason?,
+        val close: RappSentClose?,
+    ) : RappBridgeOutcome
+
+    /**
+     * The requester verified `session.ready`: deliver [hello], its
+     * `session.hello`, as the session's first message (section 7.1 item 6).
+     * [custodianName] is the custodian's name as the pair record now holds
+     * it.
+     */
+    class Greeted(
+        val hello: ByteArray,
+        val custodianName: RappDisplayName,
+    ) : RappBridgeOutcome
+
+    /**
+     * The requester's `session.hello` arrived on the custodian: [name] is the
+     * computer's name as the pair record now holds it (section 4.3 item 4).
+     */
+    class PeerNamed(
+        val name: RappDisplayName,
+    ) : RappBridgeOutcome
+
+    /**
+     * The peer's echo of this endpoint's close arrived, or a close that
+     * crossed it (section 7.1 item 7): drop the link. [reason] is the
+     * reason received; a requester acts on a crossing close as [end] says.
+     */
+    class CloseAcknowledged(
+        val reason: RappCloseReason,
+        val end: RappRequesterSessionEnd?,
     ) : RappBridgeOutcome
 
     /** Nothing to do. */
@@ -336,9 +400,14 @@ internal sealed interface RappBridgeOutcome {
         val reader: RappCardReader,
     ) : RappBridgeOutcome
 
-    /** The session closed; [reason] is the authenticated close's, when one was sent or received. */
+    /**
+     * The session closed; [reason] is the authenticated close's, when one
+     * was sent or received. On a requester, [end] says how to treat the end
+     * (section 4.5 item 6).
+     */
     class Closed(
         val reason: RappCloseReason?,
+        val end: RappRequesterSessionEnd?,
     ) : RappBridgeOutcome
 
     companion object {
@@ -352,7 +421,36 @@ internal sealed interface RappBridgeOutcome {
             return when (action.kind) {
                 RappBridgeActionKind.SEND_FRAME -> {
                     check(action.closeSessionAfterSend == (action.closeReason != null))
-                    Send(checkNotNull(action.frame).also { check(it.isNotEmpty()) }, action.closeReason)
+                    check(!action.awaitsCloseEcho || action.closeSessionAfterSend)
+                    val frame = checkNotNull(action.frame).also { check(it.isNotEmpty()) }
+                    val reason = action.closeReason
+                    val name = action.displayName
+                    when {
+                        reason == null && name != null -> {
+                            check(action.sessionEnd == null)
+                            Greeted(frame, checkNotNull(RappDisplayName.parse(name)))
+                        }
+
+                        reason == null -> {
+                            Send(frame, null)
+                        }
+
+                        action.awaitsCloseEcho -> {
+                            Send(frame, RappSentClose.Own(reason, action.sessionEnd))
+                        }
+
+                        else -> {
+                            Send(frame, RappSentClose.Echo(reason, action.sessionEnd))
+                        }
+                    }
+                }
+
+                RappBridgeActionKind.PEER_NAMED -> {
+                    PeerNamed(checkNotNull(action.displayName?.let(RappDisplayName::parse)))
+                }
+
+                RappBridgeActionKind.CLOSE_ACKNOWLEDGED -> {
+                    CloseAcknowledged(checkNotNull(action.closeReason), action.sessionEnd)
                 }
 
                 RappBridgeActionKind.NO_ACTION -> {
@@ -392,7 +490,7 @@ internal sealed interface RappBridgeOutcome {
                 }
 
                 RappBridgeActionKind.SESSION_CLOSED -> {
-                    Closed(action.closeReason)
+                    Closed(action.closeReason, action.sessionEnd)
                 }
             }
         }

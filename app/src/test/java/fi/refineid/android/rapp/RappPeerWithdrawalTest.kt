@@ -22,11 +22,11 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * A paired computer that withdraws (RAPP v26.10.29 section 4.5 items 8 and
+ * A paired computer that withdraws (RAPP v26.11.2 section 4.5 items 8 and
  * 9): its `service_withdrawn` close reaches this phone as the computer's
- * withdrawal, never as a violation, and this phone sends no close of its
- * own; the session and its operation end, the pairing stays, and the
- * pairing's next session opens.
+ * withdrawal, never as a violation, and this phone answers only with its
+ * echo (section 7.1 item 7); the session and its operation end, the pairing
+ * stays, and the pairing's next session opens.
  */
 class RappPeerWithdrawalTest {
     private companion object {
@@ -70,13 +70,7 @@ class RappPeerWithdrawalTest {
         requester.readHandshakeFrame(custodian.writeHandshakeFrame())
         custodian.enterAuthentication()
         requester.enterAuthentication()
-        val nonce = ByteArray(rappRandomByteCounts().sessionReadyNonce.toInt()).also(random::nextBytes)
-        val ready = custodian.sendReady(nonce)
-        custodian.enterEstablished()
-        assertSame(RappBridgeOutcome.Idle, RappBridgeOutcome.from(requester.receiveReady(ready, NOW)))
-        requester.enterEstablished()
-        return RappOperationBridge.beginRequester(requester, LIFETIME_MS, NOW) to
-            RappOperationBridge.beginProxy(custodian, LIFETIME_MS, NOW)
+        return RappTestOffers.establish(requester, custodian, LIFETIME_MS, NOW)
     }
 
     private fun send(call: () -> uniffi.refineid_rapp.RappBridgeAction): RappBridgeOutcome =
@@ -85,18 +79,20 @@ class RappPeerWithdrawalTest {
     private fun RappBridgeOutcome.deliverTo(peer: RappOperationBridge): RappBridgeOutcome =
         RappBridgeOutcome.from(peer.receiveFrame((this as RappBridgeOutcome.Send).frame, NOW))
 
-    /** The computer withdraws: its close, as this phone types it on receipt. */
+    /** The computer withdraws: its close, as this phone types it on receipt, the echo it answers with. */
     private fun withdraw(
         requester: RappOperationBridge,
         custodian: RappOperationBridge,
-    ): RappBridgeOutcome.Closed {
+    ): RappSentClose.Echo {
         val notice = send { requester.closeWithReason(RappCloseReason.SERVICE_WITHDRAWN) }
-        assertEquals(RappCloseReason.SERVICE_WITHDRAWN, (notice as RappBridgeOutcome.Send).closesWith)
-        return notice.deliverTo(custodian) as RappBridgeOutcome.Closed
+        assertTrue((notice as RappBridgeOutcome.Send).close is RappSentClose.Own)
+        val echo = notice.deliverTo(custodian) as RappBridgeOutcome.Send
+        assertTrue(echo.deliverTo(requester) is RappBridgeOutcome.CloseAcknowledged)
+        return echo.close as RappSentClose.Echo
     }
 
     @Test
-    fun theComputersWithdrawalClosesTheSessionWithNoViolationAndNoReply() {
+    fun theComputersWithdrawalClosesTheSessionWithNoViolationAndOnlyItsEcho() {
         val (requester, custodian) = establish(pairing())
 
         assertEquals(RappCloseReason.SERVICE_WITHDRAWN, withdraw(requester, custodian).reason)

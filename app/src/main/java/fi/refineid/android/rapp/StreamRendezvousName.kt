@@ -1,13 +1,13 @@
 package fi.refineid.android.rapp
 
 import uniffi.refineid_rapp.RappTxtEntry
-import java.security.SecureRandom
 
 /**
  * Discovery records the custodian publishes (RAPP discovery hierarchy
  * section 4.2-4.3).
  *
- * The instance name is a fresh random value on every advertising start.
+ * The instance name is a fresh random value on every advertising start,
+ * drawn by the core (`rappFreshInstanceName`).
  * The TXT record carries the version and the mode, and in session mode the
  * rotating discovery hints of the most recently used pairings. A hint is an
  * HMAC over the current 15-minute window keyed from the pairing's static
@@ -16,8 +16,6 @@ import java.security.SecureRandom
  * the instance and reads the version and mode.
  */
 internal object StreamRendezvousName {
-    private const val PREFIX = "refineid-"
-    private const val RANDOM_BYTE_COUNT = 4
     const val ATTRIBUTE_VERSION = "v"
     const val ATTRIBUTE_MODE = "mode"
     const val VERSION = "1"
@@ -27,12 +25,6 @@ internal object StreamRendezvousName {
 
     /** Length of one hint window in seconds (section 4.3). */
     const val HINT_WINDOW_SECONDS = 900L
-
-    /** A fresh `refineid-<8 hex>` instance name. */
-    fun ephemeralName(random: SecureRandom = SecureRandom()): String {
-        val bytes = ByteArray(RANDOM_BYTE_COUNT).also(random::nextBytes)
-        return PREFIX + bytes.joinToString("") { "%02x".format(it) }
-    }
 
     /** The TXT attributes of the given discovery mode, without hints. */
     fun attributes(mode: String): Map<String, String> = mapOf(ATTRIBUTE_VERSION to VERSION, ATTRIBUTE_MODE to mode)

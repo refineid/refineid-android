@@ -54,6 +54,8 @@ import uniffi.refineid_rapp.RappPreAuthenticationLimiter
 import uniffi.refineid_rapp.RappProgressEvent
 import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
+import uniffi.refineid_rapp.rappFreshInstanceName
+import uniffi.refineid_rapp.rappQuitWithdrawalBoundMs
 import uniffi.refineid_rapp.rappRandomByteCounts
 import uniffi.refineid_rapp.rappSessionRecord
 import uniffi.refineid_rapp.rappWithdrawnRecord
@@ -63,7 +65,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The custodian side of RAPP v26.10.29: serves the paired computers' sessions
+ * The custodian side of RAPP v26.11.2: serves the paired computers' sessions
  * over the stream transport and over Bluetooth (`fi.refineid.rapp.ble`,
  * section 5), asks the holder for PINs on this phone, and runs the card
  * commands through the card services.
@@ -142,6 +144,20 @@ internal class RappPhoneProxyDispatcher(
     @Volatile
     private var operationBridge: RappOperationBridge? = null
 
+    /**
+     * Completes once the session whose own close waits for the requester's
+     * echo has ended: the echo arrived, the wait passed, or the link went
+     * (section 7.1 item 7); null while no close of this phone waits.
+     */
+    @Volatile
+    private var closing: CompletableDeferred<Unit>? = null
+
+    /** Ends the session that waits for its echo once the wait passes. */
+    private var closeEchoDeadlineJob: Job? = null
+
+    /** The reason of this phone's own close that waits for its echo; null while none waits. */
+    private var ownCloseReason: RappCloseReason? = null
+
     /** Completes once the established session carried its first `card.status` (section 8.4 item 1). */
     @Volatile
     private var cardReported: CompletableDeferred<Unit>? = null
@@ -213,8 +229,6 @@ internal class RappPhoneProxyDispatcher(
     }
 
     companion object {
-        private const val DEFAULT_REQUESTER_DISPLAY_NAME = "Computer"
-
         private const val NANOS_PER_MICROSECOND = 1_000L
 
         /** How often liveness and operation deadlines are checked (section 8.3). */
@@ -227,6 +241,9 @@ internal class RappPhoneProxyDispatcher(
 
         /** How long the withdrawn record stays advertised (RAPP section 4.5: 2 to 10 seconds). */
         private const val WITHDRAWN_ANNOUNCEMENT_MS = 3_000L
+
+        /** How long this phone waits for the echo of its own close (section 7.1 item 7). */
+        private val CLOSE_ECHO_WAIT_MS = rappQuitWithdrawalBoundMs().toLong()
 
         /** How long a routed Bluetooth link has to complete `Noise_KK`, the stream listener's bound. */
         private const val BLUETOOTH_HANDSHAKE_DEADLINE_MS = StreamRelayListener.DEFAULT_HANDSHAKE_TIMEOUT_MS
@@ -278,7 +295,7 @@ internal class RappPhoneProxyDispatcher(
                 handleRelayEvent(event)
             }
         activeListener = listener
-        val instance = StreamRendezvousName.ephemeralName()
+        val instance = rappFreshInstanceName()
         announcedInstance = instance
         listener.onRegistered = { registered ->
             // Hints are bound to the instance name; a name the responder
@@ -292,7 +309,7 @@ internal class RappPhoneProxyDispatcher(
         RappCustodianService.ensureRunning(context)
         hintRefreshJob?.cancel()
         // Each hint window rebuilds the served set, which also destroys a
-        // forgotten record past its notice window (RAPP v26.10.29 section 4.6
+        // forgotten record past its notice window (RAPP v26.11.2 section 4.6
         // item 3); the listener stops once nothing is left to serve.
         hintRefreshJob =
             scope.launch {
@@ -329,7 +346,7 @@ internal class RappPhoneProxyDispatcher(
      * Session-mode TXT attributes carrying the current rotating discovery
      * hints of the most recently used custodian pairings (discovery
      * hierarchy section 4.3), forgotten ones included: their peers keep
-     * dialing until the close reaches them (RAPP v26.10.29 section 4.6 item
+     * dialing until the close reaches them (RAPP v26.11.2 section 4.6 item
      * 2).
      */
     private fun sessionAttributes(vault: AndroidRappVault): Map<String, String> {
@@ -362,11 +379,13 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Ends the session to [pairId] because the local user forgot the pairing
-     * (RAPP v26.10.29 section 4.6 item 1). Returns true when the session was
-     * established and carried the `pairing_revoked` close, so the caller
-     * destroys the record at once; false when no session to the pairing was
-     * open. A session still in its handshake is dropped, and the next one
-     * delivers the close.
+     * (RAPP v26.11.2 section 4.6 item 1). Returns true when the session was
+     * established and carried the `pairing_revoked` close: this dispatcher
+     * then destroys the record once the requester's echo arrived or the wait
+     * for it passed (section 4.6 item 3, section 7.1 item 7), and the caller
+     * only takes the pairing off the list. False when no session to the
+     * pairing was open; a session still in its handshake is dropped, and the
+     * next one delivers the close.
      */
     fun closePairingRevoked(pairId: RappPairId): Boolean {
         synchronized(sessionLock) {
@@ -377,19 +396,44 @@ internal class RappPhoneProxyDispatcher(
                 dropConnection()
                 return false
             }
-            // The caller revokes the pairing next, so the session's end records no time for it.
+            // The pairing is revoked once the close ends, so the session's end records no time for it.
             routed = null
-            val closed = act(bridge) { it.closeWithReason(RappCloseReason.PAIRING_REVOKED) } != null
-            dropConnection()
-            pair.record.close()
-            return closed
+            val ended = closeOwn(bridge, RappCloseReason.PAIRING_REVOKED)
+            val vlt = vault
+            if (ended == null || vlt == null) {
+                pair.record.close()
+                return false
+            }
+            scope.launch {
+                ended.await()
+                synchronized(sessionLock) {
+                    RappPairRevocation.revoke(pair.pairing.id, pair.record, vlt)
+                    pairingsChanged()
+                }
+            }
+            return true
         }
+    }
+
+    /**
+     * Closes the session [bridge] serves with this phone's own close of
+     * [reason] and keeps its link for the requester's echo, at most
+     * [CLOSE_ECHO_WAIT_MS] (section 7.1 item 7). Returns what completes once
+     * the session has ended, or null when no close went out and the session
+     * already ended.
+     */
+    private fun closeOwn(
+        bridge: RappOperationBridge,
+        reason: RappCloseReason,
+    ): CompletableDeferred<Unit>? {
+        val outcome = act(bridge) { it.closeWithReason(reason) }
+        return if ((outcome as? RappBridgeOutcome.Send)?.close is RappSentClose.Own) closing else null
     }
 
     /**
      * Sweeps the pairings for idle expiry every
      * [RappIdleExpiry.SWEEP_INTERVAL_MS] until this dispatcher closes,
-     * whether or not the phone serves (RAPP v26.10.29 section 4.6 item 5);
+     * whether or not the phone serves (RAPP v26.11.2 section 4.6 item 5);
      * the start's sweep is [RappStoredPairs.cleanAtStartup]'s.
      */
     fun startIdleExpiry(vault: RappPairVault) {
@@ -423,7 +467,7 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * The card this phone holds, or its card reader, may have changed:
-     * reports both on the open session (RAPP v26.10.29 section 8.4 item 1).
+     * reports both on the open session (RAPP v26.11.2 section 8.4 item 1).
      * Present is a card in the reader, from insertion until removal or the
      * reader's detachment, or an NFC card the holder added to the phone,
      * until the holder removes it; a card busy with an operation, or one
@@ -458,21 +502,39 @@ internal class RappPhoneProxyDispatcher(
         }
 
     /**
-     * Withdraws the service the user switched off (RAPP v26.10.29 section
-     * 4.5): the open session, on either transport, is closed as withdrawn;
-     * the listener and the Bluetooth server stop accepting and the
-     * advertisement stops; the instance is advertised as withdrawn for a few
-     * seconds, and then everything stops. The Bluetooth advertisement carries
-     * no withdrawal (section 4.5 item 5). It returns at once: the close is
-     * queued on the session's transport, which writes it before it closes.
+     * Withdraws the service the user switched off (RAPP v26.11.2 section 4.5
+     * item 3), keeping every pairing: the open session, on either transport,
+     * is closed as withdrawn and waits at most [CLOSE_ECHO_WAIT_MS] for the
+     * requester's echo (section 7.1 item 7); then the listener and the
+     * Bluetooth server stop accepting and the advertisement stops; the
+     * instance is advertised as withdrawn for a few seconds, and then
+     * everything stops. The Bluetooth advertisement carries no withdrawal
+     * (section 4.5 item 5). It returns at once; turning Remote Access on
+     * meanwhile cancels the rest.
      */
     fun withdraw() {
         synchronized(sessionLock) {
             hintRefreshJob?.cancel()
             hintRefreshJob = null
-            operationBridge?.let { bridge -> act(bridge) { it.closeWithReason(RappCloseReason.SERVICE_WITHDRAWN) } }
-            dropConnection()
             withdrawing = true
+            val ended = operationBridge?.let { closeOwn(it, RappCloseReason.SERVICE_WITHDRAWN) }
+            if (ended == null) {
+                dropConnection()
+                stopAccepting()
+                return
+            }
+            withdrawalJob?.cancel()
+            withdrawalJob =
+                scope.launch {
+                    ended.await()
+                    synchronized(sessionLock) { if (withdrawing) stopAccepting() }
+                }
+        }
+    }
+
+    /** Stops accepting connections and advertises the withdrawn record (section 4.5 item 3, steps 2 to 4). */
+    private fun stopAccepting() {
+        synchronized(sessionLock) {
             bleServer?.stopAdvertising()
             val listener = activeListener
             val vlt = vault
@@ -693,11 +755,30 @@ internal class RappPhoneProxyDispatcher(
         }
         val session = sessionBridge
         val pair = routed
-        if (session == null || pair == null) {
-            dropConnection()
-        } else {
-            handshake(vault, session, pair, data)
+        when {
+            session != null && closing != null -> revocationEcho(session, data)
+            session == null || pair == null -> dropConnection()
+            else -> handshake(vault, session, pair, data)
         }
+    }
+
+    /**
+     * One frame after a forgotten pairing's `pairing_revoked` close went out
+     * as its session's only message: the requester's echo, or a close that
+     * crossed it, ends the session; anything else is ignored while the wait
+     * lasts (section 7.1 item 7).
+     */
+    private fun revocationEcho(
+        session: RappSessionBridge,
+        data: ByteArray,
+    ) {
+        val outcome =
+            try {
+                RappBridgeOutcome.from(session.receiveCloseEcho(data, RappClock.monotonicMs()))
+            } catch (_: Exception) {
+                null
+            }
+        if (outcome != RappBridgeOutcome.Idle) dropConnection()
     }
 
     /**
@@ -706,13 +787,18 @@ internal class RappPhoneProxyDispatcher(
      * bound (section 3.3 item 6), and the session this phone serves must
      * admit it;
      * anything else closes the connection unanswered and changes no stored
-     * state (RAPP v26.10.29 section 2.2.1).
+     * state (RAPP v26.11.2 section 2.2.1).
      */
     private fun routeStream(
         vault: AndroidRappVault,
         preamble: ByteArray,
     ) {
         val transport = RappServedTransport.Stream
+        if (withdrawing) {
+            AppTrace.rappDialRefused(transport.profile, RappDialRefusal.NOT_SERVING)
+            activeListener?.disconnectClient()
+            return
+        }
         val pair = admitRouted(vault, transport.profile, preamble)
         if (pair == null) {
             activeListener?.disconnectClient()
@@ -842,7 +928,7 @@ internal class RappPhoneProxyDispatcher(
             }
             val nonce = ByteArray(RANDOM_BYTE_COUNTS.sessionReadyNonce.toInt()).also(SecureRandom()::nextBytes)
             try {
-                send(session.sendReady(nonce))
+                send(session.sendReady(nonce, RappLocalName.of(context).text))
             } finally {
                 nonce.fill(ERASED)
             }
@@ -855,8 +941,9 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * The first and only message of a session to a forgotten pairing: the
-     * `pairing_revoked` close, after which the record's key is destroyed
-     * (RAPP v26.10.29 section 4.6 items 2 and 3).
+     * `pairing_revoked` close. The record's key is destroyed once the
+     * requester's echo arrived or the wait for it passed (RAPP v26.11.2
+     * section 4.6 items 2 and 3, section 7.1 item 7).
      */
     private fun deliverRevocationNotice(
         vault: AndroidRappVault,
@@ -865,9 +952,21 @@ internal class RappPhoneProxyDispatcher(
     ) {
         send(session.deliverRevocationNotice())
         routed = null
-        RappPairRevocation.revoke(pair, catalog, vault)
-        dropConnection()
-        pairingsChanged()
+        val ended = CompletableDeferred<Unit>()
+        closing = ended
+        closeEchoDeadlineJob?.cancel()
+        closeEchoDeadlineJob =
+            scope.launch {
+                delay(CLOSE_ECHO_WAIT_MS)
+                synchronized(sessionLock) { if (sessionBridge === session) dropConnection() }
+            }
+        scope.launch {
+            ended.await()
+            synchronized(sessionLock) {
+                RappPairRevocation.revoke(pair, catalog, vault)
+                pairingsChanged()
+            }
+        }
     }
 
     /** The session is established: its pairing's session time is recorded (section 4.6 item 5). */
@@ -933,9 +1032,12 @@ internal class RappPhoneProxyDispatcher(
     /**
      * Runs one call on the session's bridge, types its action at the binding
      * border, and queues the frame it sealed, so frames leave in the order
-     * the bridge sealed them; a closing session ends here, its transport
-     * closing after the frame. Null when [bridge] no longer serves the
-     * session or the call failed.
+     * the bridge sealed them. A close ends the session here (section 7.1
+     * item 7): the echo of the requester's close goes out and the session
+     * ends on the reason received; this phone's own close keeps the link
+     * until the echo arrives or [CLOSE_ECHO_WAIT_MS] passes, and its
+     * transport closes after the frames queued before. Null when [bridge]
+     * no longer serves the session or the call failed.
      */
     private fun act(
         bridge: RappOperationBridge,
@@ -955,21 +1057,73 @@ internal class RappPhoneProxyDispatcher(
                 } catch (_: IOException) {
                 }
             }
-            when {
-                outcome is RappBridgeOutcome.Closed -> sessionClosed(outcome.reason)
-                outcome is RappBridgeOutcome.Send && outcome.closesWith != null -> dropConnection()
+            when (outcome) {
+                is RappBridgeOutcome.Closed -> {
+                    sessionClosed(outcome.reason)
+                }
+
+                is RappBridgeOutcome.CloseAcknowledged -> {
+                    acknowledged(outcome.reason)
+                }
+
+                is RappBridgeOutcome.Send -> {
+                    sent(bridge, outcome.close)
+                }
+
+                else -> {}
             }
             return outcome
         }
     }
 
     /**
+     * A frame went out on the session [bridge] serves, ending it with
+     * [close]: the echo of the requester's close ends the session on the
+     * reason received; this phone's own close waits for its echo.
+     */
+    private fun sent(
+        bridge: RappOperationBridge,
+        close: RappSentClose?,
+    ) {
+        when (close) {
+            null -> {}
+
+            is RappSentClose.Echo -> {
+                sessionClosed(close.reason)
+            }
+
+            is RappSentClose.Own -> {
+                // Every operation of the session is over with the close; only the link waits.
+                operationJob?.cancel()
+                operationJob = null
+                dismissInbox()
+                ownCloseReason = close.reason
+                closing = CompletableDeferred()
+                closeEchoDeadlineJob?.cancel()
+                closeEchoDeadlineJob =
+                    scope.launch {
+                        delay(CLOSE_ECHO_WAIT_MS)
+                        synchronized(sessionLock) { if (bridge === operationBridge) dropConnection() }
+                    }
+            }
+        }
+    }
+
+    /**
+     * The requester's close with [reason] acknowledged this phone's own: its
+     * echo, or a close that crossed it, which is acted on as any received
+     * close (section 7.1 item 7).
+     */
+    private fun acknowledged(reason: RappCloseReason) {
+        if (reason == ownCloseReason) dropConnection() else sessionClosed(reason)
+    }
+
+    /**
      * The session closed, and with it its operation and any prompt for it.
      * A requester that forgot this phone closes it with `pairing_revoked`,
-     * and the pairing is revoked here at once (RAPP v26.10.29 section 4.6
-     * item 4). One that withdrew closes it with `service_withdrawn`: this
-     * phone sends no close of its own and keeps the pairing (section 4.5
-     * item 9).
+     * and the pairing is revoked here at once, after the echo went out
+     * (RAPP v26.11.2 section 4.6 item 4). One that withdrew closes it with
+     * `service_withdrawn` and the pairing stays (section 4.5 item 9).
      */
     private fun sessionClosed(reason: RappCloseReason?) {
         if (reason == RappCloseReason.SERVICE_WITHDRAWN) AppTrace.rappPeerWithdrew()
@@ -1001,7 +1155,25 @@ internal class RappPhoneProxyDispatcher(
                 startOperation(bridge, outcome.operationId)
             }
 
+            is RappBridgeOutcome.PeerNamed -> {
+                peerNamed(outcome.name)
+            }
+
             else -> {}
+        }
+    }
+
+    /**
+     * The computer named itself in its `session.hello`; the pair record holds
+     * the name, and the list of paired computers and the PIN prompts show it
+     * (section 4.3 item 4).
+     */
+    private fun peerNamed(name: RappDisplayName) {
+        val pair = routed ?: return
+        catalog.updateDisplayName(pair.peer.pairIdHex, name.text)
+        val connected = _connectedPeer.value
+        if (connected?.pairIdHex == pair.peer.pairIdHex) {
+            _connectedPeer.value = connected.copy(displayName = name.text)
         }
     }
 
@@ -1052,6 +1224,11 @@ internal class RappPhoneProxyDispatcher(
             operationJob = null
             handshakeDeadlineJob?.cancel()
             handshakeDeadlineJob = null
+            closeEchoDeadlineJob?.cancel()
+            closeEchoDeadlineJob = null
+            closing?.complete(Unit)
+            closing = null
+            ownCloseReason = null
             served = null
             val bridge = operationBridge
             operationBridge = null
@@ -1083,11 +1260,15 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
+    /** The name the computer of the open session last gave itself, as its pair record holds it (section 4.3 item 4). */
     private fun requesterName(): String =
-        _connectedPeer.value
-            ?.displayName
-            ?.takeIf { it.isNotBlank() }
-            ?: DEFAULT_REQUESTER_DISPLAY_NAME
+        routed?.let { pair ->
+            try {
+                pair.record.metadata().peerDisplayName
+            } catch (_: Exception) {
+                null
+            }
+        } ?: _connectedPeer.value?.displayName.orEmpty()
 
     // --- Operations ---------------------------------------------------------
 
@@ -1169,13 +1350,27 @@ internal class RappPhoneProxyDispatcher(
             }
 
             is RappRequest.SignDocument -> {
-                signDocuments(bridge, operationId, request.keyProfile, request.algorithm, listOf(request.document)) {
+                signDocuments(
+                    bridge,
+                    operationId,
+                    request.keyProfile,
+                    request.algorithm,
+                    listOf(request.document),
+                    request.containedFiles,
+                ) {
                     it.completeSignature(operationId.toWire(), single())
                 }
             }
 
             is RappRequest.BatchSignDocuments -> {
-                signDocuments(bridge, operationId, request.keyProfile, request.algorithm, request.documents) {
+                signDocuments(
+                    bridge,
+                    operationId,
+                    request.keyProfile,
+                    request.algorithm,
+                    request.documents,
+                    containedFiles = emptyList(),
+                ) {
                     it.completeBatch(operationId.toWire())
                 }
             }
@@ -1271,11 +1466,15 @@ internal class RappPhoneProxyDispatcher(
         return awaitHolder(answer, operationId)
     }
 
-    /** Asks the holder for PIN 2 over the documents [names] on this phone; see [askPin1]. */
+    /**
+     * Asks the holder for PIN 2 over the documents [names] on this phone,
+     * with the files of a package in [containedFiles]; see [askPin1].
+     */
     private suspend fun askPin2(
         bridge: RappOperationBridge,
         operationId: RappOperationId,
         names: List<String>,
+        containedFiles: List<String>,
         wrongPin: RappCardAnswer.WrongPin?,
         firstPrompt: Boolean,
     ): Pin2Submission? {
@@ -1285,6 +1484,7 @@ internal class RappPhoneProxyDispatcher(
                 requestId = operationId.key,
                 requester = requesterName(),
                 documentNames = names,
+                containedFiles = containedFiles,
                 onApproved = { pin -> if (!answer.complete(pin)) pin.close() },
                 onDenied = { answer.complete(null) },
                 onShown = { if (firstPrompt) reportConsentShown(bridge, operationId) },
@@ -1794,7 +1994,8 @@ internal class RappPhoneProxyDispatcher(
 
     /**
      * Signs [documents] in order with the one PIN 2 entry the holder
-     * approved, then answers with [complete] over the signatures. A wrong PIN
+     * approved, then answers with [complete] over the signatures. The
+     * prompt lists [containedFiles] under a package's name (section 9.3). A wrong PIN
      * asks the holder again; signing that stops delivers no signature.
      */
     private suspend fun signDocuments(
@@ -1803,6 +2004,7 @@ internal class RappPhoneProxyDispatcher(
         keyProfile: RappCardKeyProfile,
         algorithm: RappSignatureAlgorithm,
         documents: List<RappDocument>,
+        containedFiles: List<String>,
         complete: List<ByteArray>.(RappOperationBridge) -> RappBridgeAction,
     ) {
         val names = documents.map { it.name }
@@ -1811,7 +2013,7 @@ internal class RappPhoneProxyDispatcher(
             fail(bridge, operationId, RappCardFailure.UNSUPPORTED)
             return
         }
-        val first = askPin2(bridge, operationId, names, wrongPin = null, firstPrompt = true)
+        val first = askPin2(bridge, operationId, names, containedFiles, wrongPin = null, firstPrompt = true)
         if (first == null) {
             fail(bridge, operationId, RappCardFailure.USER_CANCELLED)
             return
@@ -1836,7 +2038,16 @@ internal class RappPhoneProxyDispatcher(
                     RappBatchSignatureRun(
                         digests = digests,
                         sign = { digest ->
-                            signDocument(bridge, operationId, names, qualified, certificate, digest, pin)
+                            signDocument(
+                                bridge,
+                                operationId,
+                                names,
+                                containedFiles,
+                                qualified,
+                                certificate,
+                                digest,
+                                pin,
+                            )
                         },
                         record = { signature ->
                             if (command is RappRequest.BatchSignDocuments) {
@@ -1884,6 +2095,7 @@ internal class RappPhoneProxyDispatcher(
         bridge: RappOperationBridge,
         operationId: RappOperationId,
         names: List<String>,
+        containedFiles: List<String>,
         algorithm: QualifiedSigningAlgorithm,
         certificate: NativeQualifiedCertificate,
         digest: ByteArray,
@@ -1931,7 +2143,7 @@ internal class RappPhoneProxyDispatcher(
             when (val answer = RappCardAnswer.of(failure.kind, failure.remainingRetries)) {
                 is RappCardAnswer.WrongPin -> {
                     val next =
-                        askPin2(bridge, operationId, names, answer, firstPrompt = false)
+                        askPin2(bridge, operationId, names, containedFiles, answer, firstPrompt = false)
                             ?: return RappBatchSignatureRun.Step.Failed(RappCardFailure.USER_CANCELLED)
                     pin.replace(next)
                 }

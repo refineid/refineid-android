@@ -19,7 +19,7 @@ import java.security.SecureRandom
 /**
  * The custodian answers a pairing connection it cannot admit with
  * `pairing-busy` carrying the time until it can, and serves its offer again
- * once it can (RAPP v26.10.29 section 3.3 item 6; section 4.2, "Bootstrap
+ * once it can (RAPP v26.11.2 section 3.3 item 6; section 4.2, "Bootstrap
  * Read Flow" and "Busy Refusal").
  */
 class RappPairingBootstrapTest {

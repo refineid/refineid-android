@@ -54,6 +54,18 @@ class RappPromptTextTest {
     }
 
     @Test
+    fun signingAPackageNamesItAndListsItsFilesInContainerOrder() {
+        val files = listOf(FIRST_DOCUMENT, SECOND_DOCUMENT)
+        val text = rappPromptText(documentSign(listOf(PACKAGE), files))
+
+        assertEquals(R.string.signature, text.title)
+        assertEquals(R.string.rapp_prompt_sign_document, text.body)
+        assertEquals(listOf(COMPUTER, PACKAGE), text.bodyArgs)
+        assertEquals(R.string.pin2, text.pinLabel)
+        assertEquals(files, text.listedDocuments)
+    }
+
+    @Test
     fun aBlankDocumentNameLeavesTheSentenceWithoutOne() {
         val text = rappPromptText(documentSign(listOf(BLANK_DOCUMENT)))
 
@@ -71,21 +83,25 @@ class RappPromptTextTest {
             onShown = {},
         )
 
-    private fun documentSign(names: List<String>) =
-        RappAuthRequest.DocumentSign(
-            requestId = REQUEST_ID,
-            requester = COMPUTER,
-            documentNames = names,
-            onApproved = { it.close() },
-            onDenied = {},
-            onShown = {},
-        )
+    private fun documentSign(
+        names: List<String>,
+        containedFiles: List<String> = emptyList(),
+    ) = RappAuthRequest.DocumentSign(
+        requestId = REQUEST_ID,
+        requester = COMPUTER,
+        documentNames = names,
+        containedFiles = containedFiles,
+        onApproved = { it.close() },
+        onDenied = {},
+        onShown = {},
+    )
 
     private companion object {
         const val REQUEST_ID = "request"
         const val COMPUTER = "Example Computer"
         const val FIRST_DOCUMENT = "contract.pdf"
         const val SECOND_DOCUMENT = "appendix.pdf"
+        const val PACKAGE = "contract.asice"
         const val BLANK_DOCUMENT = " "
     }
 }

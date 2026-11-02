@@ -9,7 +9,7 @@ Accepted.
 A paired computer reaches the phone over the local network (`fi.refineid.stream`,
 ADR 0041) while it sees the phone's DNS-SD record. With the screen off or in
 power saving, the record can stay out of sight, and a Mac requester then dials
-Bluetooth (`fi.refineid.rapp.ble`, RAPP v26.10.29 section 5). The phone must
+Bluetooth (`fi.refineid.rapp.ble`, RAPP v26.11.2 section 5). The phone must
 answer there too, also with RefineID in the background. A stored pairing serves
 any registered transport (section 2.1, phase 4), so Bluetooth needs no pairing
 of its own and no link-layer bond.

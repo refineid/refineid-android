@@ -91,45 +91,17 @@ class RappProxyAndCatalogTest {
     }
 
     @Test
-    fun rappSettingsDefaultsToFalseWhenNoPairsExist() {
-        val prefs = FakeSharedPreferences()
-        val settings = RappSettings(prefs, pairCatalogSupplier = { emptyList() })
-        assertFalse(settings.isCardRemoteAccessEnabled)
+    fun rappSettingsStartsOff() {
+        assertFalse(RappSettings(FakeSharedPreferences()).isCardRemoteAccessEnabled)
     }
 
     @Test
-    fun rappSettingsDefaultsToTrueWhenPairsAlreadyExist() {
+    fun rappSettingsKeepsTheHoldersPosition() {
         val prefs = FakeSharedPreferences()
-        val peer =
-            PairedPeer(
-                pairIdHex = "01020304",
-                displayName = "Laptop",
-                platform = "Linux",
-                createdAtMs = 123456789L,
-            )
-        val settings = RappSettings(prefs, pairCatalogSupplier = { listOf(peer) })
-        assertTrue(settings.isCardRemoteAccessEnabled)
-    }
-
-    @Test
-    fun rappSettingsRespectsExplicitlyConfiguredValue() {
-        val prefs = FakeSharedPreferences()
-        val peer =
-            PairedPeer(
-                pairIdHex = "01020304",
-                displayName = "Laptop",
-                platform = "Linux",
-                createdAtMs = 123456789L,
-            )
-        val settings = RappSettings(prefs, pairCatalogSupplier = { listOf(peer) })
-
-        // Explicitly turn off
-        settings.isCardRemoteAccessEnabled = false
-        assertFalse(settings.isCardRemoteAccessEnabled)
-
-        // Explicitly turn on
-        settings.isCardRemoteAccessEnabled = true
-        assertTrue(settings.isCardRemoteAccessEnabled)
+        RappSettings(prefs).isCardRemoteAccessEnabled = true
+        assertTrue(RappSettings(prefs).isCardRemoteAccessEnabled)
+        RappSettings(prefs).isCardRemoteAccessEnabled = false
+        assertFalse(RappSettings(prefs).isCardRemoteAccessEnabled)
     }
 
     @Test

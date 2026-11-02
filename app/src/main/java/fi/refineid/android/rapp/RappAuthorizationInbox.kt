@@ -21,10 +21,10 @@ internal sealed interface RappAuthRequest {
     val action: RappAuthAction
     val onDenied: () -> Unit
 
-    /** Called once the PIN prompt is on screen (RAPP v26.10.29 section 8.2 item 3). */
+    /** Called once the PIN prompt is on screen (RAPP v26.11.2 section 8.2 item 3). */
     val onShown: () -> Unit
 
-    /** Set when this prompt asks again after a wrong PIN (RAPP v26.10.29 section 10.2). */
+    /** Set when this prompt asks again after a wrong PIN (RAPP v26.11.2 section 10.2). */
     val wrongPin: RappCardAnswer.WrongPin?
 
     data class BrowserAuth(
@@ -43,6 +43,8 @@ internal sealed interface RappAuthRequest {
         override val requester: String,
         /** Every document the approval signs, in signing order. */
         val documentNames: List<String>,
+        /** The files the one document holds when it is a package, in container order; empty otherwise. */
+        val containedFiles: List<String> = emptyList(),
         val onApproved: (Pin2Submission) -> Unit,
         override val onDenied: () -> Unit,
         override val onShown: () -> Unit,
@@ -128,6 +130,7 @@ internal class RappAuthorizationInbox(
         requestId: String,
         requester: String,
         documentNames: List<String>,
+        containedFiles: List<String>,
         onApproved: (Pin2Submission) -> Unit,
         onDenied: () -> Unit,
         onShown: () -> Unit = {},
@@ -139,6 +142,7 @@ internal class RappAuthorizationInbox(
                 requester = requester,
                 wrongPin = wrongPin,
                 documentNames = documentNames,
+                containedFiles = containedFiles,
                 onApproved = { pin2 ->
                     notificationManager.dismissNotification()
                     currentRequest = null

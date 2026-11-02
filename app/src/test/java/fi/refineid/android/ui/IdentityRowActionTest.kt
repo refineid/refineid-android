@@ -47,9 +47,9 @@ class IdentityRowActionTest {
     }
 
     @Test
-    fun identityRowPairsWithoutNfc() {
+    fun identityRowAsksForACardWithoutNfc() {
         assertEquals(
-            IdentityRowAction.OPEN_PAIRING,
+            IdentityRowAction.CONNECT_CARD,
             identityRowAction(
                 hasHolder = false,
                 usbCanRequested = false,
