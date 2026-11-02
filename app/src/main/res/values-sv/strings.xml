@@ -98,6 +98,8 @@
     <string name="card_switch_reader">Byt läsare</string>
     <string name="show_pin">Visa PIN-kod</string>
     <string name="hide_pin">Dölj PIN-kod</string>
+    <string name="show_can" tools:ignore="Typos">Visa CAN</string>
+    <string name="hide_can" tools:ignore="Typos">Dölj CAN</string>
     <string name="pins_do_not_match">PIN-koderna stämmer inte överens</string>
     <string name="digit_count_hint" tools:ignore="PluralsCandidate">%1$d siffror</string>
     <string name="digit_range_hint" tools:ignore="PluralsCandidate">%1$d–%2$d siffror</string>

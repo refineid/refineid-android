@@ -90,6 +90,11 @@ shows the access number field, and the wait runs on to its limit while
 the holder types. A request arriving while the app is in the background
 reaches the holder through its notification, which opens that prompt.
 
+The CAN is a secret like the PINs. Every CAN field starts empty and
+hidden, with a reveal control for what the holder types; a remembered
+CAN is never written back into a field, and an empty field submits the
+remembered one.
+
 While a remote operation waits, the prompt names what the reader is
 doing (reading, card lost, access number needed or wrong), and any
 recognized card whose access number is known is opened at once, so a

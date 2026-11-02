@@ -88,8 +88,7 @@ internal fun DocumentSigningCard(
     onAddDocument: () -> Unit,
     onSign: (SignatureFormat, Pin2Submission, CanSubmission?) -> Unit,
 ) {
-    val initialCan = remember { fi.refineid.android.core.CanSessionStore.currentCan ?: "" }
-    val canState = remember { TextFieldState(initialCan) }
+    val canState = remember { TextFieldState() }
     val pinState = remember { TextFieldState() }
     DisposableEffect(pinState) {
         onDispose {
@@ -102,22 +101,13 @@ internal fun DocumentSigningCard(
             status == DocumentSigningStatus.SIGNING ||
             status == DocumentSigningStatus.FINALIZING ||
             status == DocumentSigningStatus.SAVING
-    val hasRememberedCan = fi.refineid.android.core.CanSessionStore.hasCan
-    val canReady = !canRequired || hasRememberedCan || CanSubmission.isComplete(canState.text)
+    val canReady = !canRequired || canEntryReady(canState.text)
     val pinReady = Pin2Submission.isComplete(pinState.text)
     val submit = { targetFormat: SignatureFormat ->
         if (canReady && pinReady) {
-            val can =
-                if (CanSubmission.isComplete(canState.text)) {
-                    fi.refineid.android.core.CanSessionStore
-                        .remember(canState.text)
-                    CanSubmission.from(canState.text)
-                } else if (fi.refineid.android.core.CanSessionStore.hasCan) {
-                    fi.refineid.android.core.CanSessionStore.currentCan
-                        ?.let { CanSubmission.from(it) }
-                } else {
-                    null
-                }
+            fi.refineid.android.core.CanSessionStore
+                .remember(canState.text)
+            val can = canEntrySubmission(canState.text)
             val pin2 = Pin2Submission.from(pinState.text)
             pinState.clearText()
             onSign(targetFormat, pin2, can)
@@ -192,22 +182,12 @@ internal fun DocumentSigningCard(
                 }
 
                 if (canRequired) {
-                    SecureTextField(
+                    CanField(
                         state = canState,
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .testTag(UiAutomationIds.DOCUMENT_CAN_FIELD),
+                        testTag = UiAutomationIds.DOCUMENT_CAN_FIELD,
+                        modifier = Modifier.fillMaxWidth(),
                         enabled = !isWorking,
-                        label = { Text(stringResource(R.string.can)) },
-                        inputTransformation = CanInputTransformation,
-                        textObfuscationMode = TextObfuscationMode.Visible,
-                        keyboardOptions =
-                            KeyboardOptions(
-                                autoCorrectEnabled = false,
-                                keyboardType = KeyboardType.NumberPassword,
-                                imeAction = ImeAction.Next,
-                            ),
+                        imeAction = ImeAction.Next,
                     )
                 }
                 SecureTextField(

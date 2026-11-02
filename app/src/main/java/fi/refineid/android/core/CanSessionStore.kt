@@ -3,8 +3,9 @@ package fi.refineid.android.core
 
 /**
  * In-memory retention of the Card Access Number (CAN) for the lifetime of
- * the running application process. CAN is non-secret card metadata (printed
- * on the front of the identity card) needed to establish PACE.
+ * the running application process. The CAN, six digits printed on the front
+ * of a personal card and needed to establish PACE, is a secret like the
+ * PINs: it is never written back into an entry field or shown.
  *
  * A CAN the card rejected during PACE is dropped at once and nothing about it
  * is kept: the next entry starts from an empty field.

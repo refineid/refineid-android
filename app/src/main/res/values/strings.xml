@@ -102,6 +102,8 @@
     <string name="unrecoverable_card">The PUK is blocked\nThis card cannot be recovered with software.</string>
     <string name="show_pin">Show PIN</string>
     <string name="hide_pin">Hide PIN</string>
+    <string name="show_can" tools:ignore="Typos">Show CAN</string>
+    <string name="hide_can" tools:ignore="Typos">Hide CAN</string>
     <string name="pins_do_not_match">PINs do not match</string>
     <string name="digit_count_hint" tools:ignore="PluralsCandidate">%1$d digits</string>
     <string name="digit_range_hint" tools:ignore="PluralsCandidate">%1$d–%2$d digits</string>

@@ -15,7 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -25,7 +24,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -49,7 +47,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import fi.refineid.android.R
-import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin2Submission
@@ -271,7 +268,7 @@ internal fun RappCardTapDialog(
             usbReaderPresent -> R.string.insert_card_into_reader
             else -> R.string.hold_card_against_back
         }
-    val accessNumber = remember(prompt.requestId) { TextFieldState(CanSessionStore.currentCan ?: "") }
+    val accessNumber = remember(prompt.requestId) { TextFieldState() }
     DisposableEffect(accessNumber) {
         onDispose { accessNumber.clearText() }
     }
@@ -306,13 +303,10 @@ internal fun RappCardTapDialog(
                 )
 
                 if (needsAccessNumber) {
-                    SecureTextField(
+                    CanField(
                         state = accessNumber,
-                        label = { Text(stringResource(R.string.can)) },
-                        inputTransformation = CanInputTransformation,
-                        textObfuscationMode = TextObfuscationMode.Visible,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        modifier = Modifier.fillMaxWidth().testTag("RappCardTapCan"),
+                        testTag = "RappCardTapCan",
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
                     androidx.compose.material3.CircularProgressIndicator(
@@ -332,12 +326,12 @@ internal fun RappCardTapDialog(
                     }
                     if (needsAccessNumber) {
                         Button(
-                            enabled = CanSubmission.isComplete(accessNumber.text),
+                            enabled = canEntryReady(accessNumber.text),
                             modifier = Modifier.testTag("RappCardTapCanSubmit"),
                             onClick = {
-                                val submitted = CanSubmission.from(accessNumber.text)
+                                val submitted = canEntrySubmission(accessNumber.text)
                                 accessNumber.clearText()
-                                onSubmitAccessNumber(submitted)
+                                submitted?.let(onSubmitAccessNumber)
                             },
                         ) {
                             Text(stringResource(R.string.unlock))
