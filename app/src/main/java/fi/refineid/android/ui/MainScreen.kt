@@ -99,6 +99,7 @@ import fi.refineid.android.diagnostics.BuildDiagnostics
 import fi.refineid.android.diagnostics.DiagnosticsCollector
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.rapp.LocalNetworkPermission
 import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappAuthorizationInbox
 import fi.refineid.android.rapp.RappCustodianService
@@ -116,8 +117,15 @@ private enum class MainDestination {
     VERIFY,
     SIGN,
     PAIRING,
+    REQUESTER_PAIRING,
     CARD_MANAGEMENT,
     DIAGNOSTICS,
+}
+
+/** What the tablet does once the local network is granted. */
+private enum class RequesterPermissionPending {
+    ENABLE,
+    RETRY_SEARCH,
 }
 
 @Suppress("CyclomaticComplexMethod", "FunctionName", "ktlint:standard:function-naming")
@@ -285,6 +293,36 @@ internal fun MainScreen(
             (usbCardReady || (nfcSigningAvailable && nfcSnapshot.holderName != null) || remoteSigningAvailable)
 
     val permissionContext = LocalContext.current
+    // Turning remote use on is the only moment the tablet asks for the
+    // local network; a failure for it asks again from its retry.
+    var requesterPermissionPending by remember { mutableStateOf<RequesterPermissionPending?>(null) }
+    val requesterPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            when (requesterPermissionPending) {
+                RequesterPermissionPending.ENABLE -> {
+                    if (granted) remoteCardModel?.setRemoteUseEnabled(true)
+                }
+
+                RequesterPermissionPending.RETRY_SEARCH -> {
+                    if (granted) remoteCardModel?.dismissFailure()
+                }
+
+                null -> {}
+            }
+            requesterPermissionPending = null
+        }
+
+    fun requesterPermissionOrRun(pending: RequesterPermissionPending) {
+        if (LocalNetworkPermission.isGranted(permissionContext)) {
+            when (pending) {
+                RequesterPermissionPending.ENABLE -> remoteCardModel?.setRemoteUseEnabled(true)
+                RequesterPermissionPending.RETRY_SEARCH -> remoteCardModel?.dismissFailure()
+            }
+            return
+        }
+        requesterPermissionPending = pending
+        requesterPermissionLauncher.launch(LocalNetworkPermission.NAME)
+    }
     val notificationPermissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) RappCustodianService.refreshNotification(permissionContext)
@@ -351,7 +389,7 @@ internal fun MainScreen(
         if (usbCardReady) {
             snapshot.holderName
         } else {
-            nfcSnapshot.holderName ?: snapshot.holderName
+            nfcSnapshot.holderName ?: snapshot.holderName ?: remoteHolderName
         }
     val effectiveDetails =
         if (usbCardReady) {
@@ -512,6 +550,10 @@ internal fun MainScreen(
                     destination = MainDestination.PAIRING
                     readyRemoteAccess(RemoteAccessAction.OPEN_PAGE) {}
                 },
+                showsRequesterPairingRow = rappRole == RappDeviceRole.REQUESTER,
+                requesterRemoteUseOn =
+                    remoteCardModel?.remoteUseEnabled?.collectAsState()?.value ?: false,
+                onOpenRequesterPairing = { destination = MainDestination.REQUESTER_PAIRING },
                 onOpenCardManagement = { destination = MainDestination.CARD_MANAGEMENT },
                 onRequestUsbCan =
                     if (usbCardAwaitsCan) {
@@ -590,6 +632,33 @@ internal fun MainScreen(
                         model = model,
                         onEnableRemoteAccess = {
                             readyRemoteAccess(RemoteAccessAction.TURN_ON) { model.setRemoteAccessEnabled(true) }
+                        },
+                    )
+                }
+            }
+        }
+
+        MainDestination.REQUESTER_PAIRING -> {
+            SubScreen(
+                title = stringResource(R.string.pair_computer),
+                tag = UiAutomationIds.REQUESTER_PAIRING_SCREEN,
+                onBack = {
+                    remoteCardModel?.cancelSearch()
+                    destination = MainDestination.HOME
+                },
+            ) {
+                remoteCardModel?.let { model ->
+                    RappRequesterPairingScreen(
+                        remoteCardModel = model,
+                        onToggleRemoteUse = { enabled ->
+                            if (enabled) {
+                                requesterPermissionOrRun(RequesterPermissionPending.ENABLE)
+                            } else {
+                                model.setRemoteUseEnabled(false)
+                            }
+                        },
+                        onRequestLocalNetwork = {
+                            requesterPermissionOrRun(RequesterPermissionPending.RETRY_SEARCH)
                         },
                     )
                 }
@@ -720,6 +789,9 @@ private fun HomeScreen(
     onOpenVerify: () -> Unit,
     onOpenSign: () -> Unit,
     onOpenRemoteAccess: () -> Unit,
+    showsRequesterPairingRow: Boolean = false,
+    requesterRemoteUseOn: Boolean = false,
+    onOpenRequesterPairing: () -> Unit = {},
     onOpenCardManagement: () -> Unit,
     onRequestUsbCan: (() -> Unit)? = null,
     rappPairingModel: RappPairingModel? = null,
@@ -769,7 +841,9 @@ private fun HomeScreen(
                 }
             }
 
-            if (cardAvailable) {
+            // A tablet pairs from its Remote Access row, which shows
+            // without a card; the PINs and browser rows need one.
+            if (cardAvailable || showsRequesterPairingRow) {
                 Section(stringResource(R.string.card)) {
                     NavigationGroup {
                         // Only a phone with NFC serves Remote Access; a tablet is a computer.
@@ -790,33 +864,55 @@ private fun HomeScreen(
                                 onClick = onOpenRemoteAccess,
                             )
                             HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
+                        } else if (showsRequesterPairingRow) {
+                            NavigationRow(
+                                icon = painterResource(R.drawable.ic_satellite_alt),
+                                label = stringResource(R.string.pair_computer),
+                                tag = UiAutomationIds.REQUESTER_PAIRING_ROW,
+                                iconTint =
+                                    if (requesterRemoteUseOn) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                stateDescription =
+                                    stringResource(if (requesterRemoteUseOn) R.string.on else R.string.off),
+                                onClick = onOpenRequesterPairing,
+                            )
+                            if (cardAvailable) {
+                                HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
+                            }
                         }
-                        NavigationRow(
-                            icon = Icons.Outlined.Lock,
-                            label = stringResource(R.string.card_pins),
-                            tag = "manageCard",
-                            onClick = onOpenCardManagement,
-                        )
-                        HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
-                        BrowserHarness(
-                            cardService = browserCardService,
-                            pinCache = pinCache,
-                            nfcStatus = nfcStatus,
-                            nfcPrimed = nfcPrimed,
-                            enabled = browserAvailable,
-                            onPrepareAuthentication = onPrepareAuthentication,
-                            onNfcConnect = { can, pin1 -> onNfcConnect(can, pin1) },
-                            onWrongPin = onWrongPin,
-                            launcher = { onOpen ->
-                                NavigationRow(
-                                    icon = painterResource(R.drawable.ic_globe),
-                                    label = stringResource(R.string.browser),
-                                    tag = UiAutomationIds.BROWSER_ACTION,
-                                    enabled = browserAvailable,
-                                    onClick = onOpen,
-                                )
-                            },
-                        )
+                        if (cardAvailable) {
+                            NavigationRow(
+                                icon = Icons.Outlined.Lock,
+                                label = stringResource(R.string.card_pins),
+                                tag = "manageCard",
+                                onClick = onOpenCardManagement,
+                            )
+                            HorizontalDivider(modifier = Modifier.padding(start = GROUP_DIVIDER_INSET))
+                        }
+                        if (cardAvailable) {
+                            BrowserHarness(
+                                cardService = browserCardService,
+                                pinCache = pinCache,
+                                nfcStatus = nfcStatus,
+                                nfcPrimed = nfcPrimed,
+                                enabled = browserAvailable,
+                                onPrepareAuthentication = onPrepareAuthentication,
+                                onNfcConnect = { can, pin1 -> onNfcConnect(can, pin1) },
+                                onWrongPin = onWrongPin,
+                                launcher = { onOpen ->
+                                    NavigationRow(
+                                        icon = painterResource(R.drawable.ic_globe),
+                                        label = stringResource(R.string.browser),
+                                        tag = UiAutomationIds.BROWSER_ACTION,
+                                        enabled = browserAvailable,
+                                        onClick = onOpen,
+                                    )
+                                },
+                            )
+                        }
                     }
                 }
             }

@@ -51,6 +51,11 @@
     <string name="section_identity">Identiteetti</string>
     <string name="forget_identity">Unohda henkilöllisyys</string>
     <string name="pairing_failed">Yhdistäminen epäonnistui</string>
+    <string name="pairing_code">Yhdistämiskoodi</string>
+    <string name="pairing_code_not_accepted">Yhdistämiskoodia ei hyväksytty.</string>
+    <string name="no_phone_in_pairing_mode">Yhdistämistilassa olevaa puhelinta ei löytynyt.</string>
+    <string name="pairing_ended_incomplete">Yhdistäminen päättyi kesken.</string>
+    <string name="phone_forgot_computer">%1$s unohti tämän tietokoneen.</string>
     <string name="hold_card_against_back">Pidä henkilökorttia taustaa vasten.</string>
     <string name="connect_id_card">Yhdistä henkilökortti</string>
     <string name="card_pins">Tunnusluvut</string>

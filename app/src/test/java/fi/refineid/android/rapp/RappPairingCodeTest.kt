@@ -78,4 +78,15 @@ class RappPairingCodeTest {
         // A fullwidth digit is not folded to its ASCII form.
         assertFalse(RappPairingCode.isValid("7KX4M\uFF19"))
     }
+
+    @Test
+    fun testEntryKeepsTypedCodeCharactersOnly() {
+        assertEquals("7KX4M9", RappPairingCode.filterEntry("7k-x4-m9"))
+        assertEquals("7KX4M9", RappPairingCode.filterEntry("7KX4M9AB"))
+        assertEquals("", RappPairingCode.filterEntry("ILOUilou#\t"))
+        assertEquals("7K9", RappPairingCode.filterEntry("7K- I#9"))
+        assertTrue(RappPairingCode.isCompleteEntry(RappPairingCode.filterEntry("7k-x4-m9")))
+        assertFalse(RappPairingCode.isCompleteEntry(RappPairingCode.filterEntry("7KX4M")))
+        assertFalse(RappPairingCode.isCompleteEntry(""))
+    }
 }

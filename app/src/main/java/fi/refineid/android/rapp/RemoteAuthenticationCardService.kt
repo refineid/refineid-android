@@ -43,18 +43,16 @@ internal class RemoteAuthenticationCardService(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun requestAuthenticationCertificate(onResult: (NativeAuthenticationCertificate?) -> Unit) {
-        val cachedDer = remoteCardModel.cachedCertificateDer
-        if (cachedDer != null) {
-            val keyProfile = determineKeyProfile(cachedDer)
-            onResult(NativeAuthenticationCertificate(keyProfile = keyProfile, ownedDer = cachedDer.copyOf()))
+        val offeredDer = remoteCardModel.offeredCertificateDer
+        if (offeredDer != null) {
+            val keyProfile = determineKeyProfile(offeredDer)
+            onResult(NativeAuthenticationCertificate(keyProfile = keyProfile, ownedDer = offeredDer.copyOf()))
             return
         }
 
         scope.launch(Dispatchers.IO) {
-            val client = remoteCardModel.createRequesterClient()
-            val certDer = client?.readAuthenticationCertificate()?.toWire()
+            val certDer = remoteCardModel.readAuthenticationCertificate()?.toWire()
             if (certDer != null) {
-                remoteCardModel.setCertificateDer(certDer)
                 val keyProfile = determineKeyProfile(certDer)
                 mainHandler.post {
                     onResult(NativeAuthenticationCertificate(keyProfile = keyProfile, ownedDer = certDer.copyOf()))
@@ -93,10 +91,6 @@ internal class RemoteAuthenticationCardService(
         algorithm: AuthenticationSigningAlgorithm,
         digest: ByteArray,
     ): AuthenticationSignResult {
-        val client =
-            remoteCardModel.createRequesterClient()
-                ?: return AuthenticationSignResult.Failure(AuthenticationSignFailure.CARD_UNAVAILABLE)
-
         val rappAlgorithm =
             when (algorithm) {
                 AuthenticationSigningAlgorithm.ECDSA_P384_SHA256 -> RappSignatureAlgorithm.ECDSA_SHA256
@@ -118,11 +112,12 @@ internal class RemoteAuthenticationCardService(
 
         val wireSig =
             runBlocking(Dispatchers.IO) {
-                client.browserAuthenticate(
+                remoteCardModel.browserAuthenticate(
                     origin = "Web Browser",
                     keyProfile = rappKeyProfile,
                     algorithm = rappAlgorithm,
                     digest = digest,
+                    timeoutMs = AUTHENTICATION_TIMEOUT_MS,
                 )
             } ?: return AuthenticationSignResult.Failure(AuthenticationSignFailure.CARD_UNAVAILABLE)
 
@@ -173,4 +168,8 @@ internal class RemoteAuthenticationCardService(
         } catch (_: Exception) {
             NativeCardKeyProfile.ECDSA_P384
         }
+
+    private companion object {
+        const val AUTHENTICATION_TIMEOUT_MS = 60_000L
+    }
 }

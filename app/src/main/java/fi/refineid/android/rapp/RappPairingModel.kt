@@ -49,9 +49,6 @@ private const val OFFER_ID_BYTES = 32
 /** The countdown of an offer that has no time left, or of no offer. */
 private const val NO_SECONDS_REMAINING = 0
 
-/** Why no code shows while Android 17's local network permission is not granted (ADR 0041 section 2.3). */
-private const val LOCAL_NETWORK_CLOSED_REASON = "Allow local network access"
-
 /** The offer failure the debug trace names when the local network is closed. */
 private const val LOCAL_NETWORK_CLOSED_FAILURE = "local_network_permission_missing"
 

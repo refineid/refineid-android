@@ -52,6 +52,19 @@ internal class StreamRelayBrowser(
     private val candidates = RappDialCandidates()
     private var graceJob: Job? = null
 
+    /**
+     * Connects to [host]:[port] without browsing, for a pairing search's
+     * connection to the endpoint its ledger handed out. Events arrive on
+     * [onEvent] as for a browsed dial.
+     */
+    fun dialDirect(
+        host: String,
+        port: Int,
+    ) {
+        if (isClosed.get() || !isConnected.compareAndSet(false, true)) return
+        connectToEndpoint(host, port)
+    }
+
     fun start() {
         if (isClosed.get()) return
         try {

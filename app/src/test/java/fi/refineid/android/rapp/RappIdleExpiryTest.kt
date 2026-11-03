@@ -103,7 +103,7 @@ class RappIdleExpiryTest {
 
     private fun Served.sweep(
         nowMs: ULong,
-        session: RappServedSession? = null,
+        session: RappOpenSession? = null,
     ): List<RappPairId> = RappIdleExpiry.sweep(catalog, vault, nowMs, session)
 
     /** The pairing's record as the vault holds it now. */
@@ -187,7 +187,7 @@ class RappIdleExpiryTest {
         served.custodian.close()
         val heldMs = served.createdAtMs + IDLE_EXPIRY_MS * HELD_OPEN_LIMITS
 
-        assertTrue(served.sweep(heldMs, RappServedSession(served.pairId, established = true)).isEmpty())
+        assertTrue(served.sweep(heldMs, RappOpenSession(served.pairId, established = true)).isEmpty())
         assertEquals(heldMs, served.stored().lastSessionAtMs)
         assertEquals(
             served.pairId.key,
@@ -207,7 +207,7 @@ class RappIdleExpiryTest {
         served.custodian.close()
         val limitMs = served.createdAtMs + IDLE_EXPIRY_MS
 
-        assertTrue(served.sweep(limitMs, RappServedSession(served.pairId, established = false)).isEmpty())
+        assertTrue(served.sweep(limitMs, RappOpenSession(served.pairId, established = false)).isEmpty())
         assertNull(served.stored().lastSessionAtMs)
         assertNull(served.stored().forgottenAtMs)
 
@@ -255,5 +255,141 @@ class RappIdleExpiryTest {
         assertTrue(served.vault.isRevoked(served.pairId.toWire()))
 
         assertTrue(RappStoredPairs.served(served.catalog, served.vault).isEmpty())
+    }
+
+    /** One pairing as this requester stores and catalogues it. */
+    private class Held(
+        val requester: RappPairRecord,
+        val vault: RappMemoryVault,
+        val catalog: RappPairCatalog,
+        val pairId: RappPairId,
+        val createdAtMs: ULong,
+    )
+
+    private fun held(): Held {
+        val (requester, custodian) = RappTestOffers.pairRecords(PROFILES, NOW)
+        custodian.close()
+        val vault = RappMemoryVault()
+        requester.persistDeviceOnly(vault)
+        val pairId = requester.pairing().id
+        val createdAtMs = requester.metadata().createdAtMs
+        val catalog = RappPairCatalog(FakeSharedPreferences())
+        catalog.savePair(pairId.toWire(), DISPLAY_NAME, PLATFORM, createdAtMs.toLong())
+        return Held(requester, vault, catalog, pairId, createdAtMs)
+    }
+
+    private fun Held.sweepRequester(
+        nowMs: ULong,
+        session: RappOpenSession? = null,
+    ): List<RappPairId> = RappIdleExpiry.sweepRequester(catalog, vault, nowMs, session)
+
+    @Test
+    fun aRequesterPairingIdleForThirtyDaysIsDestroyedAtOnce() {
+        val held = held()
+        held.requester.close()
+        val limitMs = held.createdAtMs + IDLE_EXPIRY_MS
+
+        assertTrue(held.sweepRequester(limitMs - MARGIN_MS).isEmpty())
+        assertEquals(
+            held.pairId.key,
+            held.catalog
+                .listPairs()
+                .single()
+                .pairIdHex,
+        )
+
+        assertEquals(listOf(held.pairId), held.sweepRequester(limitMs))
+        assertTrue(held.catalog.allPairs().isEmpty())
+        assertTrue(held.catalog.forgottenPairs().isEmpty())
+        assertTrue(held.vault.isRevoked(held.pairId.toWire()))
+    }
+
+    @Test
+    fun aRequesterPairingWithAnEstablishedSessionNeverExpires() {
+        val held = held()
+        held.requester.close()
+        val heldMs = held.createdAtMs + IDLE_EXPIRY_MS * HELD_OPEN_LIMITS
+
+        assertTrue(held.sweepRequester(heldMs, RappOpenSession(held.pairId, established = true)).isEmpty())
+        assertEquals(
+            held.pairId.key,
+            held.catalog
+                .listPairs()
+                .single()
+                .pairIdHex,
+        )
+
+        assertTrue(held.sweepRequester(heldMs + IDLE_EXPIRY_MS - MARGIN_MS).isEmpty())
+        assertEquals(listOf(held.pairId), held.sweepRequester(heldMs + IDLE_EXPIRY_MS))
+    }
+
+    @Test
+    fun aRequesterPairingWhoseSessionIsComingUpIsLeftForTheNextSweep() {
+        val held = held()
+        held.requester.close()
+        val limitMs = held.createdAtMs + IDLE_EXPIRY_MS
+
+        assertTrue(held.sweepRequester(limitMs, RappOpenSession(held.pairId, established = false)).isEmpty())
+        assertEquals(
+            held.pairId.key,
+            held.catalog
+                .listPairs()
+                .single()
+                .pairIdHex,
+        )
+
+        assertEquals(listOf(held.pairId), held.sweepRequester(limitMs))
+    }
+
+    @Test
+    fun aRequesterSweepLeavesCustodianPairingsAlone() {
+        val held = held()
+        held.requester.close()
+        val (otherRequester, otherCustodian) = RappTestOffers.pairRecords(PROFILES, NOW)
+        otherRequester.close()
+        otherCustodian.persistDeviceOnly(held.vault)
+        val otherPairId = otherCustodian.pairing().id
+        otherCustodian.close()
+        held.catalog.savePair(otherPairId.toWire(), DISPLAY_NAME, PLATFORM, held.createdAtMs.toLong())
+        val limitMs = held.createdAtMs + IDLE_EXPIRY_MS
+
+        assertEquals(listOf(held.pairId), held.sweepRequester(limitMs))
+        assertEquals(
+            otherPairId.key,
+            held.catalog
+                .listPairs()
+                .single()
+                .pairIdHex,
+        )
+    }
+
+    @Test
+    fun staleRequesterRevocationsAreDestroyedAtLaunch() {
+        val held = held()
+        // Forgotten with this process, whose bound passed with it.
+        val forgottenAtMs = RappClock.wallMs()
+        held.requester.forget(held.vault, forgottenAtMs)
+        held.requester.close()
+        held.catalog.markForgotten(held.pairId.key, forgottenAtMs.toLong())
+
+        val (otherRequester, otherCustodian) = RappTestOffers.pairRecords(PROFILES, NOW)
+        otherRequester.close()
+        otherCustodian.persistDeviceOnly(held.vault)
+        val otherPairId = otherCustodian.pairing().id
+        otherCustodian.forget(held.vault, forgottenAtMs)
+        otherCustodian.close()
+        held.catalog.savePair(otherPairId.toWire(), DISPLAY_NAME, PLATFORM, held.createdAtMs.toLong())
+        held.catalog.markForgotten(otherPairId.key, forgottenAtMs.toLong())
+
+        RappStoredPairs.destroyStaleRequesterRevocations(held.catalog, held.vault)
+
+        assertTrue(held.vault.isRevoked(held.pairId.toWire()))
+        assertEquals(
+            otherPairId.key,
+            held.catalog
+                .forgottenPairs()
+                .single()
+                .pairIdHex,
+        )
     }
 }

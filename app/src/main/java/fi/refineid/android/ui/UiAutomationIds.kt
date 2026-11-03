@@ -80,6 +80,10 @@ internal object UiAutomationIds {
     const val ACTIVATION_SUBMIT_ACTION = "managementActivate"
     const val CARD_REMOTE_ACCESS_CARD = "cardRemoteAccessCard"
     const val CARD_REMOTE_ACCESS_SWITCH = "cardRemoteAccessSwitch"
+    const val REQUESTER_PAIRING_ROW = "requesterPairingRow"
+    const val REQUESTER_PAIRING_SCREEN = "requesterPairingScreen"
+    const val REQUESTER_REMOTE_USE_SWITCH = "requesterRemoteUseSwitch"
+    const val PAIRING_CODE_FIELD = "pairingCodeField"
     const val ALLOW_NOTIFICATIONS_ROW = "allowNotificationsRow"
 
     fun timestampAddressField(index: Int): String = TIMESTAMP_ADDRESS_FIELD_PREFIX + index

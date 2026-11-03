@@ -459,7 +459,7 @@ internal class RappPhoneProxyDispatcher(
     private fun sweepIdlePairings(vault: RappPairVault) {
         synchronized(sessionLock) {
             if (isClosed) return
-            val session = routed?.let { RappServedSession(it.pairing.id, established = operationBridge != null) }
+            val session = routed?.let { RappOpenSession(it.pairing.id, established = operationBridge != null) }
             val expired = RappIdleExpiry.sweep(catalog, vault, RappClock.wallMs(), session)
             if (expired.isNotEmpty()) _pairingsExpired.update { it + expired.size }
         }

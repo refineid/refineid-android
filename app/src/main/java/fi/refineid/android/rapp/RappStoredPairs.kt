@@ -4,6 +4,7 @@ package fi.refineid.android.rapp
 
 import fi.refineid.android.diagnostics.AppTrace
 import uniffi.refineid_rapp.RappBindingException
+import uniffi.refineid_rapp.RappEndpointRole
 import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappPairVault
 
@@ -49,19 +50,43 @@ internal object RappStoredPairs {
      * Removes every catalogued pairing whose record the core no longer
      * decodes, revokes catalogued records left unconfirmed or past their
      * notice window, sweeps the others for idle expiry with no session open
-     * (section 4.6 item 5), and revokes every vault record no catalogue
-     * entry names: a ceremony interrupted after it stored its record leaves
-     * one behind (section 4.3 item 4).
+     * (section 4.6 item 5), destroys the requester's revoking records whose
+     * bound passed with the process, and revokes every vault record no
+     * catalogue entry names: a ceremony interrupted after it stored its
+     * record leaves one behind (section 4.3 item 4).
      */
     fun cleanAtStartup(
         catalog: RappPairCatalog,
         vault: AndroidRappVault,
     ) {
         RappIdleExpiry.sweep(catalog, vault, RappClock.wallMs(), session = null)
+        destroyStaleRequesterRevocations(catalog, vault)
+        RappIdleExpiry.sweepRequester(catalog, vault, RappClock.wallMs(), session = null)
         val catalogued = catalog.allPairs().map { it.pairIdHex }
         for (pairIdHex in orphanPairIds(vault.storedPairIds, catalogued)) {
             val pairId = RappPairId.fromKey(pairIdHex) ?: continue
             RappPairRevocation.revoke(pairId, vault)
+        }
+    }
+
+    /**
+     * Destroys every requester record left forgotten: its revocation
+     * attempt ran with the process that forgot it, and a requester keeps no
+     * revoking pairing longer than its bound (section 4.6 item 6). Each
+     * leaves the catalog; custodian records are untouched.
+     */
+    internal fun destroyStaleRequesterRevocations(
+        catalog: RappPairCatalog,
+        vault: RappPairVault,
+    ) {
+        for (stored in served(catalog, vault)) {
+            val pairing = stored.pairing
+            if (pairing.role == RappEndpointRole.REQUESTER && pairing.state is RappPairState.Forgotten) {
+                RappPairRevocation.revoke(pairing.id, stored.record, vault)
+                catalog.removePair(stored.peer.pairIdHex)
+            } else {
+                stored.record.close()
+            }
         }
     }
 

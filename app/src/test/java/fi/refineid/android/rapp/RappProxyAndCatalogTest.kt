@@ -45,9 +45,6 @@ class RappProxyAndCatalogTest {
         assertEquals(HOLDER_NAME, peer.holderName)
         assertNull(peer.forgottenAtMs)
 
-        catalog.updateHolderName(pairIdHex, OTHER_HOLDER_NAME)
-        assertEquals(OTHER_HOLDER_NAME, catalog.listPairs().single().holderName)
-
         catalog.updateCertificateDer(pairIdHex, certDer)
         assertEquals(
             java.util.Base64
@@ -102,6 +99,16 @@ class RappProxyAndCatalogTest {
         assertTrue(RappSettings(prefs).isCardRemoteAccessEnabled)
         RappSettings(prefs).isCardRemoteAccessEnabled = false
         assertFalse(RappSettings(prefs).isCardRemoteAccessEnabled)
+    }
+
+    @Test
+    fun requesterRemoteUseStartsOffAndKeepsTheHoldersPosition() {
+        val prefs = FakeSharedPreferences()
+        assertFalse(RappSettings(prefs).isRequesterRemoteUseEnabled)
+        RappSettings(prefs).isRequesterRemoteUseEnabled = true
+        assertTrue(RappSettings(prefs).isRequesterRemoteUseEnabled)
+        RappSettings(prefs).isRequesterRemoteUseEnabled = false
+        assertFalse(RappSettings(prefs).isRequesterRemoteUseEnabled)
     }
 
     @Test
@@ -320,7 +327,6 @@ class RappProxyAndCatalogTest {
         const val DISPLAY_NAME = "Laptop"
         const val PLATFORM = "macOS"
         const val HOLDER_NAME = "Holder"
-        const val OTHER_HOLDER_NAME = "Other Holder"
         const val CREATED_AT_MS = 1_700_000_000_000L
         const val OTHER_CREATED_AT_MS = 1_700_000_001_000L
         const val USED_AT_MS = 1_700_000_005_000L

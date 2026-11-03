@@ -100,11 +100,6 @@ internal class RappPairCatalog(
         displayName: String,
     ) = update(pairIdHex) { it.copy(displayName = displayName) }
 
-    fun updateHolderName(
-        pairIdHex: String,
-        holderName: String,
-    ) = update(pairIdHex) { it.copy(holderName = holderName) }
-
     fun updateCertificateDer(
         pairIdHex: String,
         certDer: ByteArray,

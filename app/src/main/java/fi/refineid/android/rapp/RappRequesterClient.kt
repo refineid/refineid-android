@@ -1,9 +1,10 @@
-@file:Suppress("TooGenericExceptionCaught")
+@file:Suppress("TooGenericExceptionCaught", "TooManyFunctions")
 
 package fi.refineid.android.rapp
 
 import android.content.Context
 import fi.refineid.android.BuildConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -11,12 +12,15 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.refineid_rapp.RappBridgeAction
 import uniffi.refineid_rapp.RappCardKeyProfile
 import uniffi.refineid_rapp.RappCloseReason
 import uniffi.refineid_rapp.RappOperationBridge
 import uniffi.refineid_rapp.RappPairRecord
+import uniffi.refineid_rapp.RappPairVault
 import uniffi.refineid_rapp.RappRequesterSessionEnd
 import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
@@ -29,25 +33,55 @@ import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Dials a paired custodian over the stream transport and runs one operation
- * on its card per session (RAPP v26.11.2 sections 6.3 and 8). The session
- * opens with the custodian's `session.ready` and this device's
- * `session.hello`, each naming its sender (section 7.1 items 5 and 6). A
- * pairing the local user forgot delivers its `pairing_revoked` close instead
- * (section 4.6 items 2 and 6), and a custodian that forgot this pairing
- * revokes it here (section 4.6 item 4) and calls [onPairingRevoked]; the
- * custodian's name from `session.ready` reaches [onCustodianNamed]. Every
- * close is acknowledged (section 7.1 item 7): a received one is echoed, and
- * this device's own waits for the custodian's echo within its bound.
+ * Dials a paired custodian over the stream transport and holds the session
+ * (RAPP v26.11.2 sections 6.3 and 8.3). The session opens with the
+ * custodian's `session.ready` and this device's `session.hello`, each
+ * naming its sender (section 7.1 items 5 and 6), and stays open across
+ * operations, one at a time, until either endpoint ends it. Every close is
+ * acknowledged (section 7.1 item 7): a received one is echoed, and this
+ * device's own waits for the custodian's echo within its bound.
+ *
+ * One client dials once: [open] browses and runs the handshake, [close]
+ * ends the session, and [deliverRevocationNotice] delivers a forgotten
+ * pairing's close instead of a session. The [Listener] hears the card's
+ * reports, the custodian's name, and how the session ended (section 4.5
+ * item 6).
  */
 internal class RappRequesterClient(
     private val context: Context,
     private val scope: CoroutineScope,
     private val pairRecord: RappPairRecord,
-    private val vault: AndroidRappVault,
-    private val onPairingRevoked: () -> Unit = {},
-    private val onCustodianNamed: (RappDisplayName) -> Unit = {},
+    private val vault: RappPairVault,
+    private val listener: Listener,
+    private val localName: () -> RappDisplayName = { RappLocalName.of(context) },
+    private val monotonicMs: () -> ULong = RappClock::monotonicMs,
 ) {
+    /** What the driver hears about the session. */
+    interface Listener {
+        /** The custodian reported its card. */
+        fun onCardStatus(status: RappCardStatus)
+
+        /** The session ended; how to treat it (section 4.5 item 6). */
+        fun onSessionEnd(end: RappRequesterSessionEnd)
+
+        /** The custodian named itself; the pair record holds it now. */
+        fun onCustodianNamed(name: RappDisplayName)
+    }
+
+    /** What one dial ends with. */
+    sealed interface OpenOutcome {
+        /** `session.ready` verified and answered; operations may run. */
+        data object Established : OpenOutcome
+
+        /**
+         * The dial ended before `session.ready`; [end] is set when a close
+         * was exchanged, the custodian's revoking close among it.
+         */
+        data class Failed(
+            val end: RappRequesterSessionEnd?,
+        ) : OpenOutcome
+    }
+
     private companion object {
         const val TRACE_TAG = "REQUESTER_CLIENT"
 
@@ -71,10 +105,128 @@ internal class RappRequesterClient(
         const val ERASED: Byte = 0
     }
 
+    /** Whether an answer completes the run, given the card status received so far. */
+    private sealed interface Acceptance<out T> {
+        class Accepted<T>(
+            val value: T,
+        ) : Acceptance<T>
+
+        data object AwaitingCardStatus : Acceptance<Nothing>
+
+        data object Refused : Acceptance<Nothing>
+    }
+
+    /** Where a dial stands between its preamble and the established session. */
+    private enum class Phase {
+        AWAITING_HANDSHAKE,
+        AWAITING_READY,
+
+        /** This device's close went out before the session was established; only its echo matters now. */
+        AWAITING_CLOSE_ECHO,
+        ESTABLISHED,
+    }
+
+    private val sendLock = Any()
+    private val operationMutex = Mutex()
+    private val endReported = AtomicBoolean(false)
+
+    /** Once a local close starts, only a crossing close is still reported. */
+    private val closing = AtomicBoolean(false)
+    private val tornDown = AtomicBoolean(false)
+
+    private var browser: StreamRelayBrowser? = null
+    private var session: RappSessionBridge? = null
+
+    @Volatile
+    private var operation: RappOperationBridge? = null
+
+    @Volatile
+    private var phase = Phase.AWAITING_HANDSHAKE
+
+    private var livenessJob: Job? = null
+    private var echoDeadlineJob: Job? = null
+
+    private var openResult = CompletableDeferred<OpenOutcome>()
+
+    /** The echo a local close waits for, with the crossing end when one crossed it. */
+    private var closeResult: CompletableDeferred<RappRequesterSessionEnd?>? = null
+
+    private var cardStatus: RappCardStatus? = null
+
+    /** The operation running on the session, if any. */
+    private var liveOperation: LiveOperation<*>? = null
+
+    private inner class LiveOperation<T>(
+        val id: RappOperationId,
+        val accept: (RappAnswer, RappCardStatus?) -> Acceptance<T>,
+        val result: CompletableDeferred<T?> = CompletableDeferred(),
+    ) {
+        var answer: RappAnswer? = null
+
+        fun decide() {
+            val received = answer ?: return
+            if (result.isCompleted) return
+            when (val acceptance = accept(received, cardStatus)) {
+                is Acceptance.Accepted -> {
+                    result.complete(acceptance.value)
+                }
+
+                Acceptance.AwaitingCardStatus -> {}
+
+                Acceptance.Refused -> {
+                    result.complete(null)
+                }
+            }
+        }
+    }
+
+    /**
+     * Dials once and opens the session, within [timeoutMs]; to
+     * [directEndpoint] when set, else to the best phone browsing finds.
+     * Established when `session.ready` verified; failed otherwise, with
+     * the end when a close was exchanged before it.
+     */
+    suspend fun open(
+        timeoutMs: Long,
+        directEndpoint: RappDialCandidates.Endpoint? = null,
+    ): OpenOutcome {
+        if (!isDialable()) return OpenOutcome.Failed(null)
+        openResult = CompletableDeferred()
+        val relay =
+            StreamRelayBrowser(context, scope, StreamRendezvousName.MODE_SESSION, rank = ::rank) { event ->
+                try {
+                    handle(event)
+                } catch (e: Exception) {
+                    trace("session failed", e)
+                    transportFailed()
+                }
+            }
+        browser = relay
+        if (directEndpoint == null) relay.start() else relay.dialDirect(directEndpoint.host, directEndpoint.port)
+        return try {
+            withTimeoutOrNull(timeoutMs) { openResult.await() } ?: dialTimedOut()
+        } finally {
+            if (!isOpen) tearDown()
+        }
+    }
+
+    /** Whether the session is established and operations may run. */
+    val isOpen: Boolean
+        get() = phase == Phase.ESTABLISHED && operation != null
+
+    /** Whether the record may open a session: active, never forgotten. */
+    private fun isDialable(): Boolean =
+        try {
+            pairRecord.pairing().state == RappPairState.Active
+        } catch (_: Exception) {
+            false
+        }
+
     /**
      * The custodian card's authentication certificate, offered only when the
-     * custodian named it by fingerprint in `card.status` on the same session
-     * (section 8.4 item 2); null otherwise.
+     * custodian named it by fingerprint in `card.status` on the session
+     * (section 8.4 item 2); null when the session is not open or the
+     * operation did not complete.
      */
     suspend fun readAuthenticationCertificate(timeoutMs: Long = CERTIFICATE_READ_TIMEOUT_MS): RappCertificate? =
         run(
@@ -83,25 +235,29 @@ internal class RappRequesterClient(
                 bridge.beginReadCertificate(
                     operationId = operationId.toWire(),
                     signatureCertificate = false,
-                    localStartMs = RappClock.monotonicMs(),
+                    localStartMs = monotonicMs(),
                     expiresAfterMs = OPERATION_LIFETIME_MS,
                 )
             },
             accept = { answer, status ->
                 val certificate = (answer as? RappAnswer.Certificate)?.certificate
                 when {
-                    certificate == null -> Acceptance.Refused
+                    certificate == null -> {
+                        Acceptance.Refused
+                    }
 
-                    status == null -> Acceptance.AwaitingCardStatus
+                    status == null -> {
+                        Acceptance.AwaitingCardStatus
+                    }
 
                     status is RappCardStatus.Present &&
-                        status.fingerprint ==
-                        RappCertificateFingerprint.of(
-                            certificate,
-                        )
-                    -> Acceptance.Accepted(certificate)
+                        status.fingerprint == RappCertificateFingerprint.of(certificate) -> {
+                        Acceptance.Accepted(certificate)
+                    }
 
-                    else -> Acceptance.Refused
+                    else -> {
+                        Acceptance.Refused
+                    }
                 }
             },
         )
@@ -123,7 +279,7 @@ internal class RappRequesterClient(
                     keyProfile,
                     algorithm,
                     digest,
-                    RappClock.monotonicMs(),
+                    monotonicMs(),
                     OPERATION_LIFETIME_MS,
                 )
             },
@@ -133,416 +289,563 @@ internal class RappRequesterClient(
         )
 
     /**
-     * Dials once, within the revocation attempt's bound, to deliver a
-     * forgotten pairing's close and waits for the custodian's echo (section
-     * 4.6 item 6, section 7.1 item 7), then destroys the record, echo or
-     * not. True when the echo arrived.
+     * Runs one operation on the open session, within [timeoutMs]; the
+     * session carries one at a time. A refused or terminal operation leaves
+     * the session open; one abandoned to its timeout closes it as a loss,
+     * since it may still be live and no other operation can start beside
+     * it.
      */
-    suspend fun deliverRevocationNotice(timeoutMs: Long = REVOCATION_ATTEMPT_MS): Boolean {
-        val pairId = pairRecord.pairing().id
-        val echoed =
-            withTimeoutOrNull(timeoutMs) {
-                Session(begin = null, accept = { _, _ -> Acceptance.Refused }, delivered = Unit).run()
-            } != null
-        RappPairRevocation.revoke(pairId, pairRecord, vault)
-        return echoed
-    }
-
-    /** Whether an answer completes the run, given the card status received so far. */
-    private sealed interface Acceptance<out T> {
-        class Accepted<T>(
-            val value: T,
-        ) : Acceptance<T>
-
-        data object AwaitingCardStatus : Acceptance<Nothing>
-
-        data object Refused : Acceptance<Nothing>
-    }
-
     private suspend fun <T> run(
         timeoutMs: Long,
         begin: (RappOperationBridge, RappOperationId) -> RappBridgeAction,
         accept: (RappAnswer, RappCardStatus?) -> Acceptance<T>,
-    ): T? = withTimeoutOrNull(timeoutMs) { Session(begin, accept, delivered = null).run() }
-
-    /** Where a dial stands between its preamble and the established session. */
-    private enum class Phase {
-        AWAITING_HANDSHAKE,
-        AWAITING_READY,
-
-        /** This device's close went out before the session was established; only its echo matters now. */
-        AWAITING_CLOSE_ECHO,
-        ESTABLISHED,
+    ): T? {
+        var timedOut = false
+        try {
+            return operationMutex.withLock {
+                val bridge = operation
+                if (bridge == null || !isOpen) return null
+                val live = LiveOperation(RappOperationId.random(SecureRandom()), accept)
+                liveOperation = live
+                try {
+                    outcome(act(bridge) { begin(it, live.id) })
+                    val awaited = withTimeoutOrNull(timeoutMs) { live.result.await() }
+                    if (awaited == null && !live.result.isCompleted) timedOut = true
+                    awaited
+                } finally {
+                    if (liveOperation === live) liveOperation = null
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            timedOut = true
+            throw cancelled
+        } finally {
+            if (timedOut) {
+                reportEnd(RappRequesterSessionEnd.LOSS)
+                close(RappCloseReason.NORMAL)
+            }
+        }
     }
 
     /**
-     * One dial: routing preamble, `Noise_KK`, `session.ready` answered with
-     * `session.hello`, then the one operation [begin] starts. A forgotten
-     * pairing ends with [delivered] once the custodian echoed its close.
+     * Closes the open session with [reason] and waits for the custodian's
+     * echo, at most [CLOSE_ECHO_WAIT_MS] (section 7.1 item 7). Returns the
+     * end when a close crossed this one, which the caller acts on; null
+     * otherwise.
      */
-    private inner class Session<T>(
-        private val begin: ((RappOperationBridge, RappOperationId) -> RappBridgeAction)?,
-        private val accept: (RappAnswer, RappCardStatus?) -> Acceptance<T>,
-        private val delivered: T?,
+    suspend fun close(reason: RappCloseReason): RappRequesterSessionEnd? {
+        if (!closing.compareAndSet(false, true)) return null
+        liveOperation?.result?.complete(null)
+        val bridge = operation
+        if (bridge == null || !isOpen) {
+            tearDown()
+            return null
+        }
+        val awaited = CompletableDeferred<RappRequesterSessionEnd?>()
+        closeResult = awaited
+        val sent =
+            when (val outcome = act(bridge) { it.closeWithReason(reason) }) {
+                is RappBridgeOutcome.Send -> {
+                    if (outcome.close is RappSentClose.Own) {
+                        reportEnd(outcome.close.end)
+                        awaitEcho()
+                        true
+                    } else {
+                        outcome(outcome)
+                        false
+                    }
+                }
+
+                else -> {
+                    outcome(outcome)
+                    false
+                }
+            }
+        if (!sent) return null
+        return try {
+            awaited.await()
+        } finally {
+            tearDown()
+        }
+    }
+
+    /**
+     * Dials once, within the revocation attempt's bound, to deliver a
+     * forgotten pairing's close and waits for the custodian's echo (section
+     * 4.6 item 6, section 7.1 item 7), then destroys the record, echo or
+     * not. True when the echo arrived. Nothing is sent or destroyed for a
+     * record that is not forgotten.
+     */
+    suspend fun deliverRevocationNotice(
+        timeoutMs: Long = REVOCATION_ATTEMPT_MS,
+        directEndpoint: RappDialCandidates.Endpoint? = null,
+    ): Boolean {
+        val pairId =
+            try {
+                pairRecord.pairing().id
+            } catch (_: Exception) {
+                return false
+            }
+        if (!isForgotten()) return false
+        val echoed =
+            withTimeoutOrNull(timeoutMs) {
+                RevocationAttempt(directEndpoint).run()
+            } == true
+        RappPairRevocation.revoke(pairId, pairRecord, vault)
+        return echoed
+    }
+
+    private fun isForgotten(): Boolean =
+        try {
+            pairRecord.pairing().state is RappPairState.Forgotten
+        } catch (_: Exception) {
+            false
+        }
+
+    /** Shuts the session down without a close, as after the pairing ended. */
+    fun shutdown() {
+        closing.set(true)
+        tearDown()
+    }
+
+    /**
+     * A phone whose hint names this pairing first, then one publishing no
+     * hints; never one whose hints name only other pairings (discovery
+     * hierarchy section 4.3).
+     */
+    private fun rank(attributes: Map<String, ByteArray?>): Int? {
+        val named =
+            try {
+                pairRecord.matchesDiscoveryRecord(
+                    StreamRendezvousName.entries(attributes),
+                    StreamRendezvousName.nowUnixSeconds().toULong(),
+                )
+            } catch (_: Exception) {
+                false
+            }
+        return when {
+            named -> RappDialCandidates.BEST_RANK
+            !StreamRendezvousName.hasHints(attributes) -> RappDialCandidates.UNHINTED_RANK
+            else -> null
+        }
+    }
+
+    private fun handle(event: StreamRelayEvent) {
+        if (closing.get()) {
+            if (event is StreamRelayEvent.Frame) receiveWhileClosing(event.data)
+            return
+        }
+        when (event) {
+            is StreamRelayEvent.Connected -> {
+                // A fresh nonce and routing tag on every dial (section 2.2.1).
+                send(pairRecord.sessionPreamble(rappStreamProfileName()))
+                val opened = RappSessionBridge.beginRequester(pairRecord, vault, rappStreamProfileName())
+                session = opened
+                send(opened.writeHandshakeFrame())
+            }
+
+            is StreamRelayEvent.Frame -> {
+                receive(event.data)
+            }
+
+            is StreamRelayEvent.Disconnected, is StreamRelayEvent.Error -> {
+                transportFailed()
+            }
+        }
+    }
+
+    /** Feeds what arrives while a local close waits for its echo; only a close matters now. */
+    private fun receiveWhileClosing(data: ByteArray) {
+        val bridge = operation
+        val opened = session
+        try {
+            if (bridge != null && phase == Phase.ESTABLISHED) {
+                outcome(act(bridge) { it.receiveFrame(data, monotonicMs()) })
+            } else if (opened != null && phase == Phase.AWAITING_CLOSE_ECHO) {
+                outcome(RappBridgeOutcome.from(opened.receiveCloseEcho(data, monotonicMs())))
+            }
+        } catch (e: Exception) {
+            trace("echo wait failed", e)
+            tearDown()
+        }
+    }
+
+    /** The transport failed: the dial fails, and an open session is a loss. */
+    private fun transportFailed() {
+        failOpen(null)
+        liveOperation?.result?.complete(null)
+        if (phase == Phase.ESTABLISHED) reportEnd(RappRequesterSessionEnd.LOSS)
+        tearDown()
+    }
+
+    private fun receive(data: ByteArray) {
+        val opened = checkNotNull(session)
+        when (phase) {
+            Phase.AWAITING_HANDSHAKE -> {
+                handshake(opened, data)
+            }
+
+            Phase.AWAITING_READY -> {
+                ready(opened, data)
+            }
+
+            Phase.AWAITING_CLOSE_ECHO -> {
+                outcome(RappBridgeOutcome.from(opened.receiveCloseEcho(data, monotonicMs())))
+            }
+
+            Phase.ESTABLISHED -> {
+                operation?.let { bridge ->
+                    outcome(act(bridge) { it.receiveFrame(data, monotonicMs()) })
+                }
+            }
+        }
+    }
+
+    /** Completes `Noise_KK`; the session then awaits `session.ready`. */
+    private fun handshake(
+        opened: RappSessionBridge,
+        data: ByteArray,
     ) {
-        private val result = CompletableDeferred<T?>()
-        private val closed = AtomicBoolean(false)
-        private val tornDown = AtomicBoolean(false)
-        private val sendLock = Any()
-        private val operationId = RappOperationId.random(SecureRandom())
+        try {
+            opened.readHandshakeFrame(data)
+            check(opened.handshakeComplete())
+        } catch (e: Exception) {
+            trace("handshake failed", e)
+            failOpen(null)
+            tearDown()
+            return
+        }
+        opened.enterAuthentication()
+        phase = Phase.AWAITING_READY
+    }
+
+    /**
+     * Verifies `session.ready` and answers with `session.hello` naming
+     * this device (section 7.1 items 5 and 6). A close in its place, the
+     * custodian's revoking close among it, is echoed and ends the dial.
+     */
+    private fun ready(
+        opened: RappSessionBridge,
+        data: ByteArray,
+    ) {
+        val action =
+            try {
+                opened.receiveReady(data, monotonicMs(), localName().text)
+            } catch (e: Exception) {
+                trace("ready failed", e)
+                failOpen(null)
+                tearDown()
+                return
+            }
+        when (val outcome = RappBridgeOutcome.from(action)) {
+            is RappBridgeOutcome.Greeted -> {
+                send(outcome.hello)
+                try {
+                    listener.onCustodianNamed(outcome.custodianName)
+                } catch (e: Exception) {
+                    trace("named listener failed", e)
+                }
+                opened.enterEstablished()
+                val bridge =
+                    RappOperationBridge.beginRequester(
+                        opened,
+                        OPERATION_LIFETIME_MS,
+                        monotonicMs(),
+                    )
+                operation = bridge
+                phase = Phase.ESTABLISHED
+                startLiveness(bridge)
+                openResult.complete(OpenOutcome.Established)
+            }
+
+            is RappBridgeOutcome.Send -> {
+                send(outcome.frame)
+                failOpen(outcome.close?.end)
+                if (outcome.close is RappSentClose.Own) {
+                    phase = Phase.AWAITING_CLOSE_ECHO
+                    awaitEcho()
+                } else {
+                    tearDown()
+                }
+            }
+
+            else -> {
+                if (outcome is RappBridgeOutcome.Closed || outcome is RappBridgeOutcome.CloseAcknowledged) {
+                    val end =
+                        (outcome as? RappBridgeOutcome.Closed)?.end
+                            ?: (outcome as RappBridgeOutcome.CloseAcknowledged).end
+                    failOpen(end)
+                } else {
+                    failOpen(null)
+                }
+                tearDown()
+            }
+        }
+    }
+
+    private fun outcome(outcome: RappBridgeOutcome?) {
+        when (outcome) {
+            null -> {
+                liveOperation?.result?.complete(null)
+                if (phase == Phase.ESTABLISHED) reportEnd(RappRequesterSessionEnd.LOSS)
+                tearDown()
+            }
+
+            is RappBridgeOutcome.Send -> {
+                when (val close = outcome.close) {
+                    null -> {}
+
+                    is RappSentClose.Echo -> {
+                        // While a local close runs, the peer's close crossed
+                        // it and is still acted on (section 7.1 item 7).
+                        reportEnd(close.end, crossing = true)
+                        liveOperation?.result?.complete(null)
+                        tearDown()
+                    }
+
+                    is RappSentClose.Own -> {
+                        reportEnd(close.end)
+                        awaitEcho()
+                    }
+                }
+            }
+
+            is RappBridgeOutcome.CloseAcknowledged -> {
+                // A crossing close is acted on as the reason it carries
+                // says; a plain echo completes the local close.
+                if (outcome.end != null) reportEnd(outcome.end, crossing = true)
+                liveOperation?.result?.complete(null)
+                closeResult?.complete(outcome.end)
+                tearDown()
+            }
+
+            is RappBridgeOutcome.Completed -> {
+                val live = liveOperation
+                if (live != null && outcome.operationId == live.id) {
+                    live.answer = outcome.answer
+                    live.decide()
+                }
+            }
+
+            is RappBridgeOutcome.CardStatus -> {
+                cardStatus = outcome.status
+                try {
+                    listener.onCardStatus(outcome.status)
+                } catch (e: Exception) {
+                    trace("card status listener failed", e)
+                }
+                @Suppress("UNCHECKED_CAST")
+                (liveOperation as? LiveOperation<Any?>)?.decide()
+            }
+
+            is RappBridgeOutcome.Terminal -> {
+                if (outcome.operationId == liveOperation?.id) {
+                    trace("operation ended: ${outcome.reason}", null)
+                    liveOperation?.result?.complete(null)
+                }
+            }
+
+            is RappBridgeOutcome.Closed -> {
+                liveOperation?.result?.complete(null)
+                if (phase == Phase.ESTABLISHED) {
+                    reportEnd(outcome.end ?: RappRequesterSessionEnd.LOSS)
+                } else {
+                    failOpen(outcome.end)
+                }
+                // A close that crossed the local one arrives as its echo,
+                // never here; the local close's delivery stays unknown.
+                closeResult?.complete(null)
+                tearDown()
+            }
+
+            RappBridgeOutcome.Idle,
+            is RappBridgeOutcome.Progress,
+            is RappBridgeOutcome.Admitted,
+            is RappBridgeOutcome.AwaitApproval,
+            is RappBridgeOutcome.ExecuteRead,
+            is RappBridgeOutcome.ExecuteCommand,
+            is RappBridgeOutcome.Greeted,
+            is RappBridgeOutcome.PeerNamed,
+            -> {}
+        }
+    }
+
+    /**
+     * Reports how the session ended, once. After a local close started,
+     * only a crossing close is still reported.
+     */
+    private fun reportEnd(
+        end: RappRequesterSessionEnd?,
+        crossing: Boolean = false,
+    ) {
+        if (end == null) return
+        if (closing.get() && !crossing) return
+        if (endReported.compareAndSet(false, true)) {
+            try {
+                listener.onSessionEnd(end)
+            } catch (e: Exception) {
+                trace("end listener failed", e)
+            }
+        }
+    }
+
+    /** Fails the dial, unless it already ended; [end] says what a close exchanged. */
+    private fun failOpen(end: RappRequesterSessionEnd?) {
+        openResult.complete(OpenOutcome.Failed(end))
+    }
+
+    private fun dialTimedOut(): OpenOutcome {
+        openResult.complete(OpenOutcome.Failed(null))
+        return OpenOutcome.Failed(null)
+    }
+
+    private fun startLiveness(bridge: RappOperationBridge) {
+        livenessJob =
+            scope.launch(Dispatchers.IO) {
+                val random = SecureRandom()
+                while (isActive && operation === bridge) {
+                    delay(LIVENESS_POLL_INTERVAL_MS)
+                    val challenge = ByteArray(RANDOM_BYTE_COUNTS.livenessChallenge.toInt()).also(random::nextBytes)
+                    try {
+                        outcome(act(bridge) { it.pollLiveness(monotonicMs(), challenge) })
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (e: Exception) {
+                        trace("liveness failed", e)
+                    } finally {
+                        challenge.fill(ERASED)
+                    }
+                }
+            }
+    }
+
+    /** Runs one bridge call, types its action at the binding border, and sends the frame it sealed. */
+    private fun act(
+        bridge: RappOperationBridge,
+        call: (RappOperationBridge) -> RappBridgeAction,
+    ): RappBridgeOutcome? =
+        synchronized(sendLock) {
+            try {
+                val outcome = RappBridgeOutcome.from(call(bridge))
+                if (outcome is RappBridgeOutcome.Send) browser?.send(outcome.frame)
+                outcome
+            } catch (e: Exception) {
+                trace("bridge call failed", e)
+                null
+            }
+        }
+
+    private fun send(frame: ByteArray) {
+        synchronized(sendLock) { (browser ?: throw IOException("dial closed")).send(frame) }
+    }
+
+    /**
+     * Keeps the link for the custodian's echo of this device's close, at
+     * most [CLOSE_ECHO_WAIT_MS] (section 7.1 item 7).
+     */
+    private fun awaitEcho() {
+        if (echoDeadlineJob != null) return
+        echoDeadlineJob =
+            scope.launch {
+                delay(CLOSE_ECHO_WAIT_MS)
+                closeResult?.complete(null)
+                tearDown()
+            }
+    }
+
+    /** Closes the bridges and the link once nothing more is awaited on it. */
+    private fun tearDown() {
+        liveOperation?.result?.complete(null)
+        if (!tornDown.compareAndSet(false, true)) return
+        openResult.complete(OpenOutcome.Failed(null))
+        closeResult?.complete(null)
+        livenessJob?.cancel()
+        livenessJob = null
+        echoDeadlineJob?.cancel()
+        echoDeadlineJob = null
+        val bridge = operation
+        operation = null
+        bridge?.close()
+        session?.close()
+        session = null
+        browser?.close()
+        browser = null
+    }
+
+    /**
+     * One revocation attempt: the routing preamble, `Noise_KK`, and the
+     * forgotten pairing's close as the session's only message, with the
+     * wait for the custodian's echo left to the caller's bound.
+     */
+    private inner class RevocationAttempt(
+        private val directEndpoint: RappDialCandidates.Endpoint?,
+    ) {
+        private val echoed = CompletableDeferred<Boolean>()
         private var browser: StreamRelayBrowser? = null
         private var session: RappSessionBridge? = null
-        private var phase = Phase.AWAITING_HANDSHAKE
+        private var handshakeDone = false
 
-        @Volatile
-        private var operation: RappOperationBridge? = null
-        private var livenessJob: Job? = null
-        private var echoDeadlineJob: Job? = null
-        private var cardStatus: RappCardStatus? = null
-        private var answer: RappAnswer? = null
-
-        /** Whether this device's own close went out and waits for the custodian's echo. */
-        @Volatile
-        private var awaitingEcho = false
-
-        suspend fun run(): T? {
+        suspend fun run(): Boolean {
             val relay =
                 StreamRelayBrowser(context, scope, StreamRendezvousName.MODE_SESSION, rank = ::rank) { event ->
                     try {
                         handle(event)
                     } catch (e: Exception) {
-                        trace("session failed", e)
-                        finish(null)
+                        trace("revocation attempt failed", e)
+                        echoed.complete(false)
                     }
                 }
             browser = relay
-            relay.start()
+            if (directEndpoint == null) relay.start() else relay.dialDirect(directEndpoint.host, directEndpoint.port)
             return try {
-                result.await()
+                echoed.await()
             } finally {
-                finish(null)
-                // A revocation attempt ends with its caller's bound, echo or not.
-                if (begin == null) tearDown()
-            }
-        }
-
-        /**
-         * A phone whose hint names this pairing first, then one publishing no
-         * hints; never one whose hints name only other pairings (discovery
-         * hierarchy section 4.3).
-         */
-        private fun rank(attributes: Map<String, ByteArray?>): Int? {
-            val named =
-                try {
-                    pairRecord.matchesDiscoveryRecord(
-                        StreamRendezvousName.entries(attributes),
-                        StreamRendezvousName.nowUnixSeconds().toULong(),
-                    )
-                } catch (_: Exception) {
-                    false
-                }
-            return when {
-                named -> RappDialCandidates.BEST_RANK
-                !StreamRendezvousName.hasHints(attributes) -> RappDialCandidates.UNHINTED_RANK
-                else -> null
+                session?.close()
+                session = null
+                relay.close()
+                browser = null
             }
         }
 
         private fun handle(event: StreamRelayEvent) {
             when (event) {
                 is StreamRelayEvent.Connected -> {
-                    // A fresh nonce and routing tag on every dial (section 2.2.1).
-                    send(pairRecord.sessionPreamble(rappStreamProfileName()))
+                    val relay = checkNotNull(browser)
+                    relay.send(pairRecord.sessionPreamble(rappStreamProfileName()))
                     val opened = RappSessionBridge.beginRequester(pairRecord, vault, rappStreamProfileName())
                     session = opened
-                    send(opened.writeHandshakeFrame())
+                    relay.send(opened.writeHandshakeFrame())
                 }
 
                 is StreamRelayEvent.Frame -> {
-                    receive(event.data)
+                    val opened = checkNotNull(session)
+                    if (!handshakeDone) {
+                        opened.readHandshakeFrame(event.data)
+                        check(opened.handshakeComplete())
+                        opened.enterAuthentication()
+                        handshakeDone = true
+                        checkNotNull(browser).send(opened.deliverRevocationNotice())
+                    } else {
+                        val outcome = RappBridgeOutcome.from(opened.receiveCloseEcho(event.data, monotonicMs()))
+                        if (outcome is RappBridgeOutcome.CloseAcknowledged) {
+                            echoed.complete(true)
+                        }
+                    }
                 }
 
                 is StreamRelayEvent.Disconnected, is StreamRelayEvent.Error -> {
-                    finish(null)
-                    tearDown()
+                    echoed.complete(false)
                 }
             }
         }
+    }
 
-        private fun receive(data: ByteArray) {
-            val opened = checkNotNull(session)
-            when (phase) {
-                Phase.AWAITING_HANDSHAKE -> {
-                    handshake(opened, data)
-                }
-
-                Phase.AWAITING_READY -> {
-                    ready(opened, data)
-                }
-
-                Phase.AWAITING_CLOSE_ECHO -> {
-                    outcome(RappBridgeOutcome.from(opened.receiveCloseEcho(data, RappClock.monotonicMs())))
-                }
-
-                Phase.ESTABLISHED -> {
-                    operation?.let { bridge ->
-                        outcome(act(bridge) { it.receiveFrame(data, RappClock.monotonicMs()) })
-                    }
-                }
-            }
-        }
-
-        /** Completes `Noise_KK`; a forgotten pairing then sends its close as the session's only message. */
-        private fun handshake(
-            opened: RappSessionBridge,
-            data: ByteArray,
-        ) {
-            opened.readHandshakeFrame(data)
-            check(opened.handshakeComplete())
-            opened.enterAuthentication()
-            if (pairRecord.pairing().state is RappPairState.Forgotten) {
-                phase = Phase.AWAITING_CLOSE_ECHO
-                send(opened.deliverRevocationNotice())
-                awaitEcho()
-            } else {
-                phase = Phase.AWAITING_READY
-            }
-        }
-
-        /**
-         * Verifies `session.ready` and answers with `session.hello` naming
-         * this device (section 7.1 items 5 and 6), then starts the operation.
-         */
-        private fun ready(
-            opened: RappSessionBridge,
-            data: ByteArray,
-        ) {
-            val action = opened.receiveReady(data, RappClock.monotonicMs(), RappLocalName.of(context).text)
-            when (val outcome = RappBridgeOutcome.from(action)) {
-                is RappBridgeOutcome.Greeted -> {
-                    send(outcome.hello)
-                    onCustodianNamed(outcome.custodianName)
-                    opened.enterEstablished()
-                    val bridge =
-                        RappOperationBridge.beginRequester(
-                            opened,
-                            OPERATION_LIFETIME_MS,
-                            RappClock.monotonicMs(),
-                        )
-                    operation = bridge
-                    phase = Phase.ESTABLISHED
-                    startLiveness(bridge)
-                    val start = begin
-                    if (start == null) {
-                        finish(null)
-                    } else {
-                        outcome(act(bridge) { start(it, operationId) })
-                    }
-                }
-
-                is RappBridgeOutcome.Send -> {
-                    send(outcome.frame)
-                    if (outcome.close is RappSentClose.Own) phase = Phase.AWAITING_CLOSE_ECHO
-                    outcome(outcome)
-                }
-
-                else -> {
-                    outcome(outcome)
-                }
-            }
-        }
-
-        private fun outcome(outcome: RappBridgeOutcome?) {
-            when (outcome) {
-                null -> {
-                    finish(null)
-                    tearDown()
-                }
-
-                is RappBridgeOutcome.Send -> {
-                    when (val close = outcome.close) {
-                        null -> {}
-
-                        is RappSentClose.Echo -> {
-                            ended(close.end)
-                            finish(null)
-                            tearDown()
-                        }
-
-                        is RappSentClose.Own -> {
-                            ended(close.end)
-                            awaitEcho()
-                            finish(null)
-                        }
-                    }
-                }
-
-                is RappBridgeOutcome.CloseAcknowledged -> {
-                    ended(outcome.end)
-                    finish(if (outcome.reason == RappCloseReason.PAIRING_REVOKED) delivered else null)
-                    tearDown()
-                }
-
-                is RappBridgeOutcome.Completed -> {
-                    if (outcome.operationId == operationId) {
-                        answer = outcome.answer
-                        decide()
-                    }
-                }
-
-                is RappBridgeOutcome.CardStatus -> {
-                    cardStatus = outcome.status
-                    decide()
-                }
-
-                is RappBridgeOutcome.Terminal -> {
-                    trace("operation ended: ${outcome.reason}", null)
-                    finish(null)
-                }
-
-                is RappBridgeOutcome.Closed -> {
-                    ended(outcome.end)
-                    finish(null)
-                    tearDown()
-                }
-
-                RappBridgeOutcome.Idle,
-                is RappBridgeOutcome.Progress,
-                is RappBridgeOutcome.Admitted,
-                is RappBridgeOutcome.AwaitApproval,
-                is RappBridgeOutcome.ExecuteRead,
-                is RappBridgeOutcome.ExecuteCommand,
-                is RappBridgeOutcome.Greeted,
-                is RappBridgeOutcome.PeerNamed,
-                -> {}
-            }
-        }
-
-        /**
-         * The session ended as [end] says (section 4.5 item 6). Only a
-         * revocation changes what this device stores: the record is
-         * destroyed and the identity withdrawn. A withdrawal, a violation
-         * or a loss keeps the pairing, and with one operation per session
-         * nothing is dialed until a consumer asks again. A revocation
-         * attempt destroys the record itself once it ends.
-         */
-        private fun ended(end: RappRequesterSessionEnd?) {
-            if (end != RappRequesterSessionEnd.REVOKED || begin == null) return
-            RappPairRevocation.revoke(pairRecord.pairing().id, pairRecord, vault)
-            onPairingRevoked()
-        }
-
-        private fun decide() {
-            val received = answer ?: return
-            when (val acceptance = accept(received, cardStatus)) {
-                is Acceptance.Accepted -> {
-                    finish(acceptance.value)
-                }
-
-                Acceptance.AwaitingCardStatus -> {}
-
-                Acceptance.Refused -> {
-                    finish(null)
-                }
-            }
-        }
-
-        private fun startLiveness(bridge: RappOperationBridge) {
-            livenessJob =
-                scope.launch(Dispatchers.IO) {
-                    val random = SecureRandom()
-                    while (isActive && operation === bridge) {
-                        delay(LIVENESS_POLL_INTERVAL_MS)
-                        val challenge = ByteArray(RANDOM_BYTE_COUNTS.livenessChallenge.toInt()).also(random::nextBytes)
-                        try {
-                            outcome(act(bridge) { it.pollLiveness(RappClock.monotonicMs(), challenge) })
-                        } finally {
-                            challenge.fill(ERASED)
-                        }
-                    }
-                }
-        }
-
-        /** Runs one bridge call, types its action at the binding border, and sends the frame it sealed. */
-        private fun act(
-            bridge: RappOperationBridge,
-            call: (RappOperationBridge) -> RappBridgeAction,
-        ): RappBridgeOutcome? =
-            synchronized(sendLock) {
-                try {
-                    val outcome = RappBridgeOutcome.from(call(bridge))
-                    if (outcome is RappBridgeOutcome.Send) browser?.send(outcome.frame)
-                    outcome
-                } catch (e: Exception) {
-                    trace("bridge call failed", e)
-                    null
-                }
-            }
-
-        private fun send(frame: ByteArray) {
-            synchronized(sendLock) { (browser ?: throw IOException("dial closed")).send(frame) }
-        }
-
-        /**
-         * Keeps the link for the custodian's echo of this device's close, at
-         * most [CLOSE_ECHO_WAIT_MS] (section 7.1 item 7); a forgotten
-         * pairing's attempt waits as long as the caller's bound allows.
-         */
-        private fun awaitEcho() {
-            if (awaitingEcho) return
-            awaitingEcho = true
-            if (phase == Phase.AWAITING_CLOSE_ECHO && begin == null) return
-            echoDeadlineJob =
-                scope.launch {
-                    delay(CLOSE_ECHO_WAIT_MS)
-                    tearDown()
-                }
-        }
-
-        /**
-         * Ends the run with [value]. A session that is still open is closed
-         * with reason `normal`, and its link stays until the custodian's echo
-         * arrives or [CLOSE_ECHO_WAIT_MS] passes.
-         */
-        private fun finish(value: T?) {
-            result.complete(value)
-            if (!closed.compareAndSet(false, true)) return
-            livenessJob?.cancel()
-            livenessJob = null
-            if (awaitingEcho) return
-            val bridge = operation
-            val own =
-                bridge?.let { open ->
-                    act(open) { it.closeWithReason(RappCloseReason.NORMAL) }
-                } as? RappBridgeOutcome.Send
-            if (own?.close is RappSentClose.Own) awaitEcho() else tearDown()
-        }
-
-        /** Closes the bridges and the link once nothing more is awaited on it. */
-        private fun tearDown() {
-            result.complete(null)
-            if (!tornDown.compareAndSet(false, true)) return
-            closed.set(true)
-            livenessJob?.cancel()
-            livenessJob = null
-            echoDeadlineJob?.cancel()
-            echoDeadlineJob = null
-            val bridge = operation
-            operation = null
-            bridge?.close()
-            session?.close()
-            session = null
-            browser?.close()
-            browser = null
-        }
-
-        private fun trace(
-            message: String,
-            error: Exception?,
-        ) {
-            if (BuildConfig.DEBUG) {
-                android.util.Log.w(TRACE_TAG, message, error)
-            }
+    private fun trace(
+        message: String,
+        error: Exception?,
+    ) {
+        if (BuildConfig.DEBUG) {
+            android.util.Log.w(TRACE_TAG, message, error)
         }
     }
 }
