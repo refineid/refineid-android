@@ -58,8 +58,9 @@ resume work or clean up. In particular:
    Muse runs with `--model muse-spark-1.3-contributor --reasoning-effort max`.
    Codex reviews (`codex --model gpt-6-astra -c model_reasoning_effort=high`)
    are reserved strictly for explicit maintainer requests.
-5. Squash-merge once CI and reviews are green, so the `main` history stays
-   linear. The pull request preserves the branch history.
+5. Squash-merge once the local gates and the independent review pass, so
+   the `main` history stays linear. The pull request preserves the branch
+   history.
 6. Remove the worktree (`git worktree remove`), delete the branch, and
    fast-forward local main.
 
