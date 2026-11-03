@@ -20,12 +20,14 @@
 - Android also serves as the RAPP reader for the other RefineID platforms.
 - User-facing UI is terse. Explanations, status, and diagnostics belong in
   documentation and developer tooling, not product copy.
+- No confirmation dialogs: a chosen action happens.
+- Only an error takes red or orange; normal states never do.
+- No recovery buttons: back-offs stay silent and clear themselves.
 - Keep card transport, identity-card protocol, browser integration, and UI as
   separate boundaries. Keep Android framework types out of protocol logic so
   JVM unit tests can use synthetic descriptors and byte sequences.
 - fineid-spec governs protocol behavior. Prefer refineid-core for reusable
-  shipped logic; refineid-mono-internal is the implementation oracle and
-  RefineID-Apple the product-behavior and UX reference.
+  shipped logic; RefineID-Apple is the product-behavior and UX reference.
 
 ## Security
 
@@ -90,7 +92,8 @@
 - No Magic Codes - define everything (see [Types and numbers](#types-and-numbers)).
 - Comments explain what the code does now and the constraints it honors.
   Past bugs, previous implementations, and explanations of what a fix changed
-  belong in commit messages, not source comments.
+  belong in commit messages, not source comments. No measurement dates
+  in comments.
 - Record findings and durable knowledge as repository documentation under
   `doc/`, written for public distribution, not in private or per-session
   assistant memory. A committed document is the shared source of truth; redact
@@ -100,6 +103,10 @@
 - Keep the toolchain strict: warnings are errors everywhere (Kotlin extra
   warnings, full Android lint, detekt, ktlint via Spotless, Clippy, rustfmt,
   ShellCheck). `./gradlew check` runs all of it.
+- Rust follows the latest stable release (`rust-toolchain.toml` selects the
+  stable channel); never pin a release.
+- RefineID git dependencies track `refineid-core` main, never a pinned
+  revision; refresh them instead of freezing.
 - The quality gates are mandatory git hooks, not suggestions. Run
   `Scripts/install-hooks.sh` once per clone (`Scripts/bootstrap-macos.sh`
   does it); pre-commit runs the fast gates, pre-push runs the full
@@ -124,8 +131,9 @@
   branch's only checkout with it.
 - One task, one worktree, one branch (`<topic>`), one pull request per branch.
   Run `Scripts/agent-housekeeping.sh` when starting and keep the house clean. Merge
-  the pull request once CI is green, then remove the worktree and branch and
-  fast-forward `main`. Full workflow: `doc/process/agent-worktrees.md`.
+  the pull request once the local gates and the independent review pass, then
+  remove the worktree and branch and fast-forward local `main` to
+  `origin/main`. Full workflow: `doc/process/agent-worktrees.md`.
 - Clean worktrees at the start and end of every task: run
   `Scripts/agent-housekeeping.sh --clean` before creating your worktree
   and again before finishing. It removes only worktrees whose branch is
@@ -145,6 +153,8 @@
 - This repository and the referenced RefineID sources are Apache-2.0.
 - Retain existing copyright and license notices when adapting source between
   repositories.
+- New files carry `Copyright 2026 Petri Koistinen` with no email address
+  and HTTPS license URLs.
 
 ## Code reviews and AI reviewers
 
@@ -274,6 +284,8 @@ rule in a line and points to the reading behind it; the readings live in
   ones (EU eIDAS), from trusted lists at runtime. No certificates or
   fingerprints are shipped in the software.
 - No pinning or other trust policy is added without the owner's decision.
+- Describe what the code does and cite the source; ask the owner before
+  changing trust behavior.
 
 ## Independent review
 

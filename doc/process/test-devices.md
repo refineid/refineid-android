@@ -17,3 +17,11 @@ serial hangs on "waiting for device" the moment a reader is plugged in.
 - A debug build can be captured with `adb exec-out screencap`; a release
   build sets the secure window flag and captures black. A black capture
   of a debug build means the screen was off or locked.
+- Every connected-test invocation adds
+  `-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true`:
+  without it Gradle uninstalls the app at the end of the run and the
+  phone is left empty. Tell the owner before the first connected run
+  that Gradle installs its own build over the one from main, and
+  reinstall from main with `Scripts/install-device.sh` when live testing
+  ends. The live NFC signing test picks a PDF whose name contains
+  `refineid-test` from Downloads.
