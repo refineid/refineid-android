@@ -154,7 +154,8 @@
 - Retain existing copyright and license notices when adapting source between
   repositories.
 - New source files carry `Copyright 2026 Petri Koistinen` with no
-  email address and HTTPS license URLs.
+  email address and HTTPS license URLs; shell scripts carry the
+  one-line form under the shebang.
 
 ## Code reviews and AI reviewers
 
