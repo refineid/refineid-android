@@ -153,8 +153,9 @@
 - This repository and the referenced RefineID sources are Apache-2.0.
 - Retain existing copyright and license notices when adapting source between
   repositories.
-- New files carry `Copyright 2026 Petri Koistinen` with no email address
-  and HTTPS license URLs.
+- New source files carry `Copyright 2026 Petri Koistinen` with no
+  email address and HTTPS license URLs; shell scripts carry the
+  one-line form under the shebang.
 
 ## Code reviews and AI reviewers
 
