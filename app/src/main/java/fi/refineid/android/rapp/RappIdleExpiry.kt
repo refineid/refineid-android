@@ -10,8 +10,8 @@ import uniffi.refineid_rapp.RappPairVault
 import uniffi.refineid_rapp.RappSweepOutcome
 import java.util.concurrent.TimeUnit
 
-/** The pairing of the session this phone serves, and whether that session is established yet. */
-internal class RappServedSession(
+/** The pairing of an open session, and whether that session is established yet. */
+internal class RappOpenSession(
     val pairId: RappPairId,
     val established: Boolean,
 )
@@ -55,7 +55,7 @@ internal object RappIdleExpiry {
         catalog: RappPairCatalog,
         vault: RappPairVault,
         nowMs: ULong,
-        session: RappServedSession?,
+        session: RappOpenSession?,
     ): List<RappPairId> {
         val expired = mutableListOf<RappPairId>()
         for (stored in RappStoredPairs.served(catalog, vault) { nowMs }) {
@@ -79,9 +79,48 @@ internal object RappIdleExpiry {
     }
 
     /**
+     * Sweeps every active pairing this requester holds at [nowMs],
+     * milliseconds since the Unix epoch, and returns the ones that expired;
+     * each is destroyed at once, silently, and leaves the catalog (section
+     * 4.6 item 5). [session] is the session this requester holds, if any:
+     * its pairing is recorded once the session is established, and left as
+     * it is while the session comes up.
+     */
+    fun sweepRequester(
+        catalog: RappPairCatalog,
+        vault: RappPairVault,
+        nowMs: ULong,
+        session: RappOpenSession?,
+    ): List<RappPairId> {
+        val expired = mutableListOf<RappPairId>()
+        for (stored in RappStoredPairs.served(catalog, vault) { nowMs }) {
+            val pairing = stored.pairing
+            val record = stored.record
+            val established =
+                when {
+                    pairing.role != RappEndpointRole.REQUESTER || pairing.state != RappPairState.Active -> null
+                    session?.pairId != pairing.id -> false
+                    session.established -> true
+                    else -> null
+                }
+            if (established == null) {
+                record.close()
+            } else if (sweep(record, vault, nowMs, established) == RappSweepOutcome.EXPIRED) {
+                RappPairRevocation.revoke(pairing.id, record, vault)
+                catalog.removePair(stored.peer.pairIdHex)
+                AppTrace.rappPairingExpired()
+                expired += pairing.id
+            } else {
+                record.close()
+            }
+        }
+        return expired
+    }
+
+    /**
      * Records that the session to [record]'s pairing is established at
-     * [nowMs], milliseconds since the Unix epoch. The phone calls it when the
-     * session is established and when it ends.
+     * [nowMs], milliseconds since the Unix epoch. Each endpoint calls it
+     * when the session is established and when it ends.
      */
     fun recordSession(
         record: RappPairRecord,

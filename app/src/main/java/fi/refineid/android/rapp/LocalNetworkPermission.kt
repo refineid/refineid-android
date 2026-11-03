@@ -8,6 +8,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 
+/** What a page closed off the local network says where its work would be, with a retry that asks again. */
+internal const val LOCAL_NETWORK_CLOSED_REASON = "Allow local network access"
+
 /**
  * The local network permission of Android 17 (ADR 0041 section 2.3).
  *

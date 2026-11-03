@@ -69,4 +69,21 @@ internal object RappPairingCode {
         val normalized = normalize(code)
         return normalized.length == CODE_LENGTH && normalized.all { it in ALPHABET }
     }
+
+    /**
+     * Keeps [typed] to the characters a pairing code can hold, for the code
+     * entry: each character is normalized alone, so one stray character
+     * does not empty the whole entry, anything outside the alphabet is
+     * dropped, and at most [CODE_LENGTH] characters are kept.
+     */
+    fun filterEntry(typed: String): String =
+        typed
+            .map(::normalizeChar)
+            .joinToString("")
+            .take(CODE_LENGTH)
+
+    /** Whether [filtered], as [filterEntry] keeps it, is a complete code, ready to try. */
+    fun isCompleteEntry(filtered: String): Boolean = filtered.length == CODE_LENGTH
+
+    private fun normalizeChar(char: Char): String = normalize(char.toString())
 }

@@ -334,7 +334,7 @@ private fun ConnectingPhaseView(message: String) {
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-private fun FailedPhaseView(
+internal fun FailedPhaseView(
     reason: String,
     onRetry: () -> Unit,
 ) {

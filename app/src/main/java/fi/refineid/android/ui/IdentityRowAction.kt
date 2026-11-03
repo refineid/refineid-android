@@ -7,8 +7,8 @@ internal enum class IdentityRowAction {
 
     /**
      * Neither NFC nor a reader can read a card here: the row asks for a
-     * card in a reader and offers no tap. Such a device is a computer in
-     * RAPP, never a custodian, so it has no pairing page to open.
+     * card in a reader and offers no tap. Such a device pairs from its
+     * Remote Access row instead.
      */
     CONNECT_CARD,
     ASK_NFC_READ,

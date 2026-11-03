@@ -22,24 +22,30 @@ whose built-in display is narrower than the `sw600dp` bound, or that folds,
 is a phone and the custodian; a tablet, and any device without NFC, is a
 computer, a requester only. A foldable stays a phone whichever way it is
 open, and the display, not the window, decides, so split screen changes
-nothing. On a computer the app starts no custodian listener, shows no Remote
-Access row and has no pairing page; the identity row of a device without NFC
-asks for a card in a reader and opens nothing.
+nothing. On a computer the app starts no custodian listener; the identity
+row of a device without NFC asks for a card in a reader and opens nothing.
 
-Android pairs only as the custodian: the phone shows the pairing code, serves
-the offer over the stream transport, and holds the card. No screen pairs a
-tablet as a requester, so the app never calls
-`RappPairingBridge.fromBootstrap`. `RemoteCardModel` and
-`RappRequesterClient` open sessions for a stored pairing whose role is
-requester, and run only on a computer, but nothing creates such a pairing,
-so in practice they are idle. Each of their sessions lives for one
-operation and closes with `normal`; there is no remote-use switch, no
-session held open and no redial window, so the requester lifecycle of
-section 4.7 (`requester_remote_use`, `requester_view_of_custodian`) is not
-built. Giving a tablet the requester role needs a product decision and a
-pairing entry point. Idle expiry (section 4.6 item 5) sweeps only the
-pairings this phone serves as custodian, and the requester's sessions record
-no session time.
+The tablet is a complete requester. Its Remote Access row, shown with or
+without a card, opens the pairing page with the holder's remote-use
+switch and the pairing code entry. The switch starts off, keeps its
+position, and moves only by the holder; off forgets the held pairing with
+one bounded revocation attempt. Pairing another phone replaces the
+pairing, again with one bounded attempt to the old phone
+(`RappPairingSearch` tries each custodian in turn with the core's ledger).
+
+With a pairing the requester browses the stream service and holds one
+session per the requester view machine (idle, connecting, connected,
+withdrawn, ended): it dials when the phone appears, when a consumer asks,
+or within the 120 s redial window after a loss. A revoking close forgets
+the pairing with the notice that the phone forgot this computer; a
+withdrawal drops the identity until the next announcement; a violation
+keeps the pairing without redialling; anything else is a loss. The UI
+shows only the confirmed card or no remote card, never why the phone is
+absent; the local card wins over the remote one where both are present. A
+pairing idle for 30 days is destroyed silently, and the requester's
+sessions record their time. The tablet dials over the stream transport
+only; BLE and the suspension of remote use while a local card is present
+are not implemented.
 
 ## Names
 
