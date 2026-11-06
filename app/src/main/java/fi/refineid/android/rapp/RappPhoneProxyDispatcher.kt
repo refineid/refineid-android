@@ -2008,7 +2008,7 @@ internal class RappPhoneProxyDispatcher(
         complete: List<ByteArray>.(RappOperationBridge) -> RappBridgeAction,
     ) {
         val names = documents.map { it.name }
-        val qualified = resolveQualifiedAlgorithm(keyProfile, algorithm)
+        val qualified = qualifiedSigningAlgorithmFor(keyProfile, algorithm)
         if (qualified == null) {
             fail(bridge, operationId, RappCardFailure.UNSUPPORTED)
             return
@@ -2226,28 +2226,6 @@ internal class RappPhoneProxyDispatcher(
             rawSig
         }
     }
-
-    private fun resolveQualifiedAlgorithm(
-        keyProfile: RappCardKeyProfile,
-        algorithm: RappSignatureAlgorithm,
-    ): QualifiedSigningAlgorithm? =
-        when (algorithm) {
-            RappSignatureAlgorithm.ECDSA_SHA384 -> {
-                QualifiedSigningAlgorithm.ECDSA_P384_SHA384
-            }
-
-            RappSignatureAlgorithm.RSA_PKCS1_SHA384 -> {
-                QualifiedSigningAlgorithm.RSA_PKCS1_SHA384
-            }
-
-            else -> {
-                when (keyProfile) {
-                    RappCardKeyProfile.ECDSA_P384 -> QualifiedSigningAlgorithm.ECDSA_P384_SHA384
-                    RappCardKeyProfile.RSA3072 -> QualifiedSigningAlgorithm.RSA_PKCS1_SHA384
-                    else -> null
-                }
-            }
-        }
 
     override fun close() {
         synchronized(sessionLock) {
