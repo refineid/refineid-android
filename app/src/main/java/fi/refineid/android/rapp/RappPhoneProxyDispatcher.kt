@@ -233,8 +233,6 @@ internal class RappPhoneProxyDispatcher(
 
         /** How often liveness and operation deadlines are checked (section 8.3). */
         private const val LIVENESS_POLL_INTERVAL_MS = 1_000L
-        private const val SHA256_DIGEST_LENGTH = 32
-        private const val SHA384_DIGEST_LENGTH = 48
 
         /** The longest deadline a requester may set, its default when it sets none (section 8.1 item 2). */
         private const val MAXIMUM_OPERATION_LIFETIME_MS = 300_000UL
@@ -1709,7 +1707,7 @@ internal class RappPhoneProxyDispatcher(
         operationId: RappOperationId,
         request: RappRequest.BrowserAuthenticate,
     ) {
-        val algorithm = resolveSignAlgorithm(request.algorithm, request.digest)
+        val algorithm = authenticationSigningAlgorithmFor(request.algorithm)
         if (algorithm == null) {
             fail(bridge, operationId, RappCardFailure.UNSUPPORTED)
             return
@@ -1968,27 +1966,6 @@ internal class RappPhoneProxyDispatcher(
             }
         }
     }
-
-    private fun resolveSignAlgorithm(
-        algorithm: RappSignatureAlgorithm,
-        digest: ByteArray,
-    ): AuthenticationSigningAlgorithm? =
-        when (algorithm) {
-            RappSignatureAlgorithm.ECDSA_SHA256 -> AuthenticationSigningAlgorithm.ECDSA_P384_SHA256
-            RappSignatureAlgorithm.ECDSA_SHA384 -> AuthenticationSigningAlgorithm.ECDSA_P384_SHA384
-            RappSignatureAlgorithm.RSA_PKCS1_SHA256 -> AuthenticationSigningAlgorithm.RSA_PKCS1_SHA256
-            RappSignatureAlgorithm.RSA_PKCS1_SHA384 -> AuthenticationSigningAlgorithm.RSA_PKCS1_SHA384
-            RappSignatureAlgorithm.RSA_PKCS1_SHA512 -> AuthenticationSigningAlgorithm.RSA_PKCS1_SHA512
-            RappSignatureAlgorithm.RSA_PSS_SHA256 -> AuthenticationSigningAlgorithm.RSA_PSS_SHA256
-            else -> fallbackSignAlgorithm(digest.size)
-        }
-
-    private fun fallbackSignAlgorithm(digestSize: Int): AuthenticationSigningAlgorithm? =
-        when (digestSize) {
-            SHA256_DIGEST_LENGTH -> AuthenticationSigningAlgorithm.ECDSA_P384_SHA256
-            SHA384_DIGEST_LENGTH -> AuthenticationSigningAlgorithm.ECDSA_P384_SHA384
-            else -> null
-        }
 
     // --- Document signing (section 9.3) --------------------------------------
 
