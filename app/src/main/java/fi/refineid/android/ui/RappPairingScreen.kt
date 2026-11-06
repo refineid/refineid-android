@@ -53,6 +53,7 @@ import fi.refineid.android.rapp.LocalNetworkPermission
 import fi.refineid.android.rapp.PairedPeer
 import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappCustodianService
+import fi.refineid.android.rapp.RappDisplayText
 import fi.refineid.android.rapp.RappPairingCode
 import fi.refineid.android.rapp.RappPairingModel
 
@@ -250,13 +251,13 @@ private fun PairedPeerRow(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = peer.displayName,
+                text = RappDisplayText.inert(peer.displayName),
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = peer.platform,
+                text = RappDisplayText.inert(peer.platform),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

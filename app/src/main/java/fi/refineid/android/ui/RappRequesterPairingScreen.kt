@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import fi.refineid.android.R
 import fi.refineid.android.rapp.LOCAL_NETWORK_CLOSED_REASON
+import fi.refineid.android.rapp.RappDisplayText
 import fi.refineid.android.rapp.RappPairingSearch
 import fi.refineid.android.rapp.RemoteCardModel
 
@@ -83,7 +84,7 @@ internal fun RappRequesterPairingScreen(
                 if (holderName == null) {
                     phoneThatForgot?.let { phone ->
                         Text(
-                            text = stringResource(R.string.phone_forgot_computer, phone),
+                            text = stringResource(R.string.phone_forgot_computer, RappDisplayText.inert(phone)),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -104,22 +104,23 @@ internal class RappAuthorizationInbox(
         wrongPin: RappCardAnswer.WrongPin? = null,
     ) {
         val req =
-            RappAuthRequest.BrowserAuth(
-                requestId = requestId,
-                requester = requester,
-                wrongPin = wrongPin,
-                onApproved = { pin1 ->
-                    notificationManager.dismissNotification()
-                    currentRequest = null
-                    onApproved(pin1)
-                },
-                onDenied = {
-                    notificationManager.dismissNotification()
-                    currentRequest = null
-                    onDenied()
-                },
-                onShown = onShown,
-            )
+            RappAuthRequest
+                .BrowserAuth(
+                    requestId = requestId,
+                    requester = requester,
+                    wrongPin = wrongPin,
+                    onApproved = { pin1 ->
+                        notificationManager.dismissNotification()
+                        currentRequest = null
+                        onApproved(pin1)
+                    },
+                    onDenied = {
+                        notificationManager.dismissNotification()
+                        currentRequest = null
+                        onDenied()
+                    },
+                    onShown = onShown,
+                ).forDisplay()
         currentRequest = req
         if (!isForeground) {
             notificationManager.postAuthorizationNotification(requestId, requestText(req))
@@ -137,24 +138,25 @@ internal class RappAuthorizationInbox(
         wrongPin: RappCardAnswer.WrongPin? = null,
     ) {
         val req =
-            RappAuthRequest.DocumentSign(
-                requestId = requestId,
-                requester = requester,
-                wrongPin = wrongPin,
-                documentNames = documentNames,
-                containedFiles = containedFiles,
-                onApproved = { pin2 ->
-                    notificationManager.dismissNotification()
-                    currentRequest = null
-                    onApproved(pin2)
-                },
-                onDenied = {
-                    notificationManager.dismissNotification()
-                    currentRequest = null
-                    onDenied()
-                },
-                onShown = onShown,
-            )
+            RappAuthRequest
+                .DocumentSign(
+                    requestId = requestId,
+                    requester = requester,
+                    wrongPin = wrongPin,
+                    documentNames = documentNames,
+                    containedFiles = containedFiles,
+                    onApproved = { pin2 ->
+                        notificationManager.dismissNotification()
+                        currentRequest = null
+                        onApproved(pin2)
+                    },
+                    onDenied = {
+                        notificationManager.dismissNotification()
+                        currentRequest = null
+                        onDenied()
+                    },
+                    onShown = onShown,
+                ).forDisplay()
         currentRequest = req
         if (!isForeground) {
             notificationManager.postAuthorizationNotification(requestId, requestText(req))
@@ -170,7 +172,7 @@ internal class RappAuthorizationInbox(
         currentTapPrompt =
             RappCardTapPrompt(
                 requestId = requestId,
-                requester = requester,
+                requester = RappDisplayText.inert(requester),
                 action = action,
                 onCancel = {
                     currentTapPrompt = null
@@ -239,6 +241,27 @@ internal class RappAuthorizationInbox(
         notificationManager.dismissNotification()
     }
 }
+
+/**
+ * This request as the holder sees it: the requester's name and every
+ * document and contained file name made inert for display
+ * ([RappDisplayText]). The dialog and the notification both show the
+ * request in this form.
+ */
+internal fun RappAuthRequest.forDisplay(): RappAuthRequest =
+    when (this) {
+        is RappAuthRequest.BrowserAuth -> {
+            copy(requester = RappDisplayText.inert(requester))
+        }
+
+        is RappAuthRequest.DocumentSign -> {
+            copy(
+                requester = RappDisplayText.inert(requester),
+                documentNames = documentNames.map(RappDisplayText::inert),
+                containedFiles = containedFiles.map(RappDisplayText::inert),
+            )
+        }
+    }
 
 /** What a request asks of the holder, independent of the card reader in use. */
 internal fun rappRequestText(

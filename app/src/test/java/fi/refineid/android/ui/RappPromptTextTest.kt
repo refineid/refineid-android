@@ -3,6 +3,8 @@ package fi.refineid.android.ui
 
 import fi.refineid.android.R
 import fi.refineid.android.rapp.RappAuthRequest
+import fi.refineid.android.rapp.RappDisplayText
+import fi.refineid.android.rapp.forDisplay
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -74,10 +76,28 @@ class RappPromptTextTest {
         assertTrue(text.listedDocuments.isEmpty())
     }
 
-    private fun browserAuth() =
+    @Test
+    fun theShownPromptCarriesNoPeerChosenControlsWhileTheRequestKeepsThem() {
+        val raw = documentSign(listOf(SPOOFED_DOCUMENT), listOf(SPOOFED_DOCUMENT), requester = SPOOFED_COMPUTER)
+        val text = rappPromptText(raw.forDisplay())
+
+        assertEquals(R.string.rapp_prompt_sign_document, text.body)
+        assertEquals(listOf(SHOWN_COMPUTER, SHOWN_DOCUMENT), text.bodyArgs)
+        assertEquals(listOf(SHOWN_DOCUMENT), text.listedDocuments)
+        assertEquals(listOf(SPOOFED_DOCUMENT), raw.documentNames)
+    }
+
+    @Test
+    fun theShownLoginPromptCarriesNoPeerChosenControls() {
+        val text = rappPromptText(browserAuth(requester = SPOOFED_COMPUTER).forDisplay())
+
+        assertEquals(listOf(SHOWN_COMPUTER), text.bodyArgs)
+    }
+
+    private fun browserAuth(requester: String = COMPUTER) =
         RappAuthRequest.BrowserAuth(
             requestId = REQUEST_ID,
-            requester = COMPUTER,
+            requester = requester,
             onApproved = { it.close() },
             onDenied = {},
             onShown = {},
@@ -86,9 +106,10 @@ class RappPromptTextTest {
     private fun documentSign(
         names: List<String>,
         containedFiles: List<String> = emptyList(),
+        requester: String = COMPUTER,
     ) = RappAuthRequest.DocumentSign(
         requestId = REQUEST_ID,
-        requester = COMPUTER,
+        requester = requester,
         documentNames = names,
         containedFiles = containedFiles,
         onApproved = { it.close() },
@@ -103,5 +124,15 @@ class RappPromptTextTest {
         const val SECOND_DOCUMENT = "appendix.pdf"
         const val PACKAGE = "contract.asice"
         const val BLANK_DOCUMENT = " "
+
+        /** U+202E RIGHT-TO-LEFT OVERRIDE. */
+        const val RIGHT_TO_LEFT_OVERRIDE = "\u202E"
+
+        /** U+000A LINE FEED. */
+        const val LINE_FEED = "\u000A"
+        const val SPOOFED_COMPUTER = "$COMPUTER${LINE_FEED}Bank"
+        const val SPOOFED_DOCUMENT = "invoice${RIGHT_TO_LEFT_OVERRIDE}fdp.exe"
+        const val SHOWN_COMPUTER = "$COMPUTER${RappDisplayText.REPLACEMENT}Bank"
+        const val SHOWN_DOCUMENT = "invoice${RappDisplayText.REPLACEMENT}fdp.exe"
     }
 }
