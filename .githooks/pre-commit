@@ -6,4 +6,18 @@
 # contributor, human or AI agent alike.
 
 set -euo pipefail
+root=$(git rev-parse --show-toplevel)
+# RefineID's own crates are never pinned: every commit builds the head of
+# refineid-core main. Without the network the lock file keeps its core
+# revision, and the daily track-core-main job moves it later.
+for pair in native/refineid-android-core:refineid-apdu native/refineid-rapp-android:refineid-rapp; do
+    dir=${pair%%:*}
+    package=${pair##*:}
+    if (cd "$root/$dir" && cargo update --quiet --package "$package" ); then
+        git add "$root/$dir/Cargo.lock"
+    else
+        echo "pre-commit: core main not reachable; $dir/Cargo.lock keeps its core revision" >&2
+    fi
+done
+
 exec "$(git rev-parse --show-toplevel)/Scripts/verify-commit.sh"

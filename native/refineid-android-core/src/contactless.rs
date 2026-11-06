@@ -758,11 +758,12 @@ fn map_pace_error<E>(error: &PaceError<E>) -> SecureChannelFailure {
         | PaceError::ReflectedKey => SecureChannelFailure::Transport,
         PaceError::CardAccessRead(error) => card_access_read_failure(error),
         PaceError::CardAccess(_) | PaceError::NoSupportedSuite => SecureChannelFailure::Transport,
-        // The PIN outcomes answer a PIN password, which this CAN channel
-        // never sends.
+        // The PIN and PUK outcomes answer a PIN or PUK password, which
+        // this CAN channel never sends.
         PaceError::RetryFloor(_)
         | PaceError::PasswordDeactivated
         | PaceError::WrongPin { .. }
+        | PaceError::WrongPuk { .. }
         | PaceError::Encoding
         | PaceError::Random(_) => SecureChannelFailure::Bridge,
     }
