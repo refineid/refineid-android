@@ -13,7 +13,7 @@ root=$(git rev-parse --show-toplevel)
 for pair in native/refineid-android-core:refineid-apdu native/refineid-rapp-android:refineid-rapp; do
     dir=${pair%%:*}
     package=${pair##*:}
-    if (cd "$root/$dir" && cargo update --quiet --package "$package" 2>/dev/null); then
+    if (cd "$root/$dir" && cargo update --quiet --package "$package" ); then
         git add "$root/$dir/Cargo.lock"
     else
         echo "pre-commit: core main not reachable; $dir/Cargo.lock keeps its core revision" >&2
