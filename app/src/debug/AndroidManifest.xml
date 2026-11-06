@@ -11,10 +11,12 @@
         android:usesCleartextTraffic="true"
         tools:replace="android:usesCleartextTraffic">
 
+        <!-- DUMP is held by the shell user and the system, so adb shell am broadcast
+             reaches the receiver and other apps on the phone do not. -->
         <receiver
             android:name="fi.refineid.android.diagnostics.DiagnosticsDumpReceiver"
             android:exported="true"
-            tools:ignore="ExportedReceiver">
+            android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="fi.refineid.android.DUMP_DIAGNOSTICS" />
                 <action android:name="fi.refineid.android.CLEAR_LOGS" />
