@@ -767,8 +767,9 @@ mod tests {
     /// Answers a citizen card awaiting activation by PUK gives after the
     /// PIN length read and before the PUK counter read: for PIN 1 and
     /// PIN 2 the PIN container read, which leaves the changed flag
-    /// unreadable, and the status probes, every PIN blocked.
-    const PUK_ACTIVATION_PREAMBLE: [StatusWord; 5] = [StatusWord::AuthenticationBlocked; 5];
+    /// unreadable, and the status probe, every PIN blocked. The numbering
+    /// comes from the length read, so no probe resolves it again.
+    const PUK_ACTIVATION_PREAMBLE: [StatusWord; 4] = [StatusWord::AuthenticationBlocked; 4];
 
     fn activate_by_puk(
         transport: &mut ScriptedTransport,
