@@ -39,6 +39,7 @@ import fi.refineid.android.usb.CardPresence
 import fi.refineid.android.usb.ReaderConnectionStatus
 import fi.refineid.android.usb.ReaderRefreshCause
 import fi.refineid.android.usb.ccid.CcidBlockFailureKind
+import fi.refineid.android.usb.ccid.CcidBulkOutOutcome
 import fi.refineid.android.usb.ccid.CcidCardStatus
 import fi.refineid.android.usb.ccid.CcidDescriptorErrorKind
 import fi.refineid.android.usb.ccid.CcidExchangeFailureKind
@@ -900,10 +901,12 @@ internal object AppTrace {
     }
 
     /**
-     * One ISO-DEP exchange. The APDU header (CLA/INS/P1/P2) is public
-     * routing data and is logged; command/response bodies never are, so a
-     * CAN, PIN, or certificate body can never reach the trace. A negative
-     * header byte means the command was shorter than a header.
+     * One ISO-DEP exchange of a public command. The APDU header
+     * (CLA/INS/P1/P2) is public routing data and is logged with the byte
+     * counts; command/response bodies never are, so a CAN or certificate
+     * body can never reach the trace. A negative header byte means the
+     * command was shorter than a header. Credential commands trace through
+     * [nfcCredentialTransceive] instead.
      */
     fun nfcTransceive(
         commandLength: Int,
@@ -928,6 +931,26 @@ internal object AppTrace {
         debug(
             "nfc:transceive " + header +
                 " cmd=" + commandLength +
+                " rsp=" + responseLength +
+                swString +
+                " us=" + durationMicros,
+        )
+    }
+
+    /**
+     * One ISO-DEP exchange of a credential-bearing command. Neither the
+     * header nor the command length is logged: the command length follows
+     * the credential length, padded at most to the secure-messaging cipher
+     * block. The response length and status word are card output.
+     */
+    fun nfcCredentialTransceive(
+        responseLength: Int,
+        durationMicros: Long,
+        sw: Int = 0,
+    ) {
+        val swString = if (sw != 0) " sw=" + hexStatus(sw) else ""
+        debug(
+            "nfc:transceive credential redacted" +
                 " rsp=" + responseLength +
                 swString +
                 " us=" + durationMicros,
@@ -1188,20 +1211,20 @@ internal object AppTrace {
 
     /**
      * One CCID command submitted to bulk out. Only the message type,
-     * slot, sequence, and total length are logged — never block bytes,
-     * which may carry a CAN, PIN, PUK, or activation PIN.
+     * slot, and sequence are logged. Neither the block bytes nor the frame
+     * length are: a transfer block may carry a PIN, PUK, or activation PIN,
+     * this layer cannot tell which one does, and the length of an unpadded
+     * credential block is the credential length plus a fixed header.
      */
     fun ccidExchangeStarted(
         messageType: Int,
         slot: Int,
         sequence: Int,
-        length: Int,
     ) {
         debug(
             "ccid:exchange cmd=" + hexByte(messageType) +
                 " slot=" + slot +
-                " seq=" + sequence +
-                " length=" + length,
+                " seq=" + sequence,
         )
     }
 
@@ -1220,17 +1243,26 @@ internal object AppTrace {
     }
 
     /**
-     * One bulk transfer outcome. Counts only: a short or negative
-     * transfer distinguishes a timeout from a framing violation.
+     * One host-to-reader bulk transfer outcome, with no byte count: an
+     * outbound frame may carry a credential, and its size would disclose
+     * the credential length. A failed or short outcome still distinguishes
+     * a timeout from a framing violation.
      */
-    fun ccidBulkTransfer(
-        direction: String,
-        requested: Int,
+    fun ccidBulkOut(outcome: CcidBulkOutOutcome) {
+        debug("ccid:bulk dir=out outcome=" + outcome)
+    }
+
+    /**
+     * One reader-to-host bulk transfer: the fixed response buffer capacity
+     * and the count received, negative on failure. Inbound frames are card
+     * responses, never host credential bytes.
+     */
+    fun ccidBulkIn(
+        capacity: Int,
         transferred: Int,
     ) {
         debug(
-            "ccid:bulk dir=" + direction +
-                " requested=" + requested +
+            "ccid:bulk dir=in capacity=" + capacity +
                 " transferred=" + transferred,
         )
     }

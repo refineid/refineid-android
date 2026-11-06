@@ -35,6 +35,7 @@ import fi.refineid.android.usb.CardPresence
 import fi.refineid.android.usb.ReaderConnectionStatus
 import fi.refineid.android.usb.ReaderRefreshCause
 import fi.refineid.android.usb.ccid.CcidBlockFailureKind
+import fi.refineid.android.usb.ccid.CcidBulkOutOutcome
 import fi.refineid.android.usb.ccid.CcidCardStatus
 import fi.refineid.android.usb.ccid.CcidDescriptorErrorKind
 import fi.refineid.android.usb.ccid.CcidExchangeFailureKind
@@ -383,6 +384,12 @@ internal object AppTrace {
         p2: Int = -1,
     ) = Unit
 
+    fun nfcCredentialTransceive(
+        responseLength: Int,
+        durationMicros: Long,
+        sw: Int = 0,
+    ) = Unit
+
     fun getTraceLog(): List<String> = emptyList()
 
     fun clearTraceLog(): Unit = Unit
@@ -502,7 +509,6 @@ internal object AppTrace {
         messageType: Int,
         slot: Int,
         sequence: Int,
-        length: Int,
     ) = Unit
 
     fun ccidCommandExchangeFailed(
@@ -512,9 +518,10 @@ internal object AppTrace {
         sequence: Int = -1,
     ) = Unit
 
-    fun ccidBulkTransfer(
-        direction: String,
-        requested: Int,
+    fun ccidBulkOut(outcome: CcidBulkOutOutcome) = Unit
+
+    fun ccidBulkIn(
+        capacity: Int,
         transferred: Int,
     ) = Unit
 

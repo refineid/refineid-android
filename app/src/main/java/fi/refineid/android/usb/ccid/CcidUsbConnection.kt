@@ -69,6 +69,31 @@ internal object CcidUsbEndpointFinder {
     }
 }
 
+/**
+ * How one host-to-reader bulk transfer ended. An outbound frame may carry a
+ * credential, and the transport cannot tell which one does, so this outcome
+ * stands in for every outbound byte count: a frame size would disclose the
+ * credential length.
+ */
+internal enum class CcidBulkOutOutcome {
+    COMPLETE,
+    SHORT,
+    FAILED,
+    ;
+
+    companion object {
+        fun of(
+            requested: Int,
+            transferred: Int,
+        ): CcidBulkOutOutcome =
+            when {
+                transferred < 0 -> FAILED
+                transferred == requested -> COMPLETE
+                else -> SHORT
+            }
+    }
+}
+
 internal class AndroidCcidBulkIo(
     private val connection: UsbDeviceConnection,
     private val endpoints: CcidUsbEndpoints,
@@ -77,38 +102,45 @@ internal class AndroidCcidBulkIo(
         transfer(
             endpoint = endpoints.bulkOut,
             frame = frame,
-        )
+        ).also { transferred ->
+            AppTrace.ccidBulkOut(
+                CcidBulkOutOutcome.of(
+                    requested = frame.size,
+                    transferred = transferred,
+                ),
+            )
+        }
 
+    // The capacity is the fixed response buffer. The count is a reader
+    // response frame: the card answers a credential command with a status
+    // word and no data derived from the credential, so the inbound size
+    // does not depend on the credential length.
     override fun read(frame: ByteArray): Int =
         transfer(
             endpoint = endpoints.bulkIn,
             frame = frame,
-        )
+        ).also { transferred ->
+            AppTrace.ccidBulkIn(
+                capacity = frame.size,
+                transferred = transferred,
+            )
+        }
 
     private fun transfer(
         endpoint: UsbEndpoint,
         frame: ByteArray,
-    ): Int {
-        val transferred =
-            try {
-                connection.bulkTransfer(
-                    endpoint,
-                    frame,
-                    0,
-                    frame.size,
-                    USB_TRANSFER_TIMEOUT_MILLISECONDS,
-                )
-            } catch (_: SecurityException) {
-                -1
-            }
-        // Counts only — never frame bytes, which may carry credentials.
-        AppTrace.ccidBulkTransfer(
-            direction = if (endpoint.direction == UsbConstants.USB_DIR_IN) "in" else "out",
-            requested = frame.size,
-            transferred = transferred,
-        )
-        return transferred
-    }
+    ): Int =
+        try {
+            connection.bulkTransfer(
+                endpoint,
+                frame,
+                0,
+                frame.size,
+                USB_TRANSFER_TIMEOUT_MILLISECONDS,
+            )
+        } catch (_: SecurityException) {
+            -1
+        }
 
     private companion object {
         const val USB_TRANSFER_TIMEOUT_MILLISECONDS = 2_000

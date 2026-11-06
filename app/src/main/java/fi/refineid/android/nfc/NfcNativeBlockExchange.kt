@@ -7,16 +7,25 @@ import fi.refineid.android.diagnostics.AppTrace
 /**
  * Adapts one connected ISO-DEP card to the synchronous native callback
  * ABI. ISO-DEP moves complete APDUs, so both paths submit one block per
- * call and never retry; a lost tag is a typed absence, not an error.
+ * call and never retry; a lost tag is a typed absence, not an error. The
+ * credential path traces neither the command header nor its length.
  */
 internal class NfcNativeBlockExchange(
     private val channel: NfcCardChannel,
 ) : NativeBlockExchange {
-    override fun exchangePublic(block: ByteArray): ByteArray = exchange(block)
+    override fun exchangePublic(block: ByteArray): ByteArray = exchange(block, BlockKind.PUBLIC)
 
-    override fun exchangeCredential(block: ByteArray): ByteArray = exchange(block)
+    override fun exchangeCredential(block: ByteArray): ByteArray = exchange(block, BlockKind.CREDENTIAL)
 
-    private fun exchange(block: ByteArray): ByteArray {
+    private enum class BlockKind {
+        PUBLIC,
+        CREDENTIAL,
+    }
+
+    private fun exchange(
+        block: ByteArray,
+        kind: BlockKind,
+    ): ByteArray {
         if (block.isEmpty() || block.size > channel.maximumTransceiveLength) {
             return byteArrayOf(NativeExchangeReplyTag.BACKEND_FAILURE.wireValue)
         }
@@ -33,18 +42,10 @@ internal class NfcNativeBlockExchange(
                     } else {
                         0
                     }
-                // The header is public routing; bodies stay out of the trace.
-                val hasHeader = block.size >= APDU_HEADER_LENGTH
-                AppTrace.nfcTransceive(
-                    block.size,
-                    result.bytes.size,
-                    elapsedMicros,
-                    sw,
-                    cla = if (hasHeader) block[CLASS_BYTE_OFFSET].toInt() and 0xFF else -1,
-                    ins = if (hasHeader) block[INSTRUCTION_OFFSET].toInt() and 0xFF else -1,
-                    p1 = if (hasHeader) block[PARAMETER_ONE_OFFSET].toInt() and 0xFF else -1,
-                    p2 = if (hasHeader) block[PARAMETER_TWO_OFFSET].toInt() and 0xFF else -1,
-                )
+                when (kind) {
+                    BlockKind.PUBLIC -> tracePublic(block, result.bytes.size, elapsedMicros, sw)
+                    BlockKind.CREDENTIAL -> AppTrace.nfcCredentialTransceive(result.bytes.size, elapsedMicros, sw)
+                }
                 encodeResponse(result.bytes)
             }
 
@@ -56,6 +57,26 @@ internal class NfcNativeBlockExchange(
                 byteArrayOf(NativeExchangeReplyTag.TIMEOUT_UNKNOWN_STATE.wireValue)
             }
         }
+    }
+
+    // The header is public routing; bodies stay out of the trace.
+    private fun tracePublic(
+        block: ByteArray,
+        responseLength: Int,
+        elapsedMicros: Long,
+        sw: Int,
+    ) {
+        val hasHeader = block.size >= APDU_HEADER_LENGTH
+        AppTrace.nfcTransceive(
+            block.size,
+            responseLength,
+            elapsedMicros,
+            sw,
+            cla = if (hasHeader) block[CLASS_BYTE_OFFSET].toInt() and 0xFF else -1,
+            ins = if (hasHeader) block[INSTRUCTION_OFFSET].toInt() and 0xFF else -1,
+            p1 = if (hasHeader) block[PARAMETER_ONE_OFFSET].toInt() and 0xFF else -1,
+            p2 = if (hasHeader) block[PARAMETER_TWO_OFFSET].toInt() and 0xFF else -1,
+        )
     }
 
     private fun encodeResponse(payload: ByteArray): ByteArray =
