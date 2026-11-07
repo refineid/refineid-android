@@ -37,7 +37,6 @@
     <string name="back">Back</string>
     <string name="browser">Browser</string>
     <string name="timestamp_authorities">Timestamp services</string>
-    <string name="authenticate">Authenticate</string>
     <string name="cancel">Cancel</string>
     <string name="signature">Signature</string>
     <string name="ok">OK</string>

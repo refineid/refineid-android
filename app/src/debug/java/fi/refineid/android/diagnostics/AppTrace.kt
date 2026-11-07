@@ -24,8 +24,6 @@ import fi.refineid.android.document.QualifiedPdfArchivalResult
 import fi.refineid.android.document.QualifiedPdfArchivalStage
 import fi.refineid.android.document.QualifiedPdfPreparationResult
 import fi.refineid.android.document.QualifiedPdfSigningResult
-import fi.refineid.android.keychain.ExternalKeyPinAuthorization
-import fi.refineid.android.keychain.ExternalKeySignResult
 import fi.refineid.android.network.SigningTimestampAttemptOutcome
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.rapp.RappBleGattEvent
@@ -62,50 +60,6 @@ internal object AppTrace {
 
     fun activityDestroyed() {
         debug("app:activity-destroyed")
-    }
-
-    fun externalKeyProviderServiceCreated() {
-        debug("external-key:service-created")
-    }
-
-    fun externalKeyProviderServiceBound(isAccepted: Boolean) {
-        debug("external-key:service-bind accepted=" + isAccepted)
-    }
-
-    fun externalKeyProviderServiceDestroyed() {
-        debug("external-key:service-destroyed")
-    }
-
-    fun externalKeyIdentityQueried(isAvailable: Boolean) {
-        debug("external-key:identity-query available=" + isAvailable)
-    }
-
-    fun externalKeySignStarted(algorithm: AuthenticationSigningAlgorithm) {
-        debug("external-key:sign-started algorithm=" + algorithm)
-    }
-
-    fun externalKeySignCompleted(result: ExternalKeySignResult) {
-        debug("external-key:sign-completed result=" + result)
-    }
-
-    fun externalKeyIdentityRemovalCompleted(isRemoved: Boolean) {
-        debug("external-key:identity-removal removed=" + isRemoved)
-    }
-
-    fun externalKeyPinPromptDispatched() {
-        debug("external-key:pin-prompt-dispatched")
-    }
-
-    fun externalKeyPinPromptCompleted(authorization: ExternalKeyPinAuthorization) {
-        val outcome =
-            when (authorization) {
-                is ExternalKeyPinAuthorization.Approved -> "approved"
-                ExternalKeyPinAuthorization.Cancelled -> "cancelled"
-                ExternalKeyPinAuthorization.TimedOut -> "timed-out"
-                ExternalKeyPinAuthorization.Interrupted -> "interrupted"
-                ExternalKeyPinAuthorization.Unavailable -> "unavailable"
-            }
-        debug("external-key:pin-prompt-completed outcome=" + outcome)
     }
 
     fun nativeLibraryLoadCompleted(isSuccessful: Boolean) {

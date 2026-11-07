@@ -26,13 +26,11 @@ import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationResult
 import fi.refineid.android.core.readOnOwnerThread
 import fi.refineid.android.diagnostics.AppTrace
-import fi.refineid.android.keychain.nextProviderGeneration
 import fi.refineid.android.usb.ccid.CcidSessionOpenResult
 import fi.refineid.android.usb.ccid.CcidUsbSession
 import fi.refineid.android.usb.ccid.CcidUsbSessionOpener
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
-import java.security.SecureRandom
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -108,7 +106,6 @@ internal class UsbReaderController(
         )
     private val mainHandler = Handler(Looper.getMainLooper())
     private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-    private val providerGenerationRandom = SecureRandom()
     private val stateListeners = linkedSetOf<(UsbReaderSnapshot) -> Unit>()
 
     @Volatile
@@ -145,19 +142,6 @@ internal class UsbReaderController(
 
     // Worker-thread confined. Main-thread state never owns a USB connection.
     private var activeSession: CcidUsbSession? = null
-    private var activeProviderGeneration: Long? = null
-
-    internal val externalKeyCardSession =
-        UsbExternalKeyCardSession(
-            ioExecutor = ioExecutor,
-            isAvailable = {
-                isStarted &&
-                    latestSnapshot.status == ReaderConnectionStatus.READY &&
-                    latestSnapshot.cardPresence == CardPresence.PRESENT
-            },
-            activeSession = { activeSession },
-            activeProviderGeneration = { activeProviderGeneration },
-        )
 
     internal val qualifiedCardService =
         UsbQualifiedCardService(
@@ -582,9 +566,6 @@ internal class UsbReaderController(
                         NativeCertificateReadFailure.CARD_UNAVAILABLE,
                     )
                 }
-            if (result is NativeContactlessOpenResult.Success) {
-                activeProviderGeneration = providerGenerationRandom.nextProviderGeneration()
-            }
             val certificate =
                 when (result) {
                     is NativeContactlessOpenResult.Success -> result.certificate
@@ -796,7 +777,6 @@ internal class UsbReaderController(
             var cardDetails: PersonCardDetails? = null
             if (result is CcidSessionOpenResult.Ready) {
                 activeSession = result.session
-                activeProviderGeneration = providerGenerationRandom.nextProviderGeneration()
                 setupRemovalListener(result.session, device, generation)
                 try {
                     val cert = result.session.copyAuthenticationCertificate()
@@ -811,12 +791,10 @@ internal class UsbReaderController(
                 }
             } else if (result is CcidSessionOpenResult.AccessNumberRequired) {
                 // Hold the contactless session so a CAN entry can run PACE on it.
-                // No provider generation until connect() actually opens the card.
                 activeSession = result.session
                 setupRemovalListener(result.session, device, generation)
             } else if (result is CcidSessionOpenResult.ActivationRequired) {
                 activeSession = result.session
-                activeProviderGeneration = providerGenerationRandom.nextProviderGeneration()
                 setupRemovalListener(result.session, device, generation)
                 try {
                     val cert = result.session.copyAuthenticationCertificate()
@@ -986,7 +964,6 @@ internal class UsbReaderController(
     }
 
     private fun closeActiveSession() {
-        activeProviderGeneration = null
         activeSession?.close()
         activeSession = null
     }

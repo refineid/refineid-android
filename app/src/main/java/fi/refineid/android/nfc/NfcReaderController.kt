@@ -28,13 +28,11 @@ import fi.refineid.android.core.NativeContactlessSession
 import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.diagnostics.AppTrace
-import fi.refineid.android.keychain.nextProviderGeneration
 import fi.refineid.android.prime.PrimedCanStore
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
-import java.security.SecureRandom
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -98,8 +96,6 @@ internal class NfcReaderController(
 
     // Worker-thread confined. Main-thread state never owns a session.
     private var activeSession: ContactlessSession? = null
-    private var activeProviderGeneration: Long? = null
-    private val providerGenerationRandom = SecureRandom()
 
     private val isOpeningSession = AtomicBoolean(false)
 
@@ -181,24 +177,6 @@ internal class NfcReaderController(
             },
             currentGeneration = { probeGeneration },
             activeSession = { activeSession },
-        )
-
-    internal val externalKeyCardSession =
-        NfcExternalKeyCardSession(
-            probeExecutor = probeExecutor,
-            isAvailable = { latestSnapshot.status == NfcReaderStatus.CARD_READY },
-            activeSession = { activeSession },
-            activeProviderGeneration = { activeProviderGeneration },
-            onCardLost = {
-                val generation = probeGeneration
-                val sessionWasActive = activeSession != null
-                closeActiveSession()
-                publishAsync(
-                    generation,
-                    NfcReaderStatus.WAITING_FOR_CARD,
-                    awaitingCard = sessionWasActive,
-                )
-            },
         )
 
     private val adapterStateReceiver =
@@ -740,7 +718,6 @@ internal class NfcReaderController(
                 material = material,
                 heldSession = true,
             )
-        activeProviderGeneration = providerGenerationRandom.nextProviderGeneration()
         feedback.onCardSuccess()
         publishAsync(generation, NfcReaderStatus.CARD_READY, holderName = holderName, cardDetails = cardDetails)
     }
@@ -776,7 +753,6 @@ internal class NfcReaderController(
                 material = material,
                 heldSession = true,
             )
-        activeProviderGeneration = providerGenerationRandom.nextProviderGeneration()
         feedback.onCardSuccess()
         publishAsync(generation, NfcReaderStatus.ACTIVATION_REQUIRED, holderName = null, cardDetails = null)
     }
@@ -920,7 +896,6 @@ internal class NfcReaderController(
     }
 
     private fun closeActiveSession() {
-        activeProviderGeneration = null
         currentAuthCertDer = null
         activeSession?.close()
         activeSession = null

@@ -33,7 +33,6 @@
     <string name="back">Tillbaka</string>
     <string name="browser">Webbläsare</string>
     <string name="timestamp_authorities">Tidsstämpeltjänster</string>
-    <string name="authenticate">Identifiera dig</string>
     <string name="cancel">Avbryt</string>
     <string name="signature">Underskrift</string>
     <string name="ok">OK</string>
