@@ -29,7 +29,7 @@
     <string name="not_present">Ei paikalla</string>
     <string name="authentication">Tunnistautuminen</string>
     <string name="sign">Allekirjoita</string>
-    <string name="verify">Tarkasta</string>
+    <string name="verify">Todenna</string>
     <string name="back">Takaisin</string>
     <string name="browser">Selain</string>
     <string name="timestamp_authorities">Aikaleimapalvelut</string>
