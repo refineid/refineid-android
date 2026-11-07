@@ -91,7 +91,8 @@
     <string name="rapp_retry_floor">RefineID använder inte en PIN-kod med två eller färre försök kvar. Med PUK-koden kan en ny PIN-kod anges.</string>
     <string name="recovery_guidance_pin1">PIN 1 måste återställas\nÅterställ PIN 1 med din PUK-kod.</string>
     <string name="recovery_guidance_pin2">PIN 2 måste återställas\nÅterställ PIN 2 med din PUK-kod.</string>
-    <string name="unrecoverable_card">PUK-koden är spärrad\nDetta kort kan inte återställas med programvara.</string>
+    <string name="puk_reported_blocked">Kortet rapporterar PUK-koden spärrad
+En kod från utfärdaren kan ändå prövas: kortet avgör och förbrukar inget.</string>
     <string name="diagnostics">Diagnostik</string>
     <string name="refresh">Uppdatera</string>
     <string name="copy_report">Kopiera rapport</string>

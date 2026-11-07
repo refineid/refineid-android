@@ -104,7 +104,8 @@
     <string name="rapp_retry_floor">RefineID will not use a PIN with two or fewer attempts left. The PUK can set a new PIN.</string>
     <string name="recovery_guidance_pin1">PIN 1 requires recovery\nReset PIN 1 with your PUK.</string>
     <string name="recovery_guidance_pin2">PIN 2 requires recovery\nReset PIN 2 with your PUK.</string>
-    <string name="unrecoverable_card">The PUK is blocked\nThis card cannot be recovered with software.</string>
+    <string name="puk_reported_blocked">The card reports the PUK blocked
+A code from the issuer can still be tried: the card decides and spends nothing.</string>
     <string name="show_pin">Show PIN</string>
     <string name="hide_pin">Hide PIN</string>
     <string name="show_can" tools:ignore="Typos">Show CAN</string>
