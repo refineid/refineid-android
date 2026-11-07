@@ -663,18 +663,26 @@ mod tests {
         vec![StatusWord::ReferenceDataNotFound, remaining(SERVED_RETRIES)]
     }
 
-    /// PUK counter answers the floor refuses under either numbering.
-    fn refused_puk_counters() -> [StatusWord; 4] {
+    /// PUK counter answers the floor refuses under either numbering:
+    /// the last two tries. An exhausted or blocked PUK is not refused
+    /// here; the card answers for itself and spends nothing.
+    fn refused_puk_counters() -> [StatusWord; 2] {
+        [remaining(BELOW_FLOOR_RETRIES), remaining(LAST_RETRY)]
+    }
+
+    /// PUK counter answers the floor serves under either numbering: at
+    /// the floor, and at no tries left or blocked, where the card
+    /// decides.
+    fn served_puk_counters() -> [StatusWord; 3] {
         [
-            remaining(BELOW_FLOOR_RETRIES),
-            remaining(LAST_RETRY),
+            remaining(SERVED_RETRIES),
             remaining(NO_RETRIES),
             StatusWord::AuthenticationBlocked,
         ]
     }
 
     /// Every transcript, up to and including the PUK counter read, that
-    /// the floor refuses: low, exhausted and blocked counters under both
+    /// the floor refuses: two or one tries left under both
     /// numberings and with the target PIN served or blocked; a citizen
     /// probe reporting verified or no counter, whose PIN container read
     /// carries no counter either; an organizational PUK reported verified
@@ -702,18 +710,22 @@ mod tests {
         transcripts
     }
 
-    /// Transcripts the floor serves: the PUK at the floor under each
-    /// numbering, with the target PIN served or blocked.
+    /// Transcripts the floor serves: the PUK at the floor, exhausted or
+    /// blocked under each numbering, with the target PIN served or
+    /// blocked.
     fn served_puk_transcripts() -> Vec<Vec<StatusWord>> {
-        citizen_resolutions()
+        let mut transcripts = Vec::new();
+        let resolutions = citizen_resolutions()
             .into_iter()
-            .chain([organizational_resolution()])
-            .map(|resolution| {
+            .chain([organizational_resolution()]);
+        for resolution in resolutions {
+            for counter in served_puk_counters() {
                 let mut transcript = lengths_read(&resolution);
-                transcript.push(remaining(SERVED_RETRIES));
-                transcript
-            })
-            .collect()
+                transcript.push(counter);
+                transcripts.push(transcript);
+            }
+        }
+        transcripts
     }
 
     type Unblock = fn(
@@ -800,17 +812,19 @@ mod tests {
     }
 
     #[test]
-    fn activation_by_puk_at_the_puk_floor_reaches_the_card() {
-        let mut transcript = lengths_read(&[CITIZEN_TARGET_BLOCKED]);
-        transcript.extend(PUK_ACTIVATION_PREAMBLE);
-        transcript.push(remaining(SERVED_RETRIES));
-        let mut transport = ScriptedTransport::new(&transcript);
+    fn activation_by_puk_at_the_puk_floor_exhausted_or_blocked_reaches_the_card() {
+        for counter in served_puk_counters() {
+            let mut transcript = lengths_read(&[CITIZEN_TARGET_BLOCKED]);
+            transcript.extend(PUK_ACTIVATION_PREAMBLE);
+            transcript.push(counter);
+            let mut transport = ScriptedTransport::new(&transcript);
 
-        let result = activate_by_puk(&mut transport);
+            let result = activate_by_puk(&mut transport);
 
-        assert_eq!(result, Err(CardManagementFailure::TransportError));
-        assert_eq!(transport.credential_calls, 1);
-        assert!(transport.responses.is_empty());
+            assert_eq!(result, Err(CardManagementFailure::TransportError));
+            assert_eq!(transport.credential_calls, 1);
+            assert!(transport.responses.is_empty());
+        }
     }
 
     /// 13 January 2026 00:00:00 UTC, the citizen cutover, and the second
@@ -903,8 +917,9 @@ mod tests {
 
     #[test]
     fn a_retry_floor_refusal_maps_to_the_safety_refusal() {
-        let refusal = check_retry_floor(FlooredCredential::Puk, PinStatus::Locked)
-            .expect_err("a blocked PUK is refused");
+        let two_left = PinRetries::from_nibble(BELOW_FLOOR_RETRIES).expect("2 fits nibble");
+        let refusal = check_retry_floor(FlooredCredential::Puk, PinStatus::Remaining(two_left))
+            .expect_err("a PUK at two tries left is refused");
         assert_eq!(
             map_auth_error::<&str>(AuthError::RetryFloor(refusal)),
             CardManagementFailure::SafetyRefused
