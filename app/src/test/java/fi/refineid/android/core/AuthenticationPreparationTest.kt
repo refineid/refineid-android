@@ -638,40 +638,54 @@ internal class AuthenticationPreparationTest {
     }
 
     @Test
-    fun aCardThatHasNotAnsweredIsAskedNothingBeforeItsKindIsKnown() =
+    fun anUnknownAccessNumberIsAskedForBeforeTheTap() =
         runBlocking {
-            val backend =
-                Backend().apply {
-                    ready = AuthenticationReadiness(false, false, true, awaitsCardKind = true)
-                    connectAnswers.addLast(CardConnection.NEEDS_ORGANIZATION_PIN1)
-                }
+            val backend = Backend().apply { ready = AuthenticationReadiness(false, true, true) }
             val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
-            preparation.start(AuthenticationPurpose.SIGN_IN) {}
-            assertTrue(preparation.state.value !is AuthenticationPreparationState.Credentials)
-            val asked =
-                preparation.state.first { it is AuthenticationPreparationState.Credentials }
-                    as AuthenticationPreparationState.Credentials
-            assertFalse("an organization card is never asked for an access number", asked.needsCan)
-            assertTrue(asked.needsPin)
-            assertEquals(0, backend.verifications)
-            preparation.cancel()
+            var opened = false
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
+            assertEquals(AuthenticationPreparationState.Credentials(true, true), preparation.state.value)
+            assertEquals("nothing waits on a card before the holder has answered", 0, backend.connections)
+            preparation.submit(CanSubmission.from(SYNTHETIC_CAN), syntheticPin())
+            preparation.state.first { it == AuthenticationPreparationState.Ready }
+            assertTrue(opened)
+            assertEquals("one tap reads the card with the access number in hand", 1, backend.connections)
+            assertEquals(1, backend.cansOffered)
         }
 
     @Test
-    fun aCitizenCardAnsweringIsAskedForItsAccessNumber() =
+    fun anOrganizationCardAnsweringAfterTheEntryOpensWithThePinAlreadyGiven() =
         runBlocking {
             val backend =
                 Backend().apply {
-                    ready = AuthenticationReadiness(false, false, true, awaitsCardKind = true)
+                    ready = AuthenticationReadiness(false, true, true)
+                    connectAnswers.addLast(CardConnection.NEEDS_ORGANIZATION_PIN1)
+                    organizationAnswer = Pin1Verification(Pin1VerificationResult.VERIFIED)
+                }
+            val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
+            var opened = false
+            preparation.start(AuthenticationPurpose.SIGN_IN) { opened = true }
+            preparation.submit(null, syntheticPin())
+            preparation.state.first { it == AuthenticationPreparationState.Ready }
+            assertTrue(opened)
+            assertEquals(1, backend.organizationOpens)
+        }
+
+    @Test
+    fun aCitizenCardAnsweringWithoutAKnownAccessNumberIsAskedForIt() =
+        runBlocking {
+            val backend =
+                Backend().apply {
+                    ready = AuthenticationReadiness(false, false, true)
                     connectAnswers.addLast(CardConnection.NEEDS_ACCESS_NUMBER)
                 }
             val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
             preparation.start(AuthenticationPurpose.SIGN_IN) {}
+            preparation.submit(null, syntheticPin())
             val asked =
-                preparation.state.first { it is AuthenticationPreparationState.Credentials }
+                preparation.state.first { it is AuthenticationPreparationState.Credentials && it.needsCan }
                     as AuthenticationPreparationState.Credentials
-            assertTrue(asked.needsCan)
-            assertTrue(asked.needsPin)
+            assertFalse("the PIN 1 already given is held", asked.needsPin)
             preparation.cancel()
         }
 

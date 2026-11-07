@@ -28,9 +28,12 @@ on that probe can run on its channels.
 - **The floor is `MSE:Set AT`'s answer**, which spends no try. `run_pace` applies
   core's rule to it. The counters the UI and the custody rules read come from the
   same command sent alone, in plain, with no secret.
-- **Nothing is asked before a card answers.** The prompt shows after the card has
-  named its kind: an access number for a citizen card, Basic PIN 1 for an
-  organization card.
+- **A known access number asks nothing; an unknown one is asked before the
+  tap.** A primed or remembered CAN opens a citizen card on the tap. Otherwise
+  the CAN field is ready before the tap, so one tap opens the card. An
+  organization card has no CAN: once it has named its kind, the prompt asks for
+  Basic PIN 1 in place of the CAN field, and a CAN typed for it is never named
+  to it.
 - **Only public certificates rest in the store** for this card; PIN 1 is held as
   for any card, in memory, only when its counter read five before the handshake.
 

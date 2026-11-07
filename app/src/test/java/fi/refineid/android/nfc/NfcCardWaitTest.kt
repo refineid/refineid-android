@@ -132,14 +132,26 @@ class NfcCardWaitTest {
     }
 
     @Test
-    fun nothingIsAskedOfACardThatHasNotAnswered() {
-        assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.WAITING_FOR_CARD, false, null))
-        assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CARD_RECOGNIZED, false, null))
+    fun anUnknownAccessNumberIsAskedForBeforeTheTap() {
+        assertTrue(NfcCardWait.offersAccessNumber(NfcReaderStatus.WAITING_FOR_CARD, false, null))
+        assertTrue(NfcCardWait.offersAccessNumber(null, false, null))
+        assertTrue(NfcCardWait.asksForAccessNumber(NfcReaderStatus.WAITING_FOR_CARD, false, null))
+        assertTrue(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CHECKING, false, null))
         assertFalse(NfcCardWait.asksForOrganizationPin1(NfcReaderStatus.WAITING_FOR_CARD, null))
     }
 
     @Test
+    fun aKnownAccessNumberIsNeverAskedFor() {
+        assertFalse(NfcCardWait.offersAccessNumber(NfcReaderStatus.WAITING_FOR_CARD, true, null))
+        assertFalse(NfcCardWait.offersAccessNumber(NfcReaderStatus.CARD_RECOGNIZED, true, NfcCardKind.PERSONAL))
+        assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.WAITING_FOR_CARD, true, null))
+        assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CARD_RECOGNIZED, true, NfcCardKind.PERSONAL))
+    }
+
+    @Test
     fun anOrganizationCardIsNeverAskedForAnAccessNumber() {
+        assertFalse(NfcCardWait.offersAccessNumber(NfcReaderStatus.CARD_RECOGNIZED, false, NfcCardKind.ORGANIZATION))
+        assertFalse(NfcCardWait.offersAccessNumber(NfcReaderStatus.WAITING_FOR_CARD, false, NfcCardKind.ORGANIZATION))
         assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CARD_RECOGNIZED, false, NfcCardKind.ORGANIZATION))
         assertTrue(NfcCardWait.asksForOrganizationPin1(NfcReaderStatus.CARD_RECOGNIZED, NfcCardKind.ORGANIZATION))
     }
@@ -148,11 +160,17 @@ class NfcCardWaitTest {
     fun aCitizenCardIsNeverAskedForAnOrganizationPin1() {
         assertFalse(NfcCardWait.asksForOrganizationPin1(NfcReaderStatus.CARD_RECOGNIZED, NfcCardKind.PERSONAL))
         assertTrue(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CARD_RECOGNIZED, false, NfcCardKind.PERSONAL))
-        assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CARD_RECOGNIZED, true, NfcCardKind.PERSONAL))
+    }
+
+    @Test
+    fun aTapPromptDoesNotAskWhileTheCardIsBeingOpened() {
+        assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CONNECTING, false, null))
+        assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CARD_READY, false, NfcCardKind.PERSONAL))
     }
 
     @Test
     fun aRefusedAccessNumberIsAskedForAgain() {
         assertTrue(NfcCardWait.asksForAccessNumber(NfcReaderStatus.WRONG_CAN, true, NfcCardKind.PERSONAL))
+        assertTrue(NfcCardWait.offersAccessNumber(NfcReaderStatus.WRONG_CAN, true, NfcCardKind.PERSONAL))
     }
 }

@@ -27,10 +27,23 @@ internal object NfcCardWait {
             (!accessNumberKnown && status in AWAITING_ACCESS_NUMBER)
 
     /**
-     * Whether a prompt asks for the access number now: the card in the field
-     * named itself a citizen card and none is known, or it refused the one
-     * given. An organization card has none to ask for, and until a card has
-     * answered its kind is not known.
+     * Whether a card entry form offers the access number field: the card
+     * refused the one given, or none is known and the card is not an
+     * organization card, which has none. A card that has not answered yet
+     * is asked for it before the tap, so one tap opens it; an organization
+     * card that answers instead is asked for Basic PIN 1.
+     */
+    fun offersAccessNumber(
+        status: NfcReaderStatus?,
+        accessNumberKnown: Boolean,
+        cardKind: NfcCardKind?,
+    ): Boolean =
+        status == NfcReaderStatus.WRONG_CAN ||
+            (!accessNumberKnown && cardKind != NfcCardKind.ORGANIZATION)
+
+    /**
+     * Whether a card tap prompt asks for the access number now: as
+     * [offersAccessNumber], while the prompt still waits on a card.
      */
     fun asksForAccessNumber(
         status: NfcReaderStatus,
@@ -38,7 +51,7 @@ internal object NfcCardWait {
         cardKind: NfcCardKind?,
     ): Boolean =
         status == NfcReaderStatus.WRONG_CAN ||
-            (!accessNumberKnown && status == NfcReaderStatus.CARD_RECOGNIZED && cardKind == NfcCardKind.PERSONAL)
+            (status in AWAITING_ACCESS_NUMBER && offersAccessNumber(status, accessNumberKnown, cardKind))
 
     /** Whether a prompt asks for Basic PIN 1: an organization card is in the field and not yet read. */
     fun asksForOrganizationPin1(

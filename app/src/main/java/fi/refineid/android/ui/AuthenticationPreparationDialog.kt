@@ -23,6 +23,7 @@ import fi.refineid.android.R
 import fi.refineid.android.core.AuthenticationPreparation
 import fi.refineid.android.core.AuthenticationPreparationState
 import fi.refineid.android.core.AuthenticationPurpose
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationResult
 import fi.refineid.android.nfc.NfcCardProblem
@@ -35,11 +36,12 @@ internal fun AuthenticationPreparationDialog(
     state: AuthenticationPreparationState,
     nfcStatus: NfcReaderStatus? = null,
     nfcProblem: NfcCardProblem? = null,
+    nfcCardKind: NfcCardKind? = null,
 ) {
     val title = purposeTitle(preparation.purpose.collectAsState().value)
     when (state) {
         is AuthenticationPreparationState.Credentials -> {
-            PreparationCredentialsDialog(preparation, state, title)
+            PreparationCredentialsDialog(preparation, state, title, nfcCardKind)
         }
 
         is AuthenticationPreparationState.Failed -> {
@@ -125,6 +127,7 @@ private fun PreparationCredentialsDialog(
     preparation: AuthenticationPreparation,
     state: AuthenticationPreparationState.Credentials,
     title: Int,
+    nfcCardKind: NfcCardKind?,
 ) {
     val can = remember { TextFieldState() }
     val pin = remember { TextFieldState() }
@@ -134,8 +137,13 @@ private fun PreparationCredentialsDialog(
             pin.clearText()
         }
     }
-    val canReady = !state.needsCan || canEntryReady(can.text)
-    val pinReady = !state.needsPin || Pin1Submission.isComplete(pin.text)
+    // The access number is asked before the tap; an organization card that
+    // answers meanwhile has none, and PIN 1 opens it.
+    val organizationCard = nfcCardKind == NfcCardKind.ORGANIZATION
+    val asksCan = state.needsCan && !organizationCard
+    val asksPin = state.needsPin || (state.needsCan && organizationCard)
+    val canReady = !asksCan || canEntryReady(can.text)
+    val pinReady = !asksPin || Pin1Submission.isComplete(pin.text)
     AlertDialog(
         onDismissRequest = preparation::cancel,
         modifier = Modifier.testTag("AuthenticationPreparationDialog"),
@@ -143,14 +151,14 @@ private fun PreparationCredentialsDialog(
         title = { Text(stringResource(title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (state.needsCan) {
+                if (asksCan) {
                     CanField(
                         state = can,
                         testTag = "AuthenticationPreparationCan",
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                if (state.needsPin) {
+                if (asksPin) {
                     SecretField(
                         state = pin,
                         testTag = "AuthenticationPreparationPin1",
@@ -167,8 +175,8 @@ private fun PreparationCredentialsDialog(
                 enabled = canReady && pinReady,
                 modifier = Modifier.testTag("AuthenticationPreparationSubmit"),
                 onClick = {
-                    val submittedCan = if (state.needsCan) canEntrySubmission(can.text) else null
-                    val submittedPin = if (state.needsPin) Pin1Submission.from(pin.text) else null
+                    val submittedCan = if (asksCan) canEntrySubmission(can.text) else null
+                    val submittedPin = if (asksPin) Pin1Submission.from(pin.text) else null
                     can.clearText()
                     pin.clearText()
                     preparation.submit(submittedCan, submittedPin)
