@@ -25,10 +25,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -49,7 +47,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -77,7 +74,6 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1626,22 +1622,13 @@ private fun NfcCredentialEntry(
             imeAction = ImeAction.Next,
         )
     }
-    SecureTextField(
+    SecretField(
         state = pinState,
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .testTag(UiAutomationIds.NFC_PIN1_FIELD),
-        label = { Text(stringResource(R.string.pin1)) },
-        labelPosition = SecretFieldLabelPosition,
+        testTag = UiAutomationIds.NFC_PIN1_FIELD,
+        modifier = Modifier.fillMaxWidth(),
+        label = stringResource(R.string.pin1),
         inputTransformation = Pin1InputTransformation,
-        textObfuscationMode = TextObfuscationMode.Hidden,
-        keyboardOptions =
-            KeyboardOptions(
-                autoCorrectEnabled = false,
-                keyboardType = KeyboardType.NumberPassword,
-                imeAction = ImeAction.Done,
-            ),
+        imeAction = ImeAction.Done,
         onKeyboardAction = { submit() },
     )
     Button(

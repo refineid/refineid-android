@@ -20,10 +20,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -36,10 +34,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -52,11 +48,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import fi.refineid.android.R
 import fi.refineid.android.core.ActivationReport
@@ -1255,6 +1249,7 @@ private fun digitRangeHint(range: IntRange): String? =
 private fun ManagedPasswordField(
     state: TextFieldState,
     label: String,
+    testTag: String,
     modifier: Modifier = Modifier,
     imeAction: ImeAction = ImeAction.Next,
     onKeyboardAction: (() -> Unit)? = null,
@@ -1262,50 +1257,17 @@ private fun ManagedPasswordField(
     supportingText: String? = null,
     isError: Boolean = false,
     errorMessage: String? = null,
-    testTag: String? = null,
 ) {
-    var passwordVisible by remember { mutableStateOf(false) }
-
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SecureTextField(
+        SecretField(
             state = state,
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
-            label = { Text(label) },
-            labelPosition = SecretFieldLabelPosition,
-            textObfuscationMode =
-                if (passwordVisible) {
-                    TextObfuscationMode.Visible
-                } else {
-                    TextObfuscationMode.Hidden
-                },
+            testTag = testTag,
+            modifier = Modifier.fillMaxWidth(),
+            label = label,
             inputTransformation = remember(maxLength) { digitsOnlyTransformation(maxLength) },
-            keyboardOptions =
-                KeyboardOptions(
-                    autoCorrectEnabled = false,
-                    keyboardType = KeyboardType.NumberPassword,
-                    imeAction = imeAction,
-                ),
-            onKeyboardAction = onKeyboardAction?.let { action -> { action() } },
-            trailingIcon = {
-                IconButton(
-                    onClick = { passwordVisible = !passwordVisible },
-                    modifier = Modifier.testTag(if (testTag != null) "${testTag}Toggle" else "passwordToggle"),
-                ) {
-                    Icon(
-                        painter =
-                            painterResource(
-                                if (passwordVisible) R.drawable.ic_visibility_off else R.drawable.ic_visibility,
-                            ),
-                        contentDescription =
-                            stringResource(
-                                if (passwordVisible) R.string.hide_pin else R.string.show_pin,
-                            ),
-                    )
-                }
-            },
+            imeAction = imeAction,
+            onKeyboardAction = onKeyboardAction,
+            revealNames = PinRevealNames,
         )
         if (isError && errorMessage != null) {
             Text(

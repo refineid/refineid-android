@@ -26,13 +26,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material3.Button
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -564,23 +562,14 @@ private fun BrowserCardUnlockDialog(
                     )
                 }
                 if (asksPin) {
-                    SecureTextField(
+                    SecretField(
                         state = pinState,
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .testTag(UiAutomationIds.BROWSER_UNLOCK_PIN1_FIELD),
+                        testTag = UiAutomationIds.BROWSER_UNLOCK_PIN1_FIELD,
+                        modifier = Modifier.fillMaxWidth(),
                         enabled = !isWaiting,
-                        label = { Text(stringResource(R.string.pin1)) },
-                        labelPosition = SecretFieldLabelPosition,
+                        label = stringResource(R.string.pin1),
                         inputTransformation = Pin1InputTransformation,
-                        textObfuscationMode = TextObfuscationMode.Hidden,
-                        keyboardOptions =
-                            KeyboardOptions(
-                                autoCorrectEnabled = false,
-                                keyboardType = KeyboardType.NumberPassword,
-                                imeAction = ImeAction.Done,
-                            ),
+                        imeAction = ImeAction.Done,
                     )
                 }
                 Row(
@@ -658,21 +647,13 @@ private fun BrowserPinDialog(request: BrowserPinRequest) {
                     text = stringResource(R.string.pin1),
                     style = MaterialTheme.typography.titleLarge,
                 )
-                SecureTextField(
+                SecretField(
                     state = pinState,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .testTag(UiAutomationIds.BROWSER_PIN1_FIELD),
+                    testTag = UiAutomationIds.BROWSER_PIN1_FIELD,
+                    modifier = Modifier.fillMaxWidth(),
                     enabled = !wasSubmitted,
                     inputTransformation = Pin1InputTransformation,
-                    textObfuscationMode = TextObfuscationMode.Hidden,
-                    keyboardOptions =
-                        KeyboardOptions(
-                            autoCorrectEnabled = false,
-                            keyboardType = KeyboardType.NumberPassword,
-                            imeAction = ImeAction.Done,
-                        ),
+                    imeAction = ImeAction.Done,
                 )
                 Button(
                     onClick = submit,

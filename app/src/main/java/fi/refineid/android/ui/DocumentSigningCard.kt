@@ -11,10 +11,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -22,7 +20,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -34,7 +31,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fi.refineid.android.R
@@ -204,23 +200,14 @@ internal fun DocumentSigningCard(
                         imeAction = ImeAction.Next,
                     )
                 }
-                SecureTextField(
+                SecretField(
                     state = pinState,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .testTag(UiAutomationIds.PIN2_FIELD),
+                    testTag = UiAutomationIds.PIN2_FIELD,
+                    modifier = Modifier.fillMaxWidth(),
                     enabled = !isWorking,
-                    label = { Text(stringResource(R.string.pin2)) },
-                    labelPosition = SecretFieldLabelPosition,
+                    label = stringResource(R.string.pin2),
                     inputTransformation = Pin2InputTransformation,
-                    textObfuscationMode = TextObfuscationMode.Hidden,
-                    keyboardOptions =
-                        KeyboardOptions(
-                            autoCorrectEnabled = false,
-                            keyboardType = KeyboardType.NumberPassword,
-                            imeAction = ImeAction.Done,
-                        ),
+                    imeAction = ImeAction.Done,
                 )
 
                 if (canSignPdf) {
