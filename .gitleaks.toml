@@ -1,0 +1,22 @@
+# Copyright 2026 Petri Koistinen. SPDX-License-Identifier: Apache-2.0
+#
+# gitleaks configuration: the default rules, minus two things that hold
+# no secret. A Cargo.lock lists package names, versions, sources and
+# checksums and nothing else, and two lines of the ECDSA wire-signature
+# code map a native card key profile to its coordinate size.
+
+title = "refineid-android"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Cargo lockfiles hold no secrets"
+paths = ['''(^|/)Cargo\.lock$''']
+
+[[allowlists]]
+description = "key-profile to coordinate-size mapping"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^app/src/main/java/fi/refineid/android/rapp/RappEcdsaWireSignature\.kt$''']
+regexes = ['''NativeCardKeyProfile\.ECDSA_P(256|384) -> P(256|384)_COORDINATE_BYTES$''']
