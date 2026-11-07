@@ -119,7 +119,8 @@
   per-change gate.
 - Commit often when the build and lint are clean. Push when a feature is
   ready. Subject and body only: no AI attribution, co-author, sign-off, or
-  review trailers.
+  review trailers. The tracked `commit-msg` hook refuses a message that
+  carries one.
 - Reading does not require a worktree; writing does. The main checkout is
   never edited directly. Before writing code or modifying files for any task,
   create a dedicated git worktree strictly under `../wt/`
