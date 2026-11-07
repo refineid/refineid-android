@@ -58,8 +58,6 @@ internal data class CredentialHealth(
     val activationScheme: CardManagementScheme,
     val activationNeeds: CardActivationNeeds,
     val pinLengths: CardPinLengths? = null,
-    /** False where no record-floored PIN 2 change exists: an organization card over NFC. */
-    val changesPin2: Boolean = true,
 )
 
 /**

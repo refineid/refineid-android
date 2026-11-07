@@ -31,9 +31,10 @@ use crate::contactless::{ContactlessOpenOutcome, ManagedPin};
 use crate::jni_card_exchange::JniBlockExchange;
 use crate::organization_card::{
     ChannelRefusal, OrganizationCredential, OrganizationOpenOutcome,
-    organization_authenticate_and_sign, organization_change_pin1, organization_credential_health,
-    organization_open, organization_qualified_sign, organization_reset_pin,
-    organization_verify_pin1, pin1_preflight_of, pin2_preflight_of, read_organization_counter,
+    organization_authenticate_and_sign, organization_change_pin1, organization_change_pin2,
+    organization_credential_health, organization_open, organization_qualified_sign,
+    organization_reset_pin, organization_verify_pin1, pin1_preflight_of, pin2_preflight_of,
+    read_organization_counter,
 };
 use crate::pin1_status::Pin1PreflightFailure;
 use crate::pin2_status::Pin2PreflightFailure;
@@ -98,6 +99,15 @@ const _: NativeMethod = jni::native_method! {
 const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeOrganizationCard",
     static extern fn organization_change_pin1_native(
+        current_pin: [jbyte],
+        new_pin: [jbyte],
+        callback: JObject,
+    ) -> [jbyte],
+};
+
+const _: NativeMethod = jni::native_method! {
+    java_type = "fi.refineid.android.core.NativeOrganizationCard",
+    static extern fn organization_change_pin2_native(
         current_pin: [jbyte],
         new_pin: [jbyte],
         callback: JObject,
@@ -442,9 +452,10 @@ fn organization_qualified_sign_native<'local>(
     reply(env, bytes)
 }
 
-fn organization_change_pin1_native<'local>(
+/// The change of `pin` on the channel its current value opens.
+fn change_reply<'local>(
     env: &mut Env<'local>,
-    _class: JClass<'local>,
+    pin: ManagedPin,
     current_pin: JByteArray<'local>,
     new_pin: JByteArray<'local>,
     callback: JObject<'local>,
@@ -452,7 +463,10 @@ fn organization_change_pin1_native<'local>(
     let (current, new) = take_secret_pair(env, &current_pin, &new_pin)?;
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
-        let (result, transport) = organization_change_pin1(apdu_transport(exchange), current, new);
+        let (result, transport) = match pin {
+            ManagedPin::Pin1 => organization_change_pin1(apdu_transport(exchange), current, new),
+            ManagedPin::Pin2 => organization_change_pin2(apdu_transport(exchange), current, new),
+        };
         let exchange = transport.into_exchange();
         (result, exchange.bridge_failed())
     };
@@ -462,6 +476,26 @@ fn organization_change_pin1_native<'local>(
         encode_manage_outcome_reply(result)
     };
     reply(env, bytes)
+}
+
+fn organization_change_pin1_native<'local>(
+    env: &mut Env<'local>,
+    _class: JClass<'local>,
+    current_pin: JByteArray<'local>,
+    new_pin: JByteArray<'local>,
+    callback: JObject<'local>,
+) -> Result<JByteArray<'local>, jni::errors::Error> {
+    change_reply(env, ManagedPin::Pin1, current_pin, new_pin, callback)
+}
+
+fn organization_change_pin2_native<'local>(
+    env: &mut Env<'local>,
+    _class: JClass<'local>,
+    current_pin: JByteArray<'local>,
+    new_pin: JByteArray<'local>,
+    callback: JObject<'local>,
+) -> Result<JByteArray<'local>, jni::errors::Error> {
+    change_reply(env, ManagedPin::Pin2, current_pin, new_pin, callback)
 }
 
 fn reset_reply<'local>(

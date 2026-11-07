@@ -79,17 +79,7 @@ internal object NativeOrganizationCard {
 
     /** PIN 1, PIN 2 and PUK counters, read in plain with no secret. */
     fun probeHealth(exchange: NativeBlockExchange): CardManagementResult<CredentialHealth> =
-        managed {
-            when (val health = NativeCardManagement.decodeCredentialHealth(organizationHealthNative(exchange))) {
-                is CardManagementResult.Success -> {
-                    CardManagementResult.Success(health.value.copy(changesPin2 = false))
-                }
-
-                is CardManagementResult.Failure -> {
-                    health
-                }
-            }
-        }
+        managed { NativeCardManagement.decodeCredentialHealth(organizationHealthNative(exchange)) }
 
     /** PACE with PIN 1, then the certificates read through the channel. Consumes [pin1]. */
     fun open(
@@ -248,6 +238,16 @@ internal object NativeOrganizationCard {
             NativeCardManagement.decodeManageOutcome(organizationChangePin1Native(currentPin, newPin, exchange))
         }
 
+    /** PIN 2 changed on the channel the current PIN opens; core makes DF.ESIGN current. */
+    fun changePin2(
+        currentPin: ByteArray,
+        newPin: ByteArray,
+        exchange: NativeBlockExchange,
+    ): CardManagementResult<ManageOutcome> =
+        managed {
+            NativeCardManagement.decodeManageOutcome(organizationChangePin2Native(currentPin, newPin, exchange))
+        }
+
     /** PIN 1 set on the channel the PUK opens, spending no PUK try after the handshake. */
     fun resetPin1(
         puk: ByteArray,
@@ -326,6 +326,13 @@ internal object NativeOrganizationCard {
 
     @JvmStatic
     private external fun organizationChangePin1Native(
+        currentPin: ByteArray,
+        newPin: ByteArray,
+        callback: Any,
+    ): ByteArray
+
+    @JvmStatic
+    private external fun organizationChangePin2Native(
         currentPin: ByteArray,
         newPin: ByteArray,
         callback: Any,
