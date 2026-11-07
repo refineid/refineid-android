@@ -3,14 +3,9 @@
 package fi.refineid.android
 
 import android.app.Application
-import fi.refineid.android.core.AuthenticationCardIdentity
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.NativeCardCa
 import fi.refineid.android.core.Pin1Retention
-import fi.refineid.android.keychain.AndroidExternalKeyCallerLabelResolver
-import fi.refineid.android.keychain.ExternalKeyPinPromptBroker
-import fi.refineid.android.keychain.ExternalKeyProviderRuntime
-import fi.refineid.android.keychain.TransportSelectingCardSession
 import fi.refineid.android.nfc.NfcReaderController
 import fi.refineid.android.prime.PrimedCanStore
 import fi.refineid.android.settings.TimestampAuthorityStore
@@ -90,10 +85,6 @@ class RefineIdApplication : Application() {
             }
     }
 
-    internal lateinit var pinPromptBroker: ExternalKeyPinPromptBroker
-        private set
-    internal lateinit var externalKeyProviderRuntime: ExternalKeyProviderRuntime
-        private set
     internal lateinit var timestampAuthorityStore: TimestampAuthorityStore
         private set
     internal lateinit var rappAuthorizationInbox: fi.refineid.android.rapp.RappAuthorizationInbox
@@ -205,30 +196,6 @@ class RefineIdApplication : Application() {
                 vault = rappVault,
                 catalog = rappPairCatalog,
             )
-        val externalKeyCardSession =
-            TransportSelectingCardSession(
-                listOf(
-                    readerController.externalKeyCardSession,
-                    nfcReaderController.externalKeyCardSession,
-                ),
-            )
-        pinPromptBroker =
-            ExternalKeyPinPromptBroker(
-                context = this,
-                callerLabelResolver = AndroidExternalKeyCallerLabelResolver(packageManager),
-                pinCache = authenticationPinCache,
-                cardFor = { generation ->
-                    externalKeyCardSession.copyIdentity(generation)?.use { identity ->
-                        AuthenticationCardIdentity.of(identity.certificate)
-                    }
-                },
-            )
-        externalKeyProviderRuntime =
-            ExternalKeyProviderRuntime(
-                cardSession = externalKeyCardSession,
-                pinAuthorizer = pinPromptBroker,
-                issuerCertificateSource = caStore,
-            )
         val readerCardPresence = ReaderCardPresenceWatch()
         readerController.addStateListener { snapshot ->
             if (readerCardPresence.presenceEnded(snapshot)) forgetReaderPin1()
@@ -278,7 +245,6 @@ class RefineIdApplication : Application() {
 
     override fun onTerminate() {
         rappProxyDispatcher.close()
-        externalKeyProviderRuntime.close()
         nfcReaderController.stop()
         readerController.stop()
         super.onTerminate()

@@ -3,8 +3,6 @@
 *.sh text eol=lf
 .githooks/** text eol=lf
 gradlew text eol=lf
-*.aidl text eol=lf
-app/src/main/java/com/android/keychain/external/*.java text eol=lf
 
 # A Windows batch file keeps the CRLF it is committed with.
 gradlew.bat -text

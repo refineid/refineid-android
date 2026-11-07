@@ -4,6 +4,13 @@
 
 Accepted.
 
+Status note, 2026-11-07: `ExternalKeyPinPromptBroker` and
+`ExternalKeyPinActivity` moved with the rest of the provider to
+[refineid-hack's `aosp-keychain-external-key/app-provider/`](https://github.com/refineid/refineid-hack/tree/main/aosp-keychain-external-key/app-provider),
+and the application no longer declares
+`android.permission.START_ACTIVITIES_FROM_BACKGROUND`; nothing else in it
+needed the permission. The decision below describes that parked code.
+
 ## Context
 
 The framework JCA signature call is synchronous and originates in a browser

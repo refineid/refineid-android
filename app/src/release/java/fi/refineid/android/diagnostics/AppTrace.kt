@@ -22,8 +22,6 @@ import fi.refineid.android.document.QualifiedPdfArchivalResult
 import fi.refineid.android.document.QualifiedPdfArchivalStage
 import fi.refineid.android.document.QualifiedPdfPreparationResult
 import fi.refineid.android.document.QualifiedPdfSigningResult
-import fi.refineid.android.keychain.ExternalKeyPinAuthorization
-import fi.refineid.android.keychain.ExternalKeySignResult
 import fi.refineid.android.network.SigningTimestampAttemptOutcome
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.rapp.RappBleGattEvent
@@ -50,24 +48,6 @@ internal object AppTrace {
     fun activityReceivedIntent() = Unit
 
     fun activityDestroyed() = Unit
-
-    fun externalKeyProviderServiceCreated() = Unit
-
-    fun externalKeyProviderServiceBound(isAccepted: Boolean) = Unit
-
-    fun externalKeyProviderServiceDestroyed() = Unit
-
-    fun externalKeyIdentityQueried(isAvailable: Boolean) = Unit
-
-    fun externalKeySignStarted(algorithm: AuthenticationSigningAlgorithm) = Unit
-
-    fun externalKeySignCompleted(result: ExternalKeySignResult) = Unit
-
-    fun externalKeyIdentityRemovalCompleted(isRemoved: Boolean) = Unit
-
-    fun externalKeyPinPromptDispatched() = Unit
-
-    fun externalKeyPinPromptCompleted(authorization: ExternalKeyPinAuthorization) = Unit
 
     fun nativeLibraryLoadCompleted(isSuccessful: Boolean) = Unit
 

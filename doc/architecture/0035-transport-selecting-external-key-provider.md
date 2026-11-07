@@ -4,6 +4,12 @@ Status: Accepted
 
 Date: 2026-08-17
 
+Status note, 2026-11-07: `TransportSelectingCardSession`, the USB and NFC
+provider views and the provider generations the reader controllers minted
+for them moved with the provider to
+[refineid-hack's `aosp-keychain-external-key/app-provider/`](https://github.com/refineid/refineid-hack/tree/main/aosp-keychain-external-key/app-provider).
+The decision below describes that parked code.
+
 ## Context
 
 The privileged KeyChain external-key provider (ADR 0012) consumed only

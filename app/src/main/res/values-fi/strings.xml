@@ -33,7 +33,6 @@
     <string name="back">Takaisin</string>
     <string name="browser">Selain</string>
     <string name="timestamp_authorities">Aikaleimapalvelut</string>
-    <string name="authenticate">Tunnistaudu</string>
     <string name="cancel">Peruuta</string>
     <string name="signature">Allekirjoitus</string>
     <string name="ok">Selvä</string>

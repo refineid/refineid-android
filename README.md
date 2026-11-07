@@ -73,7 +73,8 @@ For system-browser support via platform KeyChain, see
 and the AOSP design in
 [`doc/architecture/0012-platform-keychain-external-key.md`](doc/architecture/0012-platform-keychain-external-key.md).
 
-The AOSP patch series, its Pixel 4 build scripts and runbooks are parked in
+The AOSP patch series, its Pixel 4 build scripts and runbooks, and the
+app-side provider the patched KeyChain binds to are parked in
 [refineid-hack's `aosp-keychain-external-key/`](https://github.com/refineid/refineid-hack/tree/main/aosp-keychain-external-key).
 
 ## Quality gates

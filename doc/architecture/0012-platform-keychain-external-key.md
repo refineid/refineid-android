@@ -6,9 +6,14 @@ Date: 2026-08-15
 
 Status note, 2026-11-07: the AOSP patch series and its build scripts moved to
 [refineid-hack's `aosp-keychain-external-key/`](https://github.com/refineid/refineid-hack/tree/main/aosp-keychain-external-key)
-as a parked experiment. This design record stays here. The app-side KeyChain
-provider code (package `fi.refineid.android.keychain`) remains in this
-repository and is inert on an unmodified phone.
+as a parked experiment, and later the same day the app-side provider followed
+it into that directory's `app-provider/`: the package
+`fi.refineid.android.keychain`, the `com.android.keychain.external` AIDL
+contract, the USB and NFC provider views over the card sessions, the
+provider's manifest entries, its trace points and its tests. This design
+record stays here. The application in this repository no longer declares the
+provider service, its PIN activity or the background-launch permission of
+ADR 0027.
 
 ## Context
 
