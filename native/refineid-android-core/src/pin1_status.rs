@@ -147,8 +147,13 @@ mod tests {
     const BELOW_FLOOR_RETRIES: u8 = 2;
     const LAST_RETRY: u8 = 1;
     const NO_RETRIES: u8 = 0;
-    const SERVED_RETRIES: [u8; 3] = [PRISTINE_RETRIES, ONE_SPENT_RETRIES, SAFE_RETRIES];
-    const REFUSED_RETRIES: [u8; 3] = [BELOW_FLOOR_RETRIES, LAST_RETRY, NO_RETRIES];
+    const SERVED_RETRIES: [u8; 4] = [
+        PRISTINE_RETRIES,
+        ONE_SPENT_RETRIES,
+        SAFE_RETRIES,
+        NO_RETRIES,
+    ];
+    const REFUSED_RETRIES: [u8; 2] = [BELOW_FLOOR_RETRIES, LAST_RETRY];
 
     struct ScriptedTransport {
         responses: VecDeque<TransportOutcome>,
@@ -266,11 +271,14 @@ mod tests {
     }
 
     #[test]
-    fn retry_floor_serves_five_four_three_and_verified() {
+    fn retry_floor_serves_five_four_three_zero_blocked_and_verified() {
         let served = SERVED_RETRIES
             .into_iter()
             .map(|count| (remaining(count), Pin1State::Remaining(count)))
-            .chain([(StatusWord::Success, Pin1State::Verified)]);
+            .chain([
+                (StatusWord::Success, Pin1State::Verified),
+                (StatusWord::AuthenticationBlocked, Pin1State::Locked),
+            ]);
         for (status, expected_state) in served {
             let mut transport = ScriptedTransport::new(&[status]);
             let result = match probe_pin1_preflight(&mut transport) {
@@ -284,12 +292,11 @@ mod tests {
     }
 
     #[test]
-    fn retry_floor_refuses_two_one_zero_blocked_and_unreadable() {
+    fn retry_floor_refuses_two_one_and_unreadable() {
         let refused = REFUSED_RETRIES
             .into_iter()
             .map(|count| (remaining(count), Pin1State::Remaining(count)))
             .chain([
-                (StatusWord::AuthenticationBlocked, Pin1State::Locked),
                 (StatusWord::AuthenticationFailed, Pin1State::NoInformation),
                 (StatusWord::WrongLength, Pin1State::Unrecognised),
             ]);

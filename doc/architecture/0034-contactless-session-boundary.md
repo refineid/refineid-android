@@ -112,7 +112,14 @@ say about it. Card loss at any stage closes the session, zeroizes the CAN,
 and returns the reader to waiting; the resting card is rediscovered by
 another tap. The signer's counter-safe gate is unchanged: preflight
 refusal at the retry floor, exactly one VERIFY, no automatic credential
-retry. Debug traces record coarse results, lengths, and timings; never
+retry. Every channel here is opened by the CAN, so the floor reads the
+counter with the header-only VERIFY over secure messaging, for PIN 1, PIN 2
+and the PUK alike. refineid-core's record-floored paths belong to channels a
+PIN or the PUK opened (`Pin1PaceChannel`, `Pin2PaceChannelOps`,
+`PukPaceChannelOps`, `Pin2ChannelSignOps`); this path opens none, and a channel
+opened by the CAN has no such record. A card that does not answer the probe
+with a counter over secure messaging is refused as unreadable, with no PIN
+sent. Debug traces record coarse results, lengths, and timings; never
 CAN digits, PACE payloads, or secure-messaging material. Release builds
 trace nothing.
 

@@ -10,11 +10,14 @@ internal enum class RappCardFailure {
     /** The holder declined or cancelled on the phone: `user_cancelled`. */
     USER_CANCELLED,
 
-    /**
-     * The card allows two, one or no PIN attempts, reports the PIN blocked,
-     * or will not say how many: `retry_floor`.
-     */
+    /** The card allows two or one PIN attempts, or will not say how many: `retry_floor`. */
     RETRY_FLOOR,
+
+    /** The card answered that PIN 1 is blocked: `retry_floor` on the wire, "blocked" to the holder. */
+    PIN1_BLOCKED,
+
+    /** The card answered that PIN 2 is blocked: `retry_floor` on the wire, "blocked" to the holder. */
+    PIN2_BLOCKED,
 
     /** The card did not answer: `card_error`. */
     CARD_ERROR,
@@ -31,9 +34,12 @@ internal enum class RappCardFailure {
  * it (RAPP v26.11.2 section 10.2).
  *
  * The native card session reads the PIN status with a header-only VERIFY
- * before every verification and, without sending one, refuses two, one or
- * no remaining attempts, a blocked PIN, and a status that carries no count
- * and is not "verified"; those refusals end the operation as `retry_floor`. A
+ * before every verification and, without sending one, refuses two or one
+ * remaining attempts and a status that carries no count and is not "verified";
+ * those refusals end the operation as `retry_floor`. At no attempts left or a
+ * blocked PIN the VERIFY goes out and the card answers for itself, spending
+ * nothing; the operation ends the same way on the wire and the holder is told
+ * the PIN is blocked. A
  * wrong PIN is the holder's to correct on the phone while the card still
  * allows at least [MINIMUM_REMAINING_ATTEMPTS]; the requester learns nothing
  * of it.
@@ -88,8 +94,12 @@ internal sealed interface RappCardAnswer {
                     afterWrongPin(remainingRetries)
                 }
 
-                AuthenticationSignFailure.SAFETY_REFUSED, AuthenticationSignFailure.PIN_LOCKED -> {
+                AuthenticationSignFailure.SAFETY_REFUSED -> {
                     Ends(RappCardFailure.RETRY_FLOOR)
+                }
+
+                AuthenticationSignFailure.PIN_LOCKED -> {
+                    Ends(RappCardFailure.PIN1_BLOCKED)
                 }
 
                 AuthenticationSignFailure.CARD_UNAVAILABLE,
@@ -122,8 +132,12 @@ internal sealed interface RappCardAnswer {
                     afterWrongPin(remainingRetries)
                 }
 
-                QualifiedSignFailure.SAFETY_REFUSED, QualifiedSignFailure.PIN_LOCKED -> {
+                QualifiedSignFailure.SAFETY_REFUSED -> {
                     Ends(RappCardFailure.RETRY_FLOOR)
+                }
+
+                QualifiedSignFailure.PIN_LOCKED -> {
+                    Ends(RappCardFailure.PIN2_BLOCKED)
                 }
 
                 QualifiedSignFailure.CARD_UNAVAILABLE,

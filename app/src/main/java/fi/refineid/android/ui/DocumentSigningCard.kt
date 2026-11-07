@@ -276,7 +276,7 @@ private fun DocumentSigningStatusText(
                 DocumentSigningStatus.CERT_REVOKED -> stringResource(R.string.signed_cert_revoked)
                 DocumentSigningStatus.NO_CARD -> stringResource(R.string.no_card)
                 DocumentSigningStatus.WRONG_PIN -> stringResource(R.string.wrong_pin)
-                DocumentSigningStatus.PIN_LOCKED -> stringResource(R.string.pin_locked)
+                DocumentSigningStatus.PIN_LOCKED -> stringResource(R.string.pin2_blocked)
                 DocumentSigningStatus.UNAVAILABLE -> stringResource(R.string.unavailable)
                 DocumentSigningStatus.ERROR -> stringResource(R.string.error)
             }

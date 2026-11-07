@@ -164,7 +164,8 @@ internal class BrowserPinCoordinator(
      * The PIN 1 held for the card in [state]. A counter that reads below
      * pristine leaves nothing held. A contactless card may not be in the
      * field yet, so an unread counter keeps the held PIN; the card's own
-     * count before the VERIFY still refuses two, one or no attempts.
+     * count before the VERIFY still refuses two or one attempts, and a
+     * blocked card answers for itself.
      */
     private fun heldPin(
         cache: AuthenticationPinCache,

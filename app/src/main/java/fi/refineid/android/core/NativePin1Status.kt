@@ -192,17 +192,24 @@ internal object NativePin1PreflightReply {
             bridgeFailure()
         }
 
+    /**
+     * The core's rule: refused at two or one tries left or an unreadable
+     * counter, sent otherwise. At no tries left or blocked the card answers
+     * for itself and spends nothing.
+     */
     private fun expectedRetryFloor(state: NativePin1State): Boolean =
         when (state) {
-            NativePin1State.Verified -> {
+            NativePin1State.Verified,
+            NativePin1State.Locked,
+            -> {
                 true
             }
 
             is NativePin1State.Remaining -> {
-                state.attempts in MINIMUM_SAFE_RETRY_COUNT..FINEID_PIN_TRY_LIMIT
+                state.attempts == EXHAUSTED_RETRY_COUNT ||
+                    state.attempts in MINIMUM_SAFE_RETRY_COUNT..FINEID_PIN_TRY_LIMIT
             }
 
-            NativePin1State.Locked,
             NativePin1State.NoInformation,
             NativePin1State.Unrecognized,
             -> {
@@ -243,4 +250,5 @@ internal object NativePin1PreflightReply {
     private const val UNSIGNED_BYTE_MASK = 0xFF
     private const val NO_RETRY_COUNT = 0xFF
     private const val MINIMUM_SAFE_RETRY_COUNT = 3
+    private const val EXHAUSTED_RETRY_COUNT = 0
 }
