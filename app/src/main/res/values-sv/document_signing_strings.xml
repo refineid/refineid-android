@@ -13,6 +13,8 @@
     <string name="hold_card">Håll ditt identitetskort mot telefonens kortläsare</string>
     <string name="finalizing_signature">Slutför signatur…</string>
     <string name="no_card">Inget läsbart identitetskort hittades</string>
+    <string name="card_left_before_read">Kortet togs bort innan det kunde läsas</string>
+    <string name="organization_card_read_first">Läs först organisationskortet med grund PIN&#160;1</string>
     <string name="signed_cert_revoked">Signaturcertifikatet är spärrat — ogiltig signatur</string>
     <string name="signed_at">signerat %1$s</string>
     <string name="document_valid">Dokument intakt — spärrlista ej kontrollerad</string>

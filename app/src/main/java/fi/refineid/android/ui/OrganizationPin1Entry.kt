@@ -4,13 +4,10 @@ package fi.refineid.android.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -18,7 +15,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import fi.refineid.android.R
 import fi.refineid.android.core.Pin1Submission
@@ -57,18 +53,13 @@ internal fun OrganizationPin1Entry(
             Text(text = stringResource(refusalMessage(attemptsLeft)), color = MaterialTheme.colorScheme.error)
         } else {
             Text(stringResource(R.string.organization_card_found_enter_pin1))
-            SecureTextField(
+            SecretField(
                 state = pin,
-                modifier = Modifier.fillMaxWidth().testTag(UiAutomationIds.NFC_ORGANIZATION_PIN1_FIELD),
+                testTag = UiAutomationIds.NFC_ORGANIZATION_PIN1_FIELD,
+                modifier = Modifier.fillMaxWidth(),
                 enabled = !isOpening,
-                label = { Text(stringResource(R.string.pin1)) },
+                label = stringResource(R.string.pin1),
                 inputTransformation = Pin1InputTransformation,
-                textObfuscationMode = TextObfuscationMode.Hidden,
-                keyboardOptions =
-                    KeyboardOptions(
-                        autoCorrectEnabled = false,
-                        keyboardType = KeyboardType.NumberPassword,
-                    ),
             )
             Button(
                 enabled = !isOpening && Pin1Submission.isComplete(pin.text),

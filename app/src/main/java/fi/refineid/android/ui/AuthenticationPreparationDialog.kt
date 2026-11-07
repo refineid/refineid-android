@@ -3,13 +3,10 @@ package fi.refineid.android.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -19,7 +16,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
@@ -155,13 +151,12 @@ private fun PreparationCredentialsDialog(
                     )
                 }
                 if (state.needsPin) {
-                    SecureTextField(
+                    SecretField(
                         state = pin,
-                        label = { Text(stringResource(R.string.pin1)) },
+                        testTag = "AuthenticationPreparationPin1",
+                        modifier = Modifier.fillMaxWidth(),
+                        label = stringResource(R.string.pin1),
                         inputTransformation = Pin1InputTransformation,
-                        textObfuscationMode = TextObfuscationMode.Hidden,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        modifier = Modifier.fillMaxWidth().testTag("AuthenticationPreparationPin1"),
                     )
                     state.attemptsLeft?.let { Text(stringResource(R.string.pin_attempts_left, it)) }
                 }

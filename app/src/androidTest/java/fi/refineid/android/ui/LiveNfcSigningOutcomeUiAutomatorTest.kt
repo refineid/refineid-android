@@ -10,6 +10,7 @@ import fi.refineid.android.browser.BundledIssuerCertificates
 import fi.refineid.android.core.Pin2Submission
 import fi.refineid.android.document.DocumentValidationResult
 import fi.refineid.android.document.DocumentValidator
+import fi.refineid.android.document.PadesLevelPolicy
 import fi.refineid.android.document.PdfSignatureClaim
 import fi.refineid.android.document.QualifiedPdfArchivalCompletion
 import fi.refineid.android.document.QualifiedPdfArchivalFailure
@@ -148,6 +149,7 @@ internal class LiveNfcSigningOutcomeUiAutomatorTest {
                     prepared = prepared,
                     timestampSource = sources.timestamp,
                     validationSource = sources.validation,
+                    policy = PadesLevelPolicy.LONG_TERM_ONLY,
                 )
             } finally {
                 sources.close()
@@ -156,6 +158,11 @@ internal class LiveNfcSigningOutcomeUiAutomatorTest {
         when (archival) {
             is QualifiedPdfArchivalResult.Success -> {
                 verifySignedDocument(archival.document)
+            }
+
+            is QualifiedPdfArchivalResult.BelowLongTerm -> {
+                archival.document.close()
+                fail("the production policy handed out a document below B-LTA: " + archival.level)
             }
 
             is QualifiedPdfArchivalResult.Failure -> {

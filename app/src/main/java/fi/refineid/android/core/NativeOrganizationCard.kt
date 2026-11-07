@@ -175,7 +175,12 @@ internal object NativeOrganizationCard {
         return result
     }
 
-    /** One qualified signature on a PIN 2 handshake, with no VERIFY. Consumes [pin2]. */
+    /**
+     * One qualified signature on a PIN 2 handshake, with no VERIFY. Consumes [pin2].
+     * With [readCaCertificates], a made signature is followed on the same
+     * channel by reads of the card's root and issuing CA, which
+     * [NativeCardCa] then holds with the card's answers.
+     */
     fun qualifiedSign(
         algorithm: QualifiedSigningAlgorithm,
         inputMode: QualifiedSigningInputMode,
@@ -183,6 +188,7 @@ internal object NativeOrganizationCard {
         input: ByteArray,
         expectedCertificate: NativeQualifiedCertificate,
         exchange: NativeBlockExchange,
+        readCaCertificates: Boolean = false,
     ): NativeQualifiedSignResult {
         val startedAt = AppTrace.nativeQualifiedSignStarted(algorithm = algorithm, contentLength = input.size)
         val expectedDer =
@@ -211,6 +217,7 @@ internal object NativeOrganizationCard {
                                     pin = bytes,
                                     content = input,
                                     expectedCertificate = expectedDer,
+                                    readCaCertificates = readCaCertificates,
                                     callback = exchange,
                                 ),
                             )
@@ -321,6 +328,7 @@ internal object NativeOrganizationCard {
         pin: ByteArray,
         content: ByteArray,
         expectedCertificate: ByteArray,
+        readCaCertificates: Boolean,
         callback: Any,
     ): ByteArray
 

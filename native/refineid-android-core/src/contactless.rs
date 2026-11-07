@@ -17,6 +17,7 @@ use refineid_pace::{
     run_pace,
 };
 use refineid_pkcs15::{CertSlot, Pkcs15Error, Pkcs15Ops};
+use refineid_x509::UnvalidatedCertificate;
 
 use crate::authentication_signer::{
     AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
@@ -152,6 +153,120 @@ pub(crate) fn read_on_card_ca_certificates<T: CardTransport + Pkcs15Ops>(secure:
     if read_any {
         let _ = secure.select_pkcs15_application();
     }
+}
+
+/// The command of a CA certificate read that the card answered last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CaReadStep {
+    SelectMf,
+    SelectFile,
+    ReadBinary,
+    /// The bytes read are not a certificate this core admits.
+    Certificate,
+}
+
+/// What the card answered to the read of one on-card CA certificate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CaReadAnswer {
+    NotAsked,
+    Read,
+    /// A step ended with the card's status word.
+    Refused {
+        step: CaReadStep,
+        status: u16,
+    },
+    /// A step ended without a status word: transport, empty or malformed data.
+    Failed {
+        step: CaReadStep,
+    },
+}
+
+/// The answers to the last unconditional read of EF.4334 and EF.4336, in
+/// that order.
+static LAST_CA_READ_ANSWERS: Mutex<[CaReadAnswer; CA_SLOT_COUNT]> =
+    Mutex::new([CaReadAnswer::NotAsked; CA_SLOT_COUNT]);
+
+/// The two on-card CA certificates: the root (EF.4334) and the issuing CA (EF.4336).
+pub(crate) const CA_SLOT_COUNT: usize = 2;
+const ROOT_CA_ANSWER_INDEX: usize = 0;
+const ISSUING_CA_ANSWER_INDEX: usize = 1;
+
+pub(crate) fn last_ca_read_answers() -> [CaReadAnswer; CA_SLOT_COUNT] {
+    LAST_CA_READ_ANSWERS
+        .lock()
+        .map_or([CaReadAnswer::NotAsked; CA_SLOT_COUNT], |guard| *guard)
+}
+
+fn set_last_ca_read_answers(answers: [CaReadAnswer; CA_SLOT_COUNT]) {
+    if let Ok(mut guard) = LAST_CA_READ_ANSWERS.lock() {
+        *guard = answers;
+    }
+}
+
+fn ca_step_answer<E>(step: CaReadStep, error: &Pkcs15Error<E>) -> CaReadAnswer {
+    match error {
+        Pkcs15Error::Status(status) => CaReadAnswer::Refused {
+            step,
+            status: status.as_u16(),
+        },
+        _ => CaReadAnswer::Failed { step },
+    }
+}
+
+/// One CA certificate under the MF, step by step so a refusal names its
+/// command: SELECT MF, SELECT of the file, READ BINARY.
+fn read_ca_slot<T: CardTransport + Pkcs15Ops>(
+    secure: &mut T,
+    slot: CertSlot,
+) -> Result<UnvalidatedCertificate, CaReadAnswer> {
+    secure
+        .select_mf()
+        .map_err(|error| ca_step_answer(CaReadStep::SelectMf, &error))?;
+    secure
+        .select_ef(slot.fid())
+        .map_err(|error| ca_step_answer(CaReadStep::SelectFile, &error))?;
+    secure
+        .read_binary_der_object(slot.label())
+        .map(UnvalidatedCertificate::new)
+        .map_err(|error| ca_step_answer(CaReadStep::ReadBinary, &error))
+}
+
+/// Read EF.4334 and EF.4336 whatever is cached, keep each that parses as a
+/// CA certificate as the last read, and record and return what the card
+/// answered, root first. Used where the caller knows the cache holds no
+/// chain for the card at hand.
+pub(crate) fn refresh_on_card_ca_certificates<T: CardTransport + Pkcs15Ops>(
+    secure: &mut T,
+) -> [CaReadAnswer; CA_SLOT_COUNT] {
+    let root = match read_ca_slot(secure, CertSlot::RootCa) {
+        Ok(cert) => match RootCaCertificate::from_unvalidated(cert) {
+            Ok(root_ca) => {
+                set_last_read_root_ca(Some(root_ca));
+                CaReadAnswer::Read
+            }
+            Err(_) => CaReadAnswer::Failed {
+                step: CaReadStep::Certificate,
+            },
+        },
+        Err(answer) => answer,
+    };
+    let issuing = match read_ca_slot(secure, CertSlot::IssuingCaEcc) {
+        Ok(cert) => match IntermediateCaCertificate::from_unvalidated(cert) {
+            Ok(issuing_ca) => {
+                set_last_read_intermediate_ca(Some(issuing_ca));
+                CaReadAnswer::Read
+            }
+            Err(_) => CaReadAnswer::Failed {
+                step: CaReadStep::Certificate,
+            },
+        },
+        Err(answer) => answer,
+    };
+    let mut answers = [CaReadAnswer::NotAsked; CA_SLOT_COUNT];
+    answers[ROOT_CA_ANSWER_INDEX] = root;
+    answers[ISSUING_CA_ANSWER_INDEX] = issuing;
+    set_last_ca_read_answers(answers);
+    answers
 }
 
 pub(crate) enum ContactlessOpenOutcome {

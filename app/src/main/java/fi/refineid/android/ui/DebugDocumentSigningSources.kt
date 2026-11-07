@@ -1,7 +1,9 @@
 package fi.refineid.android.ui
 
 import android.content.Context
+import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.browser.BundledIssuerCertificates
+import fi.refineid.android.document.SignerAnchorSource
 import fi.refineid.android.network.HttpSigningNetwork
 import fi.refineid.android.network.NetworkQualifiedPdfTimestampSource
 import fi.refineid.android.network.NetworkQualifiedPdfValidationSource
@@ -53,6 +55,7 @@ internal class DebugDocumentSigningSources private constructor(
                         dependencies = SigningNetworkValidationDependencies.create(transport),
                         signerTrustCertificates = signerTrust,
                         additionalCandidates = signerTrust,
+                        signerAnchors = cardAnchors(context),
                     )
                 return DebugDocumentSigningSources(
                     timestamp = checkNotNull(timestampSource),
@@ -67,6 +70,17 @@ internal class DebugDocumentSigningSources private constructor(
                 signerTrust.clearBytes()
             }
         }
+
+        /**
+         * The signer's own card chain, the cached copies of EF.4336 and
+         * EF.4334, anchors the collection in every build; the configured
+         * trust stays what verification uses.
+         */
+        private fun cardAnchors(context: Context): SignerAnchorSource =
+            (context.applicationContext as? RefineIdApplication)
+                ?.takeIf { app -> app.hasCaCertificateStore }
+                ?.caCertificateStore
+                ?: SignerAnchorSource.NONE
 
         private fun List<ByteArray>.clearBytes() {
             forEach { value -> value.fill(CLEARED_BYTE) }

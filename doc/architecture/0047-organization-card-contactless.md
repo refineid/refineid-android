@@ -74,3 +74,15 @@ what the card's counter reads.
   follows the last probe, and the boundary of CC-1 decides anyway.
 - UCA-4: a held PIN 1 goes to the card with a counter below five. CC-4: the
   custody rule reads the counter by `MSE:Set AT` before every use of a held value.
+- UCA-5: an operation starts while the card is still inside the open's PIN 1
+  channel; the card refuses the plain EF.CardAccess read (`6A82`, then `6985`)
+  and the operation fails as a transport error. CC-5: the open drops the
+  connection as soon as the certificates are read, like every other operation.
+- UCA-6: a signature waits on a card the reader already holds, or closes the
+  reader's session when it ends, so the reader reports a card ready with no
+  session behind it. CC-6: the tap hands a held session the fresh tag and starts
+  at once, and closes only a session it opened; a tap with no session reads
+  EF.CardAccess first and opens the kind it names: a citizen card with its
+  access number, an organization card with the certificates Basic PIN 1 read.
+  A card that answered and cannot sign ends the wait with its reason
+  (`SignTapFailure`), never as no card.

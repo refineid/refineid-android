@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.verticalScroll
@@ -23,7 +22,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -40,8 +38,6 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -62,18 +58,21 @@ import fi.refineid.android.rapp.RappCardAnswer
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 internal fun RappAuthorizationDialog(request: RappAuthRequest) {
-    var pin by remember(request.requestId) { mutableStateOf("") }
+    val pin = remember(request.requestId) { TextFieldState() }
+    DisposableEffect(pin) {
+        onDispose { pin.clearText() }
+    }
     LaunchedEffect(request.requestId) { request.onShown() }
     val text = rappPromptText(request)
     val isPinValid =
         when (request) {
-            is RappAuthRequest.BrowserAuth -> Pin1Submission.isComplete(pin)
-            is RappAuthRequest.DocumentSign -> Pin2Submission.isComplete(pin)
+            is RappAuthRequest.BrowserAuth -> Pin1Submission.isComplete(pin.text)
+            is RappAuthRequest.DocumentSign -> Pin2Submission.isComplete(pin.text)
         }
 
     Dialog(
         onDismissRequest = {
-            pin = ""
+            pin.clearText()
             request.onDenied()
         },
         properties =
@@ -107,24 +106,16 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
 
                 request.wrongPin?.let { RappWrongPinNotice(it) }
 
-                OutlinedTextField(
-                    value = pin,
-                    onValueChange = { typed ->
-                        val digits = typed.filter { it in '0'..'9' }
-                        val accepts =
-                            when (request) {
-                                is RappAuthRequest.BrowserAuth -> Pin1Submission.acceptsEntry(digits)
-                                is RappAuthRequest.DocumentSign -> Pin2Submission.acceptsEntry(digits)
-                            }
-                        if (accepts) {
-                            pin = digits
-                        }
-                    },
-                    label = { Text(stringResource(text.pinLabel)) },
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    singleLine = true,
+                SecretField(
+                    state = pin,
+                    testTag = UiAutomationIds.RAPP_PIN_FIELD,
                     modifier = Modifier.fillMaxWidth(),
+                    label = stringResource(text.pinLabel),
+                    inputTransformation =
+                        when (request) {
+                            is RappAuthRequest.BrowserAuth -> Pin1InputTransformation
+                            is RappAuthRequest.DocumentSign -> Pin2InputTransformation
+                        },
                 )
 
                 Row(
@@ -133,7 +124,7 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                 ) {
                     OutlinedButton(
                         onClick = {
-                            pin = ""
+                            pin.clearText()
                             request.onDenied()
                         },
                         modifier = Modifier.padding(end = 8.dp),
@@ -142,15 +133,17 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                     }
                     Button(
                         onClick = {
-                            val currentPin = pin
-                            pin = ""
                             when (request) {
                                 is RappAuthRequest.BrowserAuth -> {
-                                    request.onApproved(Pin1Submission.from(currentPin))
+                                    val submission = Pin1Submission.from(pin.text)
+                                    pin.clearText()
+                                    request.onApproved(submission)
                                 }
 
                                 is RappAuthRequest.DocumentSign -> {
-                                    request.onApproved(Pin2Submission.from(currentPin))
+                                    val submission = Pin2Submission.from(pin.text)
+                                    pin.clearText()
+                                    request.onApproved(submission)
                                 }
                             }
                         },

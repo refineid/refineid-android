@@ -5,6 +5,7 @@ import fi.refineid.android.browser.BrowserSignatureStatus
 import fi.refineid.android.core.AtrValidation
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
+import fi.refineid.android.core.CardCaReadAnswer
 import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.NativeAuthenticationSignResult
@@ -24,6 +25,8 @@ import fi.refineid.android.document.QualifiedPdfPreparationResult
 import fi.refineid.android.document.QualifiedPdfSigningResult
 import fi.refineid.android.network.SigningTimestampAttemptOutcome
 import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.nfc.SignTapClaim
+import fi.refineid.android.nfc.SignTapFailure
 import fi.refineid.android.rapp.RappBleGattEvent
 import fi.refineid.android.rapp.RappBleServerStep
 import fi.refineid.android.rapp.RappDialRefusal
@@ -135,6 +138,8 @@ internal object AppTrace {
     ) = Unit
 
     fun qualifiedSignatureVerificationCompleted(isVerified: Boolean) = Unit
+
+    fun cardCaReadAnswered(answers: List<CardCaReadAnswer>) = Unit
 
     fun qualifiedPdfSigningStarted(documentLength: Int): Long = 0L
 
@@ -393,6 +398,10 @@ internal object AppTrace {
     fun nfcConnectIgnored() = Unit
 
     fun nfcTagAdopted() = Unit
+
+    fun nfcSignTapClaimed(claim: SignTapClaim) = Unit
+
+    fun nfcSignTapFailed(failure: SignTapFailure) = Unit
 
     fun nfcPrimedOpenStarted() = Unit
 

@@ -22,6 +22,19 @@ internal class SignedDocumentNameTest {
     }
 
     @Test
+    fun marksADevelopmentDocumentBelowLongTermBeforeItsExtension() {
+        assertEquals(
+            "Agreement - signed at 2026-08-17T15-04-05Z-dev-B-T.pdf",
+            SignedDocumentName.belowLongTerm(
+                name = "Agreement - signed at 2026-08-17T15-04-05Z.pdf",
+                level = PadesBaselineLevel.B_T,
+            ),
+        )
+        assertEquals("scan-dev-B-B", SignedDocumentName.belowLongTerm("scan", PadesBaselineLevel.B_B))
+        assertEquals("-dev-B-T", SignedDocumentName.developmentSuffix(PadesBaselineLevel.B_T))
+    }
+
+    @Test
     fun keepsTheOriginalBaseAndExtensionAroundTheSignedPhrase() {
         assertEquals(
             "Agreement - signed at 2026-08-17T15-04-05Z.pdf",
