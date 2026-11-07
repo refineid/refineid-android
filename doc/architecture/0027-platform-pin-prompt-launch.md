@@ -41,8 +41,9 @@ component, privilege, UID, and signing-certificate checks in KeyChain.
 
 The manifest instrumentation test proves the provider permission, private
 prompt activity, recents exclusion, overlay protection permission, and
-background-launch declaration. The AOSP staging script rejects a release APK
-whose merged manifest omits the declaration. Existing broker, cancellation,
+background-launch declaration. The AOSP staging script in refineid-hack's
+`aosp-keychain-external-key/` rejects a release APK whose merged manifest
+omits the declaration. Existing broker, cancellation,
 Binder-death, secure-field, and UI tests exercise prompt ownership without a
 real credential.
 

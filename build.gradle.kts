@@ -72,19 +72,6 @@ spotless {
 val rustCrateDirectory = layout.projectDirectory.dir("native/refineid-android-core")
 val rappCrateDirectory = layout.projectDirectory.dir("native/refineid-rapp-android")
 
-// A repository shell script as a command line. Windows cannot start a
-// script as a process, so there it runs under the bash of Git for Windows,
-// whose launcher puts the tools the scripts use (awk, cmp, sed) on the PATH;
-// the hooks run in the same shell. Any bash on the PATH is the last resort.
-val hostIsWindows = System.getProperty("os.name").startsWith("Windows")
-val gitForWindowsBash: String =
-    listOfNotNull(System.getenv("ProgramFiles"), System.getenv("ProgramW6432"), System.getenv("LOCALAPPDATA"))
-        .flatMap { listOf(File(it, "Git/bin/bash.exe"), File(it, "Programs/Git/bin/bash.exe")) }
-        .firstOrNull { it.isFile }
-        ?.absolutePath ?: "bash"
-
-fun shellScript(script: String): List<String> = if (hostIsWindows) listOf(gitForWindowsBash, script) else listOf(script)
-
 // Both native crates build against the latest refineid-core main. Updating one
 // core package moves the whole core git source in the crate's Cargo.lock to the
 // current main commit; third-party crates keep their locked versions, so every
@@ -105,29 +92,18 @@ fun registerCoreRefresh(
 val refreshAndroidCoreRevision =
     registerCoreRefresh("refreshAndroidCoreRevision", rustCrateDirectory, "refineid-apdu")
 registerCoreRefresh("refreshRappCoreRevision", rappCrateDirectory, "refineid-rapp")
-val aospProviderContractVerifier = "Scripts/verify-aosp-provider-contract.sh"
-val aospProviderContractPatch =
-    "platform/aosp/android-13.0.0_r31/patches/packages-apps-KeyChain/" +
-        "0005-Bind-statically-trusted-external-key-provider.patch"
 val repositoryShellScripts =
     listOf(
         ".githooks/pre-commit",
         ".githooks/pre-push",
         "Scripts/agent-housekeeping.sh",
-        "Scripts/apply-aosp-patches.sh",
-        "Scripts/audit-aosp-patches.sh",
         "Scripts/audit-dependencies.sh",
         "Scripts/bootstrap-macos.sh",
-        "Scripts/build-aosp-flame.sh",
         "Scripts/build-release-apk.sh",
-        "Scripts/configure-aosp-host-compat.sh",
         "Scripts/gradle-environment.sh",
         "Scripts/install-hooks.sh",
         "Scripts/release-play-store.sh",
         "Scripts/stamp-version.sh",
-        "Scripts/stage-aosp-prebuilt.sh",
-        aospProviderContractVerifier,
-        "Scripts/verify-aosp-flame-device.sh",
         "Scripts/verify-commit.sh",
         "Scripts/verify-push.sh",
     )
@@ -166,22 +142,6 @@ val shellCheck =
         commandLine("shellcheck", "--shell=bash", *repositoryShellScripts.toTypedArray())
     }
 
-val verifyAospProviderContract =
-    tasks.register<Exec>("verifyAospProviderContract") {
-        group = "verification"
-        description = "Verify the application and AOSP private provider wire contract."
-        inputs.files(
-            aospProviderContractVerifier,
-            "app/src/main/aidl/com/android/keychain/external/ExternalKeyProviderIdentity.aidl",
-            "app/src/main/aidl/com/android/keychain/external/ExternalKeyProviderResult.aidl",
-            "app/src/main/aidl/com/android/keychain/external/IExternalKeyProviderService.aidl",
-            "app/src/main/java/com/android/keychain/external/ExternalKeyProviderIdentity.java",
-            "app/src/main/java/com/android/keychain/external/ExternalKeyProviderResult.java",
-            aospProviderContractPatch,
-        )
-        commandLine(shellScript(aospProviderContractVerifier))
-    }
-
 tasks.named("check") {
-    dependsOn(":app:check", rustClippy, shellCheck, verifyAospProviderContract)
+    dependsOn(":app:check", rustClippy, shellCheck)
 }
