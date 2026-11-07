@@ -50,7 +50,9 @@ The platform branch consists of four boundaries:
    `PrivateKey` for an external alias.
 3. A framework JCA provider recognizes only that private-key class, hashes or
    validates its input, and asks `KeyChainService` to sign an exact digest.
-4. A privileged RefineID service obtains a fresh PIN1 through its secure UI,
+4. A privileged RefineID service obtains PIN1 through its secure UI, or
+   uses the PIN1 the app already holds in memory under the core
+   [credential custody contract](https://github.com/refineid/refineid-core/blob/main/doc/security/credential-custody.md),
    signs through the retained USB session, locally verifies the result, and
    returns only the verified signature or a coarse failure.
 
@@ -261,8 +263,15 @@ different salts and therefore do not match the lease key.
   credential-management policy. The stable external alias remains provider
   owned and is never deleted as policy-managed key material. A browser never
   self-grants an alias.
-- Every new card operation requires fresh holder PIN1 entry. PIN values are
-  neither cached nor sent through KeyChain or the browser process.
+- PIN1 custody follows the core
+  [credential custody contract](https://github.com/refineid/refineid-core/blob/main/doc/security/credential-custody.md):
+  the app holds PIN1 in process memory from its first card-confirmed use
+  until the card leaves, the process ends, the device restarts or the
+  identity is forgotten, and the KeyChain path uses that same held value,
+  so a holder who has entered PIN1 is not prompted again for each
+  operation. No PIN is ever written to storage. PIN values are never sent
+  through KeyChain or the browser process. PIN2 is not reachable through
+  this route at all.
 - The platform-signed provider holds the Android 13 background-activity launch
   permission solely to show its own unexported secure PIN activity for an
   authenticated KeyChain request; ADR 0027 defines the restriction.
@@ -341,9 +350,9 @@ the platform image builder.
   behavior.
 - Framework provider tests prove exact algorithm/input mapping and ordinary-key
   provider fall-through.
-- RefineID tests prove one fresh PIN per card operation, mandatory local
-  verification, one-result replay, zeroization, detach, timeout, and process
-  death behavior.
+- RefineID tests prove held-PIN1 custody and its invalidation, mandatory
+  local verification, one-result replay, zeroization, detach, timeout, and
+  process death behavior.
 - Physical Pixel tests prove that Chrome and Firefox independently receive the
   alias through `KeyChain`, complete a supported TLS client-authentication
   handshake, and cannot use the alias without a grant and holder action.
