@@ -204,19 +204,16 @@ internal class OrganizationContactlessSession(
         return result
     }
 
-    /**
-     * No record-floored PIN 2 change exists for this channel, and the plain one
-     * floors on the header-only VERIFY this card does not answer over secure
-     * messaging, so nothing is sent. [CredentialHealth.changesPin2] keeps the
-     * form from being offered.
-     */
     override fun changePin2(
         currentPin: ByteArray,
         newPin: ByteArray,
     ): CardManagementResult<ManageOutcome> {
-        currentPin.fill(0)
-        newPin.fill(0)
-        return CardManagementResult.Failure(CardManagementFailure.SAFETY_REFUSED)
+        checkOwnerThread()
+        check(!isClosed) { "contactless session is closed" }
+        if (!reconnect()) return unavailable(currentPin, newPin)
+        val result = NativeOrganizationCard.changePin2(currentPin, newPin, exchange())
+        closeIsoDep()
+        return result
     }
 
     override fun unblockPin1(

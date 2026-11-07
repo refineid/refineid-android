@@ -75,14 +75,6 @@ import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
 
-private enum class ManagementTask {
-    CHANGE_PIN1,
-    CHANGE_PIN2,
-    RESET_PIN1,
-    RESET_PIN2,
-    ACTIVATE_CARD,
-}
-
 private data class OutcomeNotice(
     val resId: Int,
     val arg: String? = null,
@@ -96,24 +88,6 @@ private fun probeFailureNotice(kind: CardManagementFailure): OutcomeNotice =
             else -> R.string.error
         },
     )
-
-/**
- * The task a card's answer selects: activation while it awaits activation,
- * the reset of a locked PIN, otherwise the task already chosen.
- */
-private fun taskAfterAnswer(
-    health: CredentialHealth?,
-    current: ManagementTask,
-): ManagementTask =
-    when {
-        health == null -> current
-        health.activationNeeds.any -> ManagementTask.ACTIVATE_CARD
-        health.pin1State is NativePin1State.Locked -> ManagementTask.RESET_PIN1
-        health.pin2State is NativePin2State.Locked -> ManagementTask.RESET_PIN2
-        current == ManagementTask.CHANGE_PIN2 && !health.changesPin2 -> ManagementTask.CHANGE_PIN1
-        current == ManagementTask.ACTIVATE_CARD -> ManagementTask.CHANGE_PIN1
-        else -> current
-    }
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
@@ -362,7 +336,8 @@ internal fun CardManagementScreen(
             ManagementTask.CHANGE_PIN1, ManagementTask.CHANGE_PIN2 -> {
                 val curBytes = currentPin.toByteArray(Charsets.US_ASCII)
                 val newBytes = newPin.toByteArray(Charsets.US_ASCII)
-                val isPin1 = selectedTask == ManagementTask.CHANGE_PIN1
+                val task = selectedTask
+                val isPin1 = task == ManagementTask.CHANGE_PIN1
                 val pinName = if (isPin1) pin1Name else pin2Name
                 if (isPin1) {
                     pinCache?.clear()
@@ -381,14 +356,7 @@ internal fun CardManagementScreen(
                                     onPin1Changed?.invoke()
                                 }
                             } else {
-                                outcomeNotice =
-                                    OutcomeNotice(
-                                        when {
-                                            result.value !is ManageOutcome.Locked -> R.string.error
-                                            isPin1 -> R.string.pin1_blocked
-                                            else -> R.string.pin2_blocked
-                                        },
-                                    )
+                                outcomeNotice = OutcomeNotice(changeRefusalNotice(result.value, task))
                                 outcomeIsError = true
                             }
                             probe()
@@ -673,7 +641,6 @@ internal fun CardManagementScreen(
             Section(stringResource(R.string.card_pins)) {
                 TaskSelector(
                     selectedTask = selectedTask,
-                    changesPin2 = health?.changesPin2 != false,
                     onSelect = { task ->
                         selectedTask = task
                         outcomeNotice = null
@@ -841,7 +808,6 @@ private fun GuidanceBanner(
 @Composable
 private fun TaskSelector(
     selectedTask: ManagementTask,
-    changesPin2: Boolean,
     onSelect: (ManagementTask) -> Unit,
 ) {
     Column(
@@ -858,14 +824,12 @@ private fun TaskSelector(
                 onClick = { onSelect(ManagementTask.CHANGE_PIN1) },
                 modifier = Modifier.weight(1f).testTag("managementTask.changePin1"),
             )
-            if (changesPin2) {
-                TaskButton(
-                    text = stringResource(R.string.change_pin2),
-                    isSelected = selectedTask == ManagementTask.CHANGE_PIN2,
-                    onClick = { onSelect(ManagementTask.CHANGE_PIN2) },
-                    modifier = Modifier.weight(1f).testTag("managementTask.changePin2"),
-                )
-            }
+            TaskButton(
+                text = stringResource(R.string.change_pin2),
+                isSelected = selectedTask == ManagementTask.CHANGE_PIN2,
+                onClick = { onSelect(ManagementTask.CHANGE_PIN2) },
+                modifier = Modifier.weight(1f).testTag("managementTask.changePin2"),
+            )
         }
         Row(
             modifier = Modifier.fillMaxWidth(),

@@ -29,9 +29,9 @@
 use refineid_apdu::{CardTransport, PinRetries, StatusWord, TransportOutcome};
 use refineid_auth::{
     AuthError, CardPinLengths, ChannelProof, CredentialHealthReport, FlooredCredential,
-    ManageOutcome, Pin1, Pin1PaceChannel as _, Pin1PaceChannelOps as _, Pin2, PinManageOps as _,
-    PinReferenceScheme, PinSlot, PinStatus, Puk, PukPaceChannelOps as _, UnvalidatedSecret,
-    check_retry_floor,
+    ManageOutcome, Pin1, Pin1PaceChannel as _, Pin1PaceChannelOps as _, Pin2, Pin2ChangeError,
+    Pin2PaceChannelOps as _, PinManageOps as _, PinReferenceScheme, PinSlot, PinStatus, Puk,
+    PukPaceChannelOps as _, UnvalidatedSecret, check_retry_floor,
 };
 use refineid_ber::BerEncoder;
 use refineid_pace::commands::MseSetAt;
@@ -375,6 +375,11 @@ fn pin1_entry(bytes: Vec<u8>) -> Result<Pin1, ChannelRefusal> {
         .map_err(|_shape| ChannelRefusal::InvalidEntry)
 }
 
+fn pin2_entry(bytes: Vec<u8>) -> Result<Pin2, ChannelRefusal> {
+    Pin2::reconstruct(UnvalidatedSecret::from_owned_bytes(bytes))
+        .map_err(|_shape| ChannelRefusal::InvalidEntry)
+}
+
 fn puk_entry(bytes: Vec<u8>) -> Result<Puk, ChannelRefusal> {
     Puk::reconstruct(UnvalidatedSecret::from_owned_bytes(bytes))
         .map_err(|_shape| ChannelRefusal::InvalidEntry)
@@ -665,6 +670,45 @@ pub(crate) fn organization_change_pin1<T: CardTransport>(
     (result, secure.into_inner())
 }
 
+/// PIN 2 changed: PACE with the current PIN, then core's change on that
+/// channel, floored on the channel's record. Core makes DF.ESIGN current
+/// itself, after every refusal that sends nothing, and presents the current
+/// PIN again with the new one, as the PIN 1 change does.
+pub(crate) fn organization_change_pin2<T: CardTransport>(
+    transport: T,
+    current_bytes: Vec<u8>,
+    new_bytes: Vec<u8>,
+) -> (Result<ManageOutcome, CardManagementFailure>, T) {
+    let opening_bytes = current_bytes.clone();
+    let entries = pin2_entry(opening_bytes).and_then(|opening| {
+        let current = pin2_entry(current_bytes)?;
+        let new = pin2_entry(new_bytes)?;
+        Ok((opening, current, new))
+    });
+    let (opening, current, new) = match entries {
+        Ok(entries) => entries,
+        Err(refusal) => return (refusal.into_management(), transport),
+    };
+    let mut secure = match open_channel(transport, &opening, OrganizationCredential::Pin2) {
+        Ok(secure) => secure,
+        Err((refusal, transport)) => return (refusal.into_management(), transport),
+    };
+    let result = match secure.select_pkcs15_application() {
+        Ok(()) => lengths_on_channel(&mut secure).and_then(|lengths| {
+            secure
+                .change_pin2_after_pin2_pace(&lengths, new, ChannelProof::PresentAgain(current))
+                .or_else(|error| match error {
+                    Pin2ChangeError::Auth(auth) => Err(management_auth_failure(auth)),
+                    Pin2ChangeError::Directory(directory) => {
+                        pkcs15_refusal(&directory).into_management()
+                    }
+                })
+        }),
+        Err(error) => pkcs15_refusal(&error).into_management(),
+    };
+    (result, secure.into_inner())
+}
+
 /// A blocked PIN set: PACE with the PUK, then core's reset on that channel,
 /// which carries only the new PIN and spends no PUK try (doc/reference/pace.md
 /// in refineid-core). PIN 2 is local to DF.ESIGN, so that directory is made
@@ -727,7 +771,7 @@ mod tests {
     use super::{
         ChannelRefusal, ContactlessCardKind, ID_PACE_ECDH_GM_AES_CBC_CMAC_256,
         OrganizationCredential, contactless_card_kind, open_channel,
-        organization_authenticate_and_sign, organization_change_pin1,
+        organization_authenticate_and_sign, organization_change_pin1, organization_change_pin2,
         organization_credential_health, organization_open, organization_qualified_sign,
         organization_reset_pin, organization_verify_pin1, read_organization_counter,
         sign_on_handshake_presentation,
@@ -1413,6 +1457,138 @@ mod tests {
         );
         assert_eq!(outcome, Err(CardManagementFailure::SafetyRefused));
         assert_eq!(card.sent(INS_GENERAL_AUTHENTICATE), 0);
+    }
+
+    /// The PIN 2 change on a synthetic card answering every protected command
+    /// with `answers`.
+    fn change_pin2_with(
+        answers: Vec<ResponseApdu>,
+    ) -> (
+        Result<ManageOutcome, CardManagementFailure>,
+        PlainFront<OrganizationalCard>,
+    ) {
+        organization_change_pin2(
+            pin2_card(answers),
+            SYNTHETIC_PIN2.to_vec(),
+            SYNTHETIC_NEW_PIN2.to_vec(),
+        )
+    }
+
+    /// Where the CHANGE REFERENCE DATA stands among the protected commands.
+    fn change_position(card: &OrganizationalCard) -> usize {
+        card.protected_commands()
+            .iter()
+            .position(|command| command.get(INS_INDEX) == Some(&INS_CHANGE_REFERENCE_DATA))
+            .expect("one CHANGE REFERENCE DATA")
+    }
+
+    /// Successes for every protected command before the change, then `word`
+    /// as the card's answer to the change.
+    fn change_answered(word: StatusWord) -> Vec<ResponseApdu> {
+        let (_, card) = change_pin2_with(successes());
+        let mut answers = vec![status(StatusWord::Success); change_position(&card.inner)];
+        answers.push(status(word));
+        answers
+    }
+
+    #[test]
+    fn pin2_is_changed_inside_df_esign_on_its_own_channel_presented_once_more() {
+        let (outcome, card) = change_pin2_with(successes());
+        assert_eq!(outcome, Ok(ManageOutcome::Ok));
+        assert_eq!(card.inner.credential_commands(), 1);
+        assert!(no_verify(&card.inner));
+        let commands = card.inner.protected_commands();
+        let change = change_position(&card.inner);
+        assert_eq!(
+            commands
+                .get(change - 1)
+                .and_then(|command| command.get(INS_INDEX)),
+            Some(&INS_SELECT),
+            "DF.ESIGN is selected right before the change"
+        );
+        let carried = |pin: &[u8]| {
+            commands[change]
+                .windows(pin.len())
+                .any(|window| window == pin)
+        };
+        assert!(
+            carried(SYNTHETIC_PIN2),
+            "the change carries the current PIN 2"
+        );
+        assert!(
+            carried(SYNTHETIC_NEW_PIN2),
+            "the change carries the new PIN 2"
+        );
+    }
+
+    #[test]
+    fn a_wrong_current_pin2_in_the_change_reports_the_count() {
+        let (outcome, _) = change_pin2_with(change_answered(retries(3)));
+        assert_eq!(
+            outcome,
+            Ok(ManageOutcome::WrongCredential {
+                retries_left: PinRetries::from_nibble(3).expect("counter value")
+            })
+        );
+    }
+
+    #[test]
+    fn a_blocked_answer_to_the_pin2_change_is_the_card_s_word() {
+        let (outcome, _) = change_pin2_with(change_answered(StatusWord::AuthenticationBlocked));
+        assert_eq!(outcome, Ok(ManageOutcome::Locked));
+    }
+
+    #[test]
+    fn a_wrong_current_pin2_at_the_handshake_reports_the_count() {
+        let (outcome, card) = organization_change_pin2(
+            scripted(Script::mse(&[StatusWord::Success]).then_general_authenticate(&[retries(4)])),
+            SYNTHETIC_PIN2.to_vec(),
+            SYNTHETIC_NEW_PIN2.to_vec(),
+        );
+        assert_eq!(
+            outcome,
+            Ok(ManageOutcome::WrongCredential {
+                retries_left: PinRetries::from_nibble(4).expect("counter value")
+            })
+        );
+        assert_eq!(card.sent(INS_GENERAL_AUTHENTICATE), 1);
+    }
+
+    #[test]
+    fn a_blocked_pin2_at_the_handshake_is_the_card_s_word() {
+        let (outcome, _) = organization_change_pin2(
+            scripted(
+                Script::mse(&[retries(0)])
+                    .then_general_authenticate(&[StatusWord::AuthenticationBlocked]),
+            ),
+            SYNTHETIC_PIN2.to_vec(),
+            SYNTHETIC_NEW_PIN2.to_vec(),
+        );
+        assert_eq!(outcome, Ok(ManageOutcome::Locked));
+    }
+
+    #[test]
+    fn a_pin2_change_below_the_floor_never_opens_the_channel() {
+        for tries in [2, 1] {
+            let (outcome, card) = organization_change_pin2(
+                scripted(Script::mse(&[retries(tries)])),
+                SYNTHETIC_PIN2.to_vec(),
+                SYNTHETIC_NEW_PIN2.to_vec(),
+            );
+            assert_eq!(outcome, Err(CardManagementFailure::SafetyRefused));
+            assert_eq!(card.sent(INS_GENERAL_AUTHENTICATE), 0);
+        }
+    }
+
+    #[test]
+    fn a_malformed_pin2_entry_reaches_no_card() {
+        let (outcome, card) = organization_change_pin2(
+            scripted(Script::default()),
+            SYNTHETIC_PIN2.to_vec(),
+            b"12".to_vec(),
+        );
+        assert_eq!(outcome, Err(CardManagementFailure::InvalidCredential));
+        assert!(card.plain.is_empty());
     }
 
     #[test]

@@ -42,17 +42,12 @@ on that probe can run on its channels.
 | PIN 1 verification, login | PIN 1 PACE, no VERIFY | `MSE:Set AT` in `run_pace` |
 | Qualified signature | PIN 2 PACE, `qualified_key_after_pin2_pace`, no VERIFY | `MSE:Set AT` in `run_pace` |
 | PIN 1 change | PIN 1 PACE, `change_pin1_after_pin1_pace(PresentAgain)` | `MSE:Set AT`, then the channel's record |
+| PIN 2 change | PIN 2 PACE, `change_pin2_after_pin2_pace(PresentAgain)`, which selects DF.ESIGN itself | `MSE:Set AT`, then the channel's record |
 | PIN 1 or PIN 2 reset | PUK PACE, `reset_pin*_after_puk_pace(PaceHandshake)` | `MSE:Set AT` on the PUK's counter |
 | Counters, health | none, plain `MSE:Set AT` | no try can be spent |
-| PIN 2 change | not offered | see below |
 
 ## What core does not offer yet
 
-- **`change_pin2_after_pin2_pace`.** `refineid-auth` has the PIN 1 change on its
-  channel but no PIN 2 one; `PinManageOps::change_pin2` floors on the header-only
-  VERIFY, and the digits and CHANGE REFERENCE DATA assembly are crate-private by
-  design. The form is not offered for this card over NFC and nothing is sent. The
-  PUK reset of PIN 2 works.
 - **A counter read without a handshake.** `set_authentication_template` is private,
   so this repository assembles the same `MSE:Set AT` from core's `MseSetAt`.
 - **A held-PIN admission in `run_pace`.** Only the floor runs between `MSE:Set AT`
