@@ -197,7 +197,7 @@ internal fun DocumentSigningCard(
                             .fillMaxWidth()
                             .testTag(UiAutomationIds.PIN2_FIELD),
                     enabled = !isWorking,
-                    label = { Text(stringResource(R.string.signature_pin2)) },
+                    label = { Text(stringResource(R.string.pin2)) },
                     inputTransformation = Pin2InputTransformation,
                     textObfuscationMode = TextObfuscationMode.Hidden,
                     keyboardOptions =

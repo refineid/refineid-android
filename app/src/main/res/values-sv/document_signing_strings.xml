@@ -5,7 +5,6 @@
     <string name="signing_progress">Signerar %1$d/%2$d…</string>
     <string name="finalizing_progress">Slutför %1$d/%2$d…</string>
     <string name="saving_progress">Sparar %1$d/%2$d…</string>
-    <string name="signature_pin2">Signatur-PIN 2</string>
     <string name="sign_pdf_single">Signera dokument (PDF)</string>
     <string name="sign_pdf_multiple">Signera dokumenten (PDF)</string>
     <string name="sign_container">Signera portfölj (ASiC-E)</string>
