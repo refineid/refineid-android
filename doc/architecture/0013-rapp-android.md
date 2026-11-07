@@ -108,7 +108,8 @@ transport.
   phone or another card replaces it, the card rejects it, the card's counter
   reads below pristine or cannot be read, the holder clears it, or the
   process ends; while it is held a browser authentication runs with no
-  prompt. A card in the reader whose status reads "verified" from the last
+  prompt, on a locked phone once the holder has unlocked it (ADR 0040). A
+  card in the reader whose status reads "verified" from the last
   VERIFY is at its try limit (FINEID S1 v4.2 section 3.5), so it keeps the
   hold. Opening Remote Access or starting to serve never asks for PIN 1; the
   first authentication a computer requests does. PIN 2 is asked for every

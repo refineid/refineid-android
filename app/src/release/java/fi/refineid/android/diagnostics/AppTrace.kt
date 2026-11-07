@@ -316,6 +316,10 @@ internal object AppTrace {
 
     fun rappCardPromptDismissed() = Unit
 
+    fun rappUnlockWaitStarted() = Unit
+
+    fun rappUnlockWaitEnded() = Unit
+
     fun rappPairingCodeDisplayed() = Unit
 
     fun rappPairingCompleted() = Unit

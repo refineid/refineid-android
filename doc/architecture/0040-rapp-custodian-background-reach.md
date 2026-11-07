@@ -59,10 +59,19 @@ held against it unless the card is on the contactless interface.
   the moment the phone stops waiting. The consent activity does not
   show over the keyguard: on a locked phone the holder unlocks first, so
   an approval comes from the device owner. A login that the held PIN 1
-  serves needs no consent activity and is answered whether the phone is
-  locked or not: the held PIN 1 is bounded by the card's presence, not by
-  the keyguard, under the core
-  [credential custody contract](https://github.com/refineid/refineid-core/blob/main/doc/security/credential-custody.md).
+  serves under the core
+  [credential custody contract](https://github.com/refineid/refineid-core/blob/main/doc/security/credential-custody.md)
+  needs no consent activity, but a locked phone does not serve it either:
+  the request posts the same notification, waits within the request's
+  deadline for the holder to unlock, and then proceeds with no PIN prompt.
+  A deadline that passes with the phone still locked ends the operation
+  as any expired request. On an unlocked phone the held PIN 1 answers at
+  once. Locked means the keyguard is showing
+  (`KeyguardManager.isKeyguardLocked`), whatever secures it: that is the
+  state in which the consent activity cannot show either, and its end is
+  the `ACTION_USER_PRESENT` broadcast. A phone with no keyguard is never
+  locked. Local use, the in-app browser and the KeyChain path, is not
+  gated: it runs on the phone's own screen.
 - **Permissions.** RefineID asks for `POST_NOTIFICATIONS` when Remote Access
   is on with a pairing, and again when the holder turns Remote Access on. While
   notifications are off, the Remote Access screen offers one row that opens
@@ -88,8 +97,8 @@ Observed on a stock Android 16 phone with a debug build:
 - A Mac on the same network browsed `_refineid-stream._tcp` and found the
   phone's session instance while no RefineID activity had been started.
 
-Not yet observed: delivery after a reboot, and the request notification on
-a locked phone.
+Not yet observed: delivery after a reboot, the request notification on a
+locked phone, and the held PIN 1 wait on a locked phone.
 
 ## Consequences
 

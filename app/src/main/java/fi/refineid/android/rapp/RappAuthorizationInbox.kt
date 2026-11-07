@@ -61,6 +61,12 @@ internal data class RappCardTapPrompt(
     val onCancel: () -> Unit,
 )
 
+/** A login the held PIN 1 answers once the holder unlocks this phone (ADR 0040). */
+internal data class RappUnlockWait(
+    val requestId: String,
+    val requester: String,
+)
+
 /**
  * Rendezvous between incoming RAPP proxy events, notifications, and Compose UI.
  */
@@ -82,6 +88,10 @@ internal class RappAuthorizationInbox(
     var currentNotice by mutableStateOf<Int?>(null)
         private set
 
+    /** The login waiting for the holder to unlock the phone, if one is. */
+    var currentUnlockWait: RappUnlockWait? = null
+        private set
+
     fun updateForeground(foreground: Boolean) {
         isForeground = foreground
         if (foreground) {
@@ -91,6 +101,8 @@ internal class RappAuthorizationInbox(
                 notificationManager.postAuthorizationNotification(it.requestId, requestText(it))
             } ?: currentTapPrompt?.let {
                 notificationManager.postAuthorizationNotification(it.requestId, tapPromptText(it), waitsOnCard = true)
+            } ?: currentUnlockWait?.let {
+                notificationManager.postAuthorizationNotification(it.requestId, unlockWaitText(it))
             }
         }
     }
@@ -186,6 +198,22 @@ internal class RappAuthorizationInbox(
         }
     }
 
+    /**
+     * Tells the holder that [requester]'s login waits for this phone to be
+     * unlocked: the request notification, with no prompt behind it, since
+     * the held PIN 1 answers the login once the holder has unlocked.
+     */
+    fun showUnlockWait(
+        requestId: String,
+        requester: String,
+    ) {
+        val wait = RappUnlockWait(requestId = requestId, requester = RappDisplayText.inert(requester))
+        currentUnlockWait = wait
+        if (!isForeground) {
+            notificationManager.postAuthorizationNotification(requestId, unlockWaitText(wait))
+        }
+    }
+
     /** Shows [message] to the holder until dismissed. */
     fun tell(
         @StringRes message: Int,
@@ -213,6 +241,10 @@ internal class RappAuthorizationInbox(
             currentTapPrompt = null
             notificationManager.dismissNotification()
         }
+        if (currentUnlockWait?.requestId == requestId) {
+            currentUnlockWait = null
+            notificationManager.dismissNotification()
+        }
     }
 
     fun cancel(requestId: String) {
@@ -226,6 +258,10 @@ internal class RappAuthorizationInbox(
             currentTapPrompt = null
             notificationManager.dismissNotification()
         }
+        if (currentUnlockWait?.requestId == requestId) {
+            currentUnlockWait = null
+            notificationManager.dismissNotification()
+        }
     }
 
     private fun requestText(request: RappAuthRequest): String = rappRequestText(context.resources, request)
@@ -233,11 +269,16 @@ internal class RappAuthorizationInbox(
     private fun tapPromptText(prompt: RappCardTapPrompt): String =
         context.getString(R.string.remote_card_needed, prompt.requester)
 
+    /** The same text the consent request carries: what the holder is asked for is the login, not the unlock. */
+    private fun unlockWaitText(wait: RappUnlockWait): String =
+        context.getString(R.string.remote_authentication_request, wait.requester)
+
     fun dismissAll() {
         currentRequest?.onDenied?.invoke()
         currentRequest = null
         currentTapPrompt?.onCancel?.invoke()
         currentTapPrompt = null
+        currentUnlockWait = null
         notificationManager.dismissNotification()
     }
 }

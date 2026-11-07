@@ -88,6 +88,7 @@ internal class RappPhoneProxyDispatcher(
     private val context: Context,
     private val scope: CoroutineScope,
     private val inbox: RappAuthorizationInbox,
+    private val keyguard: RappKeyguard,
     pinCache: AuthenticationPinCache? = null,
     private val primedCanStore: PrimedCanStore? = null,
     private val authCardService: () -> AuthenticationCardService?,
@@ -1713,7 +1714,7 @@ internal class RappPhoneProxyDispatcher(
             return
         }
         val card = heldCard()
-        val held = card?.let(pin1Custody::held)
+        val held = card?.let { heldPin1(operationId, it) }
         var heldFor = card.takeIf { held != null }
         val first = held ?: askPin1(bridge, operationId, wrongPin = null, firstPrompt = true)
         if (first == null) {
@@ -1753,6 +1754,36 @@ internal class RappPhoneProxyDispatcher(
                 }
             }
         }
+    }
+
+    /**
+     * The PIN 1 held for [card], served only once this phone is unlocked
+     * (ADR 0040). While the keyguard shows, the request notification tells
+     * the holder and the operation waits for the unlock; the operation's
+     * deadline ends that wait as it ends a wait for consent, by cancelling
+     * the operation once its result went out. The custody is read again
+     * after a wait, since the hold may have ended during it. Null when
+     * nothing is held for [card].
+     */
+    private suspend fun heldPin1(
+        operationId: RappOperationId,
+        card: AuthenticationCardIdentity,
+    ): Pin1Submission? {
+        val held = pin1Custody.held(card) ?: return null
+        held.use {
+            RappUnlockGate.awaitUnlocked(
+                keyguard,
+                tell = {
+                    AppTrace.rappUnlockWaitStarted()
+                    withContext(Dispatchers.Main) { inbox.showUnlockWait(operationId.key, requesterName()) }
+                },
+                withdraw = {
+                    AppTrace.rappUnlockWaitEnded()
+                    withContext(NonCancellable + Dispatchers.Main) { inbox.dismiss(operationId.key) }
+                },
+            )
+        }
+        return pin1Custody.held(card)
     }
 
     /**
