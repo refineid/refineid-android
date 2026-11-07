@@ -57,8 +57,12 @@ held against it unless the card is on the contactless interface.
   while the request is pending, so it stays at the top of the shade after the
   heads-up folds away. While the request waits on the card it counts down to
   the moment the phone stops waiting. The consent activity does not
-  show over the keyguard: on a locked phone the holder unlocks first, because
-  PIN 1 may be cached and an approval must come from the device owner.
+  show over the keyguard: on a locked phone the holder unlocks first, so
+  an approval comes from the device owner. A login that the held PIN 1
+  serves needs no consent activity and is answered whether the phone is
+  locked or not: the held PIN 1 is bounded by the card's presence, not by
+  the keyguard, under the core
+  [credential custody contract](https://github.com/refineid/refineid-core/blob/main/doc/security/credential-custody.md).
 - **Permissions.** RefineID asks for `POST_NOTIFICATIONS` when Remote Access
   is on with a pairing, and again when the holder turns Remote Access on. While
   notifications are off, the Remote Access screen offers one row that opens
