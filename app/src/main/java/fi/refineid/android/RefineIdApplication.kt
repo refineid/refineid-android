@@ -291,6 +291,9 @@ class RefineIdApplication : Application() {
             context = this,
             scope = CoroutineScope(Dispatchers.Default),
             inbox = rappAuthorizationInbox,
+            keyguard =
+                fi.refineid.android.rapp
+                    .AndroidRappKeyguard(this),
             pinCache = authenticationPinCache,
             primedCanStore = primedStore,
             onAuthenticationVerified = ::retainAuthenticationPin,

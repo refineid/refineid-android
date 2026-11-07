@@ -623,6 +623,14 @@ internal object AppTrace {
         debug("rapp:card-prompt-dismissed")
     }
 
+    fun rappUnlockWaitStarted() {
+        debug("rapp:unlock-wait-started")
+    }
+
+    fun rappUnlockWaitEnded() {
+        debug("rapp:unlock-wait-ended")
+    }
+
     fun rappPairingCodeDisplayed() {
         debug("rapp:pairing-code-displayed")
     }
