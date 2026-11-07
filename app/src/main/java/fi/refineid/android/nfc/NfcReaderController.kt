@@ -141,19 +141,23 @@ internal class NfcReaderController(
     private val feedback = NfcFeedback(applicationContext)
 
     // Tap-to-sign: a qualified signature waits for the holder to present
-    // the card instead of requiring a pre-opened session. Confined to the
-    // shared worker thread for session mutation; the transient session it
-    // opens is the same one the qualified card service serves.
+    // the card. A session this controller holds serves it and stays this
+    // controller's; one the tap opens is the tap's to close. Session mutation
+    // runs on the shared worker thread, so the qualified card service serves
+    // whichever session is open.
     internal val tapToSign =
         NfcTapToSign(
-            probeExecutor = probeExecutor,
-            mainHandler = mainHandler,
-            latestIsoDep = { latestIsoDep },
-            primedCan = { primedCanStore.read() },
-            activeSession = { activeSession },
-            adoptSession = { session -> activeSession = session },
+            worker = probeExecutor,
+            mainThread = HandlerSignTapMainThread(mainHandler),
+            latestTag = { latestIsoDep },
+            card =
+                IsoDepSignTapCard(
+                    activeSession = { activeSession },
+                    adoptSession = { session -> activeSession = session },
+                    organizationSession = ::organizationSessionFromStore,
+                ),
+            accessNumber = { CanSessionStore.canBytes() ?: primedCanStore.read() },
             closeSession = { closeActiveSession() },
-            organizationSession = ::organizationSessionFromStore,
         )
 
     internal val authenticationCardService =
@@ -457,6 +461,10 @@ internal class NfcReaderController(
         organizationPin1Attempts = identity.preflight.state.attemptsLeft()
         organizationPin1Answer = null
         saveCardCaCertificates()
+        // The open leaves the card inside PIN 1's secure-messaging channel, where
+        // it refuses the plain EF.CardAccess read every later operation starts
+        // with; dropping the connection resets the card's ISO-DEP session.
+        dropConnection(isoDep)
         activeSession =
             OrganizationContactlessSession(
                 isoDep = isoDep,
@@ -583,6 +591,13 @@ internal class NfcReaderController(
     }
 
     private fun closeResting(isoDep: IsoDep) {
+        dropConnection(isoDep)
+        if (latestIsoDep == isoDep) latestIsoDep = null
+        AppTrace.nfcSessionClosed()
+    }
+
+    /** Close the tag's connection; the card stays in the field for the next operation. */
+    private fun dropConnection(isoDep: IsoDep) {
         try {
             isoDep.close()
         } catch (_: IOException) {
@@ -592,8 +607,6 @@ internal class NfcReaderController(
         } catch (_: IllegalStateException) {
             // Tag service unavailable.
         }
-        if (latestIsoDep == isoDep) latestIsoDep = null
-        AppTrace.nfcSessionClosed()
     }
 
     private fun saveCardCaCertificates() {
@@ -861,9 +874,14 @@ internal class NfcReaderController(
         isoDep: IsoDep,
         generation: Int,
     ) {
-        val session = activeSession
-        if (session == null || generation != probeGeneration) {
+        if (generation != probeGeneration) {
             AppTrace.nfcProbeResultDiscarded()
+            return
+        }
+        val session = activeSession
+        if (session == null) {
+            // The snapshot outlived its session; the card is read anew.
+            probe(isoDep, generation)
             return
         }
         AppTrace.nfcTagAdopted()

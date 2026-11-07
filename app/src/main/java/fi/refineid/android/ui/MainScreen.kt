@@ -100,6 +100,7 @@ import fi.refineid.android.diagnostics.BuildDiagnostics
 import fi.refineid.android.diagnostics.DiagnosticsCollector
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.nfc.SignTapFailure
 import fi.refineid.android.rapp.LocalNetworkPermission
 import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappAuthorizationInbox
@@ -151,7 +152,7 @@ internal fun MainScreen(
     onForgetPrimedCard: () -> Unit = {},
     onCancelAwaitingCard: () -> Unit = {},
     nfcCardService: AuthenticationCardService? = null,
-    onSignBeginTap: (ByteArray?, () -> Unit, () -> Unit) -> Unit = { _, _, _ -> },
+    onSignBeginTap: (ByteArray?, () -> Unit, (SignTapFailure) -> Unit) -> Unit = { _, _, _ -> },
     onSignEndTap: () -> Unit = {},
     pinCache: AuthenticationPinCache? = null,
     rappPairingModel: RappPairingModel? = null,

@@ -42,6 +42,7 @@ import fi.refineid.android.document.QualifiedPdfSigningFailure
 import fi.refineid.android.document.SignedDocumentName
 import fi.refineid.android.document.SignedPdfDocument
 import fi.refineid.android.document.ValidationMaterialCollectionFailure
+import fi.refineid.android.nfc.SignTapFailure
 import fi.refineid.android.settings.TimestampAuthorityRepository
 import fi.refineid.android.settings.TimestampAuthorityStoreException
 import kotlinx.coroutines.CancellationException
@@ -65,7 +66,7 @@ import kotlin.coroutines.resume
  * supplied only when no card has been primed.
  */
 internal class DocumentSignTap(
-    val begin: (canBytes: ByteArray?, onReady: () -> Unit, onNoCard: () -> Unit) -> Unit,
+    val begin: (canBytes: ByteArray?, onReady: () -> Unit, onFailure: (SignTapFailure) -> Unit) -> Unit,
     val end: () -> Unit,
     val canRequired: Boolean,
 )
@@ -374,10 +375,10 @@ internal class DocumentSigningHarnessSession(
                     pin2.close()
                 }
             },
-            {
+            { failure ->
                 pin2.close()
                 if (!isClosed) {
-                    status = DocumentSigningStatus.NO_CARD
+                    status = failure.signingStatus()
                 }
             },
         )
@@ -1048,6 +1049,19 @@ internal class DocumentSigningHarnessSession(
         const val DEFAULT_DOCUMENT_NAME = "document.pdf"
     }
 }
+
+/** What the signing screen says when a contactless card did not serve the signature. */
+internal fun SignTapFailure.signingStatus(): DocumentSigningStatus =
+    when (this) {
+        SignTapFailure.NO_CARD -> DocumentSigningStatus.NO_CARD
+        SignTapFailure.CARD_LEFT -> DocumentSigningStatus.CARD_LEFT
+        SignTapFailure.ACCESS_NUMBER_REQUIRED -> DocumentSigningStatus.ACCESS_NUMBER_REQUIRED
+        SignTapFailure.ORGANIZATION_CARD_NOT_READ -> DocumentSigningStatus.ORGANIZATION_CARD_NOT_READ
+        SignTapFailure.NO_KNOWN_KIND -> DocumentSigningStatus.CARD_NO_KNOWN_KIND
+        SignTapFailure.ACCESS_FILE_REFUSED -> DocumentSigningStatus.CARD_ACCESS_FILE_REFUSED
+        SignTapFailure.ACCESS_FILE_MALFORMED -> DocumentSigningStatus.CARD_ACCESS_FILE_MALFORMED
+        SignTapFailure.READ_FAILED -> DocumentSigningStatus.CARD_READ_FAILED
+    }
 
 private const val PDF_MEDIA_TYPE = "application/pdf"
 private const val ANY_MEDIA_TYPE = "*/*"

@@ -4,6 +4,7 @@
 
 package fi.refineid.android.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,6 +50,13 @@ internal enum class DocumentSigningStatus {
     SIGNED,
     CERT_REVOKED,
     NO_CARD,
+    CARD_LEFT,
+    ACCESS_NUMBER_REQUIRED,
+    ORGANIZATION_CARD_NOT_READ,
+    CARD_NO_KNOWN_KIND,
+    CARD_ACCESS_FILE_REFUSED,
+    CARD_ACCESS_FILE_MALFORMED,
+    CARD_READ_FAILED,
     WRONG_PIN,
     PIN_LOCKED,
     UNAVAILABLE,
@@ -267,17 +275,37 @@ private fun DocumentSigningStatusText(
         } else {
             when (status) {
                 DocumentSigningStatus.IDLE -> null
+
                 DocumentSigningStatus.READING -> stringResource(R.string.checking)
+
                 DocumentSigningStatus.HOLD_CARD -> stringResource(R.string.hold_card)
+
                 DocumentSigningStatus.SIGNING -> stringResource(R.string.signing)
+
                 DocumentSigningStatus.FINALIZING -> stringResource(R.string.finalizing_signature)
+
                 DocumentSigningStatus.SAVING -> stringResource(R.string.saving)
+
                 DocumentSigningStatus.SIGNED -> stringResource(R.string.signed)
+
                 DocumentSigningStatus.CERT_REVOKED -> stringResource(R.string.signed_cert_revoked)
-                DocumentSigningStatus.NO_CARD -> stringResource(R.string.no_card)
+
+                DocumentSigningStatus.NO_CARD,
+                DocumentSigningStatus.CARD_LEFT,
+                DocumentSigningStatus.ACCESS_NUMBER_REQUIRED,
+                DocumentSigningStatus.ORGANIZATION_CARD_NOT_READ,
+                DocumentSigningStatus.CARD_NO_KNOWN_KIND,
+                DocumentSigningStatus.CARD_ACCESS_FILE_REFUSED,
+                DocumentSigningStatus.CARD_ACCESS_FILE_MALFORMED,
+                DocumentSigningStatus.CARD_READ_FAILED,
+                -> stringResource(cardFailureMessage(status))
+
                 DocumentSigningStatus.WRONG_PIN -> stringResource(R.string.wrong_pin)
+
                 DocumentSigningStatus.PIN_LOCKED -> stringResource(R.string.pin2_blocked)
+
                 DocumentSigningStatus.UNAVAILABLE -> stringResource(R.string.unavailable)
+
                 DocumentSigningStatus.ERROR -> stringResource(R.string.error)
             }
         }
@@ -295,6 +323,20 @@ private fun DocumentSigningStatusText(
         )
     }
 }
+
+/** The message for a contactless card that did not serve the signature. */
+@StringRes
+private fun cardFailureMessage(status: DocumentSigningStatus): Int =
+    when (status) {
+        DocumentSigningStatus.CARD_LEFT -> R.string.card_left_before_read
+        DocumentSigningStatus.ACCESS_NUMBER_REQUIRED -> R.string.access_number_required
+        DocumentSigningStatus.ORGANIZATION_CARD_NOT_READ -> R.string.organization_card_read_first
+        DocumentSigningStatus.CARD_NO_KNOWN_KIND -> R.string.card_problem_no_known_kind
+        DocumentSigningStatus.CARD_ACCESS_FILE_REFUSED -> R.string.card_problem_access_file_refused
+        DocumentSigningStatus.CARD_ACCESS_FILE_MALFORMED -> R.string.card_problem_access_file_malformed
+        DocumentSigningStatus.CARD_READ_FAILED -> R.string.card_read_failed
+        else -> R.string.no_card
+    }
 
 private val DOCUMENT_CARD_PADDING = 20.dp
 private val DOCUMENT_ITEM_SPACING = 14.dp

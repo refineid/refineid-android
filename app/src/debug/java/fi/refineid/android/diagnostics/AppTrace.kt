@@ -26,6 +26,8 @@ import fi.refineid.android.document.QualifiedPdfPreparationResult
 import fi.refineid.android.document.QualifiedPdfSigningResult
 import fi.refineid.android.network.SigningTimestampAttemptOutcome
 import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.nfc.SignTapClaim
+import fi.refineid.android.nfc.SignTapFailure
 import fi.refineid.android.rapp.RappBleGattEvent
 import fi.refineid.android.rapp.RappBleGattProfile
 import fi.refineid.android.rapp.RappBleLinkFailure
@@ -949,6 +951,15 @@ internal object AppTrace {
 
     fun nfcTagAdopted() {
         debug("nfc:tag-adopted")
+    }
+
+    fun nfcSignTapClaimed(claim: SignTapClaim) {
+        debug("nfc:sign-tap claim=" + claim)
+    }
+
+    fun nfcSignTapFailed(failure: SignTapFailure) {
+        debug("nfc:sign-tap-failed cause=" + failure)
+        DevErrorLog.report("nfc:sign-tap-failed", failure.name)
     }
 
     fun nfcPrimedOpenStarted() {
