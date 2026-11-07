@@ -245,19 +245,27 @@ internal fun CardManagementScreen(
     val pin2Low = isLowAttempts(pin2Attempts)
     val pin2Warning = isWarningAttempts(pin2Attempts)
 
+    // A PUK the card reports blocked is not refused here: the card
+    // answers for itself and spends nothing, and whether the holder's
+    // code is a PUK or an activation code is never known, so the
+    // recovery stays open. Only the last two PUK tries are refused.
     val isRefusedByPolicy =
-        pukLocked ||
-            when (selectedTask) {
-                ManagementTask.CHANGE_PIN1 -> pin1Locked || pin1Low
-                ManagementTask.CHANGE_PIN2 -> pin2Locked || pin2Low
-                ManagementTask.RESET_PIN1, ManagementTask.RESET_PIN2 -> pukLow
-                ManagementTask.ACTIVATE_CARD -> false
-            }
+        when (selectedTask) {
+            ManagementTask.CHANGE_PIN1 -> pin1Locked || pin1Low
+            ManagementTask.CHANGE_PIN2 -> pin2Locked || pin2Low
+            ManagementTask.RESET_PIN1, ManagementTask.RESET_PIN2 -> pukLow
+            ManagementTask.ACTIVATE_CARD -> false
+        }
+
+    val pukTask =
+        selectedTask == ManagementTask.RESET_PIN1 ||
+            selectedTask == ManagementTask.RESET_PIN2 ||
+            selectedTask == ManagementTask.ACTIVATE_CARD
 
     val (guidanceMessage, guidanceTone) =
         when {
-            pukLocked -> {
-                stringResource(R.string.unrecoverable_card) to BannerTone.CRITICAL
+            pukTask && pukLocked -> {
+                stringResource(R.string.puk_reported_blocked) to BannerTone.WARNING
             }
 
             selectedTask == ManagementTask.CHANGE_PIN1 && pin1Locked -> {
