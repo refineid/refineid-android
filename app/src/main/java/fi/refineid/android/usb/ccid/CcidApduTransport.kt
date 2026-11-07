@@ -52,7 +52,6 @@ internal class CcidCommandExchange(
             messageType = command.messageType,
             slot = command.slot,
             sequence = command.sequence,
-            length = commandBytes.size,
         )
         try {
             if (commandBytes.size > maximumMessageLength) {

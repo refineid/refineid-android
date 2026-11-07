@@ -22,7 +22,14 @@ contain the instruction, an allowlisted non-secret command header, byte counts,
 status word, elapsed time, and typed outcome. They never contain response
 payloads, certificate or identity data, reader or device identifiers, network
 addresses, or credential bytes. VERIFY and other credential commands are
-redacted wholesale, including command length.
+redacted wholesale, including command length and, on the contactless path,
+the command header. The CCID frame and bulk-transfer layers below cannot tell
+a credential frame from a public one, and an unpadded credential frame is the
+credential length plus a fixed header, so they record no outbound byte count:
+an exchange line carries the message type, slot, and sequence, and a bulk-out
+line only whether the transfer completed, came up short, or failed. Inbound
+counts remain, because a card answers a credential command with a status word
+whose size does not depend on the credential.
 
 Release builds use a separate empty trace sink. R8 also removes Android Logcat,
 console, `java.util.logging`, and Android performance-trace emission from
