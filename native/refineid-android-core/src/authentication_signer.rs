@@ -64,7 +64,7 @@ pub(crate) enum AuthenticationSigningInput<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PreparedAuthenticationSigningInput {
+pub(crate) enum PreparedAuthenticationSigningInput {
     RsaPkcs1Sha256(Sha256),
     RsaPssSha256(Sha256),
     EcdsaP384Sha256(Sha256),
@@ -208,7 +208,7 @@ pub(crate) fn verify_authentication_pin<T: CardTransport>(
     }
 }
 
-fn prepare_signing_input(
+pub(crate) fn prepare_signing_input(
     algorithm: AuthenticationSigningAlgorithm,
     input: AuthenticationSigningInput<'_>,
 ) -> Result<PreparedAuthenticationSigningInput, AuthenticationSignFailure> {
@@ -318,6 +318,16 @@ where
             .sign_prehashed_sha512_rsa_pss(digest.into_bytes())
             .map(|signature| signature.into_bytes()),
     }
+}
+
+/// The authentication key signs on a channel whose handshake already
+/// presented PIN 1.
+pub(crate) fn sign_prepared_or_failure<T: CardTransport>(
+    transport: &mut T,
+    scheme: SignScheme,
+    input: PreparedAuthenticationSigningInput,
+) -> Result<Vec<u8>, AuthenticationSignFailure> {
+    sign_prepared(transport, scheme, input).map_err(map_sign_error)
 }
 
 /// A VERIFY the primitive refused under the floor, or could not carry out.

@@ -68,6 +68,7 @@ import fi.refineid.android.browser.BundledIssuerCertificates
 import fi.refineid.android.browser.RefineIdCardProviderRegistration
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.diagnostics.BuildDiagnostics
@@ -82,6 +83,7 @@ internal fun BrowserHarness(
     pinCache: fi.refineid.android.core.AuthenticationPinCache? = null,
     nfcStatus: NfcReaderStatus? = null,
     nfcPrimed: Boolean = false,
+    nfcCardKind: NfcCardKind? = null,
     enabled: Boolean = true,
     onPrepareAuthentication: ((() -> Unit, () -> Unit) -> Unit)? = null,
     onNfcConnect: (CanSubmission?, Pin1Submission) -> Unit = { _, _ -> },
@@ -123,6 +125,7 @@ internal fun BrowserHarness(
             pinCache = pinCache,
             nfcStatus = nfcStatus,
             nfcPrimed = nfcPrimed,
+            nfcCardKind = nfcCardKind,
             onPrepareAuthentication = onPrepareAuthentication,
             onNfcConnect = onNfcConnect,
             onWrongPin = onWrongPin,
@@ -144,6 +147,7 @@ private fun BrowserDialog(
     pinCache: fi.refineid.android.core.AuthenticationPinCache?,
     nfcStatus: NfcReaderStatus?,
     nfcPrimed: Boolean,
+    nfcCardKind: NfcCardKind?,
     onNfcConnect: (CanSubmission?, Pin1Submission) -> Unit,
     onPrepareAuthentication: ((() -> Unit, () -> Unit) -> Unit)? = null,
     onWrongPin: (() -> Unit)? = null,
@@ -268,6 +272,7 @@ private fun BrowserDialog(
         BrowserCardUnlockDialog(
             status = nfcStatus,
             primed = nfcPrimed,
+            cardKind = nfcCardKind,
             isWaiting = unlockWaiting,
             onUnlock = { can, pin1 ->
                 unlockWaiting = true
@@ -473,6 +478,7 @@ private fun BrowserControlsBar(
 private fun BrowserCardUnlockDialog(
     status: NfcReaderStatus?,
     primed: Boolean,
+    cardKind: NfcCardKind?,
     isWaiting: Boolean,
     onUnlock: (CanSubmission?, Pin1Submission) -> Unit,
     onCancel: () -> Unit,
@@ -488,12 +494,17 @@ private fun BrowserCardUnlockDialog(
         status != NfcReaderStatus.TURNED_OFF &&
             status != NfcReaderStatus.NOT_AVAILABLE &&
             status != NfcReaderStatus.CARD_NOT_SUPPORTED
-    val canReady = primed || canEntryReady(canState.text)
+    // The card's EF.CardAccess names what opens it: nothing is asked of a card
+    // that has not answered, and an organization card has no access number.
+    val asksCan = !primed && cardKind == NfcCardKind.PERSONAL
+    val asksPin = primed || cardKind != null
+    val canReady = !asksCan || canEntryReady(canState.text)
     val pinReady = Pin1Submission.isComplete(pinState.text)
+    val entryReady = cardEntryReady && asksPin && canReady && pinReady && !isWaiting
     val submit = {
-        if (cardEntryReady && canReady && pinReady && !isWaiting) {
+        if (entryReady) {
             val can =
-                if (primed) {
+                if (!asksCan) {
                     null
                 } else {
                     fi.refineid.android.core.CanSessionStore
@@ -525,7 +536,7 @@ private fun BrowserCardUnlockDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                if (!primed) {
+                if (asksCan) {
                     CanField(
                         state = canState,
                         testTag = UiAutomationIds.BROWSER_UNLOCK_CAN_FIELD,
@@ -534,23 +545,25 @@ private fun BrowserCardUnlockDialog(
                         imeAction = ImeAction.Next,
                     )
                 }
-                SecureTextField(
-                    state = pinState,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .testTag(UiAutomationIds.BROWSER_UNLOCK_PIN1_FIELD),
-                    enabled = !isWaiting,
-                    label = { Text(stringResource(R.string.pin1)) },
-                    inputTransformation = Pin1InputTransformation,
-                    textObfuscationMode = TextObfuscationMode.Hidden,
-                    keyboardOptions =
-                        KeyboardOptions(
-                            autoCorrectEnabled = false,
-                            keyboardType = KeyboardType.NumberPassword,
-                            imeAction = ImeAction.Done,
-                        ),
-                )
+                if (asksPin) {
+                    SecureTextField(
+                        state = pinState,
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .testTag(UiAutomationIds.BROWSER_UNLOCK_PIN1_FIELD),
+                        enabled = !isWaiting,
+                        label = { Text(stringResource(R.string.pin1)) },
+                        inputTransformation = Pin1InputTransformation,
+                        textObfuscationMode = TextObfuscationMode.Hidden,
+                        keyboardOptions =
+                            KeyboardOptions(
+                                autoCorrectEnabled = false,
+                                keyboardType = KeyboardType.NumberPassword,
+                                imeAction = ImeAction.Done,
+                            ),
+                    )
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(UNLOCK_DIALOG_SPACING),
@@ -570,7 +583,7 @@ private fun BrowserCardUnlockDialog(
                             Modifier
                                 .weight(UNLOCK_BUTTON_WEIGHT)
                                 .testTag(UiAutomationIds.BROWSER_UNLOCK_ACTION),
-                        enabled = cardEntryReady && canReady && pinReady && !isWaiting,
+                        enabled = entryReady,
                     ) {
                         Text(stringResource(R.string.unlock))
                     }

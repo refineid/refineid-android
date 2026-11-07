@@ -2,6 +2,8 @@
 
 package fi.refineid.android.nfc
 
+import fi.refineid.android.core.NfcCardKind
+
 /**
  * Timing and session-opening rules for one wait on a contactless card.
  *
@@ -23,6 +25,26 @@ internal object NfcCardWait {
     ): Boolean =
         status == NfcReaderStatus.WRONG_CAN ||
             (!accessNumberKnown && status in AWAITING_ACCESS_NUMBER)
+
+    /**
+     * Whether a prompt asks for the access number now: the card in the field
+     * named itself a citizen card and none is known, or it refused the one
+     * given. An organization card has none to ask for, and until a card has
+     * answered its kind is not known.
+     */
+    fun asksForAccessNumber(
+        status: NfcReaderStatus,
+        accessNumberKnown: Boolean,
+        cardKind: NfcCardKind?,
+    ): Boolean =
+        status == NfcReaderStatus.WRONG_CAN ||
+            (!accessNumberKnown && status == NfcReaderStatus.CARD_RECOGNIZED && cardKind == NfcCardKind.PERSONAL)
+
+    /** Whether a prompt asks for Basic PIN 1: an organization card is in the field and not yet read. */
+    fun asksForOrganizationPin1(
+        status: NfcReaderStatus,
+        cardKind: NfcCardKind?,
+    ): Boolean = status == NfcReaderStatus.CARD_RECOGNIZED && cardKind == NfcCardKind.ORGANIZATION
 
     private val AWAITING_ACCESS_NUMBER =
         setOf(

@@ -92,6 +92,7 @@ import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationPurpose
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.QualifiedCardService
 import fi.refineid.android.diagnostics.AppTrace
@@ -358,7 +359,11 @@ internal fun MainScreen(
             usbReaderPresent = usbReaderPresent,
             nfcStatus = nfcSnapshot.status,
             accessNumberKnown = nfcSnapshot.isPrimed || CanSessionStore.hasCan,
+            cardKind = nfcSnapshot.cardKind,
+            pin1AttemptsLeft = nfcSnapshot.pin1AttemptsLeft,
+            pin1Answer = nfcSnapshot.pin1Answer,
             onSubmitAccessNumber = { can -> onNfcConnect(can, null) },
+            onSubmitOrganizationPin1 = { pin1 -> onNfcConnect(null, pin1) },
         )
     }
 
@@ -533,6 +538,7 @@ internal fun MainScreen(
                         nfcSnapshot.status
                     },
                 nfcPrimed = nfcSnapshot.isPrimed,
+                nfcSnapshot = nfcSnapshot,
                 onNfcConnect = onNfcConnect,
                 // A present wired card reads over its open session; the
                 // contactless path primes NFC for the next tap otherwise.
@@ -607,7 +613,7 @@ internal fun MainScreen(
                             DocumentSignTap(
                                 begin = onSignBeginTap,
                                 end = onSignEndTap,
-                                canRequired = !nfcSnapshot.isPrimed,
+                                canRequired = !nfcSnapshot.isPrimed && nfcSnapshot.cardKind != NfcCardKind.ORGANIZATION,
                             )
                         } else {
                             null
@@ -706,6 +712,8 @@ internal fun MainScreen(
                     onConnectNfc = { can ->
                         onNfcConnect(can, null)
                     },
+                    nfcSnapshot = nfcSnapshot,
+                    onOpenOrganization = { pin1 -> onNfcConnect(null, pin1) },
                     isCardReady = managementCardReady,
                     activationRequired = isActivationRequired,
                     pinCache = pinCache,
@@ -783,6 +791,7 @@ private fun HomeScreen(
     pinCache: AuthenticationPinCache?,
     nfcStatus: NfcReaderStatus?,
     nfcPrimed: Boolean,
+    nfcSnapshot: NfcReaderSnapshot,
     onNfcConnect: (CanSubmission?, Pin1Submission?) -> Unit,
     onReadCard: (CanSubmission) -> Unit,
     timestampAuthorityRepository: TimestampAuthorityRepository?,
@@ -898,6 +907,7 @@ private fun HomeScreen(
                                 pinCache = pinCache,
                                 nfcStatus = nfcStatus,
                                 nfcPrimed = nfcPrimed,
+                                nfcCardKind = nfcSnapshot.cardKind,
                                 enabled = browserAvailable,
                                 onPrepareAuthentication = onPrepareAuthentication,
                                 onNfcConnect = { can, pin1 -> onNfcConnect(can, pin1) },
@@ -924,6 +934,8 @@ private fun HomeScreen(
                 isActivationRequired = isActivationRequired,
                 onForget = onForgetIdentity,
                 onReadCard = onReadCard,
+                nfcSnapshot = nfcSnapshot,
+                onOpenOrganization = { pin1 -> onNfcConnect(null, pin1) },
                 onOpenActivation = onOpenCardManagement,
                 pinCache = pinCache,
                 cards = cards,
@@ -984,6 +996,8 @@ private fun IdentitySection(
     isActivationRequired: Boolean = false,
     onForget: (() -> Unit)?,
     onReadCard: (CanSubmission) -> Unit,
+    nfcSnapshot: NfcReaderSnapshot,
+    onOpenOrganization: (Pin1Submission) -> Unit,
     onOpenActivation: () -> Unit = {},
     pinCache: AuthenticationPinCache? = null,
     cards: List<CardIdentityItem> = emptyList(),
@@ -1025,7 +1039,7 @@ private fun IdentitySection(
                     onOpenActivation = onOpenActivation,
                     onShowNfcRead = {
                         val currentCan = CanSessionStore.currentCan
-                        if (currentCan != null) {
+                        if (currentCan != null && nfcSnapshot.cardKind != NfcCardKind.ORGANIZATION) {
                             onReadCard(CanSubmission.from(currentCan))
                         } else {
                             showsNfcReadDialog = true
@@ -1039,10 +1053,12 @@ private fun IdentitySection(
 
     if (showsNfcReadDialog) {
         ReadCardNfcDialog(
+            snapshot = nfcSnapshot,
             onDismiss = { showsNfcReadDialog = false },
             onConnect = { can ->
                 onReadCard(can)
             },
+            onOpenOrganization = onOpenOrganization,
         )
     }
 }
@@ -1131,11 +1147,20 @@ private fun SingleIdentityRow(
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 private fun ReadCardNfcDialog(
+    snapshot: NfcReaderSnapshot,
     onDismiss: () -> Unit,
     onConnect: (CanSubmission) -> Unit,
+    onOpenOrganization: (Pin1Submission) -> Unit,
 ) {
     val canState = remember { TextFieldState() }
     val canReady = canEntryReady(canState.text)
+    val cardKind = snapshot.cardKind
+    val organizationReady =
+        cardKind == NfcCardKind.ORGANIZATION &&
+            (snapshot.status == NfcReaderStatus.CARD_READY || snapshot.status == NfcReaderStatus.ACTIVATION_REQUIRED)
+    LaunchedEffect(organizationReady) {
+        if (organizationReady) onDismiss()
+    }
 
     val submit = {
         canEntrySubmission(canState.text)?.let { can ->
@@ -1162,21 +1187,42 @@ private fun ReadCardNfcDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                CanField(
-                    state = canState,
-                    testTag = UiAutomationIds.NFC_CAN_FIELD,
-                    modifier = Modifier.fillMaxWidth(),
-                    onKeyboardAction = { submit() },
-                )
+                // The card's EF.CardAccess names what opens it, so nothing is
+                // asked until a card has answered.
+                when (cardKind) {
+                    null -> {
+                        Text(stringResource(R.string.hold_card_against_back))
+                    }
+
+                    NfcCardKind.PERSONAL -> {
+                        CanField(
+                            state = canState,
+                            testTag = UiAutomationIds.NFC_CAN_FIELD,
+                            modifier = Modifier.fillMaxWidth(),
+                            onKeyboardAction = { submit() },
+                        )
+                    }
+
+                    NfcCardKind.ORGANIZATION -> {
+                        OrganizationPin1Entry(
+                            attemptsLeft = snapshot.pin1AttemptsLeft,
+                            answer = snapshot.pin1Answer,
+                            isOpening = snapshot.status == NfcReaderStatus.CONNECTING,
+                            onSubmit = onOpenOrganization,
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
-            Button(
-                onClick = submit,
-                enabled = canReady,
-                modifier = Modifier.testTag(UiAutomationIds.NFC_CONNECT_ACTION),
-            ) {
-                Text(stringResource(R.string.read_identity_card))
+            if (cardKind == NfcCardKind.PERSONAL) {
+                Button(
+                    onClick = submit,
+                    enabled = canReady,
+                    modifier = Modifier.testTag(UiAutomationIds.NFC_CONNECT_ACTION),
+                ) {
+                    Text(stringResource(R.string.read_identity_card))
+                }
             }
         },
         dismissButton = {
@@ -1462,7 +1508,11 @@ private fun NfcCard(
                 snapshot.status == NfcReaderStatus.WRONG_CAN ||
                 snapshot.status == NfcReaderStatus.TRANSPORT_ERROR
             ) {
-                NfcCredentialEntry(isPrimed = snapshot.isPrimed, onConnect = onConnect)
+                NfcCredentialEntry(
+                    // PIN 1 alone opens a kept card and any organization card.
+                    isPrimed = snapshot.isPrimed || snapshot.cardKind == NfcCardKind.ORGANIZATION,
+                    onConnect = onConnect,
+                )
             }
 
             if (snapshot.status == NfcReaderStatus.CARD_READY) {

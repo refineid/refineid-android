@@ -3,23 +3,28 @@ package fi.refineid.android.nfc
 import fi.refineid.android.core.NativeCardAccessFailure
 import fi.refineid.android.core.NativeCardAccessResult
 import fi.refineid.android.core.NativeCardAccessSummary
+import fi.refineid.android.core.NativeCertificateReadFailure
+import fi.refineid.android.core.NfcCardKind
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class NfcCardRecognitionTest {
     @Test
-    fun publishedProfileIsRecognized() {
-        assertEquals(
-            NfcReaderStatus.CARD_RECOGNIZED,
-            summary(supportsPublishedPaceProfile = true).toReaderStatus(),
-        )
+    fun bothKindsOfCardAreRecognized() {
+        assertEquals(NfcReaderStatus.CARD_RECOGNIZED, summary(NfcCardKind.PERSONAL).toReaderStatus())
+        assertEquals(NfcReaderStatus.CARD_RECOGNIZED, summary(NfcCardKind.ORGANIZATION).toReaderStatus())
     }
 
     @Test
-    fun paceCardWithoutThePublishedProfileIsNotSupported() {
+    fun aCardOfNoKnownKindIsNotSupported() {
+        assertEquals(NfcReaderStatus.CARD_NOT_SUPPORTED, summary(null).toReaderStatus())
+    }
+
+    @Test
+    fun anAccessNumberRefusedForAnOrganizationCardIsARecognizedCard() {
         assertEquals(
-            NfcReaderStatus.CARD_NOT_SUPPORTED,
-            summary(supportsPublishedPaceProfile = false).toReaderStatus(),
+            NfcReaderStatus.CARD_RECOGNIZED,
+            NativeCertificateReadFailure.ORGANIZATION_CARD.toConnectStatus(),
         )
     }
 
@@ -55,10 +60,10 @@ class NfcCardRecognitionTest {
         )
     }
 
-    private fun summary(supportsPublishedPaceProfile: Boolean): NativeCardAccessResult =
+    private fun summary(cardKind: NfcCardKind?): NativeCardAccessResult =
         NativeCardAccessResult.Success(
             NativeCardAccessSummary(
-                supportsPublishedPaceProfile = supportsPublishedPaceProfile,
+                cardKind = cardKind,
                 paceEntryCount = SYNTHETIC_ENTRY_COUNT,
             ),
         )

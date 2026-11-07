@@ -1,7 +1,7 @@
 //! One-shot contactless card operations behind the PACE secure channel.
 //!
 //! Each operation owns one raw ISO-DEP transport for its whole lifetime:
-//! it runs the PACE handshake with the holder's card access number,
+//! it runs the PACE handshake with a citizen card's card access number,
 //! wraps the transport in secure messaging, selects the PKCS#15
 //! application, and performs exactly one logical operation before
 //! returning the exchange to the JNI border. No channel state survives
@@ -33,6 +33,7 @@ use crate::card_management::{
 use crate::card_transport::CardExchangeLevel;
 use crate::card_transport::{AndroidCardTransport, SingleBlockExchange};
 use crate::certificate_validity::validity_start_epoch_seconds;
+use crate::organization_card::{ChannelRefusal, ContactlessCardKind, contactless_card_kind};
 use crate::pin1_status::{Pin1Preflight, Pin1PreflightFailure, probe_pin1_preflight};
 use crate::pin2_status::{Pin2Preflight, Pin2PreflightFailure, probe_pin2_preflight};
 use crate::qualified_signer::{
@@ -46,7 +47,7 @@ use refineid_auth::{
 /// Coarse failures of the secure-channel front door, before any
 /// operation-specific vocabulary applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SecureChannelFailure {
+pub(crate) enum SecureChannelFailure {
     /// Card left the field during the handshake.
     CardUnavailable,
     /// The card refused the handshake; almost always a wrong CAN.
@@ -55,6 +56,23 @@ enum SecureChannelFailure {
     Transport,
     /// A local shape or facility failure that never touched the card.
     Bridge,
+    /// EF.CardAccess names an organization card, which has no CAN; the CAN
+    /// was not named to it.
+    OrganizationCard,
+    /// EF.CardAccess names neither kind of card; no password was named to it.
+    UnknownCard,
+}
+
+impl SecureChannelFailure {
+    /// The refusal this failure comes to on an organization card's channel.
+    pub(crate) const fn into_refusal(self) -> ChannelRefusal {
+        match self {
+            Self::CardUnavailable => ChannelRefusal::CardUnavailable,
+            Self::Transport | Self::PaceRejected => ChannelRefusal::Transport,
+            Self::Bridge => ChannelRefusal::Bridge,
+            Self::OrganizationCard | Self::UnknownCard => ChannelRefusal::NotOrganizationCard,
+        }
+    }
 }
 
 /// The host half of one live contactless secure-messaging session: the
@@ -124,7 +142,7 @@ pub(crate) fn set_last_read_intermediate_ca(cert: Option<IntermediateCaCertifica
     }
 }
 
-fn read_on_card_ca_certificates_if_needed<T: CardTransport + Pkcs15Ops>(secure: &mut T) {
+pub(crate) fn read_on_card_ca_certificates<T: CardTransport + Pkcs15Ops>(secure: &mut T) {
     if get_last_read_root_ca().is_some() && get_last_read_intermediate_ca().is_some() {
         return;
     }
@@ -191,7 +209,7 @@ where
     if let Some((scheme, needs)) = activation_needs(secure, &certificate) {
         return ContactlessOpenOutcome::ActivationRequired(scheme, needs);
     }
-    read_on_card_ca_certificates_if_needed(secure);
+    read_on_card_ca_certificates(secure);
     match probe_pin1_preflight(secure) {
         Ok(preflight) => ContactlessOpenOutcome::Ready(certificate, preflight),
         Err(failure) => ContactlessOpenOutcome::Failure(open_preflight_failure(failure)),
@@ -674,18 +692,32 @@ fn open_secure_channel<Exchange: SingleBlockExchange>(
         return Err((transport.into_exchange(), failure));
     }
     // The PACE suite and its domain parameter come from EF.CardAccess in
-    // the master file, read in plain before the handshake. An
-    // organization card authenticating PACE with a PIN would pass
-    // a `Pin1` or `Pin2` here instead of the CAN.
-    //
-    // Every contactless channel here is opened by the CAN, so the PIN
-    // commands on it floor on the header-only VERIFY, and a card that does
-    // not answer that probe with a counter over secure messaging is refused
-    // as unreadable. A channel a PIN opens carries its own counter record
-    // and takes core's record-floored paths instead, not these signers.
-    let handshake = read_card_access(&mut transport)
-        .and_then(|card_access| run_pace(&mut transport, &card_access, &can));
-    match handshake {
+    // the master file, read in plain before the handshake, and so does the
+    // card's kind. The CAN is named only to a card that lists a citizen
+    // card's suite: an organization card has no CAN reference to take it.
+    let card_access = match read_card_access(&mut transport) {
+        Ok(card_access) => card_access,
+        Err(error) => {
+            let failure = map_pace_error(&error);
+            return Err((transport.into_exchange(), failure));
+        }
+    };
+    match contactless_card_kind(&card_access) {
+        Some(ContactlessCardKind::Personal) => {}
+        Some(ContactlessCardKind::Organization) => {
+            return Err((
+                transport.into_exchange(),
+                SecureChannelFailure::OrganizationCard,
+            ));
+        }
+        None => {
+            return Err((transport.into_exchange(), SecureChannelFailure::UnknownCard));
+        }
+    }
+    // Every channel here is opened by the CAN, so the PIN commands on it
+    // floor on the header-only VERIFY. An organization card's channels carry
+    // their own counter record and live in `organization_card`.
+    match run_pace(&mut transport, &card_access, &can) {
         Ok(session) => Ok(SmTransport::new(transport, session)),
         Err(error) => {
             let failure = map_pace_error(&error);
@@ -704,7 +736,7 @@ fn open_secure_channel<Exchange: SingleBlockExchange>(
 /// in plain). One replay-safe, credential-free SELECT MF absorbs that
 /// termination deterministically; its status word is deliberately not
 /// interpreted, and only transport-level faults stop the open.
-fn abort_stale_secure_messaging<T: CardTransport>(
+pub(crate) fn abort_stale_secure_messaging<T: CardTransport>(
     transport: &mut T,
 ) -> Result<(), SecureChannelFailure> {
     match transport.select_mf() {
@@ -801,6 +833,8 @@ fn certificate_channel_failure(failure: SecureChannelFailure) -> CertificateRead
         SecureChannelFailure::PaceRejected => CertificateReadFailure::PaceRejected,
         SecureChannelFailure::Transport => CertificateReadFailure::Transport,
         SecureChannelFailure::Bridge => CertificateReadFailure::Bridge,
+        SecureChannelFailure::OrganizationCard => CertificateReadFailure::OrganizationCard,
+        SecureChannelFailure::UnknownCard => CertificateReadFailure::Rejected,
     }
 }
 
@@ -818,7 +852,9 @@ fn sign_channel_failure(failure: SecureChannelFailure) -> AuthenticationSignFail
     match failure {
         SecureChannelFailure::CardUnavailable => AuthenticationSignFailure::CardUnavailable,
         SecureChannelFailure::PaceRejected => AuthenticationSignFailure::PaceRejected,
-        SecureChannelFailure::Transport => AuthenticationSignFailure::Transport,
+        SecureChannelFailure::Transport
+        | SecureChannelFailure::OrganizationCard
+        | SecureChannelFailure::UnknownCard => AuthenticationSignFailure::Transport,
         SecureChannelFailure::Bridge => AuthenticationSignFailure::Bridge,
     }
 }
@@ -843,9 +879,10 @@ pub(crate) fn sign_selection_failure<E>(error: Pkcs15Error<E>) -> Authentication
 fn pin2_channel_failure(failure: SecureChannelFailure) -> Pin2PreflightFailure {
     match failure {
         SecureChannelFailure::CardUnavailable => Pin2PreflightFailure::CardUnavailable,
-        SecureChannelFailure::PaceRejected | SecureChannelFailure::Transport => {
-            Pin2PreflightFailure::Transport
-        }
+        SecureChannelFailure::PaceRejected
+        | SecureChannelFailure::Transport
+        | SecureChannelFailure::OrganizationCard
+        | SecureChannelFailure::UnknownCard => Pin2PreflightFailure::Transport,
         SecureChannelFailure::Bridge => Pin2PreflightFailure::Bridge,
     }
 }
@@ -869,7 +906,9 @@ fn management_channel_failure(failure: SecureChannelFailure) -> CardManagementFa
     match failure {
         SecureChannelFailure::CardUnavailable => CardManagementFailure::CardUnavailable,
         SecureChannelFailure::PaceRejected => CardManagementFailure::PaceRejected,
-        SecureChannelFailure::Transport => CardManagementFailure::TransportError,
+        SecureChannelFailure::Transport
+        | SecureChannelFailure::OrganizationCard
+        | SecureChannelFailure::UnknownCard => CardManagementFailure::TransportError,
         SecureChannelFailure::Bridge => CardManagementFailure::BridgeError,
     }
 }
@@ -894,9 +933,10 @@ fn management_selection_failure<E>(error: Pkcs15Error<E>) -> CardManagementFailu
 fn qualified_channel_failure(failure: SecureChannelFailure) -> QualifiedSignFailure {
     match failure {
         SecureChannelFailure::CardUnavailable => QualifiedSignFailure::CardUnavailable,
-        SecureChannelFailure::PaceRejected | SecureChannelFailure::Transport => {
-            QualifiedSignFailure::Transport
-        }
+        SecureChannelFailure::PaceRejected
+        | SecureChannelFailure::Transport
+        | SecureChannelFailure::OrganizationCard
+        | SecureChannelFailure::UnknownCard => QualifiedSignFailure::Transport,
         SecureChannelFailure::Bridge => QualifiedSignFailure::Bridge,
     }
 }
@@ -923,11 +963,11 @@ mod tests {
     use refineid_pkcs15::Pkcs15Error;
 
     use super::{
-        ContactlessChannel, ManagedPin, SecureChannelFailure, contactless_activate_card,
-        contactless_change_pin, contactless_close, contactless_probe_credential_health,
-        contactless_probe_pin2, contactless_qualified_sign, contactless_read_qualified_certificate,
-        contactless_unblock_pin, map_pace_error, open_preflight_failure, pin2_channel_failure,
-        qualified_channel_failure, reconstruct_can,
+        ContactlessChannel, ContactlessOpenOutcome, ManagedPin, SecureChannelFailure,
+        contactless_activate_card, contactless_change_pin, contactless_close, contactless_connect,
+        contactless_probe_credential_health, contactless_probe_pin2, contactless_qualified_sign,
+        contactless_read_qualified_certificate, contactless_unblock_pin, map_pace_error,
+        open_preflight_failure, pin2_channel_failure, qualified_channel_failure, reconstruct_can,
     };
     use crate::card_certificate::CertificateReadFailure;
     use crate::card_management::{ACTIVATION_SCHEME_PUK, CardManagementFailure, PinLengthsRead};
@@ -1018,6 +1058,151 @@ mod tests {
         );
         assert_eq!(activation, Err(CardManagementFailure::CardUnavailable));
         assert_eq!(exchange.blocks, 0);
+    }
+
+    /// Answers EF.CardAccess with `file`, in the clear, and records every
+    /// block; `MSE:Set AT` is refused so nothing goes further.
+    struct CardAccessExchange {
+        file: Vec<u8>,
+        blocks: Vec<Vec<u8>>,
+    }
+
+    const INS_SELECT: u8 = 0xA4;
+    const INS_READ_BINARY: u8 = 0xB0;
+    const INS_MSE: u8 = 0x22;
+    const INS_INDEX: usize = 1;
+    const P1_INDEX: usize = 2;
+    const P2_INDEX: usize = 3;
+    const LE_MAX_READ: usize = 256;
+    const SW_SUCCESS: [u8; 2] = StatusWord::Success.as_u16().to_be_bytes();
+    const SW_REFERENCE_NOT_FOUND: [u8; 2] =
+        StatusWord::ReferenceDataNotFound.as_u16().to_be_bytes();
+    const TAG_OID: u8 = 0x06;
+    const TAG_INTEGER: u8 = 0x02;
+    const TAG_SEQUENCE: u8 = 0x30;
+    const TAG_SET: u8 = 0x31;
+    const PACE_VERSION: u8 = 2;
+    /// `id-PACE-ECDH-GM-AES-CBC-CMAC-256` (BSI TR-03110-3 section A.1.1.1).
+    const ID_PACE_GM_256: [u8; 10] = [0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x04, 0x02, 0x04];
+    /// Password-reference object naming the CAN (BSI TR-03110-3 section B.14.1).
+    const MSE_NAMES_CAN: [u8; 3] = [0x83, 0x01, 0x02];
+
+    impl SingleBlockExchange for CardAccessExchange {
+        fn exchange_public(&mut self, block: &[u8]) -> SingleExchangeOutcome {
+            self.blocks.push(block.to_vec());
+            let mut reply = Vec::new();
+            match block[INS_INDEX] {
+                INS_SELECT => reply.extend_from_slice(&SW_SUCCESS),
+                INS_READ_BINARY => {
+                    let offset =
+                        (usize::from(block[P1_INDEX]) << u8::BITS) | usize::from(block[P2_INDEX]);
+                    let end = (offset + LE_MAX_READ).min(self.file.len());
+                    reply.extend_from_slice(self.file.get(offset..end).unwrap_or_default());
+                    reply.extend_from_slice(&SW_SUCCESS);
+                }
+                _ => reply.extend_from_slice(&SW_REFERENCE_NOT_FOUND),
+            }
+            SingleExchangeOutcome::Response(reply)
+        }
+
+        fn exchange_credential(&mut self, block: &[u8]) -> SingleExchangeOutcome {
+            self.blocks.push(block.to_vec());
+            SingleExchangeOutcome::NoCard
+        }
+    }
+
+    fn card_access_exchange(domain: refineid_pace::PaceDomain) -> CardAccessExchange {
+        let mut fields = refineid_ber::BerEncoder::default();
+        fields
+            .push_tlv(TAG_OID, ID_PACE_GM_256)
+            .expect("the OID encodes");
+        fields
+            .push_tlv(TAG_INTEGER, [PACE_VERSION])
+            .expect("the version encodes");
+        fields
+            .push_tlv(TAG_INTEGER, [domain.parameter_id()])
+            .expect("the parameter encodes");
+        let info = refineid_ber::tlv(TAG_SEQUENCE, fields.finish()).expect("PACEInfo encodes");
+        CardAccessExchange {
+            file: refineid_ber::tlv(TAG_SET, info).expect("the SET encodes"),
+            blocks: Vec::new(),
+        }
+    }
+
+    fn sent_mse(exchange: &CardAccessExchange) -> Vec<&Vec<u8>> {
+        exchange
+            .blocks
+            .iter()
+            .filter(|block| block[INS_INDEX] == INS_MSE)
+            .collect()
+    }
+
+    #[test]
+    fn a_can_is_never_named_to_an_organization_card() {
+        for domain in [
+            refineid_pace::PaceDomain::NistP384,
+            refineid_pace::PaceDomain::NistP256,
+        ] {
+            let (outcome, exchange) = contactless_connect(
+                AndroidCardTransport::new(card_access_exchange(domain), CardExchangeLevel::Apdu),
+                SYNTHETIC_CAN_DIGITS.to_vec(),
+            );
+            assert!(matches!(
+                outcome,
+                ContactlessOpenOutcome::Failure(CertificateReadFailure::OrganizationCard)
+            ));
+            assert!(
+                sent_mse(&exchange).is_empty(),
+                "no MSE:Set AT names the CAN"
+            );
+        }
+    }
+
+    #[test]
+    fn a_can_goes_to_a_citizen_card_under_the_can_reference_only() {
+        let (outcome, exchange) = contactless_connect(
+            AndroidCardTransport::new(
+                card_access_exchange(refineid_pace::PaceDomain::BrainpoolP384r1),
+                CardExchangeLevel::Apdu,
+            ),
+            SYNTHETIC_CAN_DIGITS.to_vec(),
+        );
+        assert!(matches!(
+            outcome,
+            ContactlessOpenOutcome::Failure(CertificateReadFailure::PaceRejected)
+        ));
+        let mse = sent_mse(&exchange);
+        assert_eq!(mse.len(), 1);
+        assert!(
+            mse[0]
+                .windows(MSE_NAMES_CAN.len())
+                .any(|window| window == MSE_NAMES_CAN),
+            "MSE:Set AT names the CAN reference"
+        );
+    }
+
+    #[test]
+    fn a_card_naming_no_kind_is_sent_no_password() {
+        let mut exchange = card_access_exchange(refineid_pace::PaceDomain::NistP384);
+        let info = exchange.file.clone();
+        let mixed: Vec<u8> = [
+            info.get(2..).expect("the SET has a header"),
+            card_access_exchange(refineid_pace::PaceDomain::BrainpoolP384r1)
+                .file
+                .get(2..)
+                .expect("the SET has a header"),
+        ]
+        .concat();
+        exchange.file = refineid_ber::tlv(TAG_SET, mixed).expect("the SET encodes");
+        let (outcome, exchange) = contactless_connect(
+            AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu),
+            SYNTHETIC_CAN_DIGITS.to_vec(),
+        );
+        assert!(matches!(
+            outcome,
+            ContactlessOpenOutcome::Failure(CertificateReadFailure::Rejected)
+        ));
+        assert!(sent_mse(&exchange).is_empty());
     }
 
     /// Synthetic ASCII stand-ins for the qualified-signature inputs.

@@ -124,6 +124,8 @@ En kod från utfärdaren kan ändå prövas: kortet avgör och förbrukar inget.
     <string name="card_reading_hold_still">Kortet läses. Håll det stilla.</string>
     <string name="card_contact_lost">Kontakten med kortet bröts. Håll det mot telefonen igen.</string>
     <string name="card_found_enter_can" tools:ignore="Typos">Kortet hittades. Ange dess CAN.</string>
+    <string name="organization_card_found_enter_pin1">Organisationskortet hittades. Ange grund PIN 1.</string>
+    <string name="wrong_pin1">Fel grund PIN 1</string>
     <string name="allow_notifications">Tillåt aviseringar</string>
     <plurals name="remote_signature_request_many">
         <item quantity="one">%1$s begär %2$d underskrift.</item>

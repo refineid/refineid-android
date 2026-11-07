@@ -15,6 +15,8 @@ mod card_transport;
 mod certificate_validity;
 mod contactless;
 mod jni_card_exchange;
+mod organization_card;
+mod organization_jni;
 mod pin1_status;
 mod pin2_status;
 mod qualified_signer;
@@ -41,6 +43,7 @@ use jni::objects::{JByteArray, JClass, JObject};
 use jni::sys::{jboolean, jint};
 use jni::{Env, NativeMethod};
 use jni_card_exchange::JniBlockExchange;
+use organization_card::ContactlessCardKind;
 use pin1_status::{Pin1Preflight, Pin1PreflightFailure, Pin1State, probe_pin1_preflight};
 use pin2_status::{Pin2Preflight, Pin2PreflightFailure, Pin2State, probe_pin2_preflight};
 use qualified_signer::{
@@ -79,6 +82,7 @@ const CERTIFICATE_TRANSPORT_ERROR: u8 = 4;
 const CERTIFICATE_INVALID: u8 = 5;
 const CERTIFICATE_PACE_REJECTED: u8 = 6;
 const CERTIFICATE_ACTIVATION_REQUIRED: u8 = 7;
+const CERTIFICATE_ORGANIZATION_CARD: u8 = 8;
 
 const CARD_ACCESS_BRIDGE_ERROR: u8 = 0;
 const CARD_ACCESS_SUCCEEDED: u8 = 1;
@@ -87,8 +91,9 @@ const CARD_ACCESS_REJECTED: u8 = 3;
 const CARD_ACCESS_TRANSPORT_ERROR: u8 = 4;
 const CARD_ACCESS_INVALID: u8 = 5;
 
-const PUBLISHED_PROFILE_ABSENT: u8 = 0;
-const PUBLISHED_PROFILE_PRESENT: u8 = 1;
+const CARD_KIND_UNKNOWN: u8 = 0;
+const CARD_KIND_PERSONAL: u8 = 1;
+const CARD_KIND_ORGANIZATION: u8 = 2;
 
 const PIN1_PREFLIGHT_BRIDGE_ERROR: u8 = 0;
 const PIN1_PREFLIGHT_SUCCEEDED: u8 = 1;
@@ -2252,6 +2257,7 @@ fn encode_certificate_reply(result: Result<CardCertificate, CertificateReadFailu
             CertificateReadFailure::PaceRejected => CERTIFICATE_PACE_REJECTED,
             CertificateReadFailure::Bridge => CERTIFICATE_BRIDGE_ERROR,
             CertificateReadFailure::ActivationRequired => CERTIFICATE_ACTIVATION_REQUIRED,
+            CertificateReadFailure::OrganizationCard => CERTIFICATE_ORGANIZATION_CARD,
         }],
     }
 }
@@ -2290,10 +2296,10 @@ fn encode_card_access_reply(result: Result<CardAccessSummary, CardAccessProbeFai
         Ok(summary) => {
             let reply: [u8; CARD_ACCESS_REPLY_LENGTH] = [
                 CARD_ACCESS_SUCCEEDED,
-                if summary.supports_published_profile {
-                    PUBLISHED_PROFILE_PRESENT
-                } else {
-                    PUBLISHED_PROFILE_ABSENT
+                match summary.kind {
+                    None => CARD_KIND_UNKNOWN,
+                    Some(ContactlessCardKind::Personal) => CARD_KIND_PERSONAL,
+                    Some(ContactlessCardKind::Organization) => CARD_KIND_ORGANIZATION,
                 },
                 summary.pace_entry_count,
             ];
@@ -2481,6 +2487,8 @@ mod tests {
     use crate::card_management;
     use refineid_sign::{ECDSA_P384_SIG_BYTES, RSA_3072_SIG_BYTES};
 
+    use crate::organization_card::ContactlessCardKind;
+
     use super::{
         ATR_INVALID, ATR_VALID_NON_T0_DIRECT, ATR_VALID_T0_DIRECT, ATR_VALID_T0_INVERSE,
         AUTHENTICATION_ALGORITHM_ECDSA_P384_SHA256, AUTHENTICATION_ALGORITHM_ECDSA_P384_SHA384,
@@ -2495,8 +2503,9 @@ mod tests {
         AUTHENTICATION_SIGNATURE_REPLY_HEADER_LENGTH, AUTHENTICATION_SIGNATURE_SUCCEEDED,
         AUTHENTICATION_SIGNATURE_WRONG_PIN, CARD_ACCESS_BRIDGE_ERROR, CARD_ACCESS_CARD_UNAVAILABLE,
         CARD_ACCESS_INVALID, CARD_ACCESS_REJECTED, CARD_ACCESS_REPLY_LENGTH, CARD_ACCESS_SUCCEEDED,
-        CARD_ACCESS_TRANSPORT_ERROR, CARD_OPERATION_CARD_UNAVAILABLE, CARD_OPERATION_REJECTED,
-        CARD_OPERATION_SUCCEEDED, CARD_OPERATION_TRANSPORT_ERROR, CERTIFICATE_ACTIVATION_REQUIRED,
+        CARD_ACCESS_TRANSPORT_ERROR, CARD_KIND_PERSONAL, CARD_KIND_UNKNOWN,
+        CARD_OPERATION_CARD_UNAVAILABLE, CARD_OPERATION_REJECTED, CARD_OPERATION_SUCCEEDED,
+        CARD_OPERATION_TRANSPORT_ERROR, CERTIFICATE_ACTIVATION_REQUIRED,
         CERTIFICATE_CARD_UNAVAILABLE, CERTIFICATE_INVALID, CERTIFICATE_PACE_REJECTED,
         CERTIFICATE_REPLY_HEADER_LENGTH, CERTIFICATE_SUCCEEDED, ContactlessOpenOutcome,
         EXCHANGE_LEVEL_APDU, EXCHANGE_LEVEL_T0_TPDU, KEY_PROFILE_RSA_2048, NO_RETRY_COUNT,
@@ -2504,16 +2513,16 @@ mod tests {
         PIN1_PREFLIGHT_REPLY_LENGTH, PIN1_PREFLIGHT_REPLY_LENGTH_BYTE, PIN1_PREFLIGHT_SUCCEEDED,
         PIN1_STATE_REMAINING, PIN2_PREFLIGHT_BRIDGE_ERROR, PIN2_PREFLIGHT_CARD_UNAVAILABLE,
         PIN2_PREFLIGHT_REPLY_LENGTH, PIN2_PREFLIGHT_SUCCEEDED, PIN2_STATE_REMAINING,
-        POLICY_PERMITTED, PUBLISHED_PROFILE_ABSENT, PUBLISHED_PROFILE_PRESENT,
-        QUALIFIED_ALGORITHM_ECDSA_P384_SHA384, QUALIFIED_ALGORITHM_RSA_PKCS1_SHA384,
-        QUALIFIED_PREHASHED_ECDSA_P384_SHA384, QUALIFIED_PREHASHED_RSA_PKCS1_SHA384,
-        QUALIFIED_SIGNATURE_CARD_UNAVAILABLE, QUALIFIED_SIGNATURE_REPLY_HEADER_LENGTH,
-        QUALIFIED_SIGNATURE_SUCCEEDED, QUALIFIED_SIGNATURE_WRONG_PIN,
-        authentication_algorithm_from_jint, authentication_request_from_jint,
-        encode_authentication_signature_reply, encode_card_access_reply, encode_certificate_reply,
-        encode_contactless_open_reply, encode_pin1_preflight_reply, encode_pin2_preflight_reply,
-        encode_qualified_signature_reply, exchange_level_from_jint, map_pkcs15_selection_result,
-        qualified_algorithm_from_jint, qualified_request_from_jint, validate_atr_bytes,
+        POLICY_PERMITTED, QUALIFIED_ALGORITHM_ECDSA_P384_SHA384,
+        QUALIFIED_ALGORITHM_RSA_PKCS1_SHA384, QUALIFIED_PREHASHED_ECDSA_P384_SHA384,
+        QUALIFIED_PREHASHED_RSA_PKCS1_SHA384, QUALIFIED_SIGNATURE_CARD_UNAVAILABLE,
+        QUALIFIED_SIGNATURE_REPLY_HEADER_LENGTH, QUALIFIED_SIGNATURE_SUCCEEDED,
+        QUALIFIED_SIGNATURE_WRONG_PIN, authentication_algorithm_from_jint,
+        authentication_request_from_jint, encode_authentication_signature_reply,
+        encode_card_access_reply, encode_certificate_reply, encode_contactless_open_reply,
+        encode_pin1_preflight_reply, encode_pin2_preflight_reply, encode_qualified_signature_reply,
+        exchange_level_from_jint, map_pkcs15_selection_result, qualified_algorithm_from_jint,
+        qualified_request_from_jint, validate_atr_bytes,
     };
     use crate::authentication_signer::{
         AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
@@ -2852,24 +2861,24 @@ mod tests {
     fn encodes_card_access_summary_and_typed_failures() {
         const SYNTHETIC_PACE_ENTRY_COUNT: u8 = 2;
         let published = encode_card_access_reply(Ok(CardAccessSummary {
-            supports_published_profile: true,
+            kind: Some(ContactlessCardKind::Personal),
             pace_entry_count: SYNTHETIC_PACE_ENTRY_COUNT,
         }));
         assert_eq!(
             published,
             vec![
                 CARD_ACCESS_SUCCEEDED,
-                PUBLISHED_PROFILE_PRESENT,
+                CARD_KIND_PERSONAL,
                 SYNTHETIC_PACE_ENTRY_COUNT,
             ]
         );
         assert_eq!(published.len(), CARD_ACCESS_REPLY_LENGTH);
         assert_eq!(
             encode_card_access_reply(Ok(CardAccessSummary {
-                supports_published_profile: false,
+                kind: None,
                 pace_entry_count: 1,
             })),
-            vec![CARD_ACCESS_SUCCEEDED, PUBLISHED_PROFILE_ABSENT, 1]
+            vec![CARD_ACCESS_SUCCEEDED, CARD_KIND_UNKNOWN, 1]
         );
         assert_eq!(
             encode_card_access_reply(Err(CardAccessProbeFailure::CardUnavailable)),

@@ -48,7 +48,9 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import fi.refineid.android.R
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.Pin1Verification
 import fi.refineid.android.core.Pin2Submission
 import fi.refineid.android.nfc.NfcCardWait
 import fi.refineid.android.nfc.NfcReaderStatus
@@ -251,7 +253,11 @@ internal fun RappCardTapDialog(
     usbReaderPresent: Boolean,
     nfcStatus: NfcReaderStatus = NfcReaderStatus.WAITING_FOR_CARD,
     accessNumberKnown: Boolean = true,
+    cardKind: NfcCardKind? = null,
+    pin1AttemptsLeft: Int? = null,
+    pin1Answer: Pin1Verification? = null,
     onSubmitAccessNumber: (CanSubmission) -> Unit = { it.close() },
+    onSubmitOrganizationPin1: (Pin1Submission) -> Unit = { it.close() },
 ) {
     var wasReading by remember(prompt.requestId) { mutableStateOf(false) }
     val reading = nfcStatus == NfcReaderStatus.CHECKING || nfcStatus == NfcReaderStatus.CONNECTING
@@ -260,12 +266,14 @@ internal fun RappCardTapDialog(
     }
     val cardOnPhone = reading || nfcStatus in CARD_ON_PHONE
     val needsAccessNumber =
-        (!usbReaderPresent || cardOnPhone) && NfcCardWait.needsAccessNumber(nfcStatus, accessNumberKnown)
+        (!usbReaderPresent || cardOnPhone) && NfcCardWait.asksForAccessNumber(nfcStatus, accessNumberKnown, cardKind)
+    val needsOrganizationPin1 = NfcCardWait.asksForOrganizationPin1(nfcStatus, cardKind)
     val message =
         when {
             reading -> R.string.card_reading_hold_still
             nfcStatus == NfcReaderStatus.WRONG_CAN -> R.string.wrong_can
             nfcStatus == NfcReaderStatus.CARD_RECOGNIZED && needsAccessNumber -> R.string.card_found_enter_can
+            needsOrganizationPin1 -> R.string.hold_card_against_back
             wasReading && nfcStatus == NfcReaderStatus.WAITING_FOR_CARD -> R.string.card_contact_lost
             usbReaderPresent -> R.string.insert_card_into_reader
             else -> R.string.hold_card_against_back
@@ -304,7 +312,15 @@ internal fun RappCardTapDialog(
                             .semantics { liveRegion = LiveRegionMode.Polite },
                 )
 
-                if (needsAccessNumber) {
+                if (needsOrganizationPin1) {
+                    OrganizationPin1Entry(
+                        attemptsLeft = pin1AttemptsLeft,
+                        answer = pin1Answer,
+                        isOpening = reading,
+                        onSubmit = onSubmitOrganizationPin1,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else if (needsAccessNumber) {
                     CanField(
                         state = accessNumber,
                         testTag = "RappCardTapCan",

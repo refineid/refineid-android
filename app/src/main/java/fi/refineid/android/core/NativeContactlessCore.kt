@@ -4,7 +4,8 @@ import fi.refineid.android.diagnostics.AppTrace
 
 /** Typed outcome of one credential-free contactless EF.CardAccess probe. */
 internal data class NativeCardAccessSummary(
-    val supportsPublishedPaceProfile: Boolean,
+    /** What opens the card; null for a card that lists neither family's suites. */
+    val cardKind: NfcCardKind?,
     val paceEntryCount: Int,
 )
 
@@ -421,21 +422,21 @@ internal object NativeCardAccessReply {
         if (reply.size != SUCCESS_REPLY_LENGTH) {
             return bridgeFailure()
         }
-        val supportsPublishedProfile =
-            when (reply[PROFILE_OFFSET].toUnsignedInt()) {
-                PUBLISHED_PROFILE_ABSENT -> false
-                PUBLISHED_PROFILE_PRESENT -> true
+        val cardKind =
+            when (reply[KIND_OFFSET].toUnsignedInt()) {
+                CARD_KIND_UNKNOWN -> null
+                CARD_KIND_PERSONAL -> NfcCardKind.PERSONAL
+                CARD_KIND_ORGANIZATION -> NfcCardKind.ORGANIZATION
                 else -> return bridgeFailure()
             }
         val paceEntryCount = reply[ENTRY_COUNT_OFFSET].toUnsignedInt()
-        // The native parser fails an EF.CardAccess with no recognized
-        // entry, so a success carrying zero entries is malformed.
-        if (paceEntryCount < MINIMUM_ENTRY_COUNT) {
+        // A card of a known kind listed the suite that names it.
+        if (cardKind != null && paceEntryCount < MINIMUM_ENTRY_COUNT) {
             return bridgeFailure()
         }
         return NativeCardAccessResult.Success(
             NativeCardAccessSummary(
-                supportsPublishedPaceProfile = supportsPublishedProfile,
+                cardKind = cardKind,
                 paceEntryCount = paceEntryCount,
             ),
         )
@@ -463,11 +464,12 @@ internal object NativeCardAccessReply {
     private const val CARD_ACCESS_TRANSPORT_ERROR = 4
     private const val CARD_ACCESS_INVALID = 5
 
-    private const val PUBLISHED_PROFILE_ABSENT = 0
-    private const val PUBLISHED_PROFILE_PRESENT = 1
+    private const val CARD_KIND_UNKNOWN = 0
+    private const val CARD_KIND_PERSONAL = 1
+    private const val CARD_KIND_ORGANIZATION = 2
 
     private const val TAG_OFFSET = 0
-    private const val PROFILE_OFFSET = 1
+    private const val KIND_OFFSET = 1
     private const val ENTRY_COUNT_OFFSET = 2
 
     private const val FAILURE_REPLY_LENGTH = 1

@@ -3,7 +3,9 @@ package fi.refineid.android.nfc
 import fi.refineid.android.core.NativeCardAccessFailure
 import fi.refineid.android.core.NativeCardAccessResult
 import fi.refineid.android.core.NativeCertificateReadFailure
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.PersonCardDetails
+import fi.refineid.android.core.Pin1Verification
 
 internal enum class NfcReaderStatus {
     NOT_AVAILABLE,
@@ -36,13 +38,19 @@ internal data class NfcReaderSnapshot(
     val holderName: String? = null,
     /** The detailed cardholder identity info parsed from the certificate. */
     val cardDetails: PersonCardDetails? = null,
+    /** What opens the card last read in the field; null before one has answered. */
+    val cardKind: NfcCardKind? = null,
+    /** An organization card's PIN 1 tries, read before any entry; null when not read. */
+    val pin1AttemptsLeft: Int? = null,
+    /** The organization card's answer to the PIN 1 last offered to open it. */
+    val pin1Answer: Pin1Verification? = null,
 )
 
 /** Coarse holder-facing status for one completed card-access probe. */
 internal fun NativeCardAccessResult.toReaderStatus(): NfcReaderStatus =
     when (this) {
         is NativeCardAccessResult.Success -> {
-            if (summary.supportsPublishedPaceProfile) {
+            if (summary.cardKind != null) {
                 NfcReaderStatus.CARD_RECOGNIZED
             } else {
                 NfcReaderStatus.CARD_NOT_SUPPORTED
@@ -76,6 +84,8 @@ internal fun NativeCardAccessResult.toReaderStatus(): NfcReaderStatus =
 internal fun NativeCertificateReadFailure.toConnectStatus(): NfcReaderStatus =
     when (this) {
         NativeCertificateReadFailure.PACE_REJECTED -> NfcReaderStatus.WRONG_CAN
+
+        NativeCertificateReadFailure.ORGANIZATION_CARD -> NfcReaderStatus.CARD_RECOGNIZED
 
         NativeCertificateReadFailure.CARD_UNAVAILABLE -> NfcReaderStatus.WAITING_FOR_CARD
 

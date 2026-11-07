@@ -9,12 +9,22 @@ import java.security.interfaces.RSAPublicKey
 
 /** Copies public primed material; the browser independently validates the certificate chain. */
 internal fun primedAuthenticationCertificate(der: ByteArray): NativeAuthenticationCertificate? =
+    primedCertificate(der) { profile, ownedDer -> NativeAuthenticationCertificate(profile, ownedDer) }
+
+/** The qualified certificate a primed store holds, typed by its key; null for one that does not parse. */
+internal fun primedQualifiedCertificate(der: ByteArray): NativeQualifiedCertificate? =
+    primedCertificate(der) { profile, ownedDer -> NativeQualifiedCertificate(profile, ownedDer) }
+
+private fun <Certificate> primedCertificate(
+    der: ByteArray,
+    certificate: (NativeCardKeyProfile, ByteArray) -> Certificate,
+): Certificate? =
     try {
-        val certificate =
+        val parsed =
             CertificateFactory
                 .getInstance("X.509")
                 .generateCertificate(ByteArrayInputStream(der)) as? X509Certificate
-        val key = certificate?.publicKey
+        val key = parsed?.publicKey
         val profile =
             when (key) {
                 is RSAPublicKey -> {
@@ -37,7 +47,7 @@ internal fun primedAuthenticationCertificate(der: ByteArray): NativeAuthenticati
                     null
                 }
             }
-        profile?.let { NativeAuthenticationCertificate(it, der.copyOf()) }
+        profile?.let { certificate(it, der.copyOf()) }
     } catch (_: CertificateException) {
         null
     } finally {

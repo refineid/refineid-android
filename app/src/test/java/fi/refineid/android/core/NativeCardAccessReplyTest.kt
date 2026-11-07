@@ -6,12 +6,12 @@ import org.junit.Test
 
 class NativeCardAccessReplyTest {
     @Test
-    fun decodesPublishedProfileSummary() {
+    fun decodesACitizenCard() {
         val result =
             NativeCardAccessReply.decode(
                 byteArrayOf(
                     CARD_ACCESS_SUCCEEDED,
-                    PUBLISHED_PROFILE_PRESENT,
+                    CARD_KIND_PERSONAL,
                     SYNTHETIC_ENTRY_COUNT,
                 ),
             )
@@ -19,7 +19,7 @@ class NativeCardAccessReplyTest {
         assertEquals(
             NativeCardAccessResult.Success(
                 NativeCardAccessSummary(
-                    supportsPublishedPaceProfile = true,
+                    cardKind = NfcCardKind.PERSONAL,
                     paceEntryCount = SYNTHETIC_ENTRY_COUNT.toInt(),
                 ),
             ),
@@ -28,12 +28,12 @@ class NativeCardAccessReplyTest {
     }
 
     @Test
-    fun decodesRecognizedCardWithoutPublishedProfile() {
+    fun decodesACardOfNoKnownKind() {
         val result =
             NativeCardAccessReply.decode(
                 byteArrayOf(
                     CARD_ACCESS_SUCCEEDED,
-                    PUBLISHED_PROFILE_ABSENT,
+                    CARD_KIND_UNKNOWN,
                     SINGLE_ENTRY_COUNT,
                 ),
             )
@@ -41,8 +41,30 @@ class NativeCardAccessReplyTest {
         assertEquals(
             NativeCardAccessResult.Success(
                 NativeCardAccessSummary(
-                    supportsPublishedPaceProfile = false,
+                    cardKind = null,
                     paceEntryCount = SINGLE_ENTRY_COUNT.toInt(),
+                ),
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun decodesAnOrganizationCard() {
+        val result =
+            NativeCardAccessReply.decode(
+                byteArrayOf(
+                    CARD_ACCESS_SUCCEEDED,
+                    CARD_KIND_ORGANIZATION,
+                    SYNTHETIC_ENTRY_COUNT,
+                ),
+            )
+
+        assertEquals(
+            NativeCardAccessResult.Success(
+                NativeCardAccessSummary(
+                    cardKind = NfcCardKind.ORGANIZATION,
+                    paceEntryCount = SYNTHETIC_ENTRY_COUNT.toInt(),
                 ),
             ),
             result,
@@ -74,19 +96,19 @@ class NativeCardAccessReplyTest {
                 byteArrayOf(),
                 byteArrayOf(UNKNOWN_TAG),
                 byteArrayOf(CARD_ACCESS_SUCCEEDED),
-                byteArrayOf(CARD_ACCESS_SUCCEEDED, PUBLISHED_PROFILE_PRESENT),
+                byteArrayOf(CARD_ACCESS_SUCCEEDED, CARD_KIND_PERSONAL),
                 byteArrayOf(
                     CARD_ACCESS_SUCCEEDED,
-                    PUBLISHED_PROFILE_PRESENT,
+                    CARD_KIND_PERSONAL,
                     SYNTHETIC_ENTRY_COUNT,
                     TRAILING_GARBAGE,
                 ),
                 byteArrayOf(
                     CARD_ACCESS_SUCCEEDED,
-                    UNKNOWN_PROFILE_FLAG,
+                    UNKNOWN_KIND,
                     SYNTHETIC_ENTRY_COUNT,
                 ),
-                byteArrayOf(CARD_ACCESS_SUCCEEDED, PUBLISHED_PROFILE_PRESENT, ZERO_ENTRY_COUNT),
+                byteArrayOf(CARD_ACCESS_SUCCEEDED, CARD_KIND_PERSONAL, ZERO_ENTRY_COUNT),
                 byteArrayOf(CARD_ACCESS_TRANSPORT_ERROR, TRAILING_GARBAGE),
             )
         malformed.forEach { reply ->
@@ -102,7 +124,7 @@ class NativeCardAccessReplyTest {
         val reply =
             byteArrayOf(
                 CARD_ACCESS_SUCCEEDED,
-                PUBLISHED_PROFILE_PRESENT,
+                CARD_KIND_PERSONAL,
                 SYNTHETIC_ENTRY_COUNT,
             )
 
@@ -118,9 +140,10 @@ class NativeCardAccessReplyTest {
         const val CARD_ACCESS_REJECTED: Byte = 3
         const val CARD_ACCESS_TRANSPORT_ERROR: Byte = 4
         const val CARD_ACCESS_INVALID: Byte = 5
-        const val PUBLISHED_PROFILE_ABSENT: Byte = 0
-        const val PUBLISHED_PROFILE_PRESENT: Byte = 1
-        const val UNKNOWN_PROFILE_FLAG: Byte = 2
+        const val CARD_KIND_UNKNOWN: Byte = 0
+        const val CARD_KIND_PERSONAL: Byte = 1
+        const val CARD_KIND_ORGANIZATION: Byte = 2
+        const val UNKNOWN_KIND: Byte = 3
         const val UNKNOWN_TAG: Byte = 6
         const val SYNTHETIC_ENTRY_COUNT: Byte = 2
         const val SINGLE_ENTRY_COUNT: Byte = 1

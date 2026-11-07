@@ -31,7 +31,7 @@ use refineid_apdu::{CardTransport, TransportOutcome};
 use refineid_auth::{AuthError, Pin2, UnvalidatedSecret, VerifyOutcome};
 use refineid_digest::Sha384;
 use refineid_pkcs15::Pkcs15Error;
-use refineid_sign::{QualifiedUnlockError, SignError, SignOps, SignScheme};
+use refineid_sign::{QualifiedUnlockError, SignError, SignOps, SignScheme, SigningKey};
 
 use crate::card_certificate::{
     CardCertificate, CardKeyProfile, CertificateReadFailure, read_qualified_certificate,
@@ -61,7 +61,7 @@ pub(crate) enum QualifiedSigningInput<'a> {
 }
 
 impl QualifiedSigningAlgorithm {
-    const fn accepts_profile(self, profile: CardKeyProfile) -> bool {
+    pub(crate) const fn accepts_profile(self, profile: CardKeyProfile) -> bool {
         matches!(
             (self, profile),
             (Self::RsaPkcs1Sha384, CardKeyProfile::Rsa3072)
@@ -157,18 +157,7 @@ pub(crate) fn qualified_sign<T>(
 where
     T: QualifiedCertificateSource,
 {
-    let digest = match input {
-        QualifiedSigningInput::Message(content) => {
-            if content.len() > MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH {
-                return Err(QualifiedSignFailure::Bridge);
-            }
-            Sha384::of(content)
-        }
-        QualifiedSigningInput::Prehashed(digest_bytes) => digest_bytes
-            .try_into()
-            .map(Sha384::from_bytes)
-            .map_err(|_| QualifiedSignFailure::Bridge)?,
-    };
+    let digest = prepared_qualified_digest(input)?;
     let pin_input = UnvalidatedSecret::from_owned_bytes(pin_bytes);
     let pin = Pin2::reconstruct(pin_input).map_err(|_| QualifiedSignFailure::InvalidPin)?;
     let preflight = probe_pin2_preflight(transport).map_err(map_preflight_failure)?;
@@ -189,6 +178,34 @@ where
     let key = transport
         .unlock_qualified_key(SignScheme::from(preflight.scheme), pin)
         .map_err(map_unlock_error)?;
+    sign_with_qualified_key(key, algorithm, digest)
+}
+
+/// The SHA-384 digest a qualified signature signs: the hash of bounded
+/// content, or a caller's digest of the exact length.
+pub(crate) fn prepared_qualified_digest(
+    input: QualifiedSigningInput<'_>,
+) -> Result<Sha384, QualifiedSignFailure> {
+    match input {
+        QualifiedSigningInput::Message(content) => {
+            if content.len() > MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH {
+                return Err(QualifiedSignFailure::Bridge);
+            }
+            Ok(Sha384::of(content))
+        }
+        QualifiedSigningInput::Prehashed(digest_bytes) => digest_bytes
+            .try_into()
+            .map(Sha384::from_bytes)
+            .map_err(|_| QualifiedSignFailure::Bridge),
+    }
+}
+
+/// One signature by a qualified key already made ready to sign.
+pub(crate) fn sign_with_qualified_key<T: CardTransport>(
+    key: SigningKey<'_, T>,
+    algorithm: QualifiedSigningAlgorithm,
+    digest: Sha384,
+) -> Result<QualifiedSignature, QualifiedSignFailure> {
     let bytes = match algorithm {
         QualifiedSigningAlgorithm::RsaPkcs1Sha384 => key
             .sign_prehashed_sha384_rsa(digest.into_bytes())
@@ -198,7 +215,6 @@ where
             .map(|signature| signature.into_bytes()),
     }
     .map_err(map_sign_error)?;
-
     Ok(QualifiedSignature { algorithm, bytes })
 }
 
@@ -229,7 +245,7 @@ fn map_unlock_error<E>(error: QualifiedUnlockError<E>) -> QualifiedSignFailure {
 }
 
 /// DF.ESIGN would not become current, so PIN2 was never sent.
-fn map_directory_error<E>(error: Pkcs15Error<E>) -> QualifiedSignFailure {
+pub(crate) fn map_directory_error<E>(error: Pkcs15Error<E>) -> QualifiedSignFailure {
     match error {
         Pkcs15Error::Outcome(TransportOutcome::NoCard | TransportOutcome::ReaderRemoved) => {
             QualifiedSignFailure::CardUnavailable
@@ -258,7 +274,9 @@ const fn map_preflight_failure(failure: Pin2PreflightFailure) -> QualifiedSignFa
     }
 }
 
-const fn map_certificate_failure(failure: CertificateReadFailure) -> QualifiedSignFailure {
+pub(crate) const fn map_certificate_failure(
+    failure: CertificateReadFailure,
+) -> QualifiedSignFailure {
     match failure {
         CertificateReadFailure::CardUnavailable => QualifiedSignFailure::CardUnavailable,
         CertificateReadFailure::Rejected => QualifiedSignFailure::CertificateRejected,
@@ -268,7 +286,8 @@ const fn map_certificate_failure(failure: CertificateReadFailure) -> QualifiedSi
         // refusal reaching it is a local impossibility.
         CertificateReadFailure::PaceRejected
         | CertificateReadFailure::Bridge
-        | CertificateReadFailure::ActivationRequired => QualifiedSignFailure::Bridge,
+        | CertificateReadFailure::ActivationRequired
+        | CertificateReadFailure::OrganizationCard => QualifiedSignFailure::Bridge,
     }
 }
 

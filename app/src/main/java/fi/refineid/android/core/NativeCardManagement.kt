@@ -58,6 +58,8 @@ internal data class CredentialHealth(
     val activationScheme: CardManagementScheme,
     val activationNeeds: CardActivationNeeds,
     val pinLengths: CardPinLengths? = null,
+    /** False where no record-floored PIN 2 change exists: an organization card over NFC. */
+    val changesPin2: Boolean = true,
 )
 
 /**
@@ -509,7 +511,7 @@ internal object NativeCardManagement {
             CardManagementScheme.UNKNOWN -> ACTIVATION_SCHEME_UNKNOWN
         }
 
-    private fun decodeCredentialHealth(reply: ByteArray): CardManagementResult<CredentialHealth> {
+    internal fun decodeCredentialHealth(reply: ByteArray): CardManagementResult<CredentialHealth> {
         if (reply.isEmpty()) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
@@ -567,7 +569,7 @@ internal object NativeCardManagement {
         )
     }
 
-    private fun decodeManageOutcome(reply: ByteArray): CardManagementResult<ManageOutcome> {
+    internal fun decodeManageOutcome(reply: ByteArray): CardManagementResult<ManageOutcome> {
         if (reply.isEmpty()) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
