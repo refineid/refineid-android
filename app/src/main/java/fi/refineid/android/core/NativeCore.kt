@@ -111,6 +111,9 @@ internal enum class NativeCertificateReadFailure {
     PACE_REJECTED,
     BRIDGE_ERROR,
     ACTIVATION_REQUIRED,
+
+    /** EF.CardAccess names an organization card; no access number was named to it. */
+    ORGANIZATION_CARD,
 }
 
 internal sealed interface NativeCertificateReadResult<out Certificate> {
@@ -487,6 +490,10 @@ internal object NativeCertificateReply {
                     )
                 }
 
+                CERTIFICATE_ORGANIZATION_CARD -> {
+                    NativeCertificateReadResult.Failure(NativeCertificateReadFailure.ORGANIZATION_CARD)
+                }
+
                 CERTIFICATE_ACTIVATION_REQUIRED -> {
                     decodeFailure(
                         reply,
@@ -548,6 +555,7 @@ internal object NativeCertificateReply {
     private const val CERTIFICATE_INVALID = 5
     private const val CERTIFICATE_PACE_REJECTED = 6
     private const val CERTIFICATE_ACTIVATION_REQUIRED = 7
+    private const val CERTIFICATE_ORGANIZATION_CARD = 8
 
     private const val KEY_PROFILE_RSA_2048 = 0
     private const val KEY_PROFILE_RSA_3072 = 1

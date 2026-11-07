@@ -70,6 +70,10 @@ import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativePin1State
 import fi.refineid.android.core.NativePin2State
+import fi.refineid.android.core.NfcCardKind
+import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.nfc.NfcReaderSnapshot
+import fi.refineid.android.nfc.NfcReaderStatus
 
 private enum class ManagementTask {
     CHANGE_PIN1,
@@ -106,6 +110,7 @@ private fun taskAfterAnswer(
         health.activationNeeds.any -> ManagementTask.ACTIVATE_CARD
         health.pin1State is NativePin1State.Locked -> ManagementTask.RESET_PIN1
         health.pin2State is NativePin2State.Locked -> ManagementTask.RESET_PIN2
+        current == ManagementTask.CHANGE_PIN2 && !health.changesPin2 -> ManagementTask.CHANGE_PIN1
         current == ManagementTask.ACTIVATE_CARD -> ManagementTask.CHANGE_PIN1
         else -> current
     }
@@ -115,6 +120,8 @@ private fun taskAfterAnswer(
 internal fun CardManagementScreen(
     cardManagementService: CardManagementService?,
     onConnectNfc: ((CanSubmission) -> Unit)? = null,
+    nfcSnapshot: NfcReaderSnapshot? = null,
+    onOpenOrganization: (Pin1Submission) -> Unit = { it.close() },
     isCardReady: Boolean = false,
     pinCache: fi.refineid.android.core.AuthenticationPinCache? = null,
     onPin1Changed: (() -> Unit)? = null,
@@ -524,27 +531,45 @@ internal fun CardManagementScreen(
                                 .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        val canReady = canEntryReady(canState.text)
-                        CanField(
-                            state = canState,
-                            testTag = "managementCardAccessNumber",
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Button(
-                            onClick = {
-                                canEntrySubmission(canState.text)?.let { can ->
-                                    fi.refineid.android.core.CanSessionStore
-                                        .remember(can)
-                                    onConnectNfc(can)
+                        when (nfcSnapshot?.cardKind) {
+                            null -> {
+                                Text(stringResource(R.string.hold_card_against_back))
+                                NfcCardProblemText(nfcSnapshot)
+                            }
+
+                            NfcCardKind.ORGANIZATION -> {
+                                OrganizationPin1Entry(
+                                    attemptsLeft = nfcSnapshot.pin1AttemptsLeft,
+                                    answer = nfcSnapshot.pin1Answer,
+                                    isOpening = nfcSnapshot.status == NfcReaderStatus.CONNECTING,
+                                    onSubmit = onOpenOrganization,
+                                )
+                            }
+
+                            NfcCardKind.PERSONAL -> {
+                                val canReady = canEntryReady(canState.text)
+                                CanField(
+                                    state = canState,
+                                    testTag = "managementCardAccessNumber",
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Button(
+                                    onClick = {
+                                        canEntrySubmission(canState.text)?.let { can ->
+                                            fi.refineid.android.core.CanSessionStore
+                                                .remember(can)
+                                            onConnectNfc(can)
+                                        }
+                                    },
+                                    enabled = canReady,
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .testTag("managementReadCard"),
+                                ) {
+                                    Text(stringResource(R.string.read_identity_card))
                                 }
-                            },
-                            enabled = canReady,
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .testTag("managementReadCard"),
-                        ) {
-                            Text(stringResource(R.string.read_identity_card))
+                            }
                         }
                     }
                 }
@@ -648,6 +673,7 @@ internal fun CardManagementScreen(
             Section(stringResource(R.string.card_pins)) {
                 TaskSelector(
                     selectedTask = selectedTask,
+                    changesPin2 = health?.changesPin2 != false,
                     onSelect = { task ->
                         selectedTask = task
                         outcomeNotice = null
@@ -815,6 +841,7 @@ private fun GuidanceBanner(
 @Composable
 private fun TaskSelector(
     selectedTask: ManagementTask,
+    changesPin2: Boolean,
     onSelect: (ManagementTask) -> Unit,
 ) {
     Column(
@@ -831,12 +858,14 @@ private fun TaskSelector(
                 onClick = { onSelect(ManagementTask.CHANGE_PIN1) },
                 modifier = Modifier.weight(1f).testTag("managementTask.changePin1"),
             )
-            TaskButton(
-                text = stringResource(R.string.change_pin2),
-                isSelected = selectedTask == ManagementTask.CHANGE_PIN2,
-                onClick = { onSelect(ManagementTask.CHANGE_PIN2) },
-                modifier = Modifier.weight(1f).testTag("managementTask.changePin2"),
-            )
+            if (changesPin2) {
+                TaskButton(
+                    text = stringResource(R.string.change_pin2),
+                    isSelected = selectedTask == ManagementTask.CHANGE_PIN2,
+                    onClick = { onSelect(ManagementTask.CHANGE_PIN2) },
+                    modifier = Modifier.weight(1f).testTag("managementTask.changePin2"),
+                )
+            }
         }
         Row(
             modifier = Modifier.fillMaxWidth(),

@@ -26,8 +26,9 @@ internal class NfcTapToSign(
     private val mainHandler: Handler,
     private val latestIsoDep: () -> IsoDep?,
     private val primedCan: () -> ByteArray?,
-    private val activeSession: () -> ContactlessSession?,
-    private val adoptSession: (ContactlessSession) -> Unit,
+    private val activeSession: () -> ContactlessCardSession?,
+    private val adoptSession: (ContactlessCardSession) -> Unit,
+    private val organizationSession: (IsoDep) -> ContactlessCardSession? = { null },
     private val closeSession: () -> Unit,
 ) {
     @Volatile
@@ -110,8 +111,10 @@ internal class NfcTapToSign(
     /**
      * Worker-thread confined; adopts a presented tag into the transient
      * signing session, opening it on the first tap. The qualified read
-     * and sign each re-run PACE with the session access number, so a
-     * substituted card fails the handshake before any credential is sent.
+     * and sign each re-run PACE with the session access number, or on an
+     * organization card, which has none, with the credential each spends; a
+     * substituted card of the other kind is refused before any password is
+     * named.
      */
     fun onTag(isoDep: IsoDep) {
         if (!inProgress) {
@@ -124,7 +127,7 @@ internal class NfcTapToSign(
         }
         val number =
             can ?: fi.refineid.android.core.CanSessionStore
-                .canBytes() ?: primedCan() ?: return
+                .canBytes() ?: primedCan()
         try {
             if (!isoDep.isConnected) {
                 isoDep.connect()
@@ -141,13 +144,17 @@ internal class NfcTapToSign(
             return
         }
         can = null
-        adoptSession(
-            ContactlessSession(
-                isoDep = isoDep,
-                can = number,
-                material = NativeCardSessionMaterial(),
-            ),
-        )
+        val opened =
+            if (number != null) {
+                ContactlessSession(
+                    isoDep = isoDep,
+                    can = number,
+                    material = NativeCardSessionMaterial(),
+                )
+            } else {
+                organizationSession(isoDep) ?: return
+            }
+        adoptSession(opened)
         val onReady = ready
         mainHandler.post {
             if (inProgress) {

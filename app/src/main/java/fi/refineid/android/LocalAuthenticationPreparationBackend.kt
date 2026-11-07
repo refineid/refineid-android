@@ -8,8 +8,10 @@ import fi.refineid.android.core.AuthenticationReadiness
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.CardConnection
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.Pin1Retention
 import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.Pin1Verification
 import fi.refineid.android.core.Pin1VerificationOutcome
 import fi.refineid.android.core.Pin1VerificationResult
 import fi.refineid.android.core.runPin1Verification
@@ -49,8 +51,10 @@ internal class LocalAuthenticationPreparationBackend(
                     usb.status == ReaderConnectionStatus.ACCESS_NUMBER_REQUIRED ||
                         usb.status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER
                 } else {
-                    nfc.status == NfcReaderStatus.WRONG_CAN || (!CanSessionStore.hasCan && !primed)
+                    nfc.status == NfcReaderStatus.WRONG_CAN ||
+                        (!CanSessionStore.hasCan && !primed && nfc.cardKind == NfcCardKind.PERSONAL)
                 },
+            awaitsCardKind = !wired && !CanSessionStore.hasCan && !primed && nfc.cardKind == null,
             available = wired || (app.nfcReaderController.hasNfc && nfc.status != NfcReaderStatus.TURNED_OFF),
         )
     }
@@ -80,6 +84,34 @@ internal class LocalAuthenticationPreparationBackend(
         stamp = current
         selected = if (current.wired) app.readerController else app.nfcReaderController.authenticationCardService
         return CardConnection.READY
+    }
+
+    override suspend fun openOrganization(pin1: Pin1Submission): Pin1Verification {
+        val controller = app.nfcReaderController
+        controller.connect(null, pin1)
+        val settled =
+            withTimeoutOrNull(CARD_WAIT_TIMEOUT_MS) {
+                suspendCancellableCoroutine { continuation ->
+                    lateinit var listener: (NfcReaderSnapshot) -> Unit
+                    listener = { snapshot ->
+                        if (snapshot.status != NfcReaderStatus.CONNECTING && continuation.isActive) {
+                            controller.removeStateListener(listener)
+                            continuation.resume(snapshot)
+                        }
+                    }
+                    controller.addStateListener(listener)
+                    continuation.invokeOnCancellation {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            controller.removeStateListener(listener)
+                        }
+                    }
+                }
+            }
+        return when {
+            settled?.status == NfcReaderStatus.CARD_READY -> Pin1Verification(Pin1VerificationResult.VERIFIED)
+            settled?.pin1Answer != null -> settled.pin1Answer
+            else -> Pin1Verification(Pin1VerificationResult.CARD_UNAVAILABLE)
+        }
     }
 
     override suspend fun connectedCard(): AuthenticationCardIdentity? =
@@ -219,10 +251,33 @@ internal class LocalAuthenticationPreparationBackend(
         // its own, and the wait ends on its own limit.
         val nfc = app.nfcReaderController.snapshot
         return when {
-            app.nfcReaderController.isCardReady -> CardConnection.READY
-            nfc.status == NfcReaderStatus.WRONG_CAN -> CardConnection.WRONG_CAN
-            nfc.status == NfcReaderStatus.ACTIVATION_REQUIRED -> CardConnection.REFUSED
-            else -> null
+            app.nfcReaderController.isCardReady -> {
+                CardConnection.READY
+            }
+
+            nfc.status == NfcReaderStatus.WRONG_CAN -> {
+                CardConnection.WRONG_CAN
+            }
+
+            nfc.status == NfcReaderStatus.ACTIVATION_REQUIRED -> {
+                CardConnection.REFUSED
+            }
+
+            nfc.status != NfcReaderStatus.CARD_RECOGNIZED -> {
+                null
+            }
+
+            nfc.cardKind == NfcCardKind.ORGANIZATION -> {
+                CardConnection.NEEDS_ORGANIZATION_PIN1
+            }
+
+            nfc.cardKind == NfcCardKind.PERSONAL && !nfc.isPrimed && !CanSessionStore.hasCan -> {
+                CardConnection.NEEDS_ACCESS_NUMBER
+            }
+
+            else -> {
+                null
+            }
         }
     }
 

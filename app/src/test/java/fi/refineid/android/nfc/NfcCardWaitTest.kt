@@ -2,6 +2,7 @@
 
 package fi.refineid.android.nfc
 
+import fi.refineid.android.core.NfcCardKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -128,5 +129,30 @@ class NfcCardWaitTest {
     private companion object {
         const val STARTED = 1_000L
         const val CHANGE_AFTER = 12_000L
+    }
+
+    @Test
+    fun nothingIsAskedOfACardThatHasNotAnswered() {
+        assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.WAITING_FOR_CARD, false, null))
+        assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CARD_RECOGNIZED, false, null))
+        assertFalse(NfcCardWait.asksForOrganizationPin1(NfcReaderStatus.WAITING_FOR_CARD, null))
+    }
+
+    @Test
+    fun anOrganizationCardIsNeverAskedForAnAccessNumber() {
+        assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CARD_RECOGNIZED, false, NfcCardKind.ORGANIZATION))
+        assertTrue(NfcCardWait.asksForOrganizationPin1(NfcReaderStatus.CARD_RECOGNIZED, NfcCardKind.ORGANIZATION))
+    }
+
+    @Test
+    fun aCitizenCardIsNeverAskedForAnOrganizationPin1() {
+        assertFalse(NfcCardWait.asksForOrganizationPin1(NfcReaderStatus.CARD_RECOGNIZED, NfcCardKind.PERSONAL))
+        assertTrue(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CARD_RECOGNIZED, false, NfcCardKind.PERSONAL))
+        assertFalse(NfcCardWait.asksForAccessNumber(NfcReaderStatus.CARD_RECOGNIZED, true, NfcCardKind.PERSONAL))
+    }
+
+    @Test
+    fun aRefusedAccessNumberIsAskedForAgain() {
+        assertTrue(NfcCardWait.asksForAccessNumber(NfcReaderStatus.WRONG_CAN, true, NfcCardKind.PERSONAL))
     }
 }

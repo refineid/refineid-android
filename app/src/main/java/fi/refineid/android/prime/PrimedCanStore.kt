@@ -31,11 +31,47 @@ internal class PrimedCanStore(
     private val preferences =
         context.applicationContext.getSharedPreferences(preferenceName, Context.MODE_PRIVATE)
 
+    /** Whether a card is kept: an access number, or an organization card's certificates. */
+    @Synchronized
+    fun isPrimed(): Boolean = hasAccessNumber() || isOrganizationPrimed()
+
     /** Whether digits are stored, without decrypting them. */
     @Synchronized
-    fun isPrimed(): Boolean =
+    fun hasAccessNumber(): Boolean =
         preferences.contains(ENTRY_NAME + IV_SUFFIX) &&
             preferences.contains(ENTRY_NAME + CIPHERTEXT_SUFFIX)
+
+    /**
+     * Whether the kept card is an organization card: it has no access number
+     * and only its public certificates rest here.
+     */
+    @Synchronized
+    fun isOrganizationPrimed(): Boolean = preferences.getBoolean(ENTRY_ORGANIZATION, false)
+
+    /** Keeps an organization card's public certificates in place of whatever was kept. */
+    @Synchronized
+    fun writeOrganization(
+        authenticationCertificate: ByteArray,
+        qualifiedCertificate: ByteArray?,
+        holderName: String?,
+    ) {
+        val encoder = Base64.getEncoder()
+        preferences.edit {
+            clear()
+            putBoolean(ENTRY_ORGANIZATION, true)
+            putString(ENTRY_AUTH_CERT, encoder.encodeToString(authenticationCertificate))
+            if (qualifiedCertificate != null) {
+                putString(ENTRY_QUALIFIED_CERT, encoder.encodeToString(qualifiedCertificate))
+            }
+            if (holderName != null) putString(ENTRY_HOLDER_NAME, holderName)
+        }
+    }
+
+    @Synchronized
+    fun readQualifiedCertificateDer(): ByteArray? {
+        val b64 = preferences.getString(ENTRY_QUALIFIED_CERT, null) ?: return null
+        return decodeBase64(b64)
+    }
 
     /** Decrypted CAN digits owned by the caller, or null when unprimed. */
     @Synchronized
@@ -111,7 +147,9 @@ internal class PrimedCanStore(
                     .putString(
                         ENTRY_NAME + CIPHERTEXT_SUFFIX,
                         Base64.getEncoder().encodeToString(ciphertext),
-                    ).commit()
+                    ).remove(ENTRY_ORGANIZATION)
+                    .remove(ENTRY_QUALIFIED_CERT)
+                    .commit()
             if (!committed) {
                 // An unprimed store is the safe failure mode.
             }
@@ -211,6 +249,8 @@ internal class PrimedCanStore(
         const val ENTRY_NAME = "can"
         const val ENTRY_HOLDER_NAME = "holder_name"
         const val ENTRY_AUTH_CERT = "auth_cert_der"
+        const val ENTRY_QUALIFIED_CERT = "qualified_cert_der"
+        const val ENTRY_ORGANIZATION = "organization_card"
         const val IV_SUFFIX = ".iv"
         const val CIPHERTEXT_SUFFIX = ".ciphertext"
         const val AES_KEY_SIZE_BITS = 256

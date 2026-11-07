@@ -1128,6 +1128,11 @@ private fun NativeCertificateReadFailure.toContactlessConnectStatus(): ReaderCon
         NativeCertificateReadFailure.ACTIVATION_REQUIRED -> {
             ReaderConnectionStatus.ACTIVATION_REQUIRED
         }
+
+        // Named only over a USB contactless reader, which has no PIN path for this card.
+        NativeCertificateReadFailure.ORGANIZATION_CARD -> {
+            ReaderConnectionStatus.CARD_ERROR
+        }
     }
 
 private fun UsbReaderSnapshot.withoutAuthentication(status: ReaderConnectionStatus): UsbReaderSnapshot =

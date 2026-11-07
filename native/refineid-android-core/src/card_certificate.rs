@@ -194,6 +194,8 @@ pub(crate) enum CertificateReadFailure {
     /// The card still awaits factory activation.
     #[allow(dead_code)]
     ActivationRequired,
+    /// EF.CardAccess names an organization card, which has no CAN.
+    OrganizationCard,
 }
 
 /// Read EF.4331 and reconstruct its public key before returning its DER.
@@ -208,6 +210,15 @@ pub(crate) fn read_qualified_certificate<T: CardTransport>(
     transport: &mut T,
 ) -> Result<CardCertificate, CertificateReadFailure> {
     read_card_certificate(transport, CertSlot::Signature)
+}
+
+/// The qualified certificate of an organization card, from either of the
+/// card's two qualified-signature slots.
+pub(crate) fn read_organization_qualified_certificate<T: CardTransport>(
+    transport: &mut T,
+) -> Result<CardCertificate, CertificateReadFailure> {
+    read_card_certificate(transport, CertSlot::Signature)
+        .or_else(|_absent| read_card_certificate(transport, CertSlot::SignatureAlt))
 }
 
 fn read_card_certificate<T: CardTransport>(

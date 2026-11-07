@@ -29,6 +29,7 @@ import fi.refineid.android.core.AuthenticationPreparationState
 import fi.refineid.android.core.AuthenticationPurpose
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationResult
+import fi.refineid.android.nfc.NfcCardProblem
 import fi.refineid.android.nfc.NfcReaderStatus
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
@@ -37,6 +38,7 @@ internal fun AuthenticationPreparationDialog(
     preparation: AuthenticationPreparation,
     state: AuthenticationPreparationState,
     nfcStatus: NfcReaderStatus? = null,
+    nfcProblem: NfcCardProblem? = null,
 ) {
     val title = purposeTitle(preparation.purpose.collectAsState().value)
     when (state) {
@@ -50,7 +52,12 @@ internal fun AuthenticationPreparationDialog(
                 onDismissRequest = preparation::cancel,
                 properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
                 title = { Text(stringResource(title)) },
-                text = { Text(stringResource(message)) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(message))
+                        state.attemptsLeft?.let { Text(stringResource(R.string.pin_attempts_left, it)) }
+                    }
+                },
                 confirmButton = { TextButton(onClick = preparation::retry) { Text(stringResource(R.string.retry)) } },
                 dismissButton = { TextButton(onClick = preparation::cancel) { Text(stringResource(R.string.cancel)) } },
             )
@@ -61,7 +68,7 @@ internal fun AuthenticationPreparationDialog(
                 onDismissRequest = preparation::cancel,
                 properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
                 title = { Text(stringResource(title)) },
-                text = { Text(stringResource(cardMessage(state, nfcStatus))) },
+                text = { Text(stringResource(nfcProblem?.let(::cardProblemMessage) ?: cardMessage(state, nfcStatus))) },
                 confirmButton = { TextButton(onClick = preparation::cancel) { Text(stringResource(R.string.cancel)) } },
             )
         }
@@ -84,7 +91,7 @@ private fun failureMessage(result: Pin1VerificationResult): Int? =
         Pin1VerificationResult.TRANSPORT_ERROR -> R.string.card_contact_lost
         Pin1VerificationResult.PACE_REJECTED -> R.string.wrong_can
         Pin1VerificationResult.INVALID_PIN -> R.string.pin_invalid
-        Pin1VerificationResult.WRONG_PIN -> R.string.wrong_pin
+        Pin1VerificationResult.WRONG_PIN -> R.string.wrong_pin1
         Pin1VerificationResult.PIN_LOCKED -> R.string.pin1_blocked
         Pin1VerificationResult.SAFETY_REFUSED -> R.string.refuse_low_attempts_pin
         Pin1VerificationResult.VERIFICATION_REJECTED -> R.string.pin_refused

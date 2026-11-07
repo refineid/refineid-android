@@ -1235,6 +1235,7 @@ internal class CcidUsbSessionOpener(
 
                     NativeCertificateReadFailure.REJECTED,
                     NativeCertificateReadFailure.INVALID_CERTIFICATE,
+                    NativeCertificateReadFailure.ORGANIZATION_CARD,
                     -> {
                         CcidSessionOpenResult.CardError
                     }

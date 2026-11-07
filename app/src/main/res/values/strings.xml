@@ -126,6 +126,11 @@ A code from the issuer can still be tried: the card decides and spends nothing.<
     <string name="card_reading_hold_still">Reading the card. Keep it still.</string>
     <string name="card_contact_lost">Lost the card. Hold it against the phone again.</string>
     <string name="card_found_enter_can" tools:ignore="Typos">Card found. Enter its CAN.</string>
+    <string name="organization_card_found_enter_pin1">Organisation card found. Enter Basic PIN 1.</string>
+    <string name="wrong_pin1">Wrong Basic PIN 1</string>
+    <string name="card_problem_no_known_kind">Card not supported: it is neither an identity card nor an organisation card.</string>
+    <string name="card_problem_access_file_refused">Card not supported: it refused the read of its access file.</string>
+    <string name="card_problem_access_file_malformed">Card not supported: its access file is malformed.</string>
     <string name="allow_notifications">Allow notifications</string>
     <plurals name="remote_signature_request_many">
         <item quantity="one">%1$s requests %2$d signature.</item>

@@ -20,6 +20,9 @@ refineid-pkcs15 = { git = "https://github.com/RefineID/refineid-core.git", branc
 refineid-sign = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-x509 = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 
+[dev-dependencies]
+refineid-pace = { git = "https://github.com/RefineID/refineid-core.git", branch = "main", features = ["testkit"] }
+
 # The contactless crypto - PACE, ECDSA, RSA - lives entirely in the refineid-core
 # dependencies. Optimising every dependency at opt-level 3 even under the dev
 # profile keeps PACE and on-card signing fast in the debug APK (an unoptimised

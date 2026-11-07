@@ -26,7 +26,7 @@ internal class NfcAuthenticationCardService(
     private val mainHandler: Handler,
     private val isReady: () -> Boolean,
     private val currentGeneration: () -> Int,
-    private val activeSession: () -> ContactlessSession?,
+    private val activeSession: () -> ContactlessCardSession?,
     private val onCardLost: (Int) -> Unit,
     private val cachedCertificate: () -> NativeAuthenticationCertificate? = { null },
     private val awaitReady: suspend () -> Boolean = { false },
