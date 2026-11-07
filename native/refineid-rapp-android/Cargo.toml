@@ -30,7 +30,7 @@ path = "src/bin/refineid-uniffi-bindgen-kotlin.rs"
 
 [lints.rust]
 missing_docs = "warn"
-unsafe_code = "warn"
+unsafe_code = "forbid"
 
 [lints.clippy]
 dbg_macro = "deny"

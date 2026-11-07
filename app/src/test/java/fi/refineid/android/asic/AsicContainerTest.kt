@@ -101,45 +101,6 @@ class AsicContainerTest {
     }
 
     @Test
-    fun asicValidatorValidatesEcdsaSignedContainerWhenTrustAnchorsProvided() {
-        val file = java.io.File("/Users/pk/src/refineid-android/tmp/container.asice")
-        if (file.exists()) {
-            val bytes = file.readBytes()
-            val rawFiles =
-                listOf(
-                    "/Users/pk/src/refineid-android/app/src/main/res/raw/fineid_intermediate_00_citizen_g3.pem",
-                    "/Users/pk/src/refineid-android/app/src/main/res/raw/fineid_intermediate_01_citizen_g4e.pem",
-                    "/Users/pk/src/refineid-android/app/src/main/res/raw/fineid_intermediate_02_citizen_g4r.pem",
-                    "/Users/pk/src/refineid-android/app/src/main/res/raw/fineid_intermediate_03_organisation_g4r.pem",
-                )
-            val cf =
-                java.security.cert.CertificateFactory
-                    .getInstance("X.509")
-            val trustAnchors =
-                rawFiles.mapNotNull { path ->
-                    val f = java.io.File(path)
-                    if (f.exists()) {
-                        cf.generateCertificate(
-                            f.inputStream(),
-                        ) as java.security.cert.X509Certificate
-                    } else {
-                        null
-                    }
-                }
-            val result = AsicValidator.validate(bytes, trustAnchors)
-            assertTrue(result is fi.refineid.android.document.DocumentValidationResult.Completed)
-            val completed = result as fi.refineid.android.document.DocumentValidationResult.Completed
-            assertEquals(1, completed.signatures.size)
-            val verdict = completed.signatures.first()
-            assertTrue(verdict.signatureValid)
-            assertTrue(verdict.digestMatches)
-            assertTrue(verdict.coversWholeDocument)
-            assertTrue(verdict.chainTrusted)
-            assertTrue(verdict.isValid)
-        }
-    }
-
-    @Test
     fun xadesPlanGeneratesUnsignedPropertiesWithTimestampsAndValidationMaterial() {
         val plan =
             XadesSignature.plan(
