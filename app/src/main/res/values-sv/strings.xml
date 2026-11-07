@@ -39,7 +39,6 @@
     <string name="signing">Signerar</string>
     <string name="signed">Signerat</string>
     <string name="wrong_pin">Fel PIN</string>
-    <string name="pin_locked">PIN låst</string>
     <string name="pin_attempts_left" tools:ignore="PluralsCandidate">%1$d försök kvar</string>
     <string name="unavailable">Inte tillgänglig</string>
     <string name="card_not_found">Kortet hittades inte</string>
@@ -88,8 +87,8 @@
     <string name="refuse_low_attempts_pin">RefineID använder inte en kod med två eller färre försök kvar. En ny kod kan anges här med PUK-koden.</string>
     <string name="refuse_low_attempts_puk">RefineID använder inte något av de två sista PUK-försöken.</string>
     <string name="rapp_retry_floor">RefineID använder inte en PIN-kod med två eller färre försök kvar. Med PUK-koden kan en ny PIN-kod anges.</string>
-    <string name="recovery_guidance_pin1">Grund PIN 1 måste återställas\nÅterställ grund PIN 1 med din PUK-kod.</string>
-    <string name="recovery_guidance_pin2">Signaturkod 2 måste återställas\nÅterställ signaturkod 2 med din PUK-kod.</string>
+    <string name="pin1_blocked">Grund PIN 1 spärrad\nÅterställ grund PIN 1 med din PUK-kod.</string>
+    <string name="pin2_blocked">Signaturkod 2 spärrad\nÅterställ signaturkod 2 med din PUK-kod.</string>
     <string name="puk_reported_blocked">Kortet rapporterar PUK-koden spärrad
 En kod från utfärdaren kan ändå prövas: kortet avgör och förbrukar inget.</string>
     <string name="diagnostics">Diagnostik</string>

@@ -269,7 +269,7 @@ internal fun CardManagementScreen(
             }
 
             selectedTask == ManagementTask.CHANGE_PIN1 && pin1Locked -> {
-                stringResource(R.string.recovery_guidance_pin1) to BannerTone.INFO
+                stringResource(R.string.pin1_blocked) to BannerTone.INFO
             }
 
             selectedTask == ManagementTask.CHANGE_PIN1 && pin1Low -> {
@@ -286,7 +286,7 @@ internal fun CardManagementScreen(
             }
 
             selectedTask == ManagementTask.CHANGE_PIN2 && pin2Locked -> {
-                stringResource(R.string.recovery_guidance_pin2) to BannerTone.INFO
+                stringResource(R.string.pin2_blocked) to BannerTone.INFO
             }
 
             selectedTask == ManagementTask.CHANGE_PIN2 && pin2Low -> {
@@ -311,11 +311,11 @@ internal fun CardManagementScreen(
             }
 
             selectedTask == ManagementTask.RESET_PIN1 && pin1Locked -> {
-                stringResource(R.string.recovery_guidance_pin1) to BannerTone.INFO
+                stringResource(R.string.pin1_blocked) to BannerTone.INFO
             }
 
             selectedTask == ManagementTask.RESET_PIN2 && pin2Locked -> {
-                stringResource(R.string.recovery_guidance_pin2) to BannerTone.INFO
+                stringResource(R.string.pin2_blocked) to BannerTone.INFO
             }
 
             else -> {
@@ -374,7 +374,14 @@ internal fun CardManagementScreen(
                                     onPin1Changed?.invoke()
                                 }
                             } else {
-                                outcomeNotice = OutcomeNotice(R.string.error)
+                                outcomeNotice =
+                                    OutcomeNotice(
+                                        when {
+                                            result.value !is ManageOutcome.Locked -> R.string.error
+                                            isPin1 -> R.string.pin1_blocked
+                                            else -> R.string.pin2_blocked
+                                        },
+                                    )
                                 outcomeIsError = true
                             }
                             probe()
@@ -422,7 +429,14 @@ internal fun CardManagementScreen(
                                     onPin1Changed?.invoke()
                                 }
                             } else {
-                                outcomeNotice = OutcomeNotice(R.string.error)
+                                outcomeNotice =
+                                    OutcomeNotice(
+                                        if (result.value is ManageOutcome.Locked) {
+                                            R.string.puk_reported_blocked
+                                        } else {
+                                            R.string.error
+                                        },
+                                    )
                                 outcomeIsError = true
                             }
                             probe()

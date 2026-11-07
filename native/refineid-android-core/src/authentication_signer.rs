@@ -19,9 +19,15 @@
 //! chain run without releasing the card transport. The entered PIN is
 //! reconstructed into the public core's non-clonable role type and consumed
 //! by exactly one credential command.
+//!
+//! The retry rule is core's, for every credential: refused at two or one tries
+//! left or an unreadable counter, sent otherwise. At no tries left or blocked
+//! the VERIFY goes out and the card's own answer reaches the holder. The
+//! preflight resolves the numbering and finds a session already verified; the
+//! VERIFY then reads the counter once more and floors on that reading itself.
 
 use refineid_apdu::{CardTransport, StatusWord, TransportOutcome};
-use refineid_auth::{Pin1, PinOps, UnvalidatedSecret, VerifyOutcome};
+use refineid_auth::{AuthError, Pin1, PinOps, UnvalidatedSecret, VerifyOutcome};
 use refineid_digest::{Sha256, Sha384, Sha512};
 use refineid_sign::{SignError, SignOps, SignScheme};
 
@@ -98,9 +104,9 @@ impl Drop for AuthenticationSignature {
 pub(crate) enum AuthenticationSignFailure {
     /// The submitted PIN1 did not satisfy its local digit predicate.
     InvalidPin,
-    /// The live counter state did not permit a consumer authentication try.
+    /// The retry floor refused: two or one tries left, or an unreadable counter.
     SafetyRefused,
-    /// PIN1 is blocked or became exhausted on this attempt.
+    /// The card answered that PIN1 is blocked or became exhausted on this attempt.
     PinLocked,
     /// The card rejected the submitted PIN1 without exhausting it.
     WrongPin {
@@ -141,13 +147,7 @@ where
     let pin = Pin1::reconstruct(pin_input).map_err(|_| AuthenticationSignFailure::InvalidPin)?;
     let preflight = probe_pin1_preflight(transport).map_err(map_preflight_failure)?;
     if !preflight.retry_floor_permits {
-        return Err(match preflight.state {
-            Pin1State::Locked => AuthenticationSignFailure::PinLocked,
-            Pin1State::Verified
-            | Pin1State::Remaining(_)
-            | Pin1State::NoInformation
-            | Pin1State::Unrecognised => AuthenticationSignFailure::SafetyRefused,
-        });
+        return Err(AuthenticationSignFailure::SafetyRefused);
     }
 
     let scheme = SignScheme::from(preflight.scheme);
@@ -164,7 +164,7 @@ where
 
     let outcome = transport
         .verify_pin1_with_scheme(preflight.scheme, pin)
-        .map_err(|error| map_preflight_failure(map_auth_error(error)))?;
+        .map_err(map_verify_error)?;
     match outcome {
         VerifyOutcome::Ok => {}
         VerifyOutcome::WrongPin { retries_left } if retries_left.is_exhausted() => {
@@ -192,20 +192,10 @@ pub(crate) fn verify_authentication_pin<T: CardTransport>(
 ) -> Result<(), AuthenticationSignFailure> {
     let pin = Pin1::reconstruct(UnvalidatedSecret::from_owned_bytes(pin_bytes))
         .map_err(|_| AuthenticationSignFailure::InvalidPin)?;
-    let preflight = probe_pin1_preflight(transport).map_err(map_preflight_failure)?;
-    if !preflight.retry_floor_permits {
-        return Err(if preflight.state == Pin1State::Locked {
-            AuthenticationSignFailure::PinLocked
-        } else {
-            AuthenticationSignFailure::SafetyRefused
-        });
-    }
     // A status-only success cannot prove newly supplied digits. Always present
     // this candidate once, even when the card reports an authenticated session.
-    match transport
-        .verify_pin1_with_scheme(preflight.scheme, pin)
-        .map_err(|error| map_preflight_failure(map_auth_error(error)))?
-    {
+    // The one probe that resolves the numbering also serves the retry floor.
+    match transport.verify_pin1(pin).map_err(map_verify_error)? {
         VerifyOutcome::Ok => Ok(()),
         VerifyOutcome::WrongPin { retries_left } if retries_left.is_exhausted() => {
             Err(AuthenticationSignFailure::PinLocked)
@@ -330,6 +320,14 @@ where
     }
 }
 
+/// A VERIFY the primitive refused under the floor, or could not carry out.
+fn map_verify_error<E>(error: AuthError<E>) -> AuthenticationSignFailure {
+    match error {
+        AuthError::RetryFloor(_) => AuthenticationSignFailure::SafetyRefused,
+        other => map_preflight_failure(map_auth_error(other)),
+    }
+}
+
 fn map_preflight_failure(failure: Pin1PreflightFailure) -> AuthenticationSignFailure {
     match failure {
         Pin1PreflightFailure::CardUnavailable => AuthenticationSignFailure::CardUnavailable,
@@ -376,9 +374,17 @@ mod tests {
 
     const SAFE_RETRIES: u8 = 3;
     const LOW_RETRIES: u8 = 2;
-    const PUBLIC_VERIFY_CALLS: usize = 1;
-    const FULL_RSA_PUBLIC_CALLS: usize = 4;
-    const PSO_HASH_PUBLIC_COMMAND_INDEX: usize = 2;
+    const NO_RETRIES: u8 = 0;
+    /// The preflight's header-only VERIFY, or the one that resolves the
+    /// numbering of a standalone verification.
+    const SINGLE_PROBE_CALLS: usize = 1;
+    /// The preflight's probe and the probe of the VERIFY primitive's floor.
+    const PROBES_BEFORE_PIN: usize = 2;
+    /// Those two probes, MSE:SET, PSO:HASH and PSO:CDS.
+    const FULL_RSA_PUBLIC_CALLS: usize = 5;
+    /// The preflight's probe, MSE:SET, PSO:HASH and PSO:CDS.
+    const VERIFIED_RSA_PUBLIC_CALLS: usize = 4;
+    const PSO_HASH_PUBLIC_COMMAND_INDEX: usize = 3;
     const VERIFY_INSTRUCTION: u8 = 0x20;
     const INSTRUCTION_OFFSET: usize = 1;
     const SYNTHETIC_PIN: &[u8] = b"1357";
@@ -414,7 +420,7 @@ mod tests {
         fn transmit(&mut self, command: &CommandApdu) -> Result<TransportOutcome, Self::Error> {
             self.public_calls += 1;
             self.public_commands.push(command.as_bytes().to_vec());
-            if self.public_calls <= PUBLIC_VERIFY_CALLS {
+            if self.public_calls <= SINGLE_PROBE_CALLS {
                 assert_eq!(
                     command.as_bytes().get(INSTRUCTION_OFFSET).copied(),
                     Some(VERIFY_INSTRUCTION)
@@ -459,6 +465,7 @@ mod tests {
         let safe = response(status(SAFE_RETRIES), Vec::new());
         ScriptedTransport::new(
             vec![
+                safe.clone(),
                 safe,
                 response(StatusWord::Success, Vec::new()),
                 response(StatusWord::Success, Vec::new()),
@@ -471,6 +478,12 @@ mod tests {
         )
     }
 
+    /// A status word the card gives for a blocked or exhausted PIN, with
+    /// the same word for its counter probes and its answer to the VERIFY.
+    fn blocked_answers() -> [StatusWord; 2] {
+        [StatusWord::AuthenticationBlocked, status(NO_RETRIES)]
+    }
+
     #[test]
     fn standalone_verification_issues_no_signing_commands() {
         let safe = response(status(SAFE_RETRIES), Vec::new());
@@ -479,8 +492,8 @@ mod tests {
             verify_authentication_pin(&mut transport, SYNTHETIC_PIN.to_vec()),
             Ok(())
         );
-        assert_eq!(transport.credential_calls, PUBLIC_VERIFY_CALLS);
-        assert_eq!(transport.public_calls, PUBLIC_VERIFY_CALLS);
+        assert_eq!(transport.credential_calls, 1);
+        assert_eq!(transport.public_calls, SINGLE_PROBE_CALLS);
     }
 
     #[test]
@@ -493,7 +506,7 @@ mod tests {
                 retries_left: LOW_RETRIES
             }),
         );
-        assert_eq!(transport.credential_calls, PUBLIC_VERIFY_CALLS);
+        assert_eq!(transport.credential_calls, 1);
     }
 
     #[test]
@@ -505,6 +518,73 @@ mod tests {
             Err(AuthenticationSignFailure::SafetyRefused),
         );
         assert_eq!(transport.credential_calls, 0);
+    }
+
+    #[test]
+    fn standalone_verification_refuses_an_unreadable_counter_without_presenting_digits() {
+        let unreadable = response(StatusWord::AuthenticationFailed, Vec::new());
+        let mut transport = ScriptedTransport::new(vec![unreadable], StatusWord::Success);
+        assert_eq!(
+            verify_authentication_pin(&mut transport, SYNTHETIC_PIN.to_vec()),
+            Err(AuthenticationSignFailure::SafetyRefused),
+        );
+        assert_eq!(transport.credential_calls, 0);
+    }
+
+    #[test]
+    fn standalone_verification_of_a_blocked_pin_reaches_the_card_and_reports_blocked() {
+        for blocked in blocked_answers() {
+            let probe = response(blocked, Vec::new());
+            let mut transport = ScriptedTransport::new(vec![probe], blocked);
+            assert_eq!(
+                verify_authentication_pin(&mut transport, SYNTHETIC_PIN.to_vec()),
+                Err(AuthenticationSignFailure::PinLocked),
+            );
+            assert_eq!(transport.credential_calls, 1);
+        }
+    }
+
+    #[test]
+    fn a_blocked_pin_reaches_the_card_and_its_answer_reports_blocked() {
+        for blocked in blocked_answers() {
+            let probe = response(blocked, Vec::new());
+            let mut transport = ScriptedTransport::new(vec![probe.clone(), probe], blocked);
+
+            let result = authenticate_and_sign(
+                &mut transport,
+                AuthenticationSigningAlgorithm::RsaPkcs1Sha256,
+                SYNTHETIC_PIN.to_vec(),
+                AuthenticationSigningInput::Message(SYNTHETIC_MESSAGE),
+            );
+
+            assert!(matches!(result, Err(AuthenticationSignFailure::PinLocked)));
+            assert_eq!(transport.credential_calls, 1);
+            assert_eq!(transport.public_calls, PROBES_BEFORE_PIN);
+        }
+    }
+
+    #[test]
+    fn a_counter_that_falls_below_the_floor_after_the_preflight_is_refused_as_a_safety_refusal() {
+        for second_probe in [status(LOW_RETRIES), StatusWord::AuthenticationFailed] {
+            let safe = response(status(SAFE_RETRIES), Vec::new());
+            let mut transport = ScriptedTransport::new(
+                vec![safe, response(second_probe, Vec::new())],
+                StatusWord::Success,
+            );
+
+            let result = authenticate_and_sign(
+                &mut transport,
+                AuthenticationSigningAlgorithm::RsaPkcs1Sha256,
+                SYNTHETIC_PIN.to_vec(),
+                AuthenticationSigningInput::Message(SYNTHETIC_MESSAGE),
+            );
+
+            assert!(matches!(
+                result,
+                Err(AuthenticationSignFailure::SafetyRefused)
+            ));
+            assert_eq!(transport.credential_calls, 0);
+        }
     }
 
     #[test]
@@ -557,14 +637,14 @@ mod tests {
             result,
             Err(AuthenticationSignFailure::SafetyRefused)
         ));
-        assert_eq!(transport.public_calls, PUBLIC_VERIFY_CALLS);
+        assert_eq!(transport.public_calls, SINGLE_PROBE_CALLS);
         assert_eq!(transport.credential_calls, 0);
     }
 
     #[test]
     fn a_wrong_pin_stops_before_mse_and_is_never_replayed() {
         let safe = response(status(SAFE_RETRIES), Vec::new());
-        let mut transport = ScriptedTransport::new(vec![safe], status(LOW_RETRIES));
+        let mut transport = ScriptedTransport::new(vec![safe.clone(), safe], status(LOW_RETRIES));
 
         let result = authenticate_and_sign(
             &mut transport,
@@ -579,7 +659,7 @@ mod tests {
                 retries_left: LOW_RETRIES
             })
         ));
-        assert_eq!(transport.public_calls, PUBLIC_VERIFY_CALLS);
+        assert_eq!(transport.public_calls, PROBES_BEFORE_PIN);
         assert_eq!(transport.credential_calls, 1);
     }
 
@@ -657,6 +737,7 @@ mod tests {
             let safe = response(status(SAFE_RETRIES), Vec::new());
             let mut transport = ScriptedTransport::new(
                 vec![
+                    safe.clone(),
                     safe,
                     response(StatusWord::Success, Vec::new()),
                     response(StatusWord::Success, Vec::new()),
@@ -703,7 +784,7 @@ mod tests {
 
         assert_eq!(result.bytes.len(), RSA_3072_SIG_BYTES);
         assert_eq!(transport.credential_calls, 0);
-        assert_eq!(transport.public_calls, FULL_RSA_PUBLIC_CALLS);
+        assert_eq!(transport.public_calls, VERIFIED_RSA_PUBLIC_CALLS);
         assert!(transport.public_responses.is_empty());
     }
 
@@ -713,6 +794,7 @@ mod tests {
             vec![
                 response(StatusWord::Success, Vec::new()),
                 response(StatusWord::SecurityNotSatisfied, Vec::new()),
+                response(StatusWord::Success, Vec::new()),
                 response(StatusWord::Success, Vec::new()),
                 response(StatusWord::Success, Vec::new()),
                 response(

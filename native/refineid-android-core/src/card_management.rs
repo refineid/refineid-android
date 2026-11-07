@@ -18,8 +18,7 @@ use refineid_apdu::{CardTransport, TransportOutcome};
 use refineid_auth::{
     ActivationCode, ActivationReport, ActivationScheme, AuthError, CardActivationNeeds,
     CardPinLengths, CredentialHealthReport, CredentialLengths, ManageOutcome, Pin1, Pin2,
-    PinManageOps, PinOps, PinReferenceScheme, PinSlot, PinStatus, Puk, UnvalidatedSecret,
-    check_retry_floor,
+    PinManageOps, PinOps, PinReferenceScheme, PinStatus, Puk, UnvalidatedSecret,
 };
 
 use crate::card_certificate::read_authentication_certificate;
@@ -257,16 +256,6 @@ pub(crate) fn encode_credential_health_reply(
     }
 }
 
-/// Refuse a command that presents the current `slot` PIN unless the core
-/// retry floor serves it; the status query spends no attempt.
-fn require_retry_floor<T: CardTransport>(
-    transport: &mut T,
-    slot: PinSlot,
-) -> Result<(), CardManagementFailure> {
-    let status = transport.pin_status(slot).map_err(map_auth_error)?;
-    check_retry_floor(slot.into(), status).map_err(|_| CardManagementFailure::SafetyRefused)
-}
-
 /// Execute change PIN1.
 pub(crate) fn change_pin1<T: CardTransport>(
     transport: &mut T,
@@ -284,7 +273,6 @@ pub(crate) fn change_pin1<T: CardTransport>(
         Pin1::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
 
     let lengths = read_lengths(transport)?;
-    require_retry_floor(transport, PinSlot::Pin1)?;
     transport
         .change_pin1(&lengths, current_pin, new_pin)
         .map_err(map_auth_error)
@@ -307,7 +295,6 @@ pub(crate) fn change_pin2<T: CardTransport>(
         Pin2::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
 
     let lengths = read_lengths(transport)?;
-    require_retry_floor(transport, PinSlot::Pin2)?;
     transport
         .change_pin2(&lengths, current_pin, new_pin)
         .map_err(map_auth_error)
@@ -469,7 +456,7 @@ mod tests {
         FINEID_PIN1_MIN_LENGTH, FINEID_PIN2_MIN_LENGTH, PIN_MAX_LENGTH, PUK_MAX_LENGTH,
         PUK_MIN_LENGTH,
     };
-    use refineid_auth::{CardActivationNeeds, FlooredCredential};
+    use refineid_auth::{CardActivationNeeds, FlooredCredential, check_retry_floor};
 
     const SYNTHETIC_PIN1: &[u8] = b"1357";
     const SYNTHETIC_NEW_PIN1: &[u8] = b"2468";
@@ -480,21 +467,17 @@ mod tests {
     const BELOW_FLOOR_RETRIES: u8 = 2;
     const LAST_RETRY: u8 = 1;
     const NO_RETRIES: u8 = 0;
-    /// Public commands a PIN 2 change sends after the PIN length read and
-    /// before it presents the current PIN, each answered here with a served
-    /// retry count.
-    const PIN2_CHANGE_PUBLIC_COMMANDS: usize = 2;
-
     /// Offset of the instruction byte in a command's wire bytes.
     const INSTRUCTION_OFFSET: usize = 1;
 
     /// Answers public commands from a script and records every credential
-    /// command without answering it. A SELECT is answered file not found
-    /// without taking a scripted answer, so the PIN length read finds no
-    /// EF.AOD.
+    /// command, answering it only when `credential_answer` names a status.
+    /// A SELECT is answered file not found without taking a scripted answer,
+    /// so the PIN length read finds no EF.AOD.
     struct ScriptedTransport {
         responses: VecDeque<StatusWord>,
         credential_calls: usize,
+        credential_answer: Option<StatusWord>,
     }
 
     impl ScriptedTransport {
@@ -502,6 +485,7 @@ mod tests {
             Self {
                 responses: statuses.iter().copied().collect(),
                 credential_calls: 0,
+                credential_answer: None,
             }
         }
     }
@@ -530,7 +514,15 @@ mod tests {
             _command: CredentialCommand,
         ) -> Result<TransportOutcome, Self::Error> {
             self.credential_calls += 1;
-            Err("a refused change must not present a credential")
+            let status = self
+                .credential_answer
+                .ok_or("this script does not answer a credential")?;
+            let [sw1, sw2] = status.as_u16().to_be_bytes();
+            Ok(TransportOutcome::Response(ResponseApdu {
+                body: Vec::new(),
+                sw1,
+                sw2,
+            }))
         }
     }
 
@@ -566,14 +558,18 @@ mod tests {
         answers
     }
 
-    fn refused_statuses() -> [StatusWord; 5] {
+    /// Counter answers the floor refuses a change at.
+    fn refused_statuses() -> [StatusWord; 3] {
         [
             remaining(BELOW_FLOOR_RETRIES),
             remaining(LAST_RETRY),
-            remaining(NO_RETRIES),
-            StatusWord::AuthenticationBlocked,
             StatusWord::AuthenticationFailed,
         ]
+    }
+
+    /// Counter answers at which the card answers a change for itself.
+    fn blocked_statuses() -> [StatusWord; 2] {
+        [remaining(NO_RETRIES), StatusWord::AuthenticationBlocked]
     }
 
     #[test]
@@ -595,10 +591,7 @@ mod tests {
     #[test]
     fn change_pin2_is_refused_below_the_retry_floor_without_presenting_it() {
         for status in refused_statuses() {
-            let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(&[
-                remaining(SERVED_RETRIES),
-                status,
-            ]));
+            let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(&[status]));
 
             let result = change_pin2(
                 &mut transport,
@@ -629,9 +622,8 @@ mod tests {
 
     #[test]
     fn change_pin2_at_the_floor_reaches_the_card() {
-        let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(
-            &[remaining(SERVED_RETRIES); PIN2_CHANGE_PUBLIC_COMMANDS],
-        ));
+        let mut transport =
+            ScriptedTransport::new(&after_citizen_lengths_read(&[remaining(SERVED_RETRIES)]));
 
         let result = change_pin2(
             &mut transport,
@@ -642,6 +634,31 @@ mod tests {
         assert_eq!(result, Err(CardManagementFailure::TransportError));
         assert_eq!(transport.credential_calls, 1);
         assert!(transport.responses.is_empty());
+    }
+
+    #[test]
+    fn a_change_of_a_blocked_pin_reaches_the_card_and_reports_its_answer() {
+        for status in blocked_statuses() {
+            let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(&[status]));
+            transport.credential_answer = Some(StatusWord::AuthenticationBlocked);
+            let result = change_pin1(
+                &mut transport,
+                SYNTHETIC_PIN1.to_vec(),
+                SYNTHETIC_NEW_PIN1.to_vec(),
+            );
+            assert_eq!(result, Ok(ManageOutcome::Locked));
+            assert_eq!(transport.credential_calls, 1);
+
+            let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(&[status]));
+            transport.credential_answer = Some(StatusWord::AuthenticationBlocked);
+            let result = change_pin2(
+                &mut transport,
+                SYNTHETIC_PIN2.to_vec(),
+                SYNTHETIC_NEW_PIN2.to_vec(),
+            );
+            assert_eq!(result, Ok(ManageOutcome::Locked));
+            assert_eq!(transport.credential_calls, 1);
+        }
     }
 
     /// The answer the citizen numbering gives the PIN 1 resolution probe

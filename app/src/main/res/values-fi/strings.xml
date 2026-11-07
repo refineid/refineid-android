@@ -39,7 +39,6 @@
     <string name="signing">Allekirjoitetaan</string>
     <string name="signed">Allekirjoitettu</string>
     <string name="wrong_pin">Väärä PIN</string>
-    <string name="pin_locked">PIN lukittu</string>
     <string name="pin_attempts_left" tools:ignore="PluralsCandidate">%1$d yritystä jäljellä</string>
     <string name="unavailable">Ei käytettävissä</string>
     <string name="card_not_found">Korttia ei löytynyt</string>
@@ -88,8 +87,8 @@
     <string name="refuse_low_attempts_pin">RefineID ei käytä tunnuslukua, jossa on kaksi yritystä tai vähemmän jäljellä. Uuden tunnusluvun voi asettaa täällä PUK-koodilla.</string>
     <string name="refuse_low_attempts_puk">RefineID ei käytä kumpaakaan kahdesta viimeisestä PUK-yrityksestä.</string>
     <string name="rapp_retry_floor">RefineID ei käytä PIN-koodia, jossa on kaksi yritystä tai vähemmän jäljellä. PUK-koodilla voi asettaa uuden PIN-koodin.</string>
-    <string name="recovery_guidance_pin1">Perustunnusluku 1 on palautettava\nPalauta perustunnusluku 1 PUK-koodilla.</string>
-    <string name="recovery_guidance_pin2">Allekirjoitustunnusluku 2 on palautettava\nPalauta allekirjoitustunnusluku 2 PUK-koodilla.</string>
+    <string name="pin1_blocked">Perustunnusluku 1 lukittu\nPalauta perustunnusluku 1 PUK-koodilla.</string>
+    <string name="pin2_blocked">Allekirjoitustunnusluku 2 lukittu\nPalauta allekirjoitustunnusluku 2 PUK-koodilla.</string>
     <string name="puk_reported_blocked">Kortti ilmoittaa PUK-koodin lukituksi
 Myöntäjältä saatua koodia voi silti yrittää: kortti päättää eikä kuluta yrityksiä.</string>
     <string name="diagnostics">Diagnostiikka</string>

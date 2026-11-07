@@ -673,7 +673,7 @@ private fun BrowserStatus(status: BrowserSignatureStatus) {
 
             BrowserSignatureStatus.WRONG_PIN -> stringResource(R.string.wrong_pin)
 
-            BrowserSignatureStatus.PIN_LOCKED -> stringResource(R.string.pin_locked)
+            BrowserSignatureStatus.PIN_LOCKED -> stringResource(R.string.pin1_blocked)
 
             BrowserSignatureStatus.REFUSED -> stringResource(R.string.unavailable)
 

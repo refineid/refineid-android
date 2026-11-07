@@ -677,6 +677,12 @@ fn open_secure_channel<Exchange: SingleBlockExchange>(
     // the master file, read in plain before the handshake. An
     // organization card authenticating PACE with a PIN would pass
     // a `Pin1` or `Pin2` here instead of the CAN.
+    //
+    // Every contactless channel here is opened by the CAN, so the PIN
+    // commands on it floor on the header-only VERIFY, and a card that does
+    // not answer that probe with a counter over secure messaging is refused
+    // as unreadable. A channel a PIN opens carries its own counter record
+    // and takes core's record-floored paths instead, not these signers.
     let handshake = read_card_access(&mut transport)
         .and_then(|card_access| run_pace(&mut transport, &card_access, &can));
     match handshake {
