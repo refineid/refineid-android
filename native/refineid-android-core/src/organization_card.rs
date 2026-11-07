@@ -51,7 +51,9 @@ use crate::card_certificate::{
     read_organization_qualified_certificate,
 };
 use crate::card_management::{CardManagementFailure, CredentialHealthAnswer};
-use crate::contactless::{ManagedPin, read_on_card_ca_certificates};
+use crate::contactless::{
+    ManagedPin, read_on_card_ca_certificates, refresh_on_card_ca_certificates,
+};
 use crate::pin1_status::{Pin1Preflight, Pin1State};
 use crate::pin2_status::{Pin2Preflight, Pin2State};
 use crate::qualified_signer::{
@@ -533,12 +535,18 @@ pub(crate) fn organization_authenticate_and_sign<T: CardTransport>(
 /// signature (FINEID S4-1 v4.2 sections 4.1 and 8.1.7), which core's
 /// `qualified_key_after_pin2_pace` spends, so no VERIFY goes out. The card's
 /// certificate is compared with the one the signed content names first.
+///
+/// With `read_ca_certificates`, a made signature is followed on the same
+/// channel by reads of the on-card root (EF.4334) and issuing CA (EF.4336),
+/// which anchor the collection of the signature's long-term validation
+/// material. They come after the signature, so no answer to them can touch it.
 pub(crate) fn organization_qualified_sign<T: CardTransport>(
     transport: T,
     algorithm: QualifiedSigningAlgorithm,
     pin_bytes: Vec<u8>,
     input: QualifiedSigningInput<'_>,
     expected_certificate: &[u8],
+    read_ca_certificates: bool,
 ) -> (Result<QualifiedSignature, QualifiedSignFailure>, T) {
     let pin_input = UnvalidatedSecret::from_owned_bytes(pin_bytes);
     let digest = match prepared_qualified_digest(input) {
@@ -554,6 +562,9 @@ pub(crate) fn organization_qualified_sign<T: CardTransport>(
         Err((refusal, transport)) => return (Err(refusal.into_qualified()), transport),
     };
     let result = sign_on_pin2_channel(&mut secure, algorithm, digest, expected_certificate);
+    if read_ca_certificates && result.is_ok() {
+        let _answers = refresh_on_card_ca_certificates(&mut secure);
+    }
     (result, secure.into_inner())
 }
 
@@ -780,7 +791,9 @@ mod tests {
         AuthenticationSignFailure, AuthenticationSigningAlgorithm, AuthenticationSigningInput,
     };
     use crate::card_management::CardManagementFailure;
-    use crate::contactless::ManagedPin;
+    use crate::contactless::{
+        CaReadAnswer, CaReadStep, ManagedPin, refresh_on_card_ca_certificates,
+    };
     use crate::qualified_signer::{
         QualifiedSignFailure, QualifiedSigningAlgorithm, QualifiedSigningInput,
     };
@@ -821,6 +834,12 @@ mod tests {
     const P1_SELECT_BY_NAME: u8 = 0x04;
     const SW_CONDITIONS_NOT_SATISFIED: StatusWord = StatusWord::Other(0x6985);
     const SW_DEACTIVATED: StatusWord = StatusWord::Other(0x6283);
+    const SW_FILE_NOT_FOUND: StatusWord = StatusWord::FileNotFound;
+    /// EF.4334 and EF.4336, the on-card root and issuing CA (FINEID S4-1 section 8.1.16).
+    const EF_ROOT_CA: [u8; 2] = [0x43, 0x34];
+    const EF_ISSUING_CA: [u8; 2] = [0x43, 0x36];
+    /// The CA reads' SELECTs that carry a file identifier, before the MF by name.
+    const SELECTS_BY_IDENTIFIER: usize = 4;
     const SW_NOT_SATISFIED_NO_COUNT: StatusWord = StatusWord::Other(0x6300);
     const SW_REFERENCE_NOT_FOUND: StatusWord = StatusWord::ReferenceDataNotFound;
     /// Password-reference object of `MSE:Set AT`, tag and length.
@@ -1119,6 +1138,7 @@ mod tests {
             SYNTHETIC_PIN2.to_vec(),
             QualifiedSigningInput::Message(SYNTHETIC_MESSAGE),
             SYNTHETIC_CERTIFICATE,
+            false,
         );
         assert!(matches!(outcome, Err(QualifiedSignFailure::Transport)));
         assert_eq!(card.sent(INS_MSE), 0);
@@ -1417,17 +1437,76 @@ mod tests {
     }
 
     #[test]
-    fn an_unreadable_qualified_certificate_signs_nothing() {
+    fn an_unreadable_qualified_certificate_signs_nothing_and_reads_no_ca() {
         let (outcome, card) = organization_qualified_sign(
             pin2_card(successes()),
             QualifiedSigningAlgorithm::RsaPkcs1Sha384,
             SYNTHETIC_PIN2.to_vec(),
             QualifiedSigningInput::Message(SYNTHETIC_MESSAGE),
             SYNTHETIC_CERTIFICATE,
+            true,
         );
         assert!(outcome.is_err());
         assert!(no_verify(&card.inner));
         assert_eq!(card.inner.credential_commands(), 0);
+        assert!(card.inner.protected_commands().iter().all(|command| {
+            let data = command.get(DATA_INDEX..DATA_INDEX + EF_ROOT_CA.len());
+            data != Some(&EF_ROOT_CA) && data != Some(&EF_ISSUING_CA)
+        }));
+    }
+
+    #[test]
+    fn the_ca_reads_on_the_pin2_channel_name_the_refusing_command() {
+        // SELECT MF, then the file under the current DF and, once more, by
+        // its identifier alone; then SELECT MF for the issuing CA, by
+        // identifier and once more by name.
+        let card = pin2_card(vec![
+            status(StatusWord::Success),
+            status(SW_FILE_NOT_FOUND),
+            status(SW_FILE_NOT_FOUND),
+            status(SW_CONDITIONS_NOT_SATISFIED),
+            status(SW_CONDITIONS_NOT_SATISFIED),
+        ]);
+        let pin = refineid_auth::Pin2::reconstruct(
+            refineid_auth::UnvalidatedSecret::from_owned_bytes(SYNTHETIC_PIN2.to_vec()),
+        )
+        .expect("valid PIN 2 fixture");
+        let mut channel = open_channel(card, &pin, OrganizationCredential::Pin2)
+            .map_err(|(refusal, _)| refusal)
+            .expect("the channel opens");
+        let answers = refresh_on_card_ca_certificates(&mut channel);
+        let card = channel.into_inner();
+        assert_eq!(
+            answers,
+            [
+                CaReadAnswer::Refused {
+                    step: CaReadStep::SelectFile,
+                    status: SW_FILE_NOT_FOUND.as_u16(),
+                },
+                CaReadAnswer::Refused {
+                    step: CaReadStep::SelectMf,
+                    status: SW_CONDITIONS_NOT_SATISFIED.as_u16(),
+                },
+            ]
+        );
+        let selected: Vec<Option<&[u8]>> = card
+            .inner
+            .protected_commands()
+            .iter()
+            .map(|command| command.get(DATA_INDEX..DATA_INDEX + MF_IDENTIFIER.len()))
+            .take(SELECTS_BY_IDENTIFIER)
+            .collect();
+        assert_eq!(
+            selected,
+            vec![
+                Some(&MF_IDENTIFIER[..]),
+                Some(&EF_ROOT_CA[..]),
+                Some(&EF_ROOT_CA[..]),
+                Some(&MF_IDENTIFIER[..])
+            ]
+        );
+        assert_eq!(card.inner.answers_left(), 0);
+        assert!(no_verify(&card.inner));
     }
 
     #[test]

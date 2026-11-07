@@ -5,6 +5,7 @@ import fi.refineid.android.browser.BrowserSignatureStatus
 import fi.refineid.android.core.AtrValidation
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
+import fi.refineid.android.core.CardCaReadAnswer
 import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.NativeAuthenticationSignResult
@@ -137,6 +138,8 @@ internal object AppTrace {
     ) = Unit
 
     fun qualifiedSignatureVerificationCompleted(isVerified: Boolean) = Unit
+
+    fun cardCaReadAnswered(answers: List<CardCaReadAnswer>) = Unit
 
     fun qualifiedPdfSigningStarted(documentLength: Int): Long = 0L
 

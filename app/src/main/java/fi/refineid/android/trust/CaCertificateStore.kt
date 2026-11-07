@@ -4,6 +4,7 @@ package fi.refineid.android.trust
 
 import android.content.Context
 import fi.refineid.android.core.AuthenticationIssuerCertificateSource
+import fi.refineid.android.document.SignerAnchorSource
 import java.io.File
 import java.io.FileOutputStream
 import java.security.GeneralSecurityException
@@ -16,12 +17,17 @@ import java.util.Locale
 
 /**
  * Persistent on-disk and in-memory cache for root and intermediate CA
- * certificates discovered on smart cards.
+ * certificates discovered on smart cards (refineid-core
+ * doc/security/certificate-custody.md). The cached chain of a signer's
+ * certificate also anchors the collection of its long-term validation
+ * material; verification does not use it.
  */
+@Suppress("TooManyFunctions")
 internal class CaCertificateStore(
     private val context: Context? = null,
     baseDirectory: File? = null,
-) : AuthenticationIssuerCertificateSource {
+) : AuthenticationIssuerCertificateSource,
+    SignerAnchorSource {
     private val lock = Any()
     private val directory = File(baseDirectory ?: context?.filesDir ?: File("."), CA_CERTIFICATES_DIRECTORY_NAME)
     private val certificates = mutableListOf<X509Certificate>()
@@ -82,6 +88,83 @@ internal class CaCertificateStore(
         }
         synchronized(lock) {
             return indexCertificateLocked(cert, persistToDisk = true)
+        }
+    }
+
+    /**
+     * Admits the CA certificates a card supplied, under the custody rule: the
+     * issuing CA when it is a CA certificate within its validity, the root
+     * when it is besides self-signed and the verified issuer of that issuing
+     * CA. Returns how many certificates were new.
+     */
+    fun admitCardChain(
+        rootDer: ByteArray?,
+        issuingDer: ByteArray?,
+    ): Int {
+        val issuing = issuingDer?.let(::parseCertificate)?.takeIf { it.isCurrentCertificateAuthority() }
+        val root =
+            rootDer
+                ?.let(::parseCertificate)
+                ?.takeIf { candidate ->
+                    issuing != null &&
+                        candidate.isCurrentCertificateAuthority() &&
+                        candidate.isSelfSigned() &&
+                        candidate.isDirectIssuerOf(issuing)
+                }
+        synchronized(lock) {
+            return listOfNotNull(issuing, root).count { cert -> indexCertificateLocked(cert, persistToDisk = true) }
+        }
+    }
+
+    /** True when the cache holds the chain of [leafDer] up to a self-signed root. */
+    fun hasChainFor(leafDer: ByteArray): Boolean {
+        val leaf = parseCertificate(leafDer) ?: return false
+        return chainOf(leaf).lastOrNull()?.isSelfSigned() == true
+    }
+
+    /** The cached chain of [signerCertificate], issuer first, each copy owned by the caller. */
+    override fun copyAnchorsFor(signerCertificate: ByteArray): List<ByteArray> {
+        val leaf = parseCertificate(signerCertificate) ?: return emptyList()
+        return chainOf(leaf).mapNotNull { certificate ->
+            try {
+                certificate.encoded
+            } catch (_: GeneralSecurityException) {
+                null
+            } catch (_: RuntimeException) {
+                null
+            }
+        }
+    }
+
+    private fun chainOf(leaf: X509Certificate): List<X509Certificate> {
+        val chain = mutableListOf<X509Certificate>()
+        var current: X509Certificate? = leaf
+        synchronized(lock) {
+            while (current != null && chain.size < MAXIMUM_CACHED_CHAIN_LENGTH) {
+                val subject = current
+                val issuer =
+                    certificates.firstOrNull { candidate ->
+                        candidate !in chain &&
+                            candidate != subject &&
+                            candidate.isDirectIssuerOf(subject) &&
+                            candidate.isCurrentCertificateAuthority()
+                    }
+                issuer?.let { chain += it }
+                current = issuer?.takeUnless { it.isSelfSigned() }
+            }
+        }
+        return chain
+    }
+
+    private fun X509Certificate.isCurrentCertificateAuthority(): Boolean {
+        if (basicConstraints < CERTIFICATE_AUTHORITY_BASIC_CONSTRAINTS_MINIMUM) return false
+        return try {
+            checkValidity()
+            true
+        } catch (_: CertificateExpiredException) {
+            false
+        } catch (_: CertificateNotYetValidException) {
+            false
         }
     }
 
@@ -262,6 +345,9 @@ internal class CaCertificateStore(
 
     private companion object {
         const val CA_CERTIFICATES_DIRECTORY_NAME = "ca-certificates"
+
+        /** An issuing CA and its root: the chain a card carries (EF.4336, EF.4334). */
+        const val MAXIMUM_CACHED_CHAIN_LENGTH = 2
         const val DER_FILE_EXTENSION = "der"
         const val X509_CERTIFICATE_TYPE = "X.509"
         const val SHA256_DIGEST_NAME = "SHA-256"

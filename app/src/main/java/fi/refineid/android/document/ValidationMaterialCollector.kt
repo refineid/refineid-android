@@ -60,6 +60,20 @@ internal fun interface ValidationSecureRandom {
     fun generate(byteCount: Int): ByteArray
 }
 
+/**
+ * Certificates that anchor the collection of a signer's validation material
+ * besides the configured trust: the chain the signer's own card carries.
+ * Verification never uses them.
+ */
+internal fun interface SignerAnchorSource {
+    /** [signerCertificate] is borrowed; the returned arrays transfer to the caller. */
+    fun copyAnchorsFor(signerCertificate: ByteArray): List<ByteArray>
+
+    companion object {
+        val NONE = SignerAnchorSource { emptyList() }
+    }
+}
+
 internal data class ValidationMaterialCollectorDependencies(
     val get: ValidationMaterialGetter,
     val post: ValidationMaterialPoster,

@@ -14,6 +14,7 @@ import fi.refineid.android.core.CardManagementScheme
 import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativeAuthenticationCertificate
+import fi.refineid.android.core.NativeCardCa
 import fi.refineid.android.core.NativeCertificateReadFailure
 import fi.refineid.android.core.NativeCertificateReadResult
 import fi.refineid.android.core.NativeOrganizationCard
@@ -22,6 +23,7 @@ import fi.refineid.android.core.NativePin2PreflightFailure
 import fi.refineid.android.core.NativePin2PreflightResult
 import fi.refineid.android.core.NativePin2State
 import fi.refineid.android.core.NativeQualifiedCertificate
+import fi.refineid.android.core.NativeQualifiedSignResult
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1Verification
 import fi.refineid.android.core.Pin1VerificationResult
@@ -33,6 +35,7 @@ import fi.refineid.android.core.QualifiedSigningInputMode
 import fi.refineid.android.core.attemptsLeft
 import fi.refineid.android.core.organizationPin1Refused
 import fi.refineid.android.diagnostics.AppTrace
+import fi.refineid.android.trust.CardCaCustody
 import java.io.IOException
 
 /**
@@ -56,6 +59,7 @@ internal class OrganizationContactlessSession(
     private val authenticationCertificate: NativeAuthenticationCertificate?,
     private val qualifiedCertificate: NativeQualifiedCertificate?,
     private val onUnlocked: () -> Unit = {},
+    private val caCustody: CardCaCustody = CardCaCustody.NONE,
 ) : ContactlessCardSession {
     private val ownerThread = Thread.currentThread()
     private var isClosed = false
@@ -166,6 +170,7 @@ internal class OrganizationContactlessSession(
             pin2.close()
             return QualifiedSignResult.Failure(QualifiedSignFailure.CARD_UNAVAILABLE)
         }
+        val readCaCertificates = !holdsCaChainFor(expectedCertificate)
         val nativeResult =
             NativeOrganizationCard.qualifiedSign(
                 algorithm = algorithm,
@@ -174,9 +179,33 @@ internal class OrganizationContactlessSession(
                 input = input,
                 expectedCertificate = expectedCertificate,
                 exchange = exchange(),
+                readCaCertificates = readCaCertificates,
             )
         closeIsoDep()
+        if (readCaCertificates && nativeResult is NativeQualifiedSignResult.Success) {
+            val answers = NativeCardCa.lastReadAnswers()
+            AppTrace.cardCaReadAnswered(answers)
+            caCustody.admitCardRead(answers)
+        }
         return verifiedQualifiedResult(expectedCertificate, inputMode, input, nativeResult)
+    }
+
+    /**
+     * Whether the cache holds the signer's chain; when it does not, the PIN 2
+     * channel reads the card's own root and issuing CA after the signature.
+     */
+    private fun holdsCaChainFor(certificate: NativeQualifiedCertificate): Boolean {
+        val der =
+            try {
+                certificate.copyDer()
+            } catch (_: IllegalStateException) {
+                return true
+            }
+        return try {
+            caCustody.holdsChainFor(der)
+        } finally {
+            der.fill(CLEARED_BYTE)
+        }
     }
 
     override fun probeCredentialHealth(readPinLengths: Boolean): CardManagementResult<CredentialHealth> {
@@ -317,5 +346,6 @@ internal class OrganizationContactlessSession(
     private companion object {
         /** Bound on one contactless exchange, PACE cryptography included. */
         const val TRANSCEIVE_TIMEOUT_MILLISECONDS = 15_000
+        const val CLEARED_BYTE: Byte = 0
     }
 }

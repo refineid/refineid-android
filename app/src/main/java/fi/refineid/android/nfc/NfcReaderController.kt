@@ -42,6 +42,8 @@ import fi.refineid.android.core.primedAuthenticationCertificate
 import fi.refineid.android.core.primedQualifiedCertificate
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.prime.PrimedCanStore
+import fi.refineid.android.trust.CardCaCustody
+import fi.refineid.android.trust.StoreCardCaCustody
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -470,6 +472,7 @@ internal class NfcReaderController(
                 isoDep = isoDep,
                 authenticationCertificate = identity.certificate,
                 qualifiedCertificate = opened.qualifiedCertificate,
+                caCustody = caCustody(),
             )
         feedback.onCardSuccess()
         publishAsync(generation, NfcReaderStatus.CARD_READY, holderName = holderName, cardDetails = cardDetails)
@@ -556,6 +559,7 @@ internal class NfcReaderController(
                     authenticationCertificate = null,
                     qualifiedCertificate = null,
                     onUnlocked = { reprobeOrganization(isoDep, generation) },
+                    caCustody = caCustody(),
                 )
             publishAsync(generation, NfcReaderStatus.ACTIVATION_REQUIRED)
         } else {
@@ -574,6 +578,7 @@ internal class NfcReaderController(
             isoDep = isoDep,
             authenticationCertificate = certificate,
             qualifiedCertificate = qualified,
+            caCustody = caCustody(),
         )
     }
 
@@ -608,6 +613,13 @@ internal class NfcReaderController(
             // Tag service unavailable.
         }
     }
+
+    /** The application's CA cache as a session sees it, or none before the application has one. */
+    private fun caCustody(): CardCaCustody =
+        (applicationContext as? RefineIdApplication)
+            ?.takeIf { app -> app.hasCaCertificateStore }
+            ?.let { app -> StoreCardCaCustody(app.caCertificateStore) }
+            ?: CardCaCustody.NONE
 
     private fun saveCardCaCertificates() {
         val app = applicationContext as? RefineIdApplication

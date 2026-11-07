@@ -6,6 +6,7 @@ import fi.refineid.android.browser.BrowserSignatureStatus
 import fi.refineid.android.core.AtrValidation
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
+import fi.refineid.android.core.CardCaReadAnswer
 import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.NativeAuthenticationSignResult
@@ -326,6 +327,17 @@ internal object AppTrace {
             DevErrorLog.report(
                 "native:qualified-sign-failed",
                 result.kind.toString(),
+            )
+        }
+    }
+
+    /** The card's answer to each CA certificate read on the PIN 2 channel: step and status word. */
+    fun cardCaReadAnswered(answers: List<CardCaReadAnswer>) {
+        answers.forEach { answer ->
+            debug(
+                "card-ca:read file=" + answer.file +
+                    " step=" + answer.step +
+                    " sw=" + (answer.statusWord?.let { word -> "%04X".format(java.util.Locale.ROOT, word) } ?: "none"),
             )
         }
     }

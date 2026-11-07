@@ -281,6 +281,11 @@ const _: NativeMethod = jni::native_method! {
 
 const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeCardCa",
+    static extern fn last_ca_read_answer_native(slot: jint) -> jint,
+};
+
+const _: NativeMethod = jni::native_method! {
+    java_type = "fi.refineid.android.core.NativeCardCa",
     static extern fn set_cached_ca_certificates_native(
         root_ca: [jbyte],
         intermediate_ca: [jbyte],
@@ -843,6 +848,52 @@ fn read_card_intermediate_ca_certificate_native<'local>(
     match cert {
         Some(cert) => env.byte_array_from_slice(cert.der().as_bytes()),
         None => env.new_byte_array(0),
+    }
+}
+
+/// The answer to the last unconditional read of one on-card CA certificate
+/// (`slot` 0 for EF.4334, 1 for EF.4336): `step * CA_READ_STEP_FACTOR +
+/// status word`, with no status word as 0 and an unknown slot or an
+/// unasked read as `CA_READ_NOT_ASKED`.
+fn last_ca_read_answer_native<'local>(
+    _env: &mut Env<'local>,
+    _class: JClass<'local>,
+    slot: jint,
+) -> Result<jint, jni::errors::Error> {
+    let answers = contactless::last_ca_read_answers();
+    let answer = usize::try_from(slot)
+        .ok()
+        .and_then(|index| answers.get(index).copied())
+        .unwrap_or(contactless::CaReadAnswer::NotAsked);
+    Ok(encode_ca_read_answer(answer))
+}
+
+const CA_READ_NOT_ASKED: jint = 0;
+const CA_READ_STEP_FACTOR: jint = 0x1_0000;
+const CA_READ_NO_STATUS: jint = 0;
+const CA_READ_STEP_SELECT_MF: jint = 1;
+const CA_READ_STEP_SELECT_FILE: jint = 2;
+const CA_READ_STEP_READ_BINARY: jint = 3;
+const CA_READ_STEP_CERTIFICATE: jint = 4;
+const CA_READ_STEP_READ: jint = 5;
+/// SW1-SW2 `90 00`, the answer of a read that completed.
+const CA_READ_SUCCESS_STATUS: jint = 0x9000;
+
+fn encode_ca_read_answer(answer: contactless::CaReadAnswer) -> jint {
+    use contactless::{CaReadAnswer, CaReadStep};
+    let step_code = |step: CaReadStep| match step {
+        CaReadStep::SelectMf => CA_READ_STEP_SELECT_MF,
+        CaReadStep::SelectFile => CA_READ_STEP_SELECT_FILE,
+        CaReadStep::ReadBinary => CA_READ_STEP_READ_BINARY,
+        CaReadStep::Certificate => CA_READ_STEP_CERTIFICATE,
+    };
+    match answer {
+        CaReadAnswer::NotAsked => CA_READ_NOT_ASKED,
+        CaReadAnswer::Read => CA_READ_STEP_READ * CA_READ_STEP_FACTOR + CA_READ_SUCCESS_STATUS,
+        CaReadAnswer::Refused { step, status } => {
+            step_code(step) * CA_READ_STEP_FACTOR + jint::from(status)
+        }
+        CaReadAnswer::Failed { step } => step_code(step) * CA_READ_STEP_FACTOR + CA_READ_NO_STATUS,
     }
 }
 
@@ -2488,6 +2539,37 @@ mod tests {
     use refineid_sign::{ECDSA_P384_SIG_BYTES, RSA_3072_SIG_BYTES};
 
     use crate::organization_card::ContactlessCardKind;
+
+    #[test]
+    fn a_ca_read_answer_names_its_step_and_the_card_s_word() {
+        use super::{
+            CA_READ_NOT_ASKED, CA_READ_STEP_CERTIFICATE, CA_READ_STEP_FACTOR, CA_READ_STEP_READ,
+            CA_READ_STEP_SELECT_FILE, CA_READ_SUCCESS_STATUS, encode_ca_read_answer,
+        };
+        use crate::contactless::{CaReadAnswer, CaReadStep};
+        const FILE_NOT_FOUND: u16 = 0x6A82;
+        assert_eq!(
+            encode_ca_read_answer(CaReadAnswer::NotAsked),
+            CA_READ_NOT_ASKED
+        );
+        assert_eq!(
+            encode_ca_read_answer(CaReadAnswer::Read),
+            CA_READ_STEP_READ * CA_READ_STEP_FACTOR + CA_READ_SUCCESS_STATUS
+        );
+        assert_eq!(
+            encode_ca_read_answer(CaReadAnswer::Refused {
+                step: CaReadStep::SelectFile,
+                status: FILE_NOT_FOUND,
+            }),
+            CA_READ_STEP_SELECT_FILE * CA_READ_STEP_FACTOR + i32::from(FILE_NOT_FOUND)
+        );
+        assert_eq!(
+            encode_ca_read_answer(CaReadAnswer::Failed {
+                step: CaReadStep::Certificate,
+            }),
+            CA_READ_STEP_CERTIFICATE * CA_READ_STEP_FACTOR
+        );
+    }
 
     use super::{
         ATR_INVALID, ATR_VALID_NON_T0_DIRECT, ATR_VALID_T0_DIRECT, ATR_VALID_T0_INVERSE,

@@ -17,7 +17,7 @@
 //! replies reuse the established vocabularies.
 
 use jni::objects::{JByteArray, JClass, JObject};
-use jni::sys::jint;
+use jni::sys::{jboolean, jint};
 use jni::{Env, NativeMethod};
 use refineid_auth::PinStatus;
 
@@ -92,6 +92,7 @@ const _: NativeMethod = jni::native_method! {
         pin: [jbyte],
         content: [jbyte],
         expected_certificate: [jbyte],
+        read_ca_certificates: jboolean,
         callback: JObject,
     ) -> [jbyte],
 };
@@ -378,6 +379,7 @@ fn organization_authenticate_and_sign_native<'local>(
     reply(env, bytes)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn organization_qualified_sign_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
@@ -385,6 +387,7 @@ fn organization_qualified_sign_native<'local>(
     pin: JByteArray<'local>,
     content: JByteArray<'local>,
     expected_certificate: JByteArray<'local>,
+    read_ca_certificates: jboolean,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
     let mut pin_bytes = take_secret_bytes(env, &pin)?;
@@ -439,6 +442,7 @@ fn organization_qualified_sign_native<'local>(
             pin_bytes,
             input,
             &expected,
+            read_ca_certificates,
         );
         let exchange = transport.into_exchange();
         (result, exchange.bridge_failed())
