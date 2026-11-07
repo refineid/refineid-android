@@ -4,6 +4,12 @@ Status: Accepted
 
 Date: 2026-08-15
 
+Status note, 2026-11-07: the AOSP patch series and its build scripts moved to
+[refineid-hack's `aosp-keychain-external-key/`](https://github.com/refineid/refineid-hack/tree/main/aosp-keychain-external-key)
+as a parked experiment. This design record stays here. The app-side KeyChain
+provider code (package `fi.refineid.android.keychain`) remains in this
+repository and is inert on an unmodified phone.
+
 ## Context
 
 ADR 0011 establishes that an app-owned WebView and a process-local JCA
@@ -318,7 +324,7 @@ the next one depends on it:
 
 The initial implementation targets the connected Pixel 4 build
 `TP1A.221005.002.B2`, based on AOSP tag `android-13.0.0_r31`. Reproducible
-patches live under `platform/aosp/android-13.0.0_r31`.
+patches live in refineid-hack under `aosp-keychain-external-key/`.
 
 A full Android 13 platform build requires a 64-bit Linux builder. AOSP builds
 for Android 11 and newer are unsupported on macOS, and Google's current

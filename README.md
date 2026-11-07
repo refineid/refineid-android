@@ -73,18 +73,13 @@ For system-browser support via platform KeyChain, see
 and the AOSP design in
 [`doc/architecture/0012-platform-keychain-external-key.md`](doc/architecture/0012-platform-keychain-external-key.md).
 
-Build the AOSP image with the pinned Pixel 4
-[`BUILD.md`](platform/aosp/android-13.0.0_r31/BUILD.md). To stage the
-minimized unsigned release artifact:
-
-```sh
-Scripts/stage-aosp-prebuilt.sh
-```
+The AOSP patch series, its Pixel 4 build scripts and runbooks are parked in
+[refineid-hack's `aosp-keychain-external-key/`](https://github.com/refineid/refineid-hack/tree/main/aosp-keychain-external-key).
 
 ## Quality gates
 
 `./gradlew check` enforces: Kotlin compiler warnings-as-errors, Android Lint,
-Detekt, ktlint, rustfmt, Clippy, ShellCheck, wire-contract matching, release
+Detekt, ktlint, rustfmt, Clippy, ShellCheck, release
 bytecode logging prohibition, and no Internet permission in the release manifest.
 
 ## Versioning

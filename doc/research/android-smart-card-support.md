@@ -35,7 +35,8 @@ KeyChain serves keys that exist in Android Keystore (KeyMint): either
 hardware-bound or imported as raw key material. A smart-card private
 key can be neither, and stock KeyChain has no service-provider
 interface an application could implement. That absence is the entire
-reason for this repository's AOSP patch series.
+reason for the RefineID AOSP patch series, parked in refineid-hack under
+`aosp-keychain-external-key/`.
 
 Google has shipped the missing hook twice on its other platforms:
 
