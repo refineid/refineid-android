@@ -36,8 +36,7 @@ use refineid_auth::{
 use refineid_ber::BerEncoder;
 use refineid_pace::commands::MseSetAt;
 use refineid_pace::{
-    CardAccess, PaceDomain, PaceError, PacePassword, PaceSession, SmTransport, read_card_access,
-    run_pace,
+    CardAccess, PaceDomain, PaceError, PacePassword, PaceSession, SmTransport, run_pace,
 };
 use refineid_pkcs15::{Pkcs15Error, Pkcs15Ops as _};
 use refineid_sign::{Pin2ChannelError, Pin2ChannelSignOps, SignScheme};
@@ -46,12 +45,13 @@ use crate::authentication_signer::{
     AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
     AuthenticationSigningInput, prepare_signing_input, sign_prepared_or_failure,
 };
+use crate::card_access::read_card_access_in_plain;
 use crate::card_certificate::{
     CardCertificate, CertificateReadFailure, read_authentication_certificate,
     read_organization_qualified_certificate,
 };
 use crate::card_management::{CardManagementFailure, CredentialHealthAnswer};
-use crate::contactless::{ManagedPin, abort_stale_secure_messaging, read_on_card_ca_certificates};
+use crate::contactless::{ManagedPin, read_on_card_ca_certificates};
 use crate::pin1_status::{Pin1Preflight, Pin1State};
 use crate::pin2_status::{Pin2Preflight, Pin2State};
 use crate::qualified_signer::{
@@ -227,14 +227,14 @@ fn pkcs15_refusal<E>(error: &Pkcs15Error<E>) -> ChannelRefusal {
     }
 }
 
-/// The master file made current and EF.CardAccess read, in plain. A card
-/// that is not an organization card stops here, with nothing but these
+/// EF.CardAccess read in plain, as core's `read_card_access` reads it; the
+/// organization card refuses a SELECT of the MF before PACE, so none is sent.
+/// A card that is not an organization card stops here, with nothing but these
 /// reads sent to it.
 fn organization_card_access<T: CardTransport>(
     transport: &mut T,
 ) -> Result<CardAccess, ChannelRefusal> {
-    abort_stale_secure_messaging(transport).map_err(|failure| failure.into_refusal())?;
-    let card_access = read_card_access(transport).map_err(|error| match error {
+    let card_access = read_card_access_in_plain(transport).map_err(|error| match error {
         PaceError::CardAccessRead(read) => pkcs15_refusal(&read),
         PaceError::Outcome(outcome) => outcome_refusal(&outcome),
         _ => ChannelRefusal::NotOrganizationCard,
@@ -322,9 +322,8 @@ fn handshake_refusal<T: CardTransport>(
         }
         PaceError::Status(_, StatusWord::AuthenticationBlocked) => ChannelRefusal::Blocked,
         PaceError::Status(_, _) | PaceError::AuthMismatch => {
-            if abort_stale_secure_messaging(transport).is_err() {
-                return ChannelRefusal::Rejected;
-            }
+            // `MSE:Set AT` starts the card's PACE afresh; the handshake that
+            // failed left no channel to end first.
             match counter_from_mse(transport, card_access, credential) {
                 Ok(PinStatus::Remaining(retries)) => ChannelRefusal::Wrong {
                     retries_left: retries.get(),
@@ -772,6 +771,11 @@ mod tests {
     const P1_INDEX: usize = 2;
     const P2_INDEX: usize = 3;
     const LE_MAX_READ: usize = 256;
+    const DATA_INDEX: usize = 5;
+    /// The MF's file identifier, `3F00` (ISO/IEC 7816-4 section 7.1.1).
+    const MF_IDENTIFIER: [u8; 2] = [0x3F, 0x00];
+    const P1_SELECT_BY_NAME: u8 = 0x04;
+    const SW_CONDITIONS_NOT_SATISFIED: StatusWord = StatusWord::Other(0x6985);
     const SW_DEACTIVATED: StatusWord = StatusWord::Other(0x6283);
     const SW_NOT_SATISFIED_NO_COUNT: StatusWord = StatusWord::Other(0x6300);
     const SW_REFERENCE_NOT_FOUND: StatusWord = StatusWord::ReferenceDataNotFound;
@@ -891,8 +895,18 @@ mod tests {
             let plain = bytes.first() == Some(&ApduClass::Plain.as_byte());
             let instruction = bytes[INS_INDEX];
             if plain && instruction == INS_SELECT {
+                // The organization card refuses a SELECT of the MF before PACE,
+                // as observed on the phone.
+                let selects_mf = bytes.get(DATA_INDEX..DATA_INDEX + MF_IDENTIFIER.len())
+                    == Some(&MF_IDENTIFIER)
+                    || bytes.get(P1_INDEX) == Some(&P1_SELECT_BY_NAME);
                 self.plain.push(bytes);
-                return Ok(TransportOutcome::Response(status(StatusWord::Success)));
+                let word = if selects_mf {
+                    SW_CONDITIONS_NOT_SATISFIED
+                } else {
+                    StatusWord::Success
+                };
+                return Ok(TransportOutcome::Response(status(word)));
             }
             if plain && instruction == INS_READ_BINARY {
                 let offset =
@@ -1111,6 +1125,16 @@ mod tests {
                 "MSE:Set AT names the credential's reference"
             );
         }
+    }
+
+    #[test]
+    fn no_select_of_the_mf_is_sent_to_an_organization_card() {
+        let (outcome, card) =
+            organization_verify_pin1(pin1_card(Vec::new()), SYNTHETIC_PIN1.to_vec());
+        assert_eq!(outcome, Ok(()));
+        assert!(card.plain.iter().all(|command| {
+            command.get(DATA_INDEX..DATA_INDEX + MF_IDENTIFIER.len()) != Some(&MF_IDENTIFIER)
+        }));
     }
 
     #[test]

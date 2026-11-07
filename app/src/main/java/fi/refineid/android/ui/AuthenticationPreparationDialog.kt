@@ -29,6 +29,7 @@ import fi.refineid.android.core.AuthenticationPreparationState
 import fi.refineid.android.core.AuthenticationPurpose
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationResult
+import fi.refineid.android.nfc.NfcCardProblem
 import fi.refineid.android.nfc.NfcReaderStatus
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
@@ -37,6 +38,7 @@ internal fun AuthenticationPreparationDialog(
     preparation: AuthenticationPreparation,
     state: AuthenticationPreparationState,
     nfcStatus: NfcReaderStatus? = null,
+    nfcProblem: NfcCardProblem? = null,
 ) {
     val title = purposeTitle(preparation.purpose.collectAsState().value)
     when (state) {
@@ -66,7 +68,7 @@ internal fun AuthenticationPreparationDialog(
                 onDismissRequest = preparation::cancel,
                 properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
                 title = { Text(stringResource(title)) },
-                text = { Text(stringResource(cardMessage(state, nfcStatus))) },
+                text = { Text(stringResource(nfcProblem?.let(::cardProblemMessage) ?: cardMessage(state, nfcStatus))) },
                 confirmButton = { TextButton(onClick = preparation::cancel) { Text(stringResource(R.string.cancel)) } },
             )
         }

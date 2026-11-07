@@ -33,7 +33,7 @@ use crate::card_management::{
 use crate::card_transport::CardExchangeLevel;
 use crate::card_transport::{AndroidCardTransport, SingleBlockExchange};
 use crate::certificate_validity::validity_start_epoch_seconds;
-use crate::organization_card::{ChannelRefusal, ContactlessCardKind, contactless_card_kind};
+use crate::organization_card::{ContactlessCardKind, contactless_card_kind};
 use crate::pin1_status::{Pin1Preflight, Pin1PreflightFailure, probe_pin1_preflight};
 use crate::pin2_status::{Pin2Preflight, Pin2PreflightFailure, probe_pin2_preflight};
 use crate::qualified_signer::{
@@ -61,18 +61,6 @@ pub(crate) enum SecureChannelFailure {
     OrganizationCard,
     /// EF.CardAccess names neither kind of card; no password was named to it.
     UnknownCard,
-}
-
-impl SecureChannelFailure {
-    /// The refusal this failure comes to on an organization card's channel.
-    pub(crate) const fn into_refusal(self) -> ChannelRefusal {
-        match self {
-            Self::CardUnavailable => ChannelRefusal::CardUnavailable,
-            Self::Transport | Self::PaceRejected => ChannelRefusal::Transport,
-            Self::Bridge => ChannelRefusal::Bridge,
-            Self::OrganizationCard | Self::UnknownCard => ChannelRefusal::NotOrganizationCard,
-        }
-    }
 }
 
 /// The host half of one live contactless secure-messaging session: the
@@ -736,7 +724,7 @@ fn open_secure_channel<Exchange: SingleBlockExchange>(
 /// in plain). One replay-safe, credential-free SELECT MF absorbs that
 /// termination deterministically; its status word is deliberately not
 /// interpreted, and only transport-level faults stop the open.
-pub(crate) fn abort_stale_secure_messaging<T: CardTransport>(
+fn abort_stale_secure_messaging<T: CardTransport>(
     transport: &mut T,
 ) -> Result<(), SecureChannelFailure> {
     match transport.select_mf() {

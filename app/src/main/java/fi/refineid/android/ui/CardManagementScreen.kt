@@ -534,6 +534,7 @@ internal fun CardManagementScreen(
                         when (nfcSnapshot?.cardKind) {
                             null -> {
                                 Text(stringResource(R.string.hold_card_against_back))
+                                NfcCardProblemText(nfcSnapshot)
                             }
 
                             NfcCardKind.ORGANIZATION -> {

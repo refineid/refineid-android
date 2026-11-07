@@ -126,6 +126,9 @@ En kod från utfärdaren kan ändå prövas: kortet avgör och förbrukar inget.
     <string name="card_found_enter_can" tools:ignore="Typos">Kortet hittades. Ange dess CAN.</string>
     <string name="organization_card_found_enter_pin1">Organisationskortet hittades. Ange grund PIN 1.</string>
     <string name="wrong_pin1">Fel grund PIN 1</string>
+    <string name="card_problem_no_known_kind">Kortet stöds inte: det är varken ett identitetskort eller ett organisationskort.</string>
+    <string name="card_problem_access_file_refused">Kortet stöds inte: det vägrade läsning av sin åtkomstfil.</string>
+    <string name="card_problem_access_file_malformed">Kortet stöds inte: dess åtkomstfil är felaktig.</string>
     <string name="allow_notifications">Tillåt aviseringar</string>
     <plurals name="remote_signature_request_many">
         <item quantity="one">%1$s begär %2$d underskrift.</item>

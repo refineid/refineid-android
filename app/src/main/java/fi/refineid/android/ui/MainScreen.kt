@@ -212,6 +212,7 @@ internal fun MainScreen(
         AuthenticationPreparationDialog(
             authenticationPreparation,
             preparationState,
+            nfcProblem = if (usbReaderPresent) null else nfcSnapshot.cardProblem,
             nfcStatus =
                 if (usbReaderPresent || nfcSnapshot.status == NfcReaderStatus.NOT_AVAILABLE) {
                     null
@@ -362,6 +363,7 @@ internal fun MainScreen(
             cardKind = nfcSnapshot.cardKind,
             pin1AttemptsLeft = nfcSnapshot.pin1AttemptsLeft,
             pin1Answer = nfcSnapshot.pin1Answer,
+            cardProblem = nfcSnapshot.cardProblem,
             onSubmitAccessNumber = { can -> onNfcConnect(can, null) },
             onSubmitOrganizationPin1 = { pin1 -> onNfcConnect(null, pin1) },
         )
@@ -369,6 +371,7 @@ internal fun MainScreen(
 
     if (!preparationActive && rappInbox?.currentTapPrompt == null && nfcSnapshot.awaitingCard) {
         NfcCardTapDialog(
+            snapshot = nfcSnapshot,
             onCancel = onCancelAwaitingCard,
         )
     }
@@ -908,6 +911,7 @@ private fun HomeScreen(
                                 nfcStatus = nfcStatus,
                                 nfcPrimed = nfcPrimed,
                                 nfcCardKind = nfcSnapshot.cardKind,
+                                nfcCardProblem = nfcSnapshot.cardProblem,
                                 enabled = browserAvailable,
                                 onPrepareAuthentication = onPrepareAuthentication,
                                 onNfcConnect = { can, pin1 -> onNfcConnect(can, pin1) },
@@ -1191,7 +1195,11 @@ private fun ReadCardNfcDialog(
                 // asked until a card has answered.
                 when (cardKind) {
                     null -> {
-                        Text(stringResource(R.string.hold_card_against_back))
+                        if (snapshot.cardProblem != null) {
+                            NfcCardProblemText(snapshot)
+                        } else {
+                            Text(stringResource(R.string.hold_card_against_back))
+                        }
                     }
 
                     NfcCardKind.PERSONAL -> {
@@ -1235,7 +1243,10 @@ private fun ReadCardNfcDialog(
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-private fun NfcCardTapDialog(onCancel: () -> Unit) {
+private fun NfcCardTapDialog(
+    snapshot: NfcReaderSnapshot,
+    onCancel: () -> Unit,
+) {
     Dialog(
         onDismissRequest = onCancel,
         properties =
@@ -1264,6 +1275,7 @@ private fun NfcCardTapDialog(onCancel: () -> Unit) {
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                 )
+                NfcCardProblemText(snapshot)
 
                 CircularProgressIndicator(
                     modifier = Modifier.padding(vertical = 8.dp),

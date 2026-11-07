@@ -123,6 +123,10 @@ internal class NfcReaderController(
     @Volatile
     private var organizationPin1Answer: Pin1Verification? = null
 
+    /** Why the card last read in the field cannot be used. */
+    @Volatile
+    private var cardProblem: NfcCardProblem? = null
+
     private val isOpeningSession = AtomicBoolean(false)
 
     /** Remote or local operations currently waiting on the card. */
@@ -404,6 +408,7 @@ internal class NfcReaderController(
                     }
 
                     is NativeOrganizationOpenResult.Unreadable -> {
+                        cardProblem = NfcCardProblem.READ_FAILED
                         closeResting(isoDep)
                         publishAsync(generation, opened.kind.toConnectStatus())
                     }
@@ -485,6 +490,7 @@ internal class NfcReaderController(
             }
 
             Pin1VerificationResult.TRANSPORT_ERROR, Pin1VerificationResult.BRIDGE_ERROR -> {
+                cardProblem = NfcCardProblem.READ_FAILED
                 closeResting(isoDep)
                 publishAsync(generation, NfcReaderStatus.TRANSPORT_ERROR)
             }
@@ -913,6 +919,7 @@ internal class NfcReaderController(
                 exchangeLevel = NativeCardExchangeLevel.APDU,
                 exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
             )
+        cardProblem = result.cardProblem()
         if (result is NativeCardAccessResult.Success) {
             recognizedKind = result.summary.cardKind
             if (result.summary.cardKind == NfcCardKind.ORGANIZATION) {
@@ -1310,6 +1317,7 @@ internal class NfcReaderController(
                 cardKind = kind,
                 pin1AttemptsLeft = organizationPin1Attempts,
                 pin1Answer = organizationPin1Answer,
+                cardProblem = if (snapshot.status in CARD_UNUSABLE) cardProblem ?: NfcCardProblem.READ_FAILED else null,
             )
         AppTrace.nfcSnapshotPublished(latestSnapshot.status)
         if (latestSnapshot.awaitingCard) {

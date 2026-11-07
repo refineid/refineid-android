@@ -60,6 +60,43 @@ class NfcCardRecognitionTest {
         )
     }
 
+    @Test
+    fun everyUnusableAnswerNamesItsReason() {
+        assertEquals(NfcCardProblem.NO_KNOWN_KIND, summary(null).cardProblem())
+        assertEquals(
+            NfcCardProblem.ACCESS_FILE_REFUSED,
+            failure(NativeCardAccessFailure.REJECTED).cardProblem(),
+        )
+        assertEquals(
+            NfcCardProblem.ACCESS_FILE_MALFORMED,
+            failure(NativeCardAccessFailure.INVALID_CARD_ACCESS).cardProblem(),
+        )
+        assertEquals(NfcCardProblem.READ_FAILED, failure(NativeCardAccessFailure.TRANSPORT_ERROR).cardProblem())
+        assertEquals(NfcCardProblem.READ_FAILED, failure(NativeCardAccessFailure.BRIDGE_ERROR).cardProblem())
+    }
+
+    @Test
+    fun aUsableCardOrOneThatLeftHasNoProblem() {
+        assertEquals(null, summary(NfcCardKind.ORGANIZATION).cardProblem())
+        assertEquals(null, summary(NfcCardKind.PERSONAL).cardProblem())
+        assertEquals(null, failure(NativeCardAccessFailure.CARD_UNAVAILABLE).cardProblem())
+    }
+
+    @Test
+    fun everyStatusThatShowsNoCardOpeningCarriesAReason() {
+        // The statuses a failed probe publishes are the ones the prompts explain.
+        listOf(
+            summary(null),
+            failure(NativeCardAccessFailure.REJECTED),
+            failure(NativeCardAccessFailure.INVALID_CARD_ACCESS),
+            failure(NativeCardAccessFailure.TRANSPORT_ERROR),
+            failure(NativeCardAccessFailure.BRIDGE_ERROR),
+        ).forEach { result ->
+            assertEquals(true, result.toReaderStatus() in CARD_UNUSABLE)
+            assertEquals(true, result.cardProblem() != null)
+        }
+    }
+
     private fun summary(cardKind: NfcCardKind?): NativeCardAccessResult =
         NativeCardAccessResult.Success(
             NativeCardAccessSummary(

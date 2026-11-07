@@ -52,6 +52,7 @@ import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1Verification
 import fi.refineid.android.core.Pin2Submission
+import fi.refineid.android.nfc.NfcCardProblem
 import fi.refineid.android.nfc.NfcCardWait
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.rapp.RappAuthAction
@@ -256,6 +257,7 @@ internal fun RappCardTapDialog(
     cardKind: NfcCardKind? = null,
     pin1AttemptsLeft: Int? = null,
     pin1Answer: Pin1Verification? = null,
+    cardProblem: NfcCardProblem? = null,
     onSubmitAccessNumber: (CanSubmission) -> Unit = { it.close() },
     onSubmitOrganizationPin1: (Pin1Submission) -> Unit = { it.close() },
 ) {
@@ -271,6 +273,7 @@ internal fun RappCardTapDialog(
     val message =
         when {
             reading -> R.string.card_reading_hold_still
+            cardProblem != null -> cardProblemMessage(cardProblem)
             nfcStatus == NfcReaderStatus.WRONG_CAN -> R.string.wrong_can
             nfcStatus == NfcReaderStatus.CARD_RECOGNIZED && needsAccessNumber -> R.string.card_found_enter_can
             needsOrganizationPin1 -> R.string.hold_card_against_back
