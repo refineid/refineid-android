@@ -409,6 +409,11 @@ internal object AppTrace {
                     "success document-length=" + result.document.length
                 }
 
+                is QualifiedPdfArchivalResult.BelowLongTerm -> {
+                    "below-long-term level=" + result.level + " kind=" + result.kind +
+                        " document-length=" + result.document.length
+                }
+
                 is QualifiedPdfArchivalResult.Failure -> {
                     "failure kind=" + result.kind
                 }

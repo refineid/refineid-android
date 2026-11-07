@@ -29,6 +29,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -48,7 +49,9 @@ internal enum class DocumentSigningStatus {
     FINALIZING,
     SAVING,
     SIGNED,
-    CERT_REVOKED,
+
+    /** Development build only: saved below PAdES-B-LTA, see [BelowLongTermNotice]. */
+    SIGNED_BELOW_LONG_TERM,
     NO_CARD,
     CARD_LEFT,
     ACCESS_NUMBER_REQUIRED,
@@ -59,8 +62,9 @@ internal enum class DocumentSigningStatus {
     CARD_READ_FAILED,
     WRONG_PIN,
     PIN_LOCKED,
-    UNAVAILABLE,
-    ERROR,
+
+    /** Stopped for the reason a [DocumentSigningFailure] names. */
+    FAILED,
 }
 
 /**
@@ -92,6 +96,8 @@ internal fun DocumentSigningCard(
     canRequired: Boolean,
     canSign: Boolean,
     status: DocumentSigningStatus,
+    failure: DocumentSigningFailure? = null,
+    belowLongTerm: BelowLongTermNotice? = null,
     onChooseDocuments: () -> Unit,
     onAddDocument: () -> Unit,
     onSign: (SignatureFormat, Pin2Submission, CanSubmission?) -> Unit,
@@ -246,7 +252,12 @@ internal fun DocumentSigningCard(
                     Text(stringResource(R.string.sign_container))
                 }
             }
-            DocumentSigningStatusText(status = status, progressText = progressText)
+            DocumentSigningStatusText(
+                status = status,
+                failure = failure,
+                belowLongTerm = belowLongTerm,
+                progressText = progressText,
+            )
         }
     }
 }
@@ -262,8 +273,11 @@ internal val Pin2InputTransformation =
 @Composable
 private fun DocumentSigningStatusText(
     status: DocumentSigningStatus,
+    failure: DocumentSigningFailure?,
+    belowLongTerm: BelowLongTermNotice?,
     progressText: String? = null,
 ) {
+    val resources = LocalResources.current
     val text =
         if (progressText != null &&
             (
@@ -275,21 +289,39 @@ private fun DocumentSigningStatusText(
             progressText
         } else {
             when (status) {
-                DocumentSigningStatus.IDLE -> null
+                DocumentSigningStatus.IDLE -> {
+                    null
+                }
 
-                DocumentSigningStatus.READING -> stringResource(R.string.checking)
+                DocumentSigningStatus.READING -> {
+                    stringResource(R.string.checking)
+                }
 
-                DocumentSigningStatus.HOLD_CARD -> stringResource(R.string.hold_card)
+                DocumentSigningStatus.HOLD_CARD -> {
+                    stringResource(R.string.hold_card)
+                }
 
-                DocumentSigningStatus.SIGNING -> stringResource(R.string.signing)
+                DocumentSigningStatus.SIGNING -> {
+                    stringResource(R.string.signing)
+                }
 
-                DocumentSigningStatus.FINALIZING -> stringResource(R.string.finalizing_signature)
+                DocumentSigningStatus.FINALIZING -> {
+                    stringResource(R.string.finalizing_signature)
+                }
 
-                DocumentSigningStatus.SAVING -> stringResource(R.string.saving)
+                DocumentSigningStatus.SAVING -> {
+                    stringResource(R.string.saving)
+                }
 
-                DocumentSigningStatus.SIGNED -> stringResource(R.string.signed)
+                DocumentSigningStatus.SIGNED -> {
+                    stringResource(R.string.signed)
+                }
 
-                DocumentSigningStatus.CERT_REVOKED -> stringResource(R.string.signed_cert_revoked)
+                DocumentSigningStatus.SIGNED_BELOW_LONG_TERM -> {
+                    belowLongTerm?.text(resources::getString) { id, arguments ->
+                        resources.getString(id, *arguments.toTypedArray())
+                    }
+                }
 
                 DocumentSigningStatus.NO_CARD,
                 DocumentSigningStatus.CARD_LEFT,
@@ -299,15 +331,26 @@ private fun DocumentSigningStatusText(
                 DocumentSigningStatus.CARD_ACCESS_FILE_REFUSED,
                 DocumentSigningStatus.CARD_ACCESS_FILE_MALFORMED,
                 DocumentSigningStatus.CARD_READ_FAILED,
-                -> stringResource(cardFailureMessage(status))
+                -> {
+                    stringResource(cardFailureMessage(status))
+                }
 
-                DocumentSigningStatus.WRONG_PIN -> stringResource(R.string.wrong_pin)
+                DocumentSigningStatus.WRONG_PIN -> {
+                    stringResource(R.string.wrong_pin)
+                }
 
-                DocumentSigningStatus.PIN_LOCKED -> stringResource(R.string.pin2_blocked)
+                DocumentSigningStatus.PIN_LOCKED -> {
+                    stringResource(R.string.pin2_blocked)
+                }
 
-                DocumentSigningStatus.UNAVAILABLE -> stringResource(R.string.unavailable)
-
-                DocumentSigningStatus.ERROR -> stringResource(R.string.error)
+                DocumentSigningStatus.FAILED -> {
+                    (failure ?: internalFailure(SigningFailureOutcome.NOT_SIGNED)).text(resources::getString) {
+                        id,
+                        argument,
+                        ->
+                        resources.getString(id, argument)
+                    }
+                }
             }
         }
     if (text != null) {

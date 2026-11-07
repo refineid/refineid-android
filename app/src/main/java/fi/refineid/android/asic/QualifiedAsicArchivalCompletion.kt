@@ -2,7 +2,6 @@
 
 package fi.refineid.android.asic
 
-import fi.refineid.android.core.QualifiedSignFailure
 import fi.refineid.android.document.PdfValidationMaterial
 import fi.refineid.android.document.QualifiedPdfTimestampSource
 import fi.refineid.android.document.QualifiedPdfTimestampSourceException
@@ -49,7 +48,7 @@ internal object QualifiedAsicArchivalCompletion {
         } catch (failure: AsicArchivalException) {
             AsicSigningResult.Failure(failure.reason)
         } catch (_: RuntimeException) {
-            AsicSigningResult.Failure(AsicSigningFailure.Card(QualifiedSignFailure.TRANSPORT_ERROR))
+            AsicSigningResult.Failure(AsicSigningFailure.InternalError)
         } finally {
             prepared.close()
         }

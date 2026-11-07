@@ -216,7 +216,7 @@ internal class DocumentSigningHarnessLifecycleTest {
             session.sign(SignatureFormat.PDF, pin2, null)
 
             composeRule.runOnIdle {
-                assertEquals(DocumentSigningStatus.UNAVAILABLE, session.status)
+                assertEquals(DocumentSigningStatus.FAILED, session.status)
                 assertTrue(session.hasDocument)
             }
         } finally {
