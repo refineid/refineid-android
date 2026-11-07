@@ -206,6 +206,7 @@ internal fun DocumentSigningCard(
                             .testTag(UiAutomationIds.PIN2_FIELD),
                     enabled = !isWorking,
                     label = { Text(stringResource(R.string.pin2)) },
+                    labelPosition = SecretFieldLabelPosition,
                     inputTransformation = Pin2InputTransformation,
                     textObfuscationMode = TextObfuscationMode.Hidden,
                     keyboardOptions =

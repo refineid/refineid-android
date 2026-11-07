@@ -572,6 +572,7 @@ private fun BrowserCardUnlockDialog(
                                 .testTag(UiAutomationIds.BROWSER_UNLOCK_PIN1_FIELD),
                         enabled = !isWaiting,
                         label = { Text(stringResource(R.string.pin1)) },
+                        labelPosition = SecretFieldLabelPosition,
                         inputTransformation = Pin1InputTransformation,
                         textObfuscationMode = TextObfuscationMode.Hidden,
                         keyboardOptions =

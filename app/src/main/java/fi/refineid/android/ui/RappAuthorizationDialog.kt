@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -107,6 +108,10 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
 
                 request.wrongPin?.let { RappWrongPinNotice(it) }
 
+                // The value-based field has no label position, so the label sits
+                // above it as SecretFieldLabelPosition places the others.
+                val pinLabel = stringResource(text.pinLabel)
+                Text(text = pinLabel, style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     value = pin,
                     onValueChange = { typed ->
@@ -120,11 +125,10 @@ internal fun RappAuthorizationDialog(request: RappAuthRequest) {
                             pin = digits
                         }
                     },
-                    label = { Text(stringResource(text.pinLabel)) },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = pinLabel },
                 )
 
                 Row(

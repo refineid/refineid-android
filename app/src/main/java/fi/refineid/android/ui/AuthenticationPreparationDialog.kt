@@ -158,6 +158,7 @@ private fun PreparationCredentialsDialog(
                     SecureTextField(
                         state = pin,
                         label = { Text(stringResource(R.string.pin1)) },
+                        labelPosition = SecretFieldLabelPosition,
                         inputTransformation = Pin1InputTransformation,
                         textObfuscationMode = TextObfuscationMode.Hidden,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),

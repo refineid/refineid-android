@@ -805,6 +805,10 @@ private fun GuidanceBanner(
     }
 }
 
+/**
+ * The four tasks, one full-width button per row: a long Finnish PIN name
+ * fits on one line with its number only across the whole column.
+ */
 @Composable
 private fun TaskSelector(
     selectedTask: ManagementTask,
@@ -814,38 +818,17 @@ private fun TaskSelector(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        listOf(
+            Triple(ManagementTask.CHANGE_PIN1, R.string.change_pin1, "managementTask.changePin1"),
+            Triple(ManagementTask.CHANGE_PIN2, R.string.change_pin2, "managementTask.changePin2"),
+            Triple(ManagementTask.RESET_PIN1, R.string.reset_pin1, "managementTask.resetPin1"),
+            Triple(ManagementTask.RESET_PIN2, R.string.reset_pin2, "managementTask.resetPin2"),
+        ).forEach { (task, label, tag) ->
             TaskButton(
-                text = stringResource(R.string.change_pin1),
-                isSelected = selectedTask == ManagementTask.CHANGE_PIN1,
-                onClick = { onSelect(ManagementTask.CHANGE_PIN1) },
-                modifier = Modifier.weight(1f).testTag("managementTask.changePin1"),
-            )
-            TaskButton(
-                text = stringResource(R.string.change_pin2),
-                isSelected = selectedTask == ManagementTask.CHANGE_PIN2,
-                onClick = { onSelect(ManagementTask.CHANGE_PIN2) },
-                modifier = Modifier.weight(1f).testTag("managementTask.changePin2"),
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            TaskButton(
-                text = stringResource(R.string.reset_pin1),
-                isSelected = selectedTask == ManagementTask.RESET_PIN1,
-                onClick = { onSelect(ManagementTask.RESET_PIN1) },
-                modifier = Modifier.weight(1f).testTag("managementTask.resetPin1"),
-            )
-            TaskButton(
-                text = stringResource(R.string.reset_pin2),
-                isSelected = selectedTask == ManagementTask.RESET_PIN2,
-                onClick = { onSelect(ManagementTask.RESET_PIN2) },
-                modifier = Modifier.weight(1f).testTag("managementTask.resetPin2"),
+                text = stringResource(label),
+                isSelected = selectedTask == task,
+                onClick = { onSelect(task) },
+                modifier = Modifier.fillMaxWidth().testTag(tag),
             )
         }
     }
@@ -1291,6 +1274,7 @@ private fun ManagedPasswordField(
                     .fillMaxWidth()
                     .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
             label = { Text(label) },
+            labelPosition = SecretFieldLabelPosition,
             textObfuscationMode =
                 if (passwordVisible) {
                     TextObfuscationMode.Visible

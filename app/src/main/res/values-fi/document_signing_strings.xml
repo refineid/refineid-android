@@ -14,7 +14,7 @@
     <string name="finalizing_signature">Viimeistellään allekirjoitusta…</string>
     <string name="no_card">Luettavaa henkilökorttia ei löytynyt</string>
     <string name="card_left_before_read">Kortti poistui ennen kuin se ehdittiin lukea</string>
-    <string name="organization_card_read_first">Lue organisaatiokortti ensin perustunnusluvulla 1</string>
+    <string name="organization_card_read_first">Lue organisaatiokortti ensin perustunnusluvulla&#160;1</string>
     <string name="signed_cert_revoked">Allekirjoitusvarmenne peruutettu — ei kelvollista allekirjoitusta</string>
     <string name="signed_at">allekirjoitettu %1$s</string>
     <string name="document_valid">Asiakirja ehjä — sulkulistaa ei tarkastettu</string>

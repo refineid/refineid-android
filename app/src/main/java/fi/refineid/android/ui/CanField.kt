@@ -45,6 +45,7 @@ internal fun CanField(
         modifier = modifier.testTag(testTag),
         enabled = enabled,
         label = { Text(stringResource(R.string.can)) },
+        labelPosition = SecretFieldLabelPosition,
         inputTransformation = CanInputTransformation,
         textObfuscationMode = if (revealed) TextObfuscationMode.Visible else TextObfuscationMode.Hidden,
         keyboardOptions =

@@ -62,6 +62,7 @@ internal fun OrganizationPin1Entry(
                 modifier = Modifier.fillMaxWidth().testTag(UiAutomationIds.NFC_ORGANIZATION_PIN1_FIELD),
                 enabled = !isOpening,
                 label = { Text(stringResource(R.string.pin1)) },
+                labelPosition = SecretFieldLabelPosition,
                 inputTransformation = Pin1InputTransformation,
                 textObfuscationMode = TextObfuscationMode.Hidden,
                 keyboardOptions =

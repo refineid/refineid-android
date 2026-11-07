@@ -1633,6 +1633,7 @@ private fun NfcCredentialEntry(
                 .fillMaxWidth()
                 .testTag(UiAutomationIds.NFC_PIN1_FIELD),
         label = { Text(stringResource(R.string.pin1)) },
+        labelPosition = SecretFieldLabelPosition,
         inputTransformation = Pin1InputTransformation,
         textObfuscationMode = TextObfuscationMode.Hidden,
         keyboardOptions =

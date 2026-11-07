@@ -14,7 +14,7 @@
     <string name="finalizing_signature">Finalizing signature…</string>
     <string name="no_card">No readable identity card was found</string>
     <string name="card_left_before_read">The card left before it could be read</string>
-    <string name="organization_card_read_first">Read the organisation card with Basic PIN 1 first</string>
+    <string name="organization_card_read_first">Read the organisation card with Basic PIN&#160;1 first</string>
     <string name="signed_cert_revoked">Signature certificate revoked — no valid signature</string>
     <string name="signed_at">signed at %1$s</string>
     <string name="document_valid">Document intact — revocation not checked</string>
