@@ -58,38 +58,38 @@
     <string name="hold_card_against_back">Pidä henkilökorttia taustaa vasten.</string>
     <string name="connect_id_card">Yhdistä henkilökortti</string>
     <string name="card_pins">Tunnusluvut</string>
-    <string name="change_pin1">Vaihda PIN 1</string>
-    <string name="change_pin2">Vaihda PIN 2</string>
-    <string name="reset_pin1">Palauta PIN 1</string>
-    <string name="reset_pin2">Palauta PIN 2</string>
+    <string name="pin1">Perustunnusluku 1</string>
+    <string name="pin2">Allekirjoitustunnusluku 2</string>
+    <string name="change_pin1">Vaihda perustunnusluku 1</string>
+    <string name="change_pin2">Vaihda allekirjoitustunnusluku 2</string>
+    <string name="reset_pin1">Palauta perustunnusluku 1</string>
+    <string name="reset_pin2">Palauta allekirjoitustunnusluku 2</string>
     <string name="activate_card">Aktivoi kortti</string>
     <string name="identity_card_activation">Henkilökortin aktivointi</string>
     <string name="organisation_card_activation">Organisaatiokortin aktivointi</string>
-    <string name="current_pin1">Nykyinen PIN 1</string>
-    <string name="current_pin2">Nykyinen PIN 2</string>
-    <string name="new_pin1">Uusi PIN 1</string>
-    <string name="new_pin2">Uusi PIN 2</string>
-    <string name="new_pin1_again">Uusi PIN 1 uudelleen</string>
-    <string name="new_pin2_again">Uusi PIN 2 uudelleen</string>
+    <string name="current_pin1">Nykyinen perustunnusluku 1</string>
+    <string name="current_pin2">Nykyinen allekirjoitustunnusluku 2</string>
+    <string name="new_pin1">Uusi perustunnusluku 1</string>
+    <string name="new_pin2">Uusi allekirjoitustunnusluku 2</string>
+    <string name="new_pin1_again">Perustunnusluku 1 uudelleen</string>
+    <string name="new_pin2_again">Allekirjoitustunnusluku 2 uudelleen</string>
     <string name="puk_code">PUK</string>
     <string name="activation_pin">Aktivointitunnusluku</string>
-    <string name="change_basic_pin1">Vaihda perus-PIN 1</string>
-    <string name="change_signature_pin2">Vaihda allekirjoitus-PIN 2</string>
     <string name="pin_changed_success">%1$s vaihdettiin</string>
     <string name="pin_reset_success">%1$s palautettiin</string>
     <string name="card_activated_success">Kortti aktivoitu onnistuneesti.</string>
-    <string name="confirm_change_title">Vahvista %1$s vaihto</string>
-    <string name="confirm_reset_title">Vahvista %1$s palautus</string>
+    <string name="confirm_change_title">%1$s vaihdetaan</string>
+    <string name="confirm_reset_title">%1$s palautetaan</string>
     <string name="confirm_activation_title">Vahvista kortin aktivointi</string>
-    <string name="confirm_pin_change_warning" tools:ignore="PluralsCandidate">Väärä nykyinen %1$s kuluttaa yhden yrityksen. Yrityksiä on jäljellä %2$d.</string>
+    <string name="confirm_pin_change_warning" tools:ignore="PluralsCandidate">%1$s: väärä nykyinen tunnusluku kuluttaa yhden yrityksen. Yrityksiä on jäljellä %2$d.</string>
     <string name="confirm_pin_reset_warning" tools:ignore="PluralsCandidate">Väärä %1$s kuluttaa yhden yrityksen. Yrityksiä on jäljellä %2$d.</string>
     <string name="proceed">Jatka</string>
     <string name="spent_attempts_notice">%1$s: %2$d/%3$d yritystä jäljellä.</string>
     <string name="refuse_low_attempts_pin">RefineID ei käytä tunnuslukua, jossa on kaksi yritystä tai vähemmän jäljellä. Uuden tunnusluvun voi asettaa täällä PUK-koodilla.</string>
     <string name="refuse_low_attempts_puk">RefineID ei käytä kumpaakaan kahdesta viimeisestä PUK-yrityksestä.</string>
     <string name="rapp_retry_floor">RefineID ei käytä PIN-koodia, jossa on kaksi yritystä tai vähemmän jäljellä. PUK-koodilla voi asettaa uuden PIN-koodin.</string>
-    <string name="recovery_guidance_pin1">PIN 1 on palautettava\nPalauta PIN 1 PUK-koodilla.</string>
-    <string name="recovery_guidance_pin2">PIN 2 on palautettava\nPalauta PIN 2 PUK-koodilla.</string>
+    <string name="recovery_guidance_pin1">Perustunnusluku 1 on palautettava\nPalauta perustunnusluku 1 PUK-koodilla.</string>
+    <string name="recovery_guidance_pin2">Allekirjoitustunnusluku 2 on palautettava\nPalauta allekirjoitustunnusluku 2 PUK-koodilla.</string>
     <string name="puk_reported_blocked">Kortti ilmoittaa PUK-koodin lukituksi
 Myöntäjältä saatua koodia voi silti yrittää: kortti päättää eikä kuluta yrityksiä.</string>
     <string name="diagnostics">Diagnostiikka</string>
@@ -108,12 +108,10 @@ Myöntäjältä saatua koodia voi silti yrittää: kortti päättää eikä kulu
     <string name="pins_do_not_match">Tunnusluvut eivät täsmää</string>
     <string name="digit_count_hint" tools:ignore="PluralsCandidate">%1$d numeroa</string>
     <string name="digit_range_hint" tools:ignore="PluralsCandidate">%1$d–%2$d numeroa</string>
-    <string name="half_activated_pin1_needed">PIN 2 on jo aktivoitu. Syötä aktivointitunnusluku aktivoidaksesi PIN 1.</string>
-    <string name="half_activated_pin2_needed">PIN 1 on jo aktivoitu. Syötä aktivointitunnusluku aktivoidaksesi PIN 2.</string>
-    <string name="confirm_activation_dialog_msg_both">Olet ottamassa käyttöön sekä PIN 1- että PIN 2 -tunnusluvut. Ne tulevat voimaan heti. Varmista, että olet kirjoittanut ne muistiin.</string>
-    <string name="confirm_activation_dialog_msg_single">Olet aktivoimassa puuttuvan tunnusluvun (%1$s). Se tulee voimaan heti. Varmista, että olet kirjoittanut sen muistiin.</string>
-    <string name="pin1_section_title">Perustunnusluku (PIN 1)</string>
-    <string name="pin2_section_title">Allekirjoitus-PIN (PIN 2)</string>
+    <string name="half_activated_pin1_needed">Allekirjoitustunnusluku 2 on jo aktivoitu. Perustunnusluku 1 aktivoidaan aktivointitunnusluvulla.</string>
+    <string name="half_activated_pin2_needed">Perustunnusluku 1 on jo aktivoitu. Allekirjoitustunnusluku 2 aktivoidaan aktivointitunnusluvulla.</string>
+    <string name="confirm_activation_dialog_msg_both">Perustunnusluku 1 ja allekirjoitustunnusluku 2 otetaan käyttöön. Ne tulevat voimaan heti. Varmista, että olet kirjoittanut ne muistiin.</string>
+    <string name="confirm_activation_dialog_msg_single">%1$s otetaan käyttöön. Se tulee voimaan heti. Varmista, että olet kirjoittanut sen muistiin.</string>
     <string name="paired_devices">Liitetyt tietokoneet</string>
     <string name="card_remote_access">Kortin etäkäyttö</string>
     <string name="remote_requests_channel">Pyynnöt</string>

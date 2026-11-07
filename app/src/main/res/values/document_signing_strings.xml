@@ -5,7 +5,6 @@
     <string name="signing_progress">Signing %1$d/%2$d…</string>
     <string name="finalizing_progress">Finalizing %1$d/%2$d…</string>
     <string name="saving_progress">Saving %1$d/%2$d…</string>
-    <string name="signature_pin2">Signature PIN 2</string>
     <string name="sign_pdf_single">Sign document (PDF)</string>
     <string name="sign_pdf_multiple">Sign documents (PDF)</string>
     <string name="sign_container">Sign container (ASiC-E)</string>

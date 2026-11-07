@@ -277,7 +277,12 @@ internal fun CardManagementScreen(
             }
 
             selectedTask == ManagementTask.CHANGE_PIN1 && pin1Warning -> {
-                stringResource(R.string.spent_attempts_notice, "PIN 1", pin1Attempts ?: 0, 5) to BannerTone.WARNING
+                stringResource(
+                    R.string.spent_attempts_notice,
+                    stringResource(R.string.pin1),
+                    pin1Attempts ?: 0,
+                    5,
+                ) to BannerTone.WARNING
             }
 
             selectedTask == ManagementTask.CHANGE_PIN2 && pin2Locked -> {
@@ -289,7 +294,12 @@ internal fun CardManagementScreen(
             }
 
             selectedTask == ManagementTask.CHANGE_PIN2 && pin2Warning -> {
-                stringResource(R.string.spent_attempts_notice, "PIN 2", pin2Attempts ?: 0, 5) to BannerTone.WARNING
+                stringResource(
+                    R.string.spent_attempts_notice,
+                    stringResource(R.string.pin2),
+                    pin2Attempts ?: 0,
+                    5,
+                ) to BannerTone.WARNING
             }
 
             (selectedTask == ManagementTask.RESET_PIN1 || selectedTask == ManagementTask.RESET_PIN2) && pukLow -> {
@@ -333,6 +343,9 @@ internal fun CardManagementScreen(
                 }
             }
 
+    val pin1Name = stringResource(R.string.pin1)
+    val pin2Name = stringResource(R.string.pin2)
+
     fun executeOperation() {
         if (!canExecute || cardManagementService == null) return
         isOperating = true
@@ -343,7 +356,7 @@ internal fun CardManagementScreen(
                 val curBytes = currentPin.toByteArray(Charsets.US_ASCII)
                 val newBytes = newPin.toByteArray(Charsets.US_ASCII)
                 val isPin1 = selectedTask == ManagementTask.CHANGE_PIN1
-                val pinName = if (isPin1) "PIN 1" else "PIN 2"
+                val pinName = if (isPin1) pin1Name else pin2Name
                 if (isPin1) {
                     pinCache?.clear()
                     onPin1Changed?.invoke()
@@ -391,7 +404,7 @@ internal fun CardManagementScreen(
                 val pukBytes = puk.toByteArray(Charsets.US_ASCII)
                 val newBytes = newPin.toByteArray(Charsets.US_ASCII)
                 val isPin1 = selectedTask == ManagementTask.RESET_PIN1
-                val pinName = if (isPin1) "PIN 1" else "PIN 2"
+                val pinName = if (isPin1) pin1Name else pin2Name
                 if (isPin1) {
                     pinCache?.clear()
                     onPin1Changed?.invoke()
@@ -636,7 +649,7 @@ internal fun CardManagementScreen(
             when (selectedTask) {
                 ManagementTask.CHANGE_PIN1, ManagementTask.CHANGE_PIN2 -> {
                     val isPin1 = selectedTask == ManagementTask.CHANGE_PIN1
-                    val pinName = if (isPin1) "PIN 1" else "PIN 2"
+                    val pinName = if (isPin1) pin1Name else pin2Name
                     val attempts = if (isPin1) pin1Attempts else pin2Attempts
                     val title = stringResource(R.string.confirm_change_title, pinName)
                     val msg =
@@ -650,7 +663,7 @@ internal fun CardManagementScreen(
 
                 ManagementTask.RESET_PIN1, ManagementTask.RESET_PIN2 -> {
                     val isPin1 = selectedTask == ManagementTask.RESET_PIN1
-                    val pinName = if (isPin1) "PIN 1" else "PIN 2"
+                    val pinName = if (isPin1) pin1Name else pin2Name
                     val attempts = pukAttempts
                     val title = stringResource(R.string.confirm_reset_title, pinName)
                     val msg =
@@ -668,9 +681,15 @@ internal fun CardManagementScreen(
                         if (needsPin1 && needsPin2) {
                             stringResource(R.string.confirm_activation_dialog_msg_both)
                         } else if (needsPin1) {
-                            stringResource(R.string.confirm_activation_dialog_msg_single, "PIN 1")
+                            stringResource(
+                                R.string.confirm_activation_dialog_msg_single,
+                                stringResource(R.string.pin1),
+                            )
                         } else {
-                            stringResource(R.string.confirm_activation_dialog_msg_single, "PIN 2")
+                            stringResource(
+                                R.string.confirm_activation_dialog_msg_single,
+                                stringResource(R.string.pin2),
+                            )
                         }
                     title to msg
                 }
@@ -925,9 +944,9 @@ private fun ChangePinForm(
                 }
             val buttonLabel =
                 if (isPin2) {
-                    stringResource(R.string.change_signature_pin2)
+                    stringResource(R.string.change_pin2)
                 } else {
-                    stringResource(R.string.change_basic_pin1)
+                    stringResource(R.string.change_pin1)
                 }
             val pinRange = if (isPin2) pinLengths.pin2 else pinLengths.pin1
             val lengthHint = digitRangeHint(pinRange)
@@ -1137,7 +1156,7 @@ private fun CardActivationForm(
                 newPin1ConfirmState.text.isNotEmpty() &&
                     newPin1ConfirmState.text.toString() != newPin1State.text.toString()
 
-            Section(stringResource(R.string.pin1_section_title)) {
+            Section(stringResource(R.string.pin1)) {
                 NavigationGroup {
                     Column(
                         modifier =
@@ -1180,7 +1199,7 @@ private fun CardActivationForm(
                 newPin2ConfirmState.text.isNotEmpty() &&
                     newPin2ConfirmState.text.toString() != newPin2State.text.toString()
 
-            Section(stringResource(R.string.pin2_section_title)) {
+            Section(stringResource(R.string.pin2)) {
                 NavigationGroup {
                     Column(
                         modifier =
