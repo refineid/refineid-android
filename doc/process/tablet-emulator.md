@@ -112,7 +112,7 @@ including the custodian phone; it did not honour `ANDROID_SERIAL` here.
 Run instrumented tests on the tablet alone with adb:
 
 ```bash
-./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+Scripts/gradle.sh :app:assembleDebug :app:assembleDebugAndroidTest
 adb -s emulator-5554 install -r -t app/build/outputs/apk/debug/app-debug.apk
 adb -s emulator-5554 install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb -s emulator-5554 shell am instrument -w -e class <test class> \
