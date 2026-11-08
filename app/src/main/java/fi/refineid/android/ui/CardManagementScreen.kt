@@ -223,7 +223,7 @@ internal fun CardManagementScreen(
 
     // A PUK the card reports blocked is not refused here: the card
     // answers for itself and spends nothing, and whether the holder's
-    // code is a PUK or an activation code is never known, so the
+    // code is a PUK or an activation PIN is never known, so the
     // recovery stays open. Only the last two PUK tries are refused.
     val isRefusedByPolicy =
         when (selectedTask) {
