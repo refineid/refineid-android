@@ -221,7 +221,12 @@ internal class RappPairingSearch(
             if (attempt == Attempt.NotOpened) anyNotOpened = true else anyOpened = true
         }
 
-        fun noneTried(): Outcome = if (anyNotOpened && !anyOpened) Outcome.Unreachable else Outcome.NoneFound
+        fun noneTried(): Outcome =
+            when {
+                anyOpened -> Outcome.NoneFound
+                anyNotOpened -> Outcome.Unreachable
+                else -> Outcome.NoneFound
+            }
     }
 
     /**

@@ -397,6 +397,40 @@ class RappPairingSearchLoopbackTest {
         }
 
     @Test
+    fun aStaleRecordBesideAListenerWithoutOfferIsNoPhoneInPairingMode() =
+        runBlocking {
+            val code = RappPairingCode.generate()
+            val staleListener = ServerSocket(0)
+            val stalePort = staleListener.localPort
+            val server = ServerSocket(0)
+            staleListener.close()
+            try {
+                val peerDone =
+                    scope.launch {
+                        Peer(server.accept()).use { peer -> peer.readFrame() }
+                    }
+                val instances =
+                    listOf(
+                        Triple(INSTANCE, LOOPBACK_HOST, stalePort),
+                        Triple(INSTANCE, LOOPBACK_HOST, server.localPort),
+                    )
+                val outcome =
+                    withTimeout(SEARCH_TIMEOUT_MS) {
+                        search(
+                            server.localPort,
+                            RappMemoryVault(),
+                            instances,
+                            initialDiscoveryMs = EMPTY_SEARCH_GRACE_MS,
+                        ).search(code)
+                    }
+                assertEquals(RappPairingSearch.Outcome.NoneFound, outcome)
+                withTimeout(SEARCH_TIMEOUT_MS) { peerDone.join() }
+            } finally {
+                server.close()
+            }
+        }
+
+    @Test
     fun aPhoneReannouncedAfterRefusingTheCodeGetsNoSecondGuess() =
         runBlocking {
             val code = RappPairingCode.generate()
