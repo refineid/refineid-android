@@ -135,4 +135,9 @@ Myöntäjältä saatua koodia voi silti yrittää: kortti päättää eikä kulu
         <item quantity="one">%1$s pyytää %2$d allekirjoitusta.</item>
         <item quantity="other">%1$s pyytää %2$d allekirjoitusta.</item>
     </plurals>
+    <string name="browser_go">Siirry</string>
+    <string name="browser_more">Lisää</string>
+    <string name="browser_copy_link">Kopioi linkki</string>
+    <string name="browser_share">Jaa</string>
+    <string name="browser_open_external">Avaa selaimessa</string>
 </resources>

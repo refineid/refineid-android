@@ -14,6 +14,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,15 +23,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material3.Button
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,7 +44,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -146,8 +141,8 @@ private data class NfcCardAnswer(
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-// General sites need JavaScript; this browser exists only in debug
-// builds and every signature stays behind the holder's PIN.
+// General sites need JavaScript; every signature stays behind the
+// holder's PIN.
 @SuppressLint("SetJavaScriptEnabled")
 private fun BrowserDialog(
     cardService: AuthenticationCardService,
@@ -161,6 +156,7 @@ private fun BrowserDialog(
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
+    val page = remember { BrowserPageState() }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val isActive = remember { AtomicBoolean(true) }
     var pinRequest by remember { mutableStateOf<BrowserPinRequest?>(null) }
@@ -175,15 +171,9 @@ private fun BrowserDialog(
             onClose()
         }
     }
-    // Once the holder unlocked and the session opened, resolve the held
-    // certificate request; the handshake then proceeds with the card.
-    LaunchedEffect(nfcStatus, unlockRequest) {
-        if (unlockRequest != null && nfcStatus == NfcReaderStatus.CARD_READY) {
-            val held = unlockRequest
-            unlockRequest = null
-            unlockWaiting = false
-            held?.retry?.invoke()
-        }
+    RetryWhenCardReady(nfcStatus, unlockRequest) {
+        unlockRequest = null
+        unlockWaiting = false
     }
     val coordinator =
         remember(cardService) {
@@ -194,11 +184,7 @@ private fun BrowserDialog(
                     if (Looper.myLooper() == Looper.getMainLooper()) {
                         action()
                     } else {
-                        mainHandler.post {
-                            if (isActive.get()) {
-                                action()
-                            }
-                        }
+                        mainHandler.post { if (isActive.get()) action() }
                     }
                 },
                 onPromptChanged = { request -> pinRequest = request },
@@ -228,6 +214,7 @@ private fun BrowserDialog(
                     cardService = cardService,
                     issuerCandidates = issuerCandidates,
                     signatureOperation = coordinator,
+                    onPageChanged = page::pageChanged,
                     onCardNeeded =
                         if (nfcStatus == null) {
                             null
@@ -262,6 +249,7 @@ private fun BrowserDialog(
         properties =
             DialogProperties(
                 dismissOnClickOutside = false,
+                dismissOnBackPress = false,
                 usePlatformDefaultWidth = false,
                 decorFitsSystemWindows = false,
                 securePolicy = SecureFlagPolicy.SecureOn,
@@ -269,7 +257,9 @@ private fun BrowserDialog(
     ) {
         BrowserDialogContent(
             webViewClient = webViewClient,
+            page = page,
             signatureStatus = signatureStatus,
+            onClose = onClose,
         )
     }
     pinRequest?.let { request ->
@@ -294,11 +284,33 @@ private fun BrowserDialog(
     }
 }
 
+/**
+ * Once the holder unlocked and the session opened, resolves the held
+ * certificate [request] after [onResolved] clears it; the handshake then
+ * proceeds with the card.
+ */
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Composable
+private fun RetryWhenCardReady(
+    nfcStatus: NfcReaderStatus?,
+    request: BrowserCardUnlockRequest?,
+    onResolved: () -> Unit,
+) {
+    LaunchedEffect(nfcStatus, request) {
+        if (request != null && nfcStatus == NfcReaderStatus.CARD_READY) {
+            onResolved()
+            request.retry()
+        }
+    }
+}
+
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 private fun BrowserDialogContent(
     webViewClient: WebViewClient?,
+    page: BrowserPageState,
     signatureStatus: BrowserSignatureStatus,
+    onClose: () -> Unit,
 ) {
     Surface(
         modifier =
@@ -311,30 +323,34 @@ private fun BrowserDialogContent(
         // over its bottom edge, the way the reference platform's
         // browser keeps its bar over the content.
         Box(modifier = Modifier.fillMaxSize()) {
-            var urlText by remember { mutableStateOf("") }
+            val chooseFiles = rememberBrowserFileChooser()
+            val chromeClient = remember(page, chooseFiles) { BrowserChromeClient(page, chooseFiles) }
             var liveWebView by remember { mutableStateOf<WebView?>(null) }
-            val navigate = {
-                val destination = normalizeHttpsUrl(urlText)
+            val navigate: (String) -> Unit = { typed ->
+                val destination = normalizeHttpsUrl(typed)
                 if (destination != null) {
-                    urlText = destination
                     liveWebView?.loadUrl(destination)
                 } else {
                     AppTrace.browserNavigationBlocked()
                 }
-                Unit
+            }
+            // The dialog leaves back to this handler: pages first, then close.
+            BackHandler {
+                val view = liveWebView
+                if (view != null && view.canGoBack()) view.goBack() else onClose()
             }
 
             BrowserWebView(
                 client = webViewClient,
+                chromeClient = chromeClient,
                 onWebViewCreated = { liveWebView = it },
                 onWebViewReleased = { liveWebView = null },
                 modifier = Modifier.fillMaxSize(),
             )
 
             BrowserControlsBar(
-                urlText = urlText,
+                page = page,
                 signatureStatus = signatureStatus,
-                onUrlChange = { urlText = it },
                 onNavigate = navigate,
                 onBack = { liveWebView?.takeIf { it.canGoBack() }?.goBack() },
                 onForward = { liveWebView?.takeIf { it.canGoForward() }?.goForward() },
@@ -349,6 +365,7 @@ private fun BrowserDialogContent(
 @Composable
 private fun BrowserWebView(
     client: WebViewClient?,
+    chromeClient: WebChromeClient,
     onWebViewCreated: (WebView) -> Unit,
     onWebViewReleased: () -> Unit,
     modifier: Modifier = Modifier,
@@ -369,7 +386,7 @@ private fun BrowserWebView(
                 WebView(viewContext).apply {
                     configureFullFeaturedBrowser()
                     this.webViewClient = client
-                    webChromeClient = WebChromeClient()
+                    webChromeClient = chromeClient
                     onWebViewCreated(this)
                     WebView.clearClientCertPreferences {}
                 }
@@ -385,93 +402,6 @@ private fun BrowserWebView(
                 webView.destroy()
             },
         )
-    }
-}
-
-@Suppress("FunctionName", "ktlint:standard:function-naming")
-@Composable
-private fun BrowserControlsBar(
-    urlText: String,
-    signatureStatus: BrowserSignatureStatus,
-    onUrlChange: (String) -> Unit,
-    onNavigate: () -> Unit,
-    onBack: () -> Unit,
-    onForward: () -> Unit,
-    onReload: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier =
-            modifier
-                .fillMaxWidth()
-                .safeDrawingPadding()
-                .padding(
-                    horizontal = FLOATING_BAR_HORIZONTAL_PADDING,
-                    vertical = FLOATING_BAR_BOTTOM_PADDING,
-                ),
-        verticalArrangement = Arrangement.spacedBy(BROWSER_ITEM_SPACING),
-    ) {
-        BrowserStatus(signatureStatus)
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(FLOATING_BAR_CORNER_RADIUS),
-            color =
-                MaterialTheme.colorScheme.surface.copy(
-                    alpha = FLOATING_BAR_ALPHA,
-                ),
-            shadowElevation = FLOATING_BAR_ELEVATION,
-        ) {
-            Row(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(FLOATING_BAR_INNER_PADDING),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.testTag(UiAutomationIds.BROWSER_BACK_ACTION),
-                ) {
-                    Text(stringResource(R.string.browser_back))
-                }
-                IconButton(
-                    onClick = onForward,
-                    modifier = Modifier.testTag(UiAutomationIds.BROWSER_FORWARD_ACTION),
-                ) {
-                    Text(stringResource(R.string.browser_forward))
-                }
-                IconButton(
-                    onClick = onReload,
-                    modifier = Modifier.testTag(UiAutomationIds.BROWSER_RELOAD_ACTION),
-                ) {
-                    Text(stringResource(R.string.browser_reload))
-                }
-                OutlinedTextField(
-                    value = urlText,
-                    onValueChange = onUrlChange,
-                    modifier =
-                        Modifier
-                            .weight(BROWSER_VIEW_WEIGHT)
-                            .testTag(UiAutomationIds.BROWSER_URL_FIELD),
-                    singleLine = true,
-                    trailingIcon = {
-                        IconButton(
-                            onClick = onNavigate,
-                            modifier = Modifier.testTag("BrowserGoAction"),
-                        ) {
-                            Text("Go")
-                        }
-                    },
-                    keyboardOptions =
-                        KeyboardOptions(
-                            autoCorrectEnabled = false,
-                            keyboardType = KeyboardType.Uri,
-                            imeAction = ImeAction.Go,
-                        ),
-                    keyboardActions = KeyboardActions(onGo = { onNavigate() }),
-                )
-            }
-        }
     }
 }
 
@@ -675,7 +605,7 @@ private fun BrowserPinDialog(request: BrowserPinRequest) {
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-private fun BrowserStatus(status: BrowserSignatureStatus) {
+internal fun BrowserStatus(status: BrowserSignatureStatus) {
     // The page is its own success feedback; only surface a failure that
     // explains why a login did not happen.
     val text =
@@ -716,10 +646,28 @@ private class RefineIdWebViewClient(
     private val cardService: AuthenticationCardService,
     private val issuerCandidates: List<X509Certificate>,
     private val signatureOperation: BrowserPinCoordinator,
+    private val onPageChanged: (WebView, String) -> Unit,
     private val onCardNeeded: ((BrowserCardUnlockRequest) -> Unit)? = null,
 ) : WebViewClient(),
     AutoCloseable {
     private val isClosed = AtomicBoolean(false)
+
+    // Every page the WebView moves to, redirects and history steps included,
+    // reaches the address bar and the session history.
+    override fun doUpdateVisitedHistory(
+        view: WebView,
+        url: String,
+        isReload: Boolean,
+    ) {
+        if (!isClosed.get()) onPageChanged(view, url)
+    }
+
+    override fun onPageFinished(
+        view: WebView,
+        url: String,
+    ) {
+        if (!isClosed.get()) onPageChanged(view, url)
+    }
 
     override fun shouldOverrideUrlLoading(
         view: WebView,
@@ -892,19 +840,11 @@ private fun normalizeHttpsUrl(input: String): String? {
 
 private const val HTTPS_SCHEME = "https"
 private const val SCHEME_SEPARATOR = "://"
-private val BROWSER_ITEM_SPACING = 12.dp
-private val FLOATING_BAR_HORIZONTAL_PADDING = 12.dp
-private val FLOATING_BAR_BOTTOM_PADDING = 8.dp
-private val FLOATING_BAR_CORNER_RADIUS = 28.dp
-private val FLOATING_BAR_INNER_PADDING = 4.dp
-private val FLOATING_BAR_ELEVATION = 6.dp
-private const val FLOATING_BAR_ALPHA = 0.95f
 private val UNLOCK_DIALOG_PADDING = 24.dp
 private val UNLOCK_DIALOG_SPACING = 14.dp
 private const val UNLOCK_BUTTON_WEIGHT = 1f
 private val PIN_DIALOG_PADDING = 24.dp
 private val PIN_DIALOG_ITEM_SPACING = 16.dp
-private const val BROWSER_VIEW_WEIGHT = 1F
 private const val NO_ISSUER_CERTIFICATES = 0
 private const val NO_KEY_TYPES = 0
 private const val NO_ISSUER_HINTS = 0

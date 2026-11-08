@@ -135,4 +135,9 @@ En kod från utfärdaren kan ändå prövas: kortet avgör och förbrukar inget.
         <item quantity="one">%1$s begär %2$d underskrift.</item>
         <item quantity="other">%1$s begär %2$d underskrifter.</item>
     </plurals>
+    <string name="browser_go">Gå</string>
+    <string name="browser_more">Mer</string>
+    <string name="browser_copy_link">Kopiera länk</string>
+    <string name="browser_share">Dela</string>
+    <string name="browser_open_external">Öppna i webbläsare</string>
 </resources>
