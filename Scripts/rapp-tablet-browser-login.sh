@@ -22,7 +22,7 @@ source Scripts/adb-ui.sh
 readonly default_url="https://certauth.cryptomix.com/json/"
 readonly login_timeout_seconds=120
 readonly trace_tag=" RefineID: "
-readonly tablet_pin_tags="browserPin1Field browserUnlockPin1Field browserUnlockCanField"
+readonly tablet_pin_tags=(browserPin1Field browserUnlockPin1Field browserUnlockCanField)
 readonly phone_pin_tag="rappPinField"
 
 usage() {
@@ -65,7 +65,10 @@ if ! ui_wait "${tablet}" browserAction; then
   exit 1
 fi
 ui_tap "${tablet}" browserAction
-ui_wait "${tablet}" browserUrlField
+if ! ui_wait "${tablet}" browserUrlField; then
+  echo "tablet: the browser did not open" >&2
+  exit 1
+fi
 ui_tap "${tablet}" browserUrlField
 sleep "${ui_poll_seconds}"
 "${ui_adb}" -s "${tablet}" shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A
@@ -77,9 +80,10 @@ echo "tablet: waiting for the client-certificate handshake"
 deadline=$((SECONDS + login_timeout_seconds))
 asked_for_pin=""
 outcome=""
+traces=""
 while ((SECONDS < deadline)); do
   tablet_tags="$(ui_tags "${tablet}")"
-  for tag in ${tablet_pin_tags}; do
+  for tag in "${tablet_pin_tags[@]}"; do
     if grep -qx "${tag}" <<< "${tablet_tags}"; then
       echo "tablet: shows ${tag}; a remote login must never ask for a secret on the requester" >&2
       exit 1
@@ -106,7 +110,7 @@ while ((SECONDS < deadline)); do
 done
 
 echo "traces:"
-browser_traces | sed 's/^/  /'
+awk '{ print "  " $0 }' <<< "${traces}"
 case "${outcome}" in
   signed)
     echo "logged in"

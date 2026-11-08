@@ -46,7 +46,7 @@ Scripts/rapp-tablet-browser-login.sh [--url <https url>]
 ```
 
 Ends with `logged in` when the card on the phone signed the tablet's TLS
-handshake. If it prints "enter PIN 1 on the phone", ask the owner to do
+handshake. If it prints "phone: enter PIN 1 on the phone", ask the owner to do
 so; never type a PIN. Ask the owner to keep hands off the emulator while
 scripts run.
 
