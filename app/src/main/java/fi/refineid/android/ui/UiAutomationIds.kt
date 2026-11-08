@@ -83,6 +83,9 @@ internal object UiAutomationIds {
     const val REQUESTER_PAIRING_SCREEN = "requesterPairingScreen"
     const val REQUESTER_REMOTE_USE_SWITCH = "requesterRemoteUseSwitch"
     const val PAIRING_CODE_FIELD = "pairingCodeField"
+    const val PAIRING_CODE_BOXES = "pairingCodeBoxes"
+    const val PAIRING_FAILURE = "pairingFailure"
+    const val PAIRING_FAILURE_REASON = "pairingFailureReason"
     const val ALLOW_NOTIFICATIONS_ROW = "allowNotificationsRow"
 
     fun timestampAddressField(index: Int): String = TIMESTAMP_ADDRESS_FIELD_PREFIX + index

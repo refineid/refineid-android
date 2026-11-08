@@ -25,3 +25,6 @@ serial hangs on "waiting for device" the moment a reader is plugged in.
   reinstall from main with `Scripts/install-device.sh` when live testing
   ends. The live NFC signing test picks a PDF whose name contains
   `refineid-test` from Downloads.
+
+A tablet emulator bridged onto the local network stands in for a RAPP
+requester beside the phone; see [tablet-emulator.md](tablet-emulator.md).

@@ -70,6 +70,7 @@ internal fun PairingCodeField(
                 modifier =
                     Modifier
                         .fillMaxWidth()
+                        .testTag(UiAutomationIds.PAIRING_CODE_BOXES)
                         .clearAndSetSemantics { },
             ) {
                 repeat(RappPairingCode.CODE_LENGTH) { index ->
