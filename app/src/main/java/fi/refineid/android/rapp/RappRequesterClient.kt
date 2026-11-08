@@ -26,7 +26,6 @@ import uniffi.refineid_rapp.RappSessionBridge
 import uniffi.refineid_rapp.RappSignatureAlgorithm
 import uniffi.refineid_rapp.rappQuitWithdrawalBoundMs
 import uniffi.refineid_rapp.rappRandomByteCounts
-import uniffi.refineid_rapp.rappRevocationAttemptBoundMs
 import uniffi.refineid_rapp.rappStreamProfileName
 import java.io.IOException
 import java.security.SecureRandom
@@ -43,7 +42,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * One client dials once: [open] browses and runs the handshake, [close]
  * ends the session, and [deliverRevocationNotice] delivers a forgotten
- * pairing's close instead of a session. The [Listener] hears the card's
+ * pairing's close instead of a session, once per appearance of its
+ * custodian (section 4.6 item 6). The [Listener] hears the card's
  * reports, the custodian's name, and how the session ended (section 4.5
  * item 6).
  */
@@ -89,9 +89,6 @@ internal class RappRequesterClient(
         const val OPERATION_LIFETIME_MS = 120_000UL
         const val CERTIFICATE_READ_TIMEOUT_MS = 15_000L
         const val AUTHENTICATION_TIMEOUT_MS = 60_000L
-
-        /** How long a forgotten pairing's one attempt to deliver its close lasts (section 4.6 item 6). */
-        val REVOCATION_ATTEMPT_MS = rappRevocationAttemptBoundMs().toLong()
 
         /** How long this endpoint waits for the echo of its own close in a session (section 7.1 item 7). */
         val CLOSE_ECHO_WAIT_MS = rappQuitWithdrawalBoundMs().toLong()
@@ -213,6 +210,16 @@ internal class RappRequesterClient(
     /** Whether the session is established and operations may run. */
     val isOpen: Boolean
         get() = phase == Phase.ESTABLISHED && operation != null
+
+    /**
+     * Whether the echo of this device's own close arrived (section 7.1
+     * item 7): a `session.close` that crossed the local one counts, since
+     * it acknowledges it. The driver reads it after [close] to tell a
+     * delivered revoking close from one the backlog must keep.
+     */
+    @Volatile
+    var closeEchoReceived = false
+        private set
 
     /** Whether the record may open a session: active, never forgotten. */
     private fun isDialable(): Boolean =
@@ -370,14 +377,16 @@ internal class RappRequesterClient(
     }
 
     /**
-     * Dials once, within the revocation attempt's bound, to deliver a
-     * forgotten pairing's close and waits for the custodian's echo (section
-     * 4.6 item 6, section 7.1 item 7), then destroys the record, echo or
-     * not. True when the echo arrived. Nothing is sent or destroyed for a
-     * record that is not forgotten.
+     * Dials once to deliver a forgotten pairing's close as the session's
+     * first message and waits for the custodian's echo (section 4.6 item
+     * 6, section 7.1 item 7), within [timeoutMs]. The record is destroyed
+     * only on the echo; without it the pairing stays in the revocation
+     * backlog until its custodian next appears or its idle expiry passes
+     * (section 4.6 item 3). True when the echo arrived. Nothing is sent
+     * or destroyed for a record that is not forgotten.
      */
     suspend fun deliverRevocationNotice(
-        timeoutMs: Long = REVOCATION_ATTEMPT_MS,
+        timeoutMs: Long,
         directEndpoint: RappDialCandidates.Endpoint? = null,
     ): Boolean {
         val pairId =
@@ -391,7 +400,7 @@ internal class RappRequesterClient(
             withTimeoutOrNull(timeoutMs) {
                 RevocationAttempt(directEndpoint).run()
             } == true
-        RappPairRevocation.revoke(pairId, pairRecord, vault)
+        if (echoed) RappPairRevocation.revoke(pairId, pairRecord, vault)
         return echoed
     }
 
@@ -613,6 +622,7 @@ internal class RappRequesterClient(
             is RappBridgeOutcome.CloseAcknowledged -> {
                 // A crossing close is acted on as the reason it carries
                 // says; a plain echo completes the local close.
+                closeEchoReceived = true
                 if (outcome.end != null) reportEnd(outcome.end, crossing = true)
                 liveOperation?.result?.complete(null)
                 closeResult?.complete(outcome.end)
@@ -647,13 +657,14 @@ internal class RappRequesterClient(
 
             is RappBridgeOutcome.Closed -> {
                 liveOperation?.result?.complete(null)
+                // A close that crossed the local one arrives as its echo,
+                // whatever its reason (section 7.1 item 7).
+                if (closing.get()) closeEchoReceived = true
                 if (phase == Phase.ESTABLISHED) {
                     reportEnd(outcome.end ?: RappRequesterSessionEnd.LOSS)
                 } else {
                     failOpen(outcome.end)
                 }
-                // A close that crossed the local one arrives as its echo,
-                // never here; the local close's delivery stays unknown.
                 closeResult?.complete(null)
                 tearDown()
             }
@@ -824,7 +835,7 @@ internal class RappRequesterClient(
                         check(opened.handshakeComplete())
                         opened.enterAuthentication()
                         handshakeDone = true
-                        checkNotNull(browser).send(opened.deliverRevocationNotice())
+                        checkNotNull(browser).send(opened.deliverRevocationNotice(RappClock.wallMs()))
                     } else {
                         val outcome = RappBridgeOutcome.from(opened.receiveCloseEcho(event.data, monotonicMs()))
                         if (outcome is RappBridgeOutcome.CloseAcknowledged) {

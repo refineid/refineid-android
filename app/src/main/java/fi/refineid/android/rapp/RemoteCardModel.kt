@@ -38,8 +38,10 @@ import uniffi.refineid_rapp.RappSignatureAlgorithm
  * custodian ([RappViewOfCustodian]) dials on appearance, on a consumer's
  * ask, or within the redial window after a loss, holding one session.
  * Without one, the pairing code entry is offered; pairing another phone
- * replaces the pairing. Turning remote use off forgets the pairing with
- * one bounded revocation attempt.
+ * replaces the pairing. Turning remote use off forgets the pairing into
+ * the revocation backlog (section 4.6 item 6): a forgotten pairing dials
+ * only when its custodian appears, sends the `pairing_revoked` close as
+ * the session's first message, and is destroyed on the echo.
  *
  * The custodian is presented only through its card: the offered identity
  * while a session confirms it, nothing otherwise, never a reason. The one
@@ -146,11 +148,20 @@ internal class RemoteCardModel(
     /** The card status the session last reported, by fingerprint when present. */
     private var lastStatusFingerprint: RappCertificateFingerprint? = null
 
-    /** The forgotten pairings with a revocation attempt under way, by catalogued id. */
+    /** The forgotten pairings with a revocation dial under way, by catalogued id. */
     private val attemptingRevocation = HashSet<String>()
 
     /** The pairing whose revoking close the open session carries, if any, by catalogued id. */
     private var inSessionRevocation: String? = null
+
+    /** Discovery watching for the custodians of forgotten pairings, while any wait. */
+    private var backlogDiscovery: AutoCloseable? = null
+
+    /** Appearances seen per forgotten pairing, by catalogued id. */
+    private val backlogSightings = HashMap<String, RappRequesterSightings>()
+
+    /** The instance each forgotten pairing's discovery is associated with, by catalogued id. */
+    private val backlogAssociated = HashMap<String, String?>()
 
     init {
         scope.launch {
@@ -164,8 +175,8 @@ internal class RemoteCardModel(
 
     /**
      * The holder turned remote use on or off. The switch moves only here,
-     * keeps its position, and off forgets the held pairing with one bounded
-     * revocation attempt (section 4.6 item 6).
+     * keeps its position, and off forgets the held pairing into the
+     * revocation backlog (section 4.6 item 6).
      */
     fun setRemoteUseEnabled(enabled: Boolean) {
         settings.isRequesterRemoteUseEnabled = enabled
@@ -182,12 +193,15 @@ internal class RemoteCardModel(
 
     /**
      * Reconciles with the switch and the pairing: a launch or a return to
-     * the foreground restores discovery, and the offer is rechecked. A
-     * search under way is left alone.
+     * the foreground restores discovery, the revocation backlog is swept
+     * and watched, and the offer is rechecked. A search under way is left
+     * alone.
      */
     fun refresh() {
         launchDriver {
             updateOfferedFlows()
+            sweepBacklog()
+            ensureBacklogDiscovery()
             if (searchJob?.isActive == true) return@launchDriver
             if (!_remoteUseEnabled.value || view != null) return@launchDriver
             val peer = newestActiveRequesterPeer()
@@ -322,7 +336,7 @@ internal class RemoteCardModel(
         lastPeerName = null
         forgetHeldPairings()
         stopDiscovery(RappCloseReason.PAIRING_REVOKED)
-        runRevocationAttempts()
+        ensureBacklogDiscovery()
     }
 
     private fun cancelSearchJob() {
@@ -580,21 +594,35 @@ internal class RemoteCardModel(
         sessionClient = null
         pairRecord?.let(::recordSessionTime)
         // A revoking close carries the forgotten pairing's goodbye; the
-        // key is destroyed once it is sent, echo or not, and no second
-        // attempt dials for it.
+        // key and the record go only on the custodian's echo, within one
+        // second (section 4.6 item 6). Without the echo the pairing stays
+        // in the revocation backlog for its next appearance.
         val revoking = if (reason == RappCloseReason.PAIRING_REVOKED) heldPeer?.pairIdHex else null
         if (revoking != null) inSessionRevocation = revoking
         scope.launch(Dispatchers.IO) {
+            var echoed = false
             try {
-                if (reason == null) client.shutdown() else client.close(reason)
+                if (reason == null) {
+                    client.shutdown()
+                } else {
+                    client.close(reason)
+                    echoed = client.closeEchoReceived
+                }
             } finally {
                 client.shutdown()
                 if (revoking != null) {
                     withContext(driverContext) {
-                        RappPairId.fromKey(revoking)?.let { pairId ->
-                            RappPairRevocation.revoke(pairId, vault)
+                        if (echoed) {
+                            RappPairId.fromKey(revoking)?.let { pairId ->
+                                RappPairRevocation.revoke(pairId, vault)
+                            }
+                            catalog.removePair(revoking)
+                            backlogSightings.remove(revoking)
+                            backlogAssociated.remove(revoking)
+                        } else if (reason == RappCloseReason.PAIRING_REVOKED) {
+                            catalog.markForgotten(revoking, System.currentTimeMillis())
+                            ensureBacklogDiscovery()
                         }
-                        catalog.removePair(revoking)
                         inSessionRevocation = null
                     }
                 }
@@ -689,13 +717,14 @@ internal class RemoteCardModel(
         heldPeer = null
     }
 
-    /** The holder forgot the held pairings: each keeps its key only for its revocation attempt. */
+    /** The holder forgot the held pairings: each joins the revocation backlog with its key for the close. */
     private fun forgetHeldPairings() {
         identity.withdraw()
         updateOfferedFlows()
         for (peer in catalog.listPairs()) {
             forgetOneRequesterPairing(peer, except = null)
         }
+        ensureBacklogDiscovery()
     }
 
     /**
@@ -719,30 +748,115 @@ internal class RemoteCardModel(
         }
     }
 
-    /** One bounded attempt per forgotten pairing, then each is gone. */
-    private fun runRevocationAttempts() {
-        for (peer in catalog.forgottenPairs()) {
-            startRevocationAttempt(peer)
+    /**
+     * Watches for the custodians of forgotten pairings while any wait in
+     * the revocation backlog (section 4.6 item 6). The backlog runs whether
+     * remote use is on, off or suspended, and is then the only remote
+     * activity; it offers no identity and starts no operation.
+     */
+    private fun ensureBacklogDiscovery() {
+        if (catalog.forgottenPairs().isEmpty()) {
+            backlogDiscovery?.close()
+            backlogDiscovery = null
+            return
+        }
+        if (backlogDiscovery != null) return
+        backlogDiscovery =
+            try {
+                openDiscovery(scope) { event -> launchDriver { handleBacklogDiscovery(event) } }
+            } catch (e: Exception) {
+                trace("backlog discovery failed to start", e)
+                null
+            }
+    }
+
+    /**
+     * One forgotten pairing's appearance: at most one connection per
+     * appearance, never on a timer (section 4.6 item 6). A dial already
+     * under way, or the open session carrying the close, leaves this one
+     * out.
+     */
+    private fun handleBacklogDiscovery(event: RappRequesterDiscovery.Event) {
+        when (event) {
+            is RappRequesterDiscovery.Event.Resolved -> {
+                for (peer in catalog.forgottenPairs()) {
+                    val sighting = classifyBacklogSighting(peer, event) ?: continue
+                    if (sighting is RappSighting.Appeared) {
+                        if (sighting.hintMatched || backlogAssociated[peer.pairIdHex] == null) {
+                            backlogAssociated[peer.pairIdHex] = event.instance
+                        }
+                        startBacklogDial(peer, RappDialCandidates.Endpoint(event.host, event.port))
+                    }
+                }
+            }
+
+            is RappRequesterDiscovery.Event.Lost -> {
+                for (sightings in backlogSightings.values) {
+                    sightings.lost(event.instance)
+                }
+            }
         }
     }
 
-    /** Starts the forgotten pairing's one attempt, unless one runs or the session carries it. */
-    private fun startRevocationAttempt(peer: PairedPeer) {
+    /**
+     * What the resolved service [event] means to forgotten [peer], or null
+     * when it means nothing. A withdrawn record counts only on the
+     * instance the pairing is associated with; anything else without the
+     * pairing's hint is unannounced loss and means nothing here.
+     */
+    private fun classifyBacklogSighting(
+        peer: PairedPeer,
+        event: RappRequesterDiscovery.Event.Resolved,
+    ): RappSighting? {
+        val record = loadForgottenRequesterRecord(peer) ?: return null
+        try {
+            return backlogSightings
+                .getOrPut(peer.pairIdHex) { RappRequesterSightings() }
+                .resolved(
+                    event.instance,
+                    event.attributes,
+                    backlogAssociated[peer.pairIdHex],
+                    record,
+                    System.currentTimeMillis() / MILLIS_PER_SECOND,
+                )
+        } finally {
+            record.close()
+        }
+    }
+
+    /** Dials the forgotten pairing once at [endpoint], destroying it only on the custodian's echo. */
+    private fun startBacklogDial(
+        peer: PairedPeer,
+        endpoint: RappDialCandidates.Endpoint,
+    ) {
         if (peer.pairIdHex == inSessionRevocation || !attemptingRevocation.add(peer.pairIdHex)) return
         val record = loadForgottenRequesterRecord(peer)
         if (record == null) {
             attemptingRevocation.remove(peer.pairIdHex)
+            ensureBacklogDiscovery()
             return
         }
         scope.launch(Dispatchers.IO) {
+            var echoed = false
             try {
-                RappRequesterClient(context, scope, record, vault, sessionListener, localName = localName)
-                    .deliverRevocationNotice()
+                echoed =
+                    RappRequesterClient(context, scope, record, vault, sessionListener, localName = localName)
+                        .deliverRevocationNotice(DIAL_ATTEMPT_MS, directDialEndpoint ?: endpoint)
+            } catch (_: Exception) {
+                echoed = false
             } finally {
                 record.close()
                 withContext(driverContext) {
-                    catalog.removePair(peer.pairIdHex)
                     attemptingRevocation.remove(peer.pairIdHex)
+                    if (echoed) {
+                        RappPairId.fromKey(peer.pairIdHex)?.let { pairId ->
+                            RappPairRevocation.revoke(pairId, vault)
+                        }
+                        catalog.removePair(peer.pairIdHex)
+                        backlogSightings.remove(peer.pairIdHex)
+                        backlogAssociated.remove(peer.pairIdHex)
+                    }
+                    ensureBacklogDiscovery()
                 }
             }
         }
@@ -806,7 +920,6 @@ internal class RemoteCardModel(
                     )
                     outcome.record.close()
                     forgetPreviousPairings(pairing.id)
-                    runRevocationAttempts()
                     _phoneThatForgot.value = null
                     _searchPhase.value = SearchPhase.Entry
                     newestActiveRequesterPeer()?.let(::startDiscovery)
@@ -824,16 +937,45 @@ internal class RemoteCardModel(
         }
     }
 
-    /** A stored pairing replaces the ones held: each is forgotten with its own attempt. */
+    /** A stored pairing replaces the ones held: each forgotten one joins the revocation backlog. */
     private fun forgetPreviousPairings(except: RappPairId) {
         identity.withdraw()
         updateOfferedFlows()
         for (peer in catalog.listPairs()) {
             forgetOneRequesterPairing(peer, except)
         }
+        ensureBacklogDiscovery()
+    }
+
+    /**
+     * Destroys the forgotten pairings whose idle expiry passed without
+     * their custodian echoing the close: 30 days after their latest
+     * established session (section 4.6 item 3). Nothing is sent.
+     */
+    private fun sweepBacklog() {
+        val nowMs = System.currentTimeMillis().toULong()
+        for (peer in catalog.forgottenPairs()) {
+            val pairId = RappPairId.fromKey(peer.pairIdHex) ?: continue
+            val expired =
+                try {
+                    RappPairRecord.loadFromVault(pairId.toWire(), vault).use { record ->
+                        record.revocationNoticeExpired(nowMs)
+                    }
+                } catch (_: Exception) {
+                    false
+                }
+            if (expired) {
+                RappPairRevocation.revoke(pairId, vault)
+                catalog.removePair(peer.pairIdHex)
+                backlogSightings.remove(peer.pairIdHex)
+                backlogAssociated.remove(peer.pairIdHex)
+            }
+        }
+        ensureBacklogDiscovery()
     }
 
     private fun sweepExpiry() {
+        sweepBacklog()
         val peer = newestActiveRequesterPeer() ?: return
         val pairId = RappPairId.fromKey(peer.pairIdHex) ?: return
         val session =
