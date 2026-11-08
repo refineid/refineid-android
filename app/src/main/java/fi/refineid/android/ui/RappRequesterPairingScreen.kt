@@ -123,6 +123,7 @@ private fun searchFailureReason(outcome: RappPairingSearch.Outcome): String =
     when (outcome) {
         RappPairingSearch.Outcome.NotAccepted -> stringResource(R.string.pairing_code_not_accepted)
         RappPairingSearch.Outcome.NoneFound -> stringResource(R.string.no_phone_in_pairing_mode)
+        RappPairingSearch.Outcome.Unreachable -> stringResource(R.string.phone_unreachable)
         RappPairingSearch.Outcome.CeremonyEnded -> stringResource(R.string.pairing_ended_incomplete)
         RappPairingSearch.Outcome.LocalNetworkClosed -> LOCAL_NETWORK_CLOSED_REASON
         is RappPairingSearch.Outcome.Paired -> ""

@@ -52,6 +52,7 @@
     <string name="pairing_code">Kopplingskod</string>
     <string name="pairing_code_not_accepted">Koden godtogs inte.</string>
     <string name="no_phone_in_pairing_mode">Ingen telefon i parkopplingsläge hittades.</string>
+    <string name="phone_unreachable">Det gick inte att ansluta till telefonen. Kontrollera att telefonen och den här enheten är anslutna till samma nätverk.</string>
     <string name="pairing_ended_incomplete">Parkopplingen avslutades innan den var klar.</string>
     <string name="phone_forgot_computer">%1$s glömde den här datorn.</string>
     <string name="hold_card_against_back">Håll ID-kortet mot baksidan.</string>
