@@ -16,9 +16,8 @@ Scripts/start-tablet-emulator.sh
 ```
 
 Runs the emulator under `sudo`, bridged onto the Mac's network. It ends
-with "wlan0 is on the host's local subnet"; anything else is a failure
-to fix before going on. Start it as a background command and wait for it
-to exit; do not poll.
+with "wlan0 is on the host's local network"; anything else is a failure
+to fix before going on. Stop it with `Scripts/stop-tablet-emulator.sh`.
 
 ## 2. Install builds
 
@@ -36,8 +35,9 @@ to exit; do not poll.
 Scripts/rapp-tablet-pair.sh
 ```
 
-Needs a primed card on the phone. Prints `paired` or the tablet's
-failure reason.
+Needs a primed card on the phone. The last line is `paired`, or it
+exits non-zero with the tablet's failure reason. Never run it under
+`bash -x`; xtrace would print the pairing code.
 
 ## 4. Drive and check
 
@@ -47,9 +47,10 @@ failure reason.
   node text.
 - Add a missing test tag to the app rather than tapping coordinates or
   localised text.
-- When a flow breaks, look at the tablet with
-  `adb -s emulator-5554 shell screencap -p /sdcard/s.png` and `adb pull`;
-  the tablet holds no secrets. Do not capture the phone while a CAN, PIN,
+- When a flow breaks, look at the tablet:
+  `adb -s emulator-5554 shell screencap -p /sdcard/s.png` then
+  `adb -s emulator-5554 pull /sdcard/s.png <local path>`; the tablet
+  holds no secrets. Do not capture the phone while a CAN, PIN,
   pairing code or holder name can be on screen.
 - Artemis: `ARTEMIS_HOME=<checkout> Scripts/test-artemis.sh custom "<goal>" --serial emulator-5554`.
   Tablet only.

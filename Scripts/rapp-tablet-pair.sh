@@ -10,7 +10,8 @@
 # The phone must be reached over Wi-Fi debugging and hold a primed card; the
 # tablet must run from Scripts/start-tablet-emulator.sh. The pairing code is
 # read from the phone's screen into a variable and typed on the tablet; it is
-# never printed. See doc/process/tablet-emulator.md.
+# never printed. Progress goes to stdout; the last line is "paired" on
+# success. See doc/process/tablet-emulator.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=Scripts/adb-ui.sh
@@ -18,41 +19,34 @@ source Scripts/adb-ui.sh
 
 readonly pairing_timeout_seconds=60
 readonly code_length=6
-# The tablet runs in English; these are the app's strings.xml values.
-readonly pairing_code_label="Pairing code"
+
+usage() {
+  echo "usage: $0 [--phone <serial>] [--tablet <serial>]" >&2
+  exit 2
+}
 
 phone=""
 tablet=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --phone)
-      phone="$2"
-      shift 2
-      ;;
-    --tablet)
-      tablet="$2"
+    --phone | --tablet)
+      [[ $# -ge 2 && -n "$2" ]] || usage
+      if [[ "$1" == "--phone" ]]; then phone="$2"; else tablet="$2"; fi
       shift 2
       ;;
     *)
-      echo "unknown argument: $1" >&2
-      exit 2
+      usage
       ;;
   esac
 done
 phone="${phone:-$(ui_wifi_phone)}"
 tablet="${tablet:-$(ui_emulator)}"
-if [[ -z "${phone}" || -z "${tablet}" ]]; then
-  echo "need a phone on Wi-Fi debugging and a running tablet emulator" >&2
-  exit 1
-fi
 
 echo "phone: opening pairing"
 ui_launch_refineid "${phone}"
 ui_tap "${phone}" RappPairingRow
 ui_wait "${phone}" cardRemoteAccessSwitch
-if [[ "$(ui_checked "${phone}" cardRemoteAccessSwitch)" != "true" ]]; then
-  ui_tap "${phone}" cardRemoteAccessSwitch
-fi
+ui_set_switch "${phone}" cardRemoteAccessSwitch true
 ui_wait "${phone}" offeringCodeText
 code="$(ui_text "${phone}" offeringCodeText | tr -d ' -')"
 if [[ ${#code} -ne ${code_length} ]]; then
@@ -64,37 +58,35 @@ echo "tablet: entering the pairing code"
 ui_launch_refineid "${tablet}"
 ui_tap "${tablet}" requesterPairingRow
 ui_wait "${tablet}" requesterRemoteUseSwitch
-if [[ "$(ui_checked "${tablet}" requesterRemoteUseSwitch)" != "true" ]]; then
-  ui_tap "${tablet}" requesterRemoteUseSwitch
-fi
-ui_wait "${tablet}" requesterPairingScreen
+# Turning remote use off forgets a held pairing, so the code entry is
+# offered again whatever the tablet held before.
+ui_set_switch "${tablet}" requesterRemoteUseSwitch false
+ui_set_switch "${tablet}" requesterRemoteUseSwitch true
+ui_wait "${tablet}" pairingCodeBoxes
+# The code entry is a transparent field over the boxes, left out of the
+# uiautomator dump; tapping the boxes focuses it.
+ui_tap "${tablet}" pairingCodeBoxes
 sleep "${ui_poll_seconds}"
-# The code entry is a transparent field over six boxes; the boxes follow
-# the field's label and focus the field when tapped.
-ui_tap_next_after "${tablet}" text "${pairing_code_label}"
-sleep "${ui_poll_seconds}"
-adb -s "${tablet}" shell input text "${code}"
+ui_type "${tablet}" "${code}"
 unset code
 
 echo "tablet: waiting for the pairing to finish"
 deadline=$((SECONDS + pairing_timeout_seconds))
-finished=""
+tags=""
 while ((SECONDS < deadline)); do
-  if ! ui_has "${tablet}" requesterPairingScreen \
-    || ! ui_node "${tablet}" text "${pairing_code_label}" | grep -q .; then
-    finished="yes"
+  tags="$(ui_tags "${tablet}")"
+  if grep -qx pairingFailure <<< "${tags}" || ! grep -qx pairingCodeBoxes <<< "${tags}"; then
     break
   fi
   sleep "${ui_poll_seconds}"
 done
-if [[ -z "${finished}" ]]; then
-  echo "tablet: pairing did not finish within ${pairing_timeout_seconds}s" >&2
+if grep -qx pairingFailure <<< "${tags}"; then
+  # The reason is one of the app's fixed failure strings, never a value.
+  echo "tablet: pairing failed: $(ui_text "${tablet}" pairingFailureReason)" >&2
   exit 1
 fi
-
-failure="$(ui_dump "${tablet}" | grep -oE 'text="(The pairing code was not accepted\.|No phone in pairing mode was found\.|Pairing ended before it was completed\.)"' || true)"
-if [[ -n "${failure}" ]]; then
-  echo "tablet: pairing failed: ${failure}" >&2
+if grep -qx pairingCodeBoxes <<< "${tags}"; then
+  echo "tablet: pairing did not finish within ${pairing_timeout_seconds}s" >&2
   exit 1
 fi
 echo "paired"

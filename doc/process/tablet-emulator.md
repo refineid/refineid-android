@@ -29,15 +29,20 @@ Scripts/start-tablet-emulator.sh [<host network interface>]
 The script creates the `refineid_tablet` AVD on first use, starts it
 bridged on the interface carrying the default route, waits for boot,
 turns stylus handwriting off, and checks that `wlan0` landed on the
-host's local subnet. It needs:
+host interface's network under its subnet mask. It needs:
 
 - The `system-images;android-35;google_apis_playstore_tablet;arm64-v8a`
   image. A Play image carries Google Play services, which passkeys in the
   WebView need.
 - `sudo`. vmnet requires root or the `com.apple.vm.networking`
   entitlement, and the emulator binary does not carry the entitlement.
-  Files the emulator writes as root, such as crash reports under
-  `/tmp/android-root`, are owned by root.
+  The script asks for the password in the foreground before it starts
+  the emulator in the background. Files the emulator writes as root land
+  in `~/.android` (AVD state, metrics) and `/tmp/android-root` (crash
+  reports).
+
+Stop it with `Scripts/stop-tablet-emulator.sh`, which shuts the emulator
+down and returns `~/.android` to the user.
 
 The emulator command it runs:
 
@@ -70,19 +75,26 @@ The phone is the one device on Wi-Fi debugging (see
 opens Remote Access on the phone and turns Card Remote Access on, reads
 the offered code from the screen into a variable, opens Remote Access on
 the tablet, turns remote use on, types the code, and waits for the entry
-to close. It exits non-zero with the tablet's failure reason, or when
-the pairing does not finish within a minute. The code is never printed.
+to close. Progress goes to stdout and the last line is `paired`; it
+exits non-zero with the tablet's failure reason, or when the pairing
+does not finish within a minute. The code is never printed. Never run
+it, or any script built on the helpers, under `bash -x`: xtrace prints
+variables and arguments, the code among them.
 
 Both scripts drive the UI through `Scripts/adb-ui.sh`, sourced helpers
 that find nodes by Compose test tag (exposed as resource ids), tap them,
-wait for them and read their state, and never print node text. New
-device scripts reuse them. Two limits of `uiautomator dump` shape them:
+wait for them and read their state, and never print node text. They use
+the SDK's `adb`, refuse to guess when more than one phone or emulator is
+connected, and delete the dump file from the device after reading it.
+New device scripts reuse them, and a node a script needs gets a test tag
+in `UiAutomationIds` rather than a match on localised text. Two limits
+of `uiautomator dump` shape the pairing script:
 
-- A fully transparent node is left out of the dump. The pairing code
-  field is a transparent `BasicTextField` over six boxes, so the script
-  taps the boxes, the node after the field's label, to focus it.
-- Nodes under `clearAndSetSemantics` expose no text, so the code boxes
-  cannot confirm what was typed; the outcome screen does.
+- The pairing code field, a fully transparent `BasicTextField` over six
+  boxes, did not appear in the dump. The script taps the boxes
+  (`pairingCodeBoxes`) to focus it.
+- The boxes clear their semantics, so they cannot confirm what was
+  typed; the outcome (`pairingFailure`, or the boxes gone) does.
 
 ## Build signing
 

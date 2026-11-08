@@ -340,7 +340,10 @@ internal fun FailedPhaseView(
     onRetry: () -> Unit,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag(UiAutomationIds.PAIRING_FAILURE),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = GROUP_ELEVATION),
         shape = RoundedCornerShape(GROUP_CORNER_RADIUS),
@@ -368,6 +371,7 @@ internal fun FailedPhaseView(
                 text = reason,
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
+                modifier = Modifier.testTag(UiAutomationIds.PAIRING_FAILURE_REASON),
             )
             Button(onClick = onRetry) {
                 Text(stringResource(R.string.retry))

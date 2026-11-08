@@ -12,6 +12,9 @@
 # binary does not carry the com.apple.vm.networking entitlement.
 # See doc/process/tablet-emulator.md.
 set -euo pipefail
+cd "$(dirname "$0")/.."
+# shellcheck source=Scripts/adb-ui.sh
+source Scripts/adb-ui.sh
 
 readonly avd_name="refineid_tablet"
 readonly api_level="android-35"
@@ -23,7 +26,6 @@ readonly boot_poll_limit=120
 sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-${HOME}/Library/Android/sdk}}"
 avd_home="${ANDROID_AVD_HOME:-${HOME}/.android/avd}"
 emulator="${sdk}/emulator/emulator"
-adb="${sdk}/platform-tools/adb"
 image_dir="system-images/${api_level}/${image_tag}/${image_abi}"
 
 if [[ "$(uname)" != "Darwin" ]]; then
@@ -78,6 +80,10 @@ EOF
   echo "created AVD ${avd_name}"
 fi
 
+# Ask for the password now, in the foreground; the emulator then starts in
+# the background without a prompt.
+sudo -v
+
 log_dir="${TMPDIR:-/tmp}"
 log="${log_dir%/}/${avd_name}-emulator.log"
 
@@ -103,7 +109,7 @@ for ((attempt = 0; attempt < boot_poll_limit; attempt++)); do
     echo "emulator exited during boot; see ${log}" >&2
     exit 1
   fi
-  booted="$("${adb}" -e shell getprop sys.boot_completed 2> /dev/null | tr -d '\r' || true)"
+  booted="$("${ui_adb}" -e shell getprop sys.boot_completed 2> /dev/null | tr -d '\r' || true)"
   if [[ "${booted}" == "1" ]]; then
     break
   fi
@@ -116,13 +122,31 @@ fi
 
 # Emulated touches count as stylus input on the tablet image, and the
 # keyboard's stylus onboarding would take text that adb types.
-"${adb}" -e shell settings put secure stylus_handwriting_enabled 0
+"${ui_adb}" -e shell settings put secure stylus_handwriting_enabled 0
 
+# The tablet is on the host's network when its wlan0 address shares the
+# host interface's network prefix under the interface's subnet mask.
+ipv4_to_integer() {
+  local IFS=.
+  read -r first second third fourth <<< "$1"
+  echo $(((first << 24) | (second << 16) | (third << 8) | fourth))
+}
 host_address="$(ipconfig getifaddr "${interface}" || true)"
-guest_address="$("${adb}" -e shell ip -4 -o addr show wlan0 | awk '{ split($4, a, "/"); print a[1] }' | tr -d '\r')"
-if [[ -n "${host_address}" && "${guest_address%.*}" == "${host_address%.*}" ]]; then
-  echo "${avd_name} booted; wlan0 is on the host's local subnet"
+host_mask="$(ipconfig getoption "${interface}" subnet_mask || true)"
+guest_address="$("${ui_adb}" -e shell ip -4 -o addr show wlan0 | awk '{ split($4, a, "/"); print a[1] }' | tr -d '\r')"
+ipv4_pattern='^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+same_network=""
+if [[ "${host_address}" =~ ${ipv4_pattern} && "${host_mask}" =~ ${ipv4_pattern} && "${guest_address}" =~ ${ipv4_pattern} ]]; then
+  mask="$(ipv4_to_integer "${host_mask}")"
+  host_network=$(($(ipv4_to_integer "${host_address}") & mask))
+  guest_network=$(($(ipv4_to_integer "${guest_address}") & mask))
+  if ((host_network == guest_network)); then
+    same_network="yes"
+  fi
+fi
+if [[ -n "${same_network}" ]]; then
+  echo "${avd_name} booted; wlan0 is on the host's local network"
 else
-  echo "${avd_name} booted, but wlan0 is not on the host's local subnet; see ${log}" >&2
+  echo "${avd_name} booted, but wlan0 is not on the host's local network; see ${log}" >&2
   exit 1
 fi
