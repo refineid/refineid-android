@@ -18,7 +18,10 @@ import java.time.format.DateTimeFormatter
  *
  * Debug source set only; a release build has no such class. An entry names
  * the event and the case or type that caused it, never a value read from
- * the card, the network, the device or the user.
+ * the card, the network, the device or the user, with one narrow exception:
+ * failed RAPP sessions name the paired device's label and its transport, so
+ * the entry says who was talking. The label is a device label, never holder,
+ * card, or network identifiers.
  */
 internal object DevErrorLog {
     /** The logcat tag: `adb logcat -s RefineIDErrors` shows every entry. */

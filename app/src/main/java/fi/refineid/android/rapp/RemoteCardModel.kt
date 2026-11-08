@@ -510,7 +510,7 @@ internal class RemoteCardModel(
                         client.shutdown()
                         throw cancelled
                     } catch (e: Exception) {
-                        trace("dial failed", e)
+                        trace("dial failed", e, RappSessionFailureLog.NETWORK_TRANSPORT)
                         client.shutdown()
                         RappRequesterClient.OpenOutcome.Failed(null)
                     }
@@ -1099,12 +1099,21 @@ internal class RemoteCardModel(
 
     private fun monotonicMs(): Long = RappClock.monotonicMs().toLong()
 
+    /**
+     * The dev log: every line names the paired phone, so a failed session
+     * says who was talking. The name is the held pairing's device label; the
+     * dial's line also names the stream transport it dials on. The label is
+     * refreshed every session (RAPP v26.11.2 section 4.3 items 3 and 4).
+     */
     private fun trace(
         message: String,
         error: Exception?,
+        transport: String? = null,
     ) {
         if (BuildConfig.DEBUG) {
-            android.util.Log.w(TRACE_TAG, message, error)
+            val peer = heldPeer?.displayName ?: lastPeerName ?: RappSessionFailureLog.UNKNOWN_PAIRING
+            val context = if (transport == null) peer else peer + ", " + transport
+            android.util.Log.w(TRACE_TAG, message + ", " + context, error)
         }
     }
 }

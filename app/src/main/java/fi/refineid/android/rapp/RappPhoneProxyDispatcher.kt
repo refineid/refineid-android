@@ -659,7 +659,11 @@ internal class RappPhoneProxyDispatcher(
                     else -> null
                 }
             if (refusal != null || vlt == null) {
-                AppTrace.rappDialRefused(transport.profile, refusal ?: RappDialRefusal.NOT_SERVING)
+                AppTrace.rappDialRefused(
+                    transport.profile,
+                    refusal ?: RappDialRefusal.NOT_SERVING,
+                    RappSessionFailureLog.UNKNOWN_PAIRING,
+                )
                 return false
             }
             val pair = admitRouted(vlt, transport.profile, preamble) ?: return false
@@ -668,12 +672,13 @@ internal class RappPhoneProxyDispatcher(
                 return false
             }
             if (!open(vlt, pair, transport)) return false
+            val peer = RappSessionFailureLog.peerName(pair.record)
             handshakeDeadlineJob =
                 scope.launch {
                     delay(BLUETOOTH_HANDSHAKE_DEADLINE_MS)
                     synchronized(sessionLock) {
                         if (served == transport && operationBridge == null) {
-                            AppTrace.rappDialRefused(transport.profile, RappDialRefusal.HANDSHAKE_DEADLINE)
+                            AppTrace.rappDialRefused(transport.profile, RappDialRefusal.HANDSHAKE_DEADLINE, peer)
                             dropConnection()
                         }
                     }
@@ -700,7 +705,10 @@ internal class RappPhoneProxyDispatcher(
                 }
 
                 is RappBleGattEvent.Closed -> {
-                    if (served == RappServedTransport.Bluetooth(event.link)) endSession()
+                    if (served == RappServedTransport.Bluetooth(event.link)) {
+                        logSessionClosed(RappSessionFailureLog.TRANSPORT_CLOSED)
+                        endSession()
+                    }
                 }
 
                 is RappBleGattEvent.Subscribed, is RappBleGattEvent.Routed, is RappBleGattEvent.Unsubscribed -> {}
@@ -717,7 +725,10 @@ internal class RappPhoneProxyDispatcher(
         synchronized(sessionLock) {
             when (event) {
                 is StreamRelayEvent.Connected -> {
-                    if (served == RappServedTransport.Stream) endSession()
+                    if (served == RappServedTransport.Stream) {
+                        logSessionClosed(RappSessionFailureLog.SUPERSEDED)
+                        endSession()
+                    }
                 }
 
                 is StreamRelayEvent.Frame -> {
@@ -729,14 +740,22 @@ internal class RappPhoneProxyDispatcher(
                 }
 
                 is StreamRelayEvent.Disconnected, is StreamRelayEvent.Error -> {
-                    AppTrace.rappConnectionDropped(
+                    val detail =
                         if (event is StreamRelayEvent.Error) {
                             event.cause.javaClass.simpleName
                         } else {
                             "stream disconnected"
-                        },
-                    )
-                    if (served == RappServedTransport.Stream) endSession()
+                        }
+                    if (served == RappServedTransport.Stream) {
+                        logSessionClosed(RappSessionFailureLog.TRANSPORT_CLOSED + ": " + detail)
+                        endSession()
+                    } else {
+                        AppTrace.rappConnectionDropped(
+                            detail,
+                            RappSessionFailureLog.UNKNOWN_PAIRING,
+                            RappSessionFailureLog.NETWORK_TRANSPORT,
+                        )
+                    }
                 }
             }
         }
@@ -794,7 +813,11 @@ internal class RappPhoneProxyDispatcher(
     ) {
         val transport = RappServedTransport.Stream
         if (withdrawing) {
-            AppTrace.rappDialRefused(transport.profile, RappDialRefusal.NOT_SERVING)
+            AppTrace.rappDialRefused(
+                transport.profile,
+                RappDialRefusal.NOT_SERVING,
+                RappSessionFailureLog.UNKNOWN_PAIRING,
+            )
             activeListener?.disconnectClient()
             return
         }
@@ -820,13 +843,17 @@ internal class RappPhoneProxyDispatcher(
         vault: AndroidRappVault,
         profile: RappTransportProfile,
         preamble: ByteArray,
-    ): RappStoredPair? =
-        dialGate.admit(
+    ): RappStoredPair? {
+        var routedName = RappSessionFailureLog.UNKNOWN_PAIRING
+        return dialGate.admit(
             nowMonotonicMs = RappClock.monotonicMs(),
-            route = { routeServed(vault, profile, preamble) },
+            route = {
+                routeServed(vault, profile, preamble)?.also { routedName = RappSessionFailureLog.peerName(it.record) }
+            },
             release = { it.record.close() },
-            onRateLimited = { AppTrace.rappDialRefused(profile, RappDialRefusal.RATE_LIMITED) },
+            onRateLimited = { AppTrace.rappDialRefused(profile, RappDialRefusal.RATE_LIMITED, routedName) },
         )
+    }
 
     /** The served pairing [preamble] routes to on [profile], or null when it routes to none. */
     private fun routeServed(
@@ -843,7 +870,9 @@ internal class RappPhoneProxyDispatcher(
             }
         val pair = pairs.firstOrNull { it.record === record }
         pairs.filter { it !== pair }.forEach { it.record.close() }
-        if (pair == null) AppTrace.rappDialRefused(profile, RappDialRefusal.NO_PAIRING)
+        if (pair == null) {
+            AppTrace.rappDialRefused(profile, RappDialRefusal.NO_PAIRING, RappSessionFailureLog.UNKNOWN_PAIRING)
+        }
         return pair
     }
 
@@ -867,15 +896,23 @@ internal class RappPhoneProxyDispatcher(
             RappSessionAdmission.ADMIT -> {}
 
             RappSessionAdmission.REFUSE_BUSY -> {
-                AppTrace.rappDialRefused(transport.profile, RappDialRefusal.BUSY)
+                AppTrace.rappDialRefused(
+                    transport.profile,
+                    RappDialRefusal.BUSY,
+                    RappSessionFailureLog.peerName(pair.record),
+                )
             }
 
             RappSessionAdmission.REFUSE_HELD -> {
-                AppTrace.rappDialRefused(transport.profile, RappDialRefusal.HELD)
+                AppTrace.rappDialRefused(
+                    transport.profile,
+                    RappDialRefusal.HELD,
+                    RappSessionFailureLog.peerName(pair.record),
+                )
             }
         }
         if (!verdict.admits) return false
-        if (served != null) dropConnection()
+        if (served != null) dropConnection(RappSessionFailureLog.SUPERSEDED)
         return true
     }
 
@@ -899,7 +936,7 @@ internal class RappPhoneProxyDispatcher(
             sessionBridge = RappSessionBridge.beginProxy(pair.record, vault, transport.profile.profileName)
             true
         } catch (_: Exception) {
-            dropConnection()
+            dropConnection(RappSessionFailureLog.SESSION_OPEN_FAILED)
             false
         }
     }
@@ -934,7 +971,7 @@ internal class RappPhoneProxyDispatcher(
             session.enterEstablished()
             establish(vault, session, pair)
         } catch (_: Exception) {
-            dropConnection()
+            dropConnection(RappSessionFailureLog.HANDSHAKE_PROTOCOL_FAILURE)
         }
     }
 
@@ -1125,7 +1162,27 @@ internal class RappPhoneProxyDispatcher(
      * `service_withdrawn` and the pairing stays (section 4.5 item 9).
      */
     private fun sessionClosed(reason: RappCloseReason?) {
-        if (reason == RappCloseReason.SERVICE_WITHDRAWN) AppTrace.rappPeerWithdrew()
+        when (reason) {
+            RappCloseReason.SERVICE_WITHDRAWN -> {
+                val transport = served
+                if (transport != null) {
+                    AppTrace.rappPeerWithdrew(
+                        RappSessionFailureLog.peerName(routed?.record),
+                        RappSessionFailureLog.transportLabel(transport.profile),
+                    )
+                }
+            }
+
+            RappCloseReason.PROTOCOL_VIOLATION -> {
+                logSessionClosed(RappSessionFailureLog.PROTOCOL_VIOLATION)
+            }
+
+            RappCloseReason.PAIRING_REVOKED -> {
+                logSessionClosed(RappSessionFailureLog.peerClose(reason))
+            }
+
+            else -> {}
+        }
         val pair = routed.takeIf { reason == RappCloseReason.PAIRING_REVOKED }
         if (pair != null) routed = null
         dropConnection()
@@ -1147,7 +1204,7 @@ internal class RappPhoneProxyDispatcher(
     ) {
         when (val outcome = act(bridge) { it.receiveFrame(data, RappClock.monotonicMs()) }) {
             null -> {
-                if (bridge === operationBridge) dropConnection()
+                if (bridge === operationBridge) dropConnection(RappSessionFailureLog.PROTOCOL_VIOLATION)
             }
 
             is RappBridgeOutcome.Admitted -> {
@@ -1192,7 +1249,9 @@ internal class RappPhoneProxyDispatcher(
                             challenge.fill(ERASED)
                         }
                     if (polled == null) {
-                        synchronized(sessionLock) { if (bridge === operationBridge) dropConnection() }
+                        synchronized(sessionLock) {
+                            if (bridge === operationBridge) dropConnection(RappSessionFailureLog.TRANSPORT_CLOSED)
+                        }
                         break
                     }
                     if (act(bridge) { it.expireDue(RappClock.monotonicMs()) } is RappBridgeOutcome.Send) {
@@ -1249,10 +1308,26 @@ internal class RappPhoneProxyDispatcher(
         }
     }
 
-    /** Closes the session's transport and ends the session; the pairing stays. */
-    private fun dropConnection() {
+    /**
+     * Logs the served session's failure with the paired device and its
+     * transport. Nothing is logged while no transport serves a session.
+     */
+    private fun logSessionClosed(cause: String) {
+        val transport = served ?: return
+        AppTrace.rappSessionClosed(
+            cause,
+            RappSessionFailureLog.peerName(routed?.record),
+            RappSessionFailureLog.transportLabel(transport.profile),
+        )
+    }
+
+    /**
+     * Closes the session's transport and ends the session; the pairing stays.
+     * A non-null [cause] logs the served session's failure first.
+     */
+    private fun dropConnection(cause: String? = null) {
         synchronized(sessionLock) {
-            AppTrace.rappConnectionDropped("proxy dispatcher dropConnection")
+            if (cause != null) logSessionClosed(cause)
             val transport = served
             endSession()
             closeTransport(transport)
