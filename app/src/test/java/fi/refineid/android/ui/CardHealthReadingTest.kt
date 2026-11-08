@@ -21,15 +21,20 @@ import org.junit.Test
 
 class CardHealthReadingTest {
     @Test
-    fun noTitleIsDecidedBeforeTheCardAnswers() {
-        assertNull(cardManagementTitle(health = null))
+    fun aCardAwaitingNoActivationIsShownItsPinsBeforeItAnswers() {
+        assertEquals(CardManagementTitle.CARD_PINS, cardManagementTitle(health = null, activationRequired = false))
+    }
+
+    @Test
+    fun aCardAwaitingActivationHasNoTitleBeforeItAnswers() {
+        assertNull(cardManagementTitle(health = null, activationRequired = true))
     }
 
     @Test
     fun anOrganizationCardIsTitledByItsAnswer() {
         assertEquals(
             CardManagementTitle.ORGANISATION_CARD_ACTIVATION,
-            cardManagementTitle(awaitingActivation(NativePinReferenceScheme.ORGANIZATIONAL)),
+            cardManagementTitle(awaitingActivation(NativePinReferenceScheme.ORGANIZATIONAL), activationRequired = true),
         )
     }
 
@@ -37,30 +42,28 @@ class CardHealthReadingTest {
     fun aCitizenCardIsTitledByItsAnswer() {
         assertEquals(
             CardManagementTitle.IDENTITY_CARD_ACTIVATION,
-            cardManagementTitle(awaitingActivation(NativePinReferenceScheme.CITIZEN)),
+            cardManagementTitle(awaitingActivation(NativePinReferenceScheme.CITIZEN), activationRequired = true),
         )
     }
 
     @Test
     fun anActivatedCardManagesPins() {
-        assertEquals(CardManagementTitle.CARD_PINS, cardManagementTitle(activated()))
+        assertEquals(CardManagementTitle.CARD_PINS, cardManagementTitle(activated(), activationRequired = false))
     }
 
     @Test
-    fun theScreenWaitsForAReadableCardUntilItAnswers() {
+    fun theReadingFillsInWhenTheCardAnswers() {
         val service = HeldService()
         val reading = CardHealthReading()
 
-        assertTrue(cardManagementAwaitsReading(cardReadable = true, reading = reading))
-        assertFalse(cardManagementAwaitsReading(cardReadable = false, reading = reading))
-
+        assertFalse(reading.hasAnswered)
         reading.probe(service)
         assertTrue(reading.isProbing)
-        assertTrue(cardManagementAwaitsReading(cardReadable = true, reading = reading))
+        assertFalse(reading.hasAnswered)
 
         service.answer(CardManagementResult.Success(awaitingActivation(NativePinReferenceScheme.ORGANIZATIONAL)))
         assertFalse(reading.isProbing)
-        assertFalse(cardManagementAwaitsReading(cardReadable = true, reading = reading))
+        assertTrue(reading.hasAnswered)
         assertEquals(NativePinReferenceScheme.ORGANIZATIONAL, reading.health?.scheme)
     }
 
@@ -74,7 +77,7 @@ class CardHealthReadingTest {
 
         assertNull(reading.health)
         assertEquals(CardManagementFailure.CARD_UNAVAILABLE, reading.failure)
-        assertFalse(cardManagementAwaitsReading(cardReadable = true, reading = reading))
+        assertTrue(reading.hasAnswered)
     }
 
     @Test
@@ -90,7 +93,7 @@ class CardHealthReadingTest {
         assertNull(reading.health)
         assertFalse(reading.isProbing)
         assertFalse(answered)
-        assertTrue(cardManagementAwaitsReading(cardReadable = true, reading = reading))
+        assertFalse(reading.hasAnswered)
     }
 
     private fun awaitingActivation(scheme: NativePinReferenceScheme) =

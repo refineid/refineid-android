@@ -299,8 +299,12 @@ internal fun CardManagementScreen(
             }
         }
 
+    // Nothing goes to a readable card before it has answered with its
+    // counters, so the retry floor above judges what the card said.
+    val awaitingAnswer = isCardReady && health == null
     val canExecute =
-        !isRefusedByPolicy &&
+        !awaitingAnswer &&
+            !isRefusedByPolicy &&
             when (selectedTask) {
                 ManagementTask.CHANGE_PIN1, ManagementTask.CHANGE_PIN2 -> {
                     currentPinValid && newPinValid && confirmationValid &&
@@ -566,11 +570,10 @@ internal fun CardManagementScreen(
             )
         }
 
-        // A readable card's forms wait for its answer; a card awaiting
+        // The forms show at once with the FINEID bounds, and the card's
+        // counters and lengths fill in when it answers; a card awaiting
         // activation shows its form once the probe has named its scheme.
-        if (isCardReady && health == null) {
-            // Nothing that depends on the card is drawn before it answers.
-        } else if (isActivationFlow) {
+        if (isActivationFlow) {
             if (health != null) {
                 CardActivationForm(
                     health = health,
