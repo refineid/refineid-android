@@ -16,8 +16,6 @@ internal data class AuthenticationReadiness(
     val hasCertificate: Boolean,
     val needsCan: Boolean,
     val available: Boolean,
-    /** Nothing can be asked yet: no card has answered, and its kind decides what opens it. */
-    val awaitsCardKind: Boolean = false,
 )
 
 /**
@@ -181,10 +179,6 @@ internal class AuthenticationPreparation(
 
             ready.hasCertificate && (pinCache.hasPin || !purpose.needsPin1) -> {
                 complete()
-            }
-
-            ready.awaitsCardKind -> {
-                submit(null, null)
             }
 
             ready.needsCan || needsPin -> {

@@ -71,6 +71,7 @@ import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.diagnostics.BuildDiagnostics
 import fi.refineid.android.nfc.NfcCardProblem
+import fi.refineid.android.nfc.NfcCardWait
 import fi.refineid.android.nfc.NfcReaderStatus
 import java.security.cert.X509Certificate
 import java.util.concurrent.atomic.AtomicBoolean
@@ -502,13 +503,17 @@ private fun BrowserCardUnlockDialog(
         status != NfcReaderStatus.TURNED_OFF &&
             status != NfcReaderStatus.NOT_AVAILABLE &&
             status != NfcReaderStatus.CARD_NOT_SUPPORTED
-    // The card's EF.CardAccess names what opens it: nothing is asked of a card
-    // that has not answered, and an organization card has no access number.
-    val asksCan = !primed && cardKind == NfcCardKind.PERSONAL
-    val asksPin = primed || cardKind != null
+    // The access number is ready before the tap unless it is known; an
+    // organization card, which has none, opens with PIN 1 alone.
+    val asksCan =
+        NfcCardWait.offersAccessNumber(
+            status,
+            primed || fi.refineid.android.core.CanSessionStore.hasCan,
+            cardKind,
+        )
     val canReady = !asksCan || canEntryReady(canState.text)
     val pinReady = Pin1Submission.isComplete(pinState.text)
-    val entryReady = cardEntryReady && asksPin && canReady && pinReady && !isWaiting
+    val entryReady = cardEntryReady && canReady && pinReady && !isWaiting
     val submit = {
         if (entryReady) {
             val can =
@@ -561,17 +566,15 @@ private fun BrowserCardUnlockDialog(
                         imeAction = ImeAction.Next,
                     )
                 }
-                if (asksPin) {
-                    SecretField(
-                        state = pinState,
-                        testTag = UiAutomationIds.BROWSER_UNLOCK_PIN1_FIELD,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isWaiting,
-                        label = stringResource(R.string.pin1),
-                        inputTransformation = Pin1InputTransformation,
-                        imeAction = ImeAction.Done,
-                    )
-                }
+                SecretField(
+                    state = pinState,
+                    testTag = UiAutomationIds.BROWSER_UNLOCK_PIN1_FIELD,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isWaiting,
+                    label = stringResource(R.string.pin1),
+                    inputTransformation = Pin1InputTransformation,
+                    imeAction = ImeAction.Done,
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(UNLOCK_DIALOG_SPACING),

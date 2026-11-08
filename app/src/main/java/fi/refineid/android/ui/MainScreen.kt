@@ -210,6 +210,7 @@ internal fun MainScreen(
             authenticationPreparation,
             preparationState,
             nfcProblem = if (usbReaderPresent) null else nfcSnapshot.cardProblem,
+            nfcCardKind = if (usbReaderPresent) null else nfcSnapshot.cardKind,
             nfcStatus =
                 if (usbReaderPresent || nfcSnapshot.status == NfcReaderStatus.NOT_AVAILABLE) {
                     null
@@ -1188,18 +1189,11 @@ private fun ReadCardNfcDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                // The card's EF.CardAccess names what opens it, so nothing is
-                // asked until a card has answered.
+                // The access number is ready before the tap; an organization
+                // card, which has none, is asked for PIN 1 once it answers.
                 when (cardKind) {
-                    null -> {
-                        if (snapshot.cardProblem != null) {
-                            NfcCardProblemText(snapshot)
-                        } else {
-                            Text(stringResource(R.string.hold_card_against_back))
-                        }
-                    }
-
-                    NfcCardKind.PERSONAL -> {
+                    null, NfcCardKind.PERSONAL -> {
+                        NfcCardProblemText(snapshot)
                         CanField(
                             state = canState,
                             testTag = UiAutomationIds.NFC_CAN_FIELD,
@@ -1220,7 +1214,7 @@ private fun ReadCardNfcDialog(
             }
         },
         confirmButton = {
-            if (cardKind == NfcCardKind.PERSONAL) {
+            if (cardKind != NfcCardKind.ORGANIZATION) {
                 Button(
                     onClick = submit,
                     enabled = canReady,

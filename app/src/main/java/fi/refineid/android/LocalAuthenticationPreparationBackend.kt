@@ -15,6 +15,7 @@ import fi.refineid.android.core.Pin1Verification
 import fi.refineid.android.core.Pin1VerificationOutcome
 import fi.refineid.android.core.Pin1VerificationResult
 import fi.refineid.android.core.runPin1Verification
+import fi.refineid.android.nfc.NfcCardWait
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.usb.CardPresence
@@ -51,10 +52,8 @@ internal class LocalAuthenticationPreparationBackend(
                     usb.status == ReaderConnectionStatus.ACCESS_NUMBER_REQUIRED ||
                         usb.status == ReaderConnectionStatus.WRONG_ACCESS_NUMBER
                 } else {
-                    nfc.status == NfcReaderStatus.WRONG_CAN ||
-                        (!CanSessionStore.hasCan && !primed && nfc.cardKind == NfcCardKind.PERSONAL)
+                    NfcCardWait.offersAccessNumber(nfc.status, CanSessionStore.hasCan || primed, nfc.cardKind)
                 },
-            awaitsCardKind = !wired && !CanSessionStore.hasCan && !primed && nfc.cardKind == null,
             available = wired || (app.nfcReaderController.hasNfc && nfc.status != NfcReaderStatus.TURNED_OFF),
         )
     }

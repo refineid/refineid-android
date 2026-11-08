@@ -66,6 +66,7 @@ import fi.refineid.android.core.NativePin1State
 import fi.refineid.android.core.NativePin2State
 import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.nfc.NfcCardWait
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
 
@@ -493,13 +494,10 @@ internal fun CardManagementScreen(
                                 .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        when (nfcSnapshot?.cardKind) {
-                            null -> {
-                                Text(stringResource(R.string.hold_card_against_back))
-                                NfcCardProblemText(nfcSnapshot)
-                            }
-
-                            NfcCardKind.ORGANIZATION -> {
+                        val accessNumberKnown =
+                            nfcSnapshot?.isPrimed == true || fi.refineid.android.core.CanSessionStore.hasCan
+                        when {
+                            nfcSnapshot?.cardKind == NfcCardKind.ORGANIZATION -> {
                                 OrganizationPin1Entry(
                                     attemptsLeft = nfcSnapshot.pin1AttemptsLeft,
                                     answer = nfcSnapshot.pin1Answer,
@@ -508,7 +506,14 @@ internal fun CardManagementScreen(
                                 )
                             }
 
-                            NfcCardKind.PERSONAL -> {
+                            // A known access number opens the card on the tap.
+                            !NfcCardWait.offersAccessNumber(nfcSnapshot?.status, accessNumberKnown, null) -> {
+                                Text(stringResource(R.string.hold_card_against_back))
+                                NfcCardProblemText(nfcSnapshot)
+                            }
+
+                            else -> {
+                                NfcCardProblemText(nfcSnapshot)
                                 val canReady = canEntryReady(canState.text)
                                 CanField(
                                     state = canState,
