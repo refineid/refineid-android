@@ -105,6 +105,10 @@
   ShellCheck). `./gradlew check` runs all of it.
 - Rust follows the latest stable release (`rust-toolchain.toml` selects the
   stable channel); never pin a release.
+- The build runs on one JDK, the version `gradle/gradle-daemon-jvm.properties`
+  names: the newest Gradle supports running on, raised with `updateDaemonJvm`.
+  Run Gradle through `Scripts/gradle.sh`, never a bare `./gradlew` from a shell
+  that chose its own JDK. See `doc/process/build-environment.md`.
 - RefineID git dependencies track `refineid-core` main, never a pinned
   revision; refresh them instead of freezing.
 - The quality gates are mandatory git hooks, not suggestions. Run

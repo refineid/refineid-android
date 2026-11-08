@@ -11,7 +11,13 @@ cd "$(dirname "$0")/.."
 
 sdk_root="${ANDROID_SDK_ROOT:-${HOME}/Library/Android/sdk}"
 rust_android_targets=(aarch64-linux-android x86_64-linux-android)
-brew_formulas=(openjdk rustup shellcheck)
+# The JDK the Gradle daemon requires, as updateDaemonJvm recorded it.
+jdk_version=$(sed -n 's/^toolchainVersion=\([0-9]*\).*/\1/p' gradle/gradle-daemon-jvm.properties)
+if [[ -z "${jdk_version}" ]]; then
+  echo "Error: could not read toolchainVersion from gradle/gradle-daemon-jvm.properties." >&2
+  exit 1
+fi
+brew_formulas=("openjdk@${jdk_version}" rustup shellcheck)
 brew_casks=(android-commandlinetools android-platform-tools)
 
 if [[ "$(uname)" != "Darwin" ]]; then
@@ -47,8 +53,8 @@ for cask in "${brew_casks[@]}"; do
   brew list --cask "${cask}" >/dev/null 2>&1 || brew install --cask "${cask}"
 done
 
-java_home="$(brew --prefix openjdk)/libexec/openjdk.jdk/Contents/Home"
-export JAVA_HOME="${java_home}"
+JAVA_HOME="$(brew --prefix "openjdk@${jdk_version}")/libexec/openjdk.jdk/Contents/Home"
+export JAVA_HOME
 
 if command -v sdkmanager >/dev/null; then
   sdkmanager=$(command -v sdkmanager)
@@ -89,11 +95,6 @@ Scripts/install-hooks.sh
 
 cat <<EOF
 
-Bootstrap complete. Ensure your shell profile exports:
-
-  export JAVA_HOME="${java_home}"
-  export ANDROID_SDK_ROOT="${sdk_root}"
-  export PATH="${rustup_bin}:\${HOME}/.cargo/bin:\${PATH}"
-
-Then build with: ./gradlew assembleDebug
+Bootstrap complete. Build with: Scripts/gradle.sh assembleDebug
+(it selects JDK ${jdk_version} and the rustup toolchain; local.properties names the SDK).
 EOF

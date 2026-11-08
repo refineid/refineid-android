@@ -49,7 +49,7 @@ Export the public certificate from your card once to register in Play Console:
 ### Step 3: Build and Sign Releases
 Build the compliant release bundle:
 ```bash
-./gradlew check bundleRelease
+Scripts/gradle.sh check bundleRelease
 ```
 
 Sign the bundle using your hardware identity card:

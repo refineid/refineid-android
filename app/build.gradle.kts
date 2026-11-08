@@ -21,7 +21,16 @@ val minimumAndroidApi = 33
 val currentAndroidApi = 37
 val androidAbis = listOf("arm64-v8a", "x86_64")
 val abiTargetArgs = androidAbis.flatMap { abi -> listOf("-t", abi) }
-val javaToolchainVersion = 25
+
+// Kotlin compiles on the JDK the Gradle daemon runs on: the one version
+// gradle/gradle-daemon-jvm.properties names, which updateDaemonJvm writes.
+val daemonJvmPropertiesFile = rootProject.layout.projectDirectory.file("gradle/gradle-daemon-jvm.properties")
+val daemonJvmVersionKey = "toolchainVersion"
+val javaToolchainVersion =
+    Properties()
+        .apply { load(StringReader(providers.fileContents(daemonJvmPropertiesFile).asText.get())) }
+        .getProperty(daemonJvmVersionKey)
+        .toInt()
 val calendarYearBase = 2000
 val twoDigitYearModulus = 100
 val maximumUtcHour = 23

@@ -7,15 +7,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Set JAVA_HOME if not already set.
-if [[ -z "${JAVA_HOME:-}" ]] && [[ "$(uname)" == "Darwin" ]]; then
-  studio_jdk="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-  if [[ -d "${studio_jdk}" ]]; then
-    export JAVA_HOME="${studio_jdk}"
-  else
-    export JAVA_HOME="$(/usr/libexec/java_home 2>/dev/null || echo "/opt/homebrew/opt/openjdk")"
-  fi
-fi
+# shellcheck source=Scripts/gradle-environment.sh
+source Scripts/gradle-environment.sh
 
 output_cert="${1:-upload_cert.pem}"
 pkcs11_lib="${REFINEID_PKCS11_LIB:-/usr/local/lib/librefineid_pkcs11_sign.dylib}"
