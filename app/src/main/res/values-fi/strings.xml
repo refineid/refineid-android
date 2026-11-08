@@ -52,6 +52,7 @@
     <string name="pairing_code">Yhdistämiskoodi</string>
     <string name="pairing_code_not_accepted">Yhdistämiskoodia ei hyväksytty.</string>
     <string name="no_phone_in_pairing_mode">Yhdistämistilassa olevaa puhelinta ei löytynyt.</string>
+    <string name="phone_unreachable">Puhelimeen ei saatu yhteyttä. Tarkista, että puhelin ja tämä laite ovat samassa verkossa.</string>
     <string name="pairing_ended_incomplete">Yhdistäminen päättyi kesken.</string>
     <string name="phone_forgot_computer">%1$s unohti tämän tietokoneen.</string>
     <string name="hold_card_against_back">Pidä henkilökorttia taustaa vasten.</string>

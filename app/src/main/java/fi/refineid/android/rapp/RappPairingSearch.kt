@@ -93,8 +93,17 @@ internal class RappPairingSearch(
         /** Every custodian tried refused the code. */
         data object NotAccepted : Outcome
 
-        /** No custodian in pairing mode was found. */
+        /**
+         * No custodian in pairing mode was found: none was found, or one
+         * that opened a connection served no offer.
+         */
         data object NoneFound : Outcome
+
+        /**
+         * A custodian was found but none could be reached: every connection
+         * failed to open, and none opened.
+         */
+        data object Unreachable : Outcome
 
         /** The code was accepted but the ceremony did not complete. */
         data object CeremonyEnded : Outcome
@@ -120,8 +129,11 @@ internal class RappPairingSearch(
             val retryAfterMs: ULong,
         ) : Attempt
 
-        /** The custodian refused the code, or the connection failed before it took it. */
+        /** The custodian refused the code, or the open connection closed before it took it. */
         data object Refused : Attempt
+
+        /** The connection to the custodian could not be opened. */
+        data object NotOpened : Attempt
 
         /** The code was accepted but the ceremony did not complete. */
         data object CeremonyEnded : Attempt
@@ -133,11 +145,11 @@ internal class RappPairingSearch(
         val table = ConcurrentHashMap<String, Endpoint>()
         val foundSignal = Channel<Unit>(Channel.UNLIMITED)
         endpoints.start { instance, host, port ->
-            // A phone that restarts its listener announces the same instance
-            // on a new port, while a requester's mDNS cache can still resolve
-            // the old one. Each resolved address is its own endpoint (section
-            // 4.2 item 1); the offer_id still allows one guess per phone
-            // (item 2), and the connection limit bounds the openings (item 5).
+            // An instance can resolve to more than one address, and to a new
+            // one when its record changes; each resolved address is its own
+            // endpoint (section 4.2 item 1). The offer_id still allows one
+            // guess per phone (item 2), and the connection limit bounds the
+            // openings (item 5).
             val endpoint = endpointKey(instance, host, port)
             table.putIfAbsent(endpoint, Endpoint(host, port))
             try {
@@ -146,13 +158,16 @@ internal class RappPairingSearch(
             }
             foundSignal.trySend(Unit)
         }
+        val reach = Reach()
         try {
             val graceUntilMs = monotonicMs().toLong() + initialDiscoveryMs
             while (true) {
                 scope.ensureActive()
                 when (val next = ledger.nextEndpoint(monotonicMs())) {
                     is RappNextEndpoint.Open -> {
-                        when (val attempt = tryEndpoint(table[next.endpoint], code, ledger)) {
+                        val attempt = tryEndpoint(table[next.endpoint], code, ledger)
+                        reach.record(attempt)
+                        when (attempt) {
                             is Attempt.Paired -> {
                                 return Outcome.Paired(attempt.record, attempt.peer)
                             }
@@ -162,11 +177,12 @@ internal class RappPairingSearch(
                                     ledger.busy(attempt.retryAfterMs, monotonicMs()),
                                     foundSignal,
                                     graceUntilMs,
+                                    reach,
                                 )?.let { return it }
                             }
 
-                            Attempt.Refused -> {
-                                afterClosed(ledger.closed(), foundSignal, graceUntilMs)?.let { return it }
+                            Attempt.Refused, Attempt.NotOpened -> {
+                                afterClosed(ledger.closed(), foundSignal, graceUntilMs, reach)?.let { return it }
                             }
 
                             Attempt.CeremonyEnded -> {
@@ -182,7 +198,7 @@ internal class RappPairingSearch(
                     }
 
                     is RappNextEndpoint.Exhausted -> {
-                        if (!awaitFound(foundSignal, graceUntilMs)) return Outcome.NoneFound
+                        if (!awaitFound(foundSignal, graceUntilMs)) return reach.noneTried()
                     }
                 }
             }
@@ -192,14 +208,37 @@ internal class RappPairingSearch(
     }
 
     /**
+     * Whether the connections of one search reached any custodian: what a
+     * search that tried none ends with, as RefineID-Apple tells it. A
+     * custodian that opened a connection and served no offer is not in
+     * pairing mode, while one that could not be reached says nothing of it.
+     */
+    private class Reach {
+        private var anyOpened = false
+        private var anyNotOpened = false
+
+        fun record(attempt: Attempt) {
+            if (attempt == Attempt.NotOpened) anyNotOpened = true else anyOpened = true
+        }
+
+        fun noneTried(): Outcome =
+            when {
+                anyOpened -> Outcome.NoneFound
+                anyNotOpened -> Outcome.Unreachable
+                else -> Outcome.NoneFound
+            }
+    }
+
+    /**
      * What the search ends with after [candidate] closed an attempt, or
-     * null to go on: a refused code after every custodian tried, or no
-     * phone found before the discovery grace ends.
+     * null to go on: a refused code after every custodian tried, or, when
+     * none was tried before the discovery grace ends, why ([reach]).
      */
     private suspend fun afterClosed(
         candidate: RappNextCandidate,
         foundSignal: Channel<Unit>,
         graceUntilMs: Long,
+        reach: Reach,
     ): Outcome? =
         when (candidate) {
             RappNextCandidate.TRY, RappNextCandidate.DEFERRED -> {
@@ -211,7 +250,7 @@ internal class RappPairingSearch(
             }
 
             RappNextCandidate.NONE_TRIED -> {
-                if (!awaitFound(foundSignal, graceUntilMs)) Outcome.NoneFound else null
+                if (!awaitFound(foundSignal, graceUntilMs)) reach.noneTried() else null
             }
         }
 
@@ -237,7 +276,7 @@ internal class RappPairingSearch(
         code: String,
         ledger: RappPairingCandidates,
     ): Attempt {
-        if (endpoint == null) return Attempt.Refused
+        if (endpoint == null) return Attempt.NotOpened
         val link = Link()
         val browser =
             StreamRelayBrowser(context, scope, StreamRendezvousName.MODE_PAIRING, onEvent = link::handle)
@@ -246,7 +285,7 @@ internal class RappPairingSearch(
         var paired = false
         try {
             browser.dialDirect(endpoint.host, endpoint.port)
-            if (!link.awaitConnected(CONNECT_TIMEOUT_MS)) return Attempt.Refused
+            if (!link.awaitConnected(CONNECT_TIMEOUT_MS)) return Attempt.NotOpened
             browser.send(rappPairingPreamble(rappStreamProfileName()))
             val bootstrap = link.awaitFrame(BOOTSTRAP_TIMEOUT_MS) ?: return Attempt.Refused
             val offer =
@@ -426,8 +465,12 @@ internal class RappPairingSearch(
             port: Int,
         ): String = listOf(instance, host, port.toString()).joinToString(ENDPOINT_KEY_SEPARATOR)
 
-        /** How long a search waits for a phone in pairing mode before reporting none found. */
-        const val INITIAL_DISCOVERY_MS = 10_000L
+        /**
+         * How long a search waits for a phone in pairing mode before
+         * reporting none found or none reachable: RefineID-Apple's discovery
+         * window, so both platforms give up at the same time.
+         */
+        const val INITIAL_DISCOVERY_MS = 15_000L
 
         /** How long one pairing connection may take to connect. */
         const val CONNECT_TIMEOUT_MS = 10_000L

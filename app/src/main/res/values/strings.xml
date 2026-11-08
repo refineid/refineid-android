@@ -56,6 +56,7 @@
     <string name="pairing_code">Pairing code</string>
     <string name="pairing_code_not_accepted">The pairing code was not accepted.</string>
     <string name="no_phone_in_pairing_mode">No phone in pairing mode was found.</string>
+    <string name="phone_unreachable">Could not connect to the phone. Check that the phone and this device are on the same network.</string>
     <string name="pairing_ended_incomplete">Pairing ended before it was completed.</string>
     <string name="phone_forgot_computer">%1$s forgot this computer.</string>
     <string name="hold_card_against_back">Please hold your ID card against the back of the phone.</string>

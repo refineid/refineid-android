@@ -354,7 +354,7 @@ class RappPairingSearchLoopbackTest {
         }
 
     @Test
-    fun onlyStaleRecordsOfAPhoneFindNone() =
+    fun onlyStaleRecordsOfAPhoneAreUnreachable() =
         runBlocking {
             val code = RappPairingCode.generate()
             val first = ServerSocket(0)
@@ -367,7 +367,67 @@ class RappPairingSearchLoopbackTest {
                 withTimeout(SEARCH_TIMEOUT_MS) {
                     search(0, RappMemoryVault(), instances, initialDiscoveryMs = EMPTY_SEARCH_GRACE_MS).search(code)
                 }
-            assertEquals(RappPairingSearch.Outcome.NoneFound, outcome)
+            assertEquals(RappPairingSearch.Outcome.Unreachable, outcome)
+        }
+
+    @Test
+    fun aListenerThatServesNoOfferIsNoPhoneInPairingMode() =
+        runBlocking {
+            val code = RappPairingCode.generate()
+            val server = ServerSocket(0)
+            try {
+                val peerDone =
+                    scope.launch {
+                        // Takes the connection and the preamble, then closes without an offer.
+                        Peer(server.accept()).use { peer -> peer.readFrame() }
+                    }
+                val outcome =
+                    withTimeout(SEARCH_TIMEOUT_MS) {
+                        search(
+                            server.localPort,
+                            RappMemoryVault(),
+                            initialDiscoveryMs = EMPTY_SEARCH_GRACE_MS,
+                        ).search(code)
+                    }
+                assertEquals(RappPairingSearch.Outcome.NoneFound, outcome)
+                withTimeout(SEARCH_TIMEOUT_MS) { peerDone.join() }
+            } finally {
+                server.close()
+            }
+        }
+
+    @Test
+    fun aStaleRecordBesideAListenerWithoutOfferIsNoPhoneInPairingMode() =
+        runBlocking {
+            val code = RappPairingCode.generate()
+            val staleListener = ServerSocket(0)
+            val stalePort = staleListener.localPort
+            val server = ServerSocket(0)
+            staleListener.close()
+            try {
+                val peerDone =
+                    scope.launch {
+                        Peer(server.accept()).use { peer -> peer.readFrame() }
+                    }
+                val instances =
+                    listOf(
+                        Triple(INSTANCE, LOOPBACK_HOST, stalePort),
+                        Triple(INSTANCE, LOOPBACK_HOST, server.localPort),
+                    )
+                val outcome =
+                    withTimeout(SEARCH_TIMEOUT_MS) {
+                        search(
+                            server.localPort,
+                            RappMemoryVault(),
+                            instances,
+                            initialDiscoveryMs = EMPTY_SEARCH_GRACE_MS,
+                        ).search(code)
+                    }
+                assertEquals(RappPairingSearch.Outcome.NoneFound, outcome)
+                withTimeout(SEARCH_TIMEOUT_MS) { peerDone.join() }
+            } finally {
+                server.close()
+            }
         }
 
     @Test
