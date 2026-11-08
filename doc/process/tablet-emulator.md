@@ -72,7 +72,9 @@ Scripts/rapp-tablet-pair.sh [--phone <serial>] [--tablet <serial>]
 
 The phone is the one device on Wi-Fi debugging (see
 [test-devices.md](test-devices.md)) and holds a primed card. The script
-opens Remote Access on the phone and turns Card Remote Access on, reads
+opens Remote Access on the phone (bringing the running app to the front
+rather than restarting it, so the phone keeps PIN 1 and its listener)
+and turns Card Remote Access on, reads
 the offered code from the screen into a variable, opens Remote Access on
 the tablet, turns remote use on, types the code, and waits for the entry
 to close. Progress goes to stdout and the last line is `paired`; it
@@ -95,6 +97,38 @@ of `uiautomator dump` shape the pairing script:
   (`pairingCodeBoxes`) to focus it.
 - The boxes clear their semantics, so they cannot confirm what was
   typed; the outcome (`pairingFailure`, or the boxes gone) does.
+
+## Log in from the tablet's browser
+
+```bash
+Scripts/rapp-tablet-browser-login.sh [--url <https url>]
+```
+
+With the tablet paired, the script opens the in-app browser on the
+tablet, loads the URL (by default a public service that requests a
+client certificate from any issuer) and judges the TLS handshake from
+the debug build's `browser:` traces: the client-certificate request,
+its completion and the signature status. It prints the traces, which
+carry only enum values and counts, and ends with `logged in`. It never
+prints page content, which can carry the certificate subject.
+
+- The card signs on the phone, so it lies on the phone's NFC reader for
+  the whole run. When the phone asks for the card (`RappCardTapMessage`)
+  or for PIN 1 (`rappPinField`), the script says so and waits for the
+  holder. With the card present and PIN 1 held on the phone, the
+  signature goes through without a prompt. Without the card the phone
+  waits and the tablet's signature ends in `ERROR` after a minute.
+- A PIN or CAN field on the tablet fails the run: a remote login never
+  asks the requester for a secret (AGENTS.md RULE #1).
+- The default service does not trust the Finnish card root, so its page
+  reports the chain as unverified while it still receives the card's
+  certificate; the script's verdict is the handshake, not the page.
+
+Keep hands off the emulator while a script drives it. Touches on the
+emulator window can switch the tablet into desktop windowing and bring
+other apps' windows over RefineID, and the scripts' taps then land in
+the wrong window. `Scripts/stop-tablet-emulator.sh` and a fresh start
+restore a known state.
 
 ## Build signing
 

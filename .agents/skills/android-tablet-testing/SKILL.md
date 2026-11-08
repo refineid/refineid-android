@@ -39,8 +39,23 @@ Needs a primed card on the phone. The last line is `paired`, or it
 exits non-zero with the tablet's failure reason. Never run it under
 `bash -x`; xtrace would print the pairing code.
 
-## 4. Drive and check
+## 4. Log in from the browser
 
+```bash
+Scripts/rapp-tablet-browser-login.sh [--url <https url>]
+```
+
+Ends with `logged in` when the card on the phone signed the tablet's TLS
+handshake. The card must lie on the phone's NFC reader. If it prints
+"phone: hold the card to the phone" or "phone: enter PIN 1 on the
+phone", ask the owner to do so; never type a PIN. Do not force-stop the
+phone's app: it drops the held PIN 1. Ask the owner to keep hands off the emulator while
+scripts run.
+
+## 5. Drive and check
+
+- Source the helpers from bash (`bash -c 'source Scripts/adb-ui.sh; ...'`);
+  under zsh `BASH_REMATCH` is empty and taps fail.
 - Write further flows as scripts that source `Scripts/adb-ui.sh`: find
   nodes by test tag (`ui_tap`, `ui_wait`, `ui_has`, `ui_checked`,
   `ui_tags`), read values into variables with `ui_text`, never print

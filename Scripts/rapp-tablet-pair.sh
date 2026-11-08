@@ -43,7 +43,7 @@ phone="${phone:-$(ui_wifi_phone)}"
 tablet="${tablet:-$(ui_emulator)}"
 
 echo "phone: opening pairing"
-ui_launch_refineid "${phone}"
+ui_open_refineid "${phone}"
 ui_tap "${phone}" RappPairingRow
 ui_wait "${phone}" cardRemoteAccessSwitch
 ui_set_switch "${phone}" cardRemoteAccessSwitch true
