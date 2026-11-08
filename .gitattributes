@@ -1,8 +1,6 @@
-# The gates run these through bash and compare these byte for byte, so they
-# keep LF on every host, Windows included.
-*.sh text eol=lf
-.githooks/** text eol=lf
-gradlew text eol=lf
+# Every text file is LF in the repository and in every checkout, Windows
+# included, whatever core.autocrlf says; Git detects binary files itself.
+* text=auto eol=lf
 
-# A Windows batch file keeps the CRLF it is committed with.
-gradlew.bat -text
+# cmd.exe misparses labels and jumps in a batch file with LF endings.
+gradlew.bat text eol=crlf

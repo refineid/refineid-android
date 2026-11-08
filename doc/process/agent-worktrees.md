@@ -51,7 +51,7 @@ resume work or clean up. In particular:
 
 ## Finishing a task
 
-1. Run the quality gates (`./gradlew check`) in the worktree.
+1. Run the quality gates (`Scripts/gradle.sh check`) in the worktree.
 2. Commit on the task branch (subject and body only) and push.
 3. Open one pull request for the branch.
 4. Conduct iterative code review via Muse (`discuss-with-muse start --pr <NUM>`).

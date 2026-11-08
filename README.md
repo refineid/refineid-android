@@ -7,16 +7,22 @@ authentication, qualified PDF signing, and contactless NFC operation.
 
 - Android 13+
 - USB CCID smart-card reader or NFC
-- JDK, Rust (aarch64-linux-android and x86_64-linux-android targets), cargo-ndk, Android SDK/NDK
+- JDK of the version in `gradle/gradle-daemon-jvm.properties`, Rust
+  (aarch64-linux-android and x86_64-linux-android targets), cargo-ndk,
+  Android SDK/NDK
 
 ## Quick start
 
 ```sh
-Scripts/bootstrap-macos.sh   # installs toolchains, sets env, installs git hooks
-./gradlew check              # full quality gates
-./gradlew assembleDebug      # debug APK
-./gradlew installDebug       # deploy to connected device
+Scripts/bootstrap-macos.sh       # installs toolchains, installs git hooks
+Scripts/gradle.sh check          # full quality gates
+Scripts/gradle.sh assembleDebug  # debug APK
+Scripts/install-device.sh        # build, install and launch on the test phone
 ```
+
+`Scripts/gradle.sh` runs the Gradle wrapper on the JDK and Rust toolchain the
+hooks use, whatever the calling shell exports; see
+[`doc/process/build-environment.md`](doc/process/build-environment.md).
 
 Release APK (signed with hardware identity card, PIN 2):
 
@@ -28,12 +34,13 @@ Scripts/build-release-apk.sh
 
 The gates and the hooks run in the bash of Git for Windows; the build starts
 the repository's shell scripts under it. Set up by hand what the macOS
-bootstrap installs: a JDK (Android Studio's `jbr` serves), the SDK platform
+bootstrap installs: a JDK of the version `gradle/gradle-daemon-jvm.properties`
+names, with `JAVA_HOME` pointing at it, the SDK platform
 and the NDK pinned in `app/build.gradle.kts` through `sdkmanager`, the Rust
 Android targets with `rustup target add`, `cargo install cargo-ndk`, and
-ShellCheck (`winget install koalaman.shellcheck`). Shell scripts, patches and
-the provider contract sources check out with LF on every host
-(`.gitattributes`); the Kotlin sources follow `core.autocrlf`.
+ShellCheck (`winget install koalaman.shellcheck`). Every text file checks out
+with LF on every host whatever `core.autocrlf` says, except `gradlew.bat`,
+which `cmd.exe` needs in CRLF (`.gitattributes`).
 
 ### Managing build cache
 
