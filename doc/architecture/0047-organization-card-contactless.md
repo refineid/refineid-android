@@ -36,6 +36,14 @@ on that probe can run on its channels.
   to it.
 - **Only public certificates rest in the store** for this card; PIN 1 is held as
   for any card, in memory, only when its counter read five before the handshake.
+- **A PIN 1 typed before the card named its kind waits for it.** The holder
+  types PIN 1 before the tap, with or without an access number, the card is
+  not yet known as an organization card, or it leaves before the PIN reaches
+  it: the PIN waits in memory, at most as long as a wait for a card
+  (`NfcCardWait.LIMIT_MILLISECONDS`), and opens the organization card once the
+  tap has named its kind and its counter (`TypedOrganizationPin1`). A citizen
+  card, a kept organization card, a counter the floor refuses, a dismissed
+  prompt or a forgotten card zeroes it unsent.
 
 ## Paths
 
@@ -89,3 +97,8 @@ what the card's counter reads.
   access number, an organization card with the certificates Basic PIN 1 read.
   A card that answered and cannot sign ends the wait with its reason
   (`SignTapFailure`), never as no card.
+- UCA-7: a PIN 1 typed for an organization card goes to a card it was not typed
+  for, or waits on after the holder stopped. CC-7: the typed PIN goes only to a
+  card that named itself an organization card and passed the counter rule of
+  CC-2, at most once, within the card wait's limit; a substituted organization
+  card refuses it as under "Identifying the card before PACE".

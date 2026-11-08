@@ -54,11 +54,14 @@ internal interface AuthenticationPreparationBackend {
     /** PIN 1 attempts the ready card allows, read without a VERIFY; null when it cannot be read. */
     suspend fun pin1AttemptsLeft(): Int?
 
-    /** Takes ownership of [pin1] and [outcome]; see [runPin1Verification]. */
+    /**
+     * Takes ownership of [pin1] and [outcome]; see [runPin1Verification].
+     * A wrong PIN's answer carries the count the card reported with it.
+     */
     suspend fun verify(
         pin1: Pin1Submission,
         outcome: Pin1VerificationOutcome,
-    ): Pin1VerificationResult
+    ): Pin1Verification
 
     /**
      * Holds [pin], which the ready card accepted, for the card [retention]
@@ -271,7 +274,8 @@ internal class AuthenticationPreparation(
         attemptsBeforeVerify = attempts
         mutableState.value = AuthenticationPreparationState.Verifying
         answerLost = true
-        val result = verifyHeld(held)
+        val answer = verifyHeld(held)
+        val result = answer.result
         coroutineContext.ensureActive()
         when (result) {
             Pin1VerificationResult.CARD_UNAVAILABLE, Pin1VerificationResult.TRANSPORT_ERROR -> {
@@ -298,8 +302,8 @@ internal class AuthenticationPreparation(
 
             else -> {
                 answerLost = false
-                val attemptsAfter = if (result == Pin1VerificationResult.WRONG_PIN) backend.pin1AttemptsLeft() else null
-                fail(result, attemptsAfter)
+                // A wrong PIN's answer carries the card's count; it is not read again.
+                fail(result, answer.remainingRetries)
             }
         }
         return false
@@ -396,7 +400,7 @@ internal class AuthenticationPreparation(
     }
 
     /** Sends the held PIN once; the copies the verifier takes are zeroed here on every path. */
-    private suspend fun verifyHeld(held: Pin1Submission): Pin1VerificationResult {
+    private suspend fun verifyHeld(held: Pin1Submission): Pin1Verification {
         val candidate = held.copyBytes()
         val submitted = held.copyBytes()
         return try {

@@ -23,8 +23,8 @@ import fi.refineid.android.core.CardConnection
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.Pin1Retention
 import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.Pin1Verification
 import fi.refineid.android.core.Pin1VerificationOutcome
-import fi.refineid.android.core.Pin1VerificationResult
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.usb.CardPresence
@@ -153,7 +153,7 @@ internal class AuthenticationPreparationDialogTest {
         override suspend fun verify(
             pin1: Pin1Submission,
             outcome: Pin1VerificationOutcome,
-        ): Pin1VerificationResult = error("no card operation expected")
+        ): Pin1Verification = error("no card operation expected")
 
         override suspend fun retainVerified(
             pin: ByteArray,

@@ -131,6 +131,9 @@ internal class NfcReaderController(
 
     private val isOpeningSession = AtomicBoolean(false)
 
+    /** PIN 1 typed for an organization card not in the field; it opens the card at the next tap. */
+    private val typedOrganizationPin1 = TypedOrganizationPin1(SystemClock::elapsedRealtime)
+
     /** Remote or local operations currently waiting on the card. */
     private val activeWaits = AtomicInteger(0)
 
@@ -266,6 +269,7 @@ internal class NfcReaderController(
 
     fun stop() {
         probeGeneration += 1
+        typedOrganizationPin1.drop()
         latestIsoDep = null
         tapToSign.cancel()
         probeExecutor.execute(::closeActiveSession)
@@ -361,16 +365,20 @@ internal class NfcReaderController(
     /** The holder's PIN 1 for an organization card the phone has not read yet. */
     private fun connectOrganization(pin1: Pin1Submission) {
         val resting = latestIsoDep
-        if (resting == null || pinCache.isRejected(pin1)) {
-            val rejected = resting != null
+        if (pinCache.isRejected(pin1)) {
             pin1.close()
-            if (rejected) {
+            if (resting != null) {
                 organizationPin1Answer = Pin1Verification(Pin1VerificationResult.WRONG_PIN)
                 publish(latestSnapshot)
             } else {
-                refreshReaderMode(forceCycle = true, publishWaiting = false)
-                publish(NfcReaderSnapshot(status = NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true))
+                awaitTap()
             }
+            return
+        }
+        if (resting == null) {
+            // The card left the field: the PIN waits for its next tap.
+            typedOrganizationPin1.hold(pin1)
+            awaitTap()
             return
         }
         if (!isOpeningSession.compareAndSet(false, true)) {
@@ -387,6 +395,12 @@ internal class NfcReaderController(
         }
     }
 
+    /** Asks for the card to be tapped again. */
+    private fun awaitTap() {
+        refreshReaderMode(forceCycle = true, publishWaiting = false)
+        publish(NfcReaderSnapshot(status = NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true))
+    }
+
     /** Worker-thread confined; PACE with PIN 1 and the reads through the channel. */
     private fun openOrganization(
         pin1: Pin1Submission,
@@ -395,8 +409,15 @@ internal class NfcReaderController(
     ) {
         try {
             closeActiveSession()
-            if (generation != probeGeneration || !ensureIsoDepConnected(isoDep)) {
+            if (generation != probeGeneration) {
                 pin1.close()
+                AppTrace.nfcSessionOpenFailed()
+                publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true)
+                return
+            }
+            if (!ensureIsoDepConnected(isoDep)) {
+                // The card left before the PIN reached it: the PIN waits for its next tap.
+                typedOrganizationPin1.hold(pin1)
                 AppTrace.nfcSessionOpenFailed()
                 publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true)
                 return
@@ -541,6 +562,7 @@ internal class NfcReaderController(
         recognizedKind = NfcCardKind.ORGANIZATION
         val stored = organizationSessionFromStore(isoDep)
         if (stored != null) {
+            typedOrganizationPin1.drop()
             activeSession?.close()
             activeSession = stored
             currentAuthCertDer = primedCanStore.readAuthCertificateDer()
@@ -552,6 +574,7 @@ internal class NfcReaderController(
         val state = (counter as? NativePin1PreflightResult.Success)?.preflight?.state
         organizationPin1Attempts = state?.attemptsLeft()
         if (organizationPin1Refused(organizationPin1Attempts)) {
+            typedOrganizationPin1.drop()
             activeSession?.close()
             activeSession =
                 OrganizationContactlessSession(
@@ -562,9 +585,18 @@ internal class NfcReaderController(
                     caCustody = caCustody(),
                 )
             publishAsync(generation, NfcReaderStatus.ACTIVATION_REQUIRED)
-        } else {
-            publishAsync(generation, NfcReaderStatus.CARD_RECOGNIZED)
+            return
         }
+        val typed = typedOrganizationPin1.take()
+        if (typed == null || pinCache.isRejected(typed)) {
+            typed?.close()
+            publishAsync(generation, NfcReaderStatus.CARD_RECOGNIZED)
+            return
+        }
+        // The holder typed PIN 1 before this tap; it opens the card now.
+        isOpeningSession.set(true)
+        publishAsync(generation, NfcReaderStatus.CONNECTING)
+        openOrganization(typed, generation, isoDep)
     }
 
     /** Worker-thread confined; the session for the organization card this phone keeps, or null. */
@@ -695,7 +727,9 @@ internal class NfcReaderController(
         if (resting == null || !resting.isConnected) {
             latestIsoDep = null
             inMemoryCanBytes?.fill(0)
-            pin1?.close()
+            // A PIN 1 typed before the tap waits for the card: it opens an
+            // organization card once the card names its kind.
+            pin1?.let(typedOrganizationPin1::hold)
             probeGeneration += 1
             refreshReaderMode(forceCycle = true, publishWaiting = false)
             // The holder asked to connect with no tag in the field:
@@ -722,9 +756,10 @@ internal class NfcReaderController(
                 val canBytes = inMemoryCanBytes ?: CanSessionStore.canBytes() ?: primedCanStore.read()
                 if (canBytes == null) {
                     isOpeningSession.set(false)
-                    pin1?.close()
+                    pin1?.let(typedOrganizationPin1::hold)
                     // A card with no access number, or one not read yet, says
-                    // what it needs when it answers.
+                    // what it needs when it answers; a PIN 1 typed for it
+                    // opens an organization card.
                     if (ensureIsoDepConnected(resting)) {
                         probe(resting, generation)
                     } else {
@@ -956,6 +991,7 @@ internal class NfcReaderController(
                 organizationRecognized(isoDep, generation)
                 return
             }
+            typedOrganizationPin1.drop()
         } else {
             try {
                 isoDep.close()
@@ -1005,6 +1041,7 @@ internal class NfcReaderController(
     ) {
         CanSessionStore.remember(String(canBytes, Charsets.US_ASCII))
         recognizedKind = NfcCardKind.PERSONAL
+        typedOrganizationPin1.drop()
         val (cardDetails, holderName) = extractCardDetails(opened)
         if (holderName != null) {
             rememberedHolderName = holderName
@@ -1052,6 +1089,7 @@ internal class NfcReaderController(
     ) {
         CanSessionStore.remember(String(canBytes, Charsets.US_ASCII))
         pin1?.close()
+        typedOrganizationPin1.drop()
         // PACE proved the access number against this card, so it is kept
         // from here on, activated or not: the holder is not asked for it
         // again at the activation tap, and a mismatch on a later tap
@@ -1088,7 +1126,13 @@ internal class NfcReaderController(
         organizationCard: Boolean,
     ) {
         currentAuthCertDer = null
-        pin1?.close()
+        if (organizationCard) {
+            // The card named itself an organization card: the PIN 1 typed
+            // with the access number opens it.
+            pin1?.let(typedOrganizationPin1::hold)
+        } else {
+            pin1?.close()
+        }
         if (status == NfcReaderStatus.WRONG_CAN) {
             recognizedKind = NfcCardKind.PERSONAL
             CanSessionStore.drop()
@@ -1249,6 +1293,7 @@ internal class NfcReaderController(
         recognizedKind = null
         organizationPin1Attempts = null
         organizationPin1Answer = null
+        typedOrganizationPin1.drop()
         isForgetting = true
         probeGeneration += 1
         try {
@@ -1276,6 +1321,7 @@ internal class NfcReaderController(
     fun forgetPin1() {
         checkMainThread()
         pinCache.clear()
+        typedOrganizationPin1.drop()
     }
 
     /**
@@ -1297,6 +1343,7 @@ internal class NfcReaderController(
 
     fun cancelAwaitingCard() {
         checkMainThread()
+        typedOrganizationPin1.drop()
         if (latestSnapshot.awaitingCard) {
             publish(latestSnapshot.copy(awaitingCard = false))
         }

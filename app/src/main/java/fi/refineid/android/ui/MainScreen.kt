@@ -245,36 +245,14 @@ internal fun MainScreen(
             destination
         }
 
-    // The card management screen's title and form depend on what the card
-    // is, so a readable card is asked first and the screen already shown
-    // stays until the card has answered; a screen already on display keeps
-    // itself while it asks.
+    // The card management screen opens at once and asks the card; its
+    // title, counters and lengths fill in as the card answers.
     val managementCardReady =
         usbCardReady || nfcSnapshot.status == NfcReaderStatus.CARD_READY || isActivationRequired
     val managementService =
         if (usbCardReady || usbActivationRequired) cardManagementService else nfcCardManagementService
     val healthReading =
         remember(managementService, managementCardReady, isActivationRequired) { CardHealthReading() }
-    var cardManagementOnScreen by remember { mutableStateOf(false) }
-    val shownDestination =
-        if (wantedDestination == MainDestination.CARD_MANAGEMENT &&
-            !cardManagementOnScreen &&
-            cardManagementAwaitsReading(managementCardReady, healthReading)
-        ) {
-            MainDestination.HOME
-        } else {
-            wantedDestination
-        }
-    SideEffect { cardManagementOnScreen = shownDestination == MainDestination.CARD_MANAGEMENT }
-    LaunchedEffect(wantedDestination, healthReading, managementService) {
-        if (wantedDestination == MainDestination.CARD_MANAGEMENT &&
-            !cardManagementOnScreen &&
-            cardManagementAwaitsReading(managementCardReady, healthReading) &&
-            !healthReading.isProbing
-        ) {
-            managementService?.let(healthReading::probe)
-        }
-    }
 
     // Signing follows the one-transport rule: a wired reader signs on
     // its open session, while a contactless card is never assumed
@@ -383,7 +361,7 @@ internal fun MainScreen(
             }
         }
 
-    BackHandler(enabled = shownDestination != MainDestination.HOME) {
+    BackHandler(enabled = wantedDestination != MainDestination.HOME) {
         rappPairingModel?.reset()
         validationUri = null
         if (isActivationRequired) activationDismissed = true
@@ -504,7 +482,7 @@ internal fun MainScreen(
         !isActivationRequired &&
             (usbCardReady || effectiveHolderName != null || remoteSigningAvailable)
 
-    when (shownDestination) {
+    when (wantedDestination) {
         MainDestination.HOME -> {
             HomeScreen(
                 signingAvailable = signingAvailable,
@@ -673,9 +651,8 @@ internal fun MainScreen(
         }
 
         MainDestination.CARD_MANAGEMENT -> {
-            // The title already shown stays while the card is asked again;
-            // before any answer there is none.
-            val decidedTitle = cardManagementTitle(healthReading.health)
+            // The title already shown stays while the card is asked again.
+            val decidedTitle = cardManagementTitle(healthReading.health, isActivationRequired)
             var shownTitle by remember { mutableStateOf(decidedTitle) }
             SideEffect { if (decidedTitle != null) shownTitle = decidedTitle }
             SubScreen(

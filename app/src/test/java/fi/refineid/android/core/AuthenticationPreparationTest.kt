@@ -411,6 +411,21 @@ internal class AuthenticationPreparationTest {
         }
 
     @Test
+    fun aWrongPinShowsTheCountTheCardAnsweredWithoutAnotherRead() =
+        runBlocking {
+            val backend = Backend().apply { result = Pin1VerificationResult.WRONG_PIN }
+            val preparation = AuthenticationPreparation(this, backend, AuthenticationPinCache())
+            preparation.start(AuthenticationPurpose.SIGN_IN) {}
+            preparation.submit(null, syntheticPin())
+            val failed =
+                preparation.state.first { it is AuthenticationPreparationState.Failed }
+                    as AuthenticationPreparationState.Failed
+            assertEquals(Pin1VerificationResult.WRONG_PIN, failed.result)
+            assertEquals(SYNTHETIC_COUNT, failed.attemptsLeft)
+            assertEquals(1, backend.attemptsReads)
+        }
+
+    @Test
     fun aRejectedPinIsAskedAgainOnRetry() =
         runBlocking {
             val backend = Backend().apply { result = Pin1VerificationResult.WRONG_PIN }
@@ -771,6 +786,9 @@ internal class AuthenticationPreparationTest {
         /** The card answers READY only to a wait that offers the access number. */
         var requiresCan = false
 
+        /** The count the card reports with a wrong PIN. */
+        var wrongPinCount = SYNTHETIC_COUNT
+
         /** Attempts the card allows when no scripted answer is queued. */
         var attemptsLeft: Int? = FINEID_PIN_TRY_LIMIT
 
@@ -819,15 +837,17 @@ internal class AuthenticationPreparationTest {
         override suspend fun verify(
             pin1: Pin1Submission,
             outcome: Pin1VerificationOutcome,
-        ): Pin1VerificationResult =
+        ): Pin1Verification =
             try {
                 runPin1Verification(verifyContext, pin1, outcome) { submission ->
                     submission.close()
                     verifications++
                     cardCommand.complete(Unit)
-                    cardAnswer?.get(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                        ?: verifyAnswers.removeFirstOrNull()
-                        ?: result
+                    val answer =
+                        cardAnswer?.get(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                            ?: verifyAnswers.removeFirstOrNull()
+                            ?: result
+                    Pin1Verification(answer, if (answer == Pin1VerificationResult.WRONG_PIN) wrongPinCount else null)
                 }
             } finally {
                 verifyReturned.complete(Unit)

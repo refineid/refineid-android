@@ -134,31 +134,30 @@ internal class LocalAuthenticationPreparationBackend(
     override suspend fun verify(
         pin1: Pin1Submission,
         outcome: Pin1VerificationOutcome,
-    ): Pin1VerificationResult {
+    ): Pin1Verification {
         val expected = stamp
-        val result =
+        val answer =
             runPin1Verification(Dispatchers.IO, pin1, outcome) { submission ->
                 when {
                     expected == null || expected != currentStamp() -> {
                         submission.close()
-                        Pin1VerificationResult.CARD_UNAVAILABLE
+                        Pin1Verification(Pin1VerificationResult.CARD_UNAVAILABLE)
                     }
 
                     expected.wired -> {
-                        app.readerController.verifyAuthenticationPin(submission, expected.session).result
+                        app.readerController.verifyAuthenticationPin(submission, expected.session)
                     }
 
                     else -> {
                         app.nfcReaderController.authenticationCardService
                             .verifyAuthenticationPin(submission, expected.session)
-                            .result
                     }
                 }
             }
-        return if (result == Pin1VerificationResult.VERIFIED && expected != currentStamp()) {
-            Pin1VerificationResult.CARD_UNAVAILABLE
+        return if (answer.result == Pin1VerificationResult.VERIFIED && expected != currentStamp()) {
+            Pin1Verification(Pin1VerificationResult.CARD_UNAVAILABLE)
         } else {
-            result
+            answer
         }
     }
 
