@@ -137,4 +137,10 @@ A code from the issuer can still be tried: the card decides and spends nothing.<
         <item quantity="one">%1$s requests %2$d signature.</item>
         <item quantity="other">%1$s requests %2$d signatures.</item>
     </plurals>
+    <string name="browser_go">Go</string>
+    <string name="browser_more">More</string>
+    <string name="browser_copy_link">Copy link</string>
+    <string name="browser_share">Share</string>
+    <string name="browser_open_external">Open in browser</string>
+    <string name="browser_link">Link</string>
 </resources>
