@@ -6,6 +6,7 @@ import fi.refineid.android.browser.BrowserSignatureStatus
 import fi.refineid.android.core.AtrValidation
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
+import fi.refineid.android.core.CardCaReadAnswer
 import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.NativeAuthenticationSignResult
@@ -26,6 +27,8 @@ import fi.refineid.android.document.QualifiedPdfPreparationResult
 import fi.refineid.android.document.QualifiedPdfSigningResult
 import fi.refineid.android.network.SigningTimestampAttemptOutcome
 import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.nfc.SignTapClaim
+import fi.refineid.android.nfc.SignTapFailure
 import fi.refineid.android.rapp.RappBleGattEvent
 import fi.refineid.android.rapp.RappBleGattProfile
 import fi.refineid.android.rapp.RappBleLinkFailure
@@ -328,6 +331,17 @@ internal object AppTrace {
         }
     }
 
+    /** The card's answer to each CA certificate read on the PIN 2 channel: step and status word. */
+    fun cardCaReadAnswered(answers: List<CardCaReadAnswer>) {
+        answers.forEach { answer ->
+            debug(
+                "card-ca:read file=" + answer.file +
+                    " step=" + answer.step +
+                    " sw=" + (answer.statusWord?.let { word -> "%04X".format(java.util.Locale.ROOT, word) } ?: "none"),
+            )
+        }
+    }
+
     fun qualifiedSignatureVerificationCompleted(isVerified: Boolean) {
         debug("qualified-signature:local-verification verified=" + isVerified)
     }
@@ -405,6 +419,11 @@ internal object AppTrace {
             when (result) {
                 is QualifiedPdfArchivalResult.Success -> {
                     "success document-length=" + result.document.length
+                }
+
+                is QualifiedPdfArchivalResult.BelowLongTerm -> {
+                    "below-long-term level=" + result.level + " kind=" + result.kind +
+                        " document-length=" + result.document.length
                 }
 
                 is QualifiedPdfArchivalResult.Failure -> {
@@ -949,6 +968,15 @@ internal object AppTrace {
 
     fun nfcTagAdopted() {
         debug("nfc:tag-adopted")
+    }
+
+    fun nfcSignTapClaimed(claim: SignTapClaim) {
+        debug("nfc:sign-tap claim=" + claim)
+    }
+
+    fun nfcSignTapFailed(failure: SignTapFailure) {
+        debug("nfc:sign-tap-failed cause=" + failure)
+        DevErrorLog.report("nfc:sign-tap-failed", failure.name)
     }
 
     fun nfcPrimedOpenStarted() {

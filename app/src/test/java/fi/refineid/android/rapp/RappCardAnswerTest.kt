@@ -55,13 +55,27 @@ class RappCardAnswerTest {
     }
 
     @Test
-    fun aRefusalBeforeAnyVerificationAndABlockedPinEndAtTheFloor() {
-        for (failure in listOf(AuthenticationSignFailure.SAFETY_REFUSED, AuthenticationSignFailure.PIN_LOCKED)) {
-            assertEquals(RappCardFailure.RETRY_FLOOR, ends(RappCardAnswer.of(failure, null)))
-        }
-        for (failure in listOf(QualifiedSignFailure.SAFETY_REFUSED, QualifiedSignFailure.PIN_LOCKED)) {
-            assertEquals(RappCardFailure.RETRY_FLOOR, ends(RappCardAnswer.of(failure, null)))
-        }
+    fun aRefusalBeforeAnyVerificationEndsAtTheFloor() {
+        assertEquals(
+            RappCardFailure.RETRY_FLOOR,
+            ends(RappCardAnswer.of(AuthenticationSignFailure.SAFETY_REFUSED, null)),
+        )
+        assertEquals(
+            RappCardFailure.RETRY_FLOOR,
+            ends(RappCardAnswer.of(QualifiedSignFailure.SAFETY_REFUSED, null)),
+        )
+    }
+
+    @Test
+    fun aBlockedAnswerNamesThePinItBlocks() {
+        assertEquals(
+            RappCardFailure.PIN1_BLOCKED,
+            ends(RappCardAnswer.of(AuthenticationSignFailure.PIN_LOCKED, null)),
+        )
+        assertEquals(
+            RappCardFailure.PIN2_BLOCKED,
+            ends(RappCardAnswer.of(QualifiedSignFailure.PIN_LOCKED, null)),
+        )
     }
 
     @Test

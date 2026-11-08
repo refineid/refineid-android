@@ -5,7 +5,6 @@
     <string name="signing_progress">Allekirjoitetaan %1$d/%2$d…</string>
     <string name="finalizing_progress">Viimeistellään %1$d/%2$d…</string>
     <string name="saving_progress">Tallennetaan %1$d/%2$d…</string>
-    <string name="signature_pin2">Allekirjoitustunnusluku (PIN 2)</string>
     <string name="sign_pdf_single">Allekirjoita asiakirja (PDF)</string>
     <string name="sign_pdf_multiple">Allekirjoita asiakirjat (PDF)</string>
     <string name="sign_container">Allekirjoita salkku (ASiC-E)</string>
@@ -14,6 +13,8 @@
     <string name="hold_card">Pidä henkilökorttia puhelimen lukijaa vasten</string>
     <string name="finalizing_signature">Viimeistellään allekirjoitusta…</string>
     <string name="no_card">Luettavaa henkilökorttia ei löytynyt</string>
+    <string name="card_left_before_read">Kortti poistui ennen kuin se ehdittiin lukea</string>
+    <string name="organization_card_read_first">Lue organisaatiokortti ensin perustunnusluvulla&#160;1</string>
     <string name="signed_cert_revoked">Allekirjoitusvarmenne peruutettu — ei kelvollista allekirjoitusta</string>
     <string name="signed_at">allekirjoitettu %1$s</string>
     <string name="document_valid">Asiakirja ehjä — sulkulistaa ei tarkastettu</string>

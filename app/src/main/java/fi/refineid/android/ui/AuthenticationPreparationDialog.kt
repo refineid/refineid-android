@@ -3,13 +3,10 @@ package fi.refineid.android.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -19,7 +16,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
@@ -27,8 +23,10 @@ import fi.refineid.android.R
 import fi.refineid.android.core.AuthenticationPreparation
 import fi.refineid.android.core.AuthenticationPreparationState
 import fi.refineid.android.core.AuthenticationPurpose
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationResult
+import fi.refineid.android.nfc.NfcCardProblem
 import fi.refineid.android.nfc.NfcReaderStatus
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
@@ -37,11 +35,13 @@ internal fun AuthenticationPreparationDialog(
     preparation: AuthenticationPreparation,
     state: AuthenticationPreparationState,
     nfcStatus: NfcReaderStatus? = null,
+    nfcProblem: NfcCardProblem? = null,
+    nfcCardKind: NfcCardKind? = null,
 ) {
     val title = purposeTitle(preparation.purpose.collectAsState().value)
     when (state) {
         is AuthenticationPreparationState.Credentials -> {
-            PreparationCredentialsDialog(preparation, state, title)
+            PreparationCredentialsDialog(preparation, state, title, nfcCardKind)
         }
 
         is AuthenticationPreparationState.Failed -> {
@@ -50,7 +50,12 @@ internal fun AuthenticationPreparationDialog(
                 onDismissRequest = preparation::cancel,
                 properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
                 title = { Text(stringResource(title)) },
-                text = { Text(stringResource(message)) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(message))
+                        state.attemptsLeft?.let { Text(stringResource(R.string.pin_attempts_left, it)) }
+                    }
+                },
                 confirmButton = { TextButton(onClick = preparation::retry) { Text(stringResource(R.string.retry)) } },
                 dismissButton = { TextButton(onClick = preparation::cancel) { Text(stringResource(R.string.cancel)) } },
             )
@@ -61,7 +66,7 @@ internal fun AuthenticationPreparationDialog(
                 onDismissRequest = preparation::cancel,
                 properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
                 title = { Text(stringResource(title)) },
-                text = { Text(stringResource(cardMessage(state, nfcStatus))) },
+                text = { Text(stringResource(nfcProblem?.let(::cardProblemMessage) ?: cardMessage(state, nfcStatus))) },
                 confirmButton = { TextButton(onClick = preparation::cancel) { Text(stringResource(R.string.cancel)) } },
             )
         }
@@ -84,8 +89,8 @@ private fun failureMessage(result: Pin1VerificationResult): Int? =
         Pin1VerificationResult.TRANSPORT_ERROR -> R.string.card_contact_lost
         Pin1VerificationResult.PACE_REJECTED -> R.string.wrong_can
         Pin1VerificationResult.INVALID_PIN -> R.string.pin_invalid
-        Pin1VerificationResult.WRONG_PIN -> R.string.wrong_pin
-        Pin1VerificationResult.PIN_LOCKED -> R.string.pin_locked
+        Pin1VerificationResult.WRONG_PIN -> R.string.wrong_pin1
+        Pin1VerificationResult.PIN_LOCKED -> R.string.pin1_blocked
         Pin1VerificationResult.SAFETY_REFUSED -> R.string.refuse_low_attempts_pin
         Pin1VerificationResult.VERIFICATION_REJECTED -> R.string.pin_refused
         Pin1VerificationResult.BRIDGE_ERROR -> R.string.card_read_failed
@@ -122,6 +127,7 @@ private fun PreparationCredentialsDialog(
     preparation: AuthenticationPreparation,
     state: AuthenticationPreparationState.Credentials,
     title: Int,
+    nfcCardKind: NfcCardKind?,
 ) {
     val can = remember { TextFieldState() }
     val pin = remember { TextFieldState() }
@@ -131,8 +137,13 @@ private fun PreparationCredentialsDialog(
             pin.clearText()
         }
     }
-    val canReady = !state.needsCan || canEntryReady(can.text)
-    val pinReady = !state.needsPin || Pin1Submission.isComplete(pin.text)
+    // The access number is asked before the tap; an organization card that
+    // answers meanwhile has none, and PIN 1 opens it.
+    val organizationCard = nfcCardKind == NfcCardKind.ORGANIZATION
+    val asksCan = state.needsCan && !organizationCard
+    val asksPin = state.needsPin || (state.needsCan && organizationCard)
+    val canReady = !asksCan || canEntryReady(can.text)
+    val pinReady = !asksPin || Pin1Submission.isComplete(pin.text)
     AlertDialog(
         onDismissRequest = preparation::cancel,
         modifier = Modifier.testTag("AuthenticationPreparationDialog"),
@@ -140,21 +151,20 @@ private fun PreparationCredentialsDialog(
         title = { Text(stringResource(title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (state.needsCan) {
+                if (asksCan) {
                     CanField(
                         state = can,
                         testTag = "AuthenticationPreparationCan",
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                if (state.needsPin) {
-                    SecureTextField(
+                if (asksPin) {
+                    SecretField(
                         state = pin,
-                        label = { Text(stringResource(R.string.pin1)) },
+                        testTag = "AuthenticationPreparationPin1",
+                        modifier = Modifier.fillMaxWidth(),
+                        label = stringResource(R.string.pin1),
                         inputTransformation = Pin1InputTransformation,
-                        textObfuscationMode = TextObfuscationMode.Hidden,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        modifier = Modifier.fillMaxWidth().testTag("AuthenticationPreparationPin1"),
                     )
                     state.attemptsLeft?.let { Text(stringResource(R.string.pin_attempts_left, it)) }
                 }
@@ -165,8 +175,8 @@ private fun PreparationCredentialsDialog(
                 enabled = canReady && pinReady,
                 modifier = Modifier.testTag("AuthenticationPreparationSubmit"),
                 onClick = {
-                    val submittedCan = if (state.needsCan) canEntrySubmission(can.text) else null
-                    val submittedPin = if (state.needsPin) Pin1Submission.from(pin.text) else null
+                    val submittedCan = if (asksCan) canEntrySubmission(can.text) else null
+                    val submittedPin = if (asksPin) Pin1Submission.from(pin.text) else null
                     can.clearText()
                     pin.clearText()
                     preparation.submit(submittedCan, submittedPin)

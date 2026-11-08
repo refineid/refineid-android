@@ -25,7 +25,7 @@ internal class NfcQualifiedCardService(
     private val mainHandler: Handler,
     private val isReady: () -> Boolean,
     private val currentGeneration: () -> Int,
-    private val activeSession: () -> ContactlessSession?,
+    private val activeSession: () -> ContactlessCardSession?,
 ) : QualifiedCardService {
     override fun requestQualifiedCertificate(
         onResult: (NativeCertificateReadResult<NativeQualifiedCertificate>) -> Unit,
@@ -149,7 +149,7 @@ internal class NfcQualifiedCardService(
         input: ByteArray,
         expectedCertificate: NativeQualifiedCertificate,
         onResult: (QualifiedSignResult) -> Unit,
-        signer: (ContactlessSession, NativeQualifiedCertificate, ByteArray) -> QualifiedSignResult,
+        signer: (ContactlessCardSession, NativeQualifiedCertificate, ByteArray) -> QualifiedSignResult,
     ) {
         if (!isReady()) {
             pin2.close()

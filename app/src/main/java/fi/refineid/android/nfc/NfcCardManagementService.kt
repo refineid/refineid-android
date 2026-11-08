@@ -17,7 +17,7 @@ internal class NfcCardManagementService(
     private val mainHandler: Handler,
     private val isReady: () -> Boolean,
     private val currentGeneration: () -> Int,
-    private val activeSession: () -> ContactlessSession?,
+    private val activeSession: () -> ContactlessCardSession?,
 ) : CardManagementService {
     override fun probeCredentialHealth(onResult: (CardManagementResult<CredentialHealth>) -> Unit) {
         if (!isReady()) {

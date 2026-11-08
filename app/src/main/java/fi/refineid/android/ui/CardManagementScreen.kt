@@ -20,10 +20,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -36,10 +34,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -52,11 +48,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import fi.refineid.android.R
 import fi.refineid.android.core.ActivationReport
@@ -70,14 +64,11 @@ import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativePin1State
 import fi.refineid.android.core.NativePin2State
-
-private enum class ManagementTask {
-    CHANGE_PIN1,
-    CHANGE_PIN2,
-    RESET_PIN1,
-    RESET_PIN2,
-    ACTIVATE_CARD,
-}
+import fi.refineid.android.core.NfcCardKind
+import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.nfc.NfcCardWait
+import fi.refineid.android.nfc.NfcReaderSnapshot
+import fi.refineid.android.nfc.NfcReaderStatus
 
 private data class OutcomeNotice(
     val resId: Int,
@@ -93,28 +84,13 @@ private fun probeFailureNotice(kind: CardManagementFailure): OutcomeNotice =
         },
     )
 
-/**
- * The task a card's answer selects: activation while it awaits activation,
- * the reset of a locked PIN, otherwise the task already chosen.
- */
-private fun taskAfterAnswer(
-    health: CredentialHealth?,
-    current: ManagementTask,
-): ManagementTask =
-    when {
-        health == null -> current
-        health.activationNeeds.any -> ManagementTask.ACTIVATE_CARD
-        health.pin1State is NativePin1State.Locked -> ManagementTask.RESET_PIN1
-        health.pin2State is NativePin2State.Locked -> ManagementTask.RESET_PIN2
-        current == ManagementTask.ACTIVATE_CARD -> ManagementTask.CHANGE_PIN1
-        else -> current
-    }
-
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 internal fun CardManagementScreen(
     cardManagementService: CardManagementService?,
     onConnectNfc: ((CanSubmission) -> Unit)? = null,
+    nfcSnapshot: NfcReaderSnapshot? = null,
+    onOpenOrganization: (Pin1Submission) -> Unit = { it.close() },
     isCardReady: Boolean = false,
     pinCache: fi.refineid.android.core.AuthenticationPinCache? = null,
     onPin1Changed: (() -> Unit)? = null,
@@ -269,7 +245,7 @@ internal fun CardManagementScreen(
             }
 
             selectedTask == ManagementTask.CHANGE_PIN1 && pin1Locked -> {
-                stringResource(R.string.recovery_guidance_pin1) to BannerTone.INFO
+                stringResource(R.string.pin1_blocked) to BannerTone.INFO
             }
 
             selectedTask == ManagementTask.CHANGE_PIN1 && pin1Low -> {
@@ -277,11 +253,16 @@ internal fun CardManagementScreen(
             }
 
             selectedTask == ManagementTask.CHANGE_PIN1 && pin1Warning -> {
-                stringResource(R.string.spent_attempts_notice, "PIN 1", pin1Attempts ?: 0, 5) to BannerTone.WARNING
+                stringResource(
+                    R.string.spent_attempts_notice,
+                    stringResource(R.string.pin1),
+                    pin1Attempts ?: 0,
+                    5,
+                ) to BannerTone.WARNING
             }
 
             selectedTask == ManagementTask.CHANGE_PIN2 && pin2Locked -> {
-                stringResource(R.string.recovery_guidance_pin2) to BannerTone.INFO
+                stringResource(R.string.pin2_blocked) to BannerTone.INFO
             }
 
             selectedTask == ManagementTask.CHANGE_PIN2 && pin2Low -> {
@@ -289,7 +270,12 @@ internal fun CardManagementScreen(
             }
 
             selectedTask == ManagementTask.CHANGE_PIN2 && pin2Warning -> {
-                stringResource(R.string.spent_attempts_notice, "PIN 2", pin2Attempts ?: 0, 5) to BannerTone.WARNING
+                stringResource(
+                    R.string.spent_attempts_notice,
+                    stringResource(R.string.pin2),
+                    pin2Attempts ?: 0,
+                    5,
+                ) to BannerTone.WARNING
             }
 
             (selectedTask == ManagementTask.RESET_PIN1 || selectedTask == ManagementTask.RESET_PIN2) && pukLow -> {
@@ -301,11 +287,11 @@ internal fun CardManagementScreen(
             }
 
             selectedTask == ManagementTask.RESET_PIN1 && pin1Locked -> {
-                stringResource(R.string.recovery_guidance_pin1) to BannerTone.INFO
+                stringResource(R.string.pin1_blocked) to BannerTone.INFO
             }
 
             selectedTask == ManagementTask.RESET_PIN2 && pin2Locked -> {
-                stringResource(R.string.recovery_guidance_pin2) to BannerTone.INFO
+                stringResource(R.string.pin2_blocked) to BannerTone.INFO
             }
 
             else -> {
@@ -313,8 +299,12 @@ internal fun CardManagementScreen(
             }
         }
 
+    // Nothing goes to a readable card before it has answered with its
+    // counters, so the retry floor above judges what the card said.
+    val awaitingAnswer = isCardReady && health == null
     val canExecute =
-        !isRefusedByPolicy &&
+        !awaitingAnswer &&
+            !isRefusedByPolicy &&
             when (selectedTask) {
                 ManagementTask.CHANGE_PIN1, ManagementTask.CHANGE_PIN2 -> {
                     currentPinValid && newPinValid && confirmationValid &&
@@ -333,6 +323,9 @@ internal fun CardManagementScreen(
                 }
             }
 
+    val pin1Name = stringResource(R.string.pin1)
+    val pin2Name = stringResource(R.string.pin2)
+
     fun executeOperation() {
         if (!canExecute || cardManagementService == null) return
         isOperating = true
@@ -342,8 +335,9 @@ internal fun CardManagementScreen(
             ManagementTask.CHANGE_PIN1, ManagementTask.CHANGE_PIN2 -> {
                 val curBytes = currentPin.toByteArray(Charsets.US_ASCII)
                 val newBytes = newPin.toByteArray(Charsets.US_ASCII)
-                val isPin1 = selectedTask == ManagementTask.CHANGE_PIN1
-                val pinName = if (isPin1) "PIN 1" else "PIN 2"
+                val task = selectedTask
+                val isPin1 = task == ManagementTask.CHANGE_PIN1
+                val pinName = if (isPin1) pin1Name else pin2Name
                 if (isPin1) {
                     pinCache?.clear()
                     onPin1Changed?.invoke()
@@ -361,7 +355,7 @@ internal fun CardManagementScreen(
                                     onPin1Changed?.invoke()
                                 }
                             } else {
-                                outcomeNotice = OutcomeNotice(R.string.error)
+                                outcomeNotice = OutcomeNotice(changeRefusalNotice(result.value, task))
                                 outcomeIsError = true
                             }
                             probe()
@@ -391,7 +385,7 @@ internal fun CardManagementScreen(
                 val pukBytes = puk.toByteArray(Charsets.US_ASCII)
                 val newBytes = newPin.toByteArray(Charsets.US_ASCII)
                 val isPin1 = selectedTask == ManagementTask.RESET_PIN1
-                val pinName = if (isPin1) "PIN 1" else "PIN 2"
+                val pinName = if (isPin1) pin1Name else pin2Name
                 if (isPin1) {
                     pinCache?.clear()
                     onPin1Changed?.invoke()
@@ -409,7 +403,14 @@ internal fun CardManagementScreen(
                                     onPin1Changed?.invoke()
                                 }
                             } else {
-                                outcomeNotice = OutcomeNotice(R.string.error)
+                                outcomeNotice =
+                                    OutcomeNotice(
+                                        if (result.value is ManageOutcome.Locked) {
+                                            R.string.puk_reported_blocked
+                                        } else {
+                                            R.string.error
+                                        },
+                                    )
                                 outcomeIsError = true
                             }
                             probe()
@@ -497,27 +498,49 @@ internal fun CardManagementScreen(
                                 .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        val canReady = canEntryReady(canState.text)
-                        CanField(
-                            state = canState,
-                            testTag = "managementCardAccessNumber",
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Button(
-                            onClick = {
-                                canEntrySubmission(canState.text)?.let { can ->
-                                    fi.refineid.android.core.CanSessionStore
-                                        .remember(can)
-                                    onConnectNfc(can)
+                        val accessNumberKnown =
+                            nfcSnapshot?.isPrimed == true || fi.refineid.android.core.CanSessionStore.hasCan
+                        when {
+                            nfcSnapshot?.cardKind == NfcCardKind.ORGANIZATION -> {
+                                OrganizationPin1Entry(
+                                    attemptsLeft = nfcSnapshot.pin1AttemptsLeft,
+                                    answer = nfcSnapshot.pin1Answer,
+                                    isOpening = nfcSnapshot.status == NfcReaderStatus.CONNECTING,
+                                    onSubmit = onOpenOrganization,
+                                )
+                            }
+
+                            // A known access number opens the card on the tap.
+                            !NfcCardWait.offersAccessNumber(nfcSnapshot?.status, accessNumberKnown, null) -> {
+                                Text(stringResource(R.string.hold_card_against_back))
+                                NfcCardProblemText(nfcSnapshot)
+                            }
+
+                            else -> {
+                                NfcCardProblemText(nfcSnapshot)
+                                val canReady = canEntryReady(canState.text)
+                                CanField(
+                                    state = canState,
+                                    testTag = "managementCardAccessNumber",
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Button(
+                                    onClick = {
+                                        canEntrySubmission(canState.text)?.let { can ->
+                                            fi.refineid.android.core.CanSessionStore
+                                                .remember(can)
+                                            onConnectNfc(can)
+                                        }
+                                    },
+                                    enabled = canReady,
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .testTag("managementReadCard"),
+                                ) {
+                                    Text(stringResource(R.string.read_identity_card))
                                 }
-                            },
-                            enabled = canReady,
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .testTag("managementReadCard"),
-                        ) {
-                            Text(stringResource(R.string.read_identity_card))
+                            }
                         }
                     }
                 }
@@ -547,11 +570,10 @@ internal fun CardManagementScreen(
             )
         }
 
-        // A readable card's forms wait for its answer; a card awaiting
+        // The forms show at once with the FINEID bounds, and the card's
+        // counters and lengths fill in when it answers; a card awaiting
         // activation shows its form once the probe has named its scheme.
-        if (isCardReady && health == null) {
-            // Nothing that depends on the card is drawn before it answers.
-        } else if (isActivationFlow) {
+        if (isActivationFlow) {
             if (health != null) {
                 CardActivationForm(
                     health = health,
@@ -636,7 +658,7 @@ internal fun CardManagementScreen(
             when (selectedTask) {
                 ManagementTask.CHANGE_PIN1, ManagementTask.CHANGE_PIN2 -> {
                     val isPin1 = selectedTask == ManagementTask.CHANGE_PIN1
-                    val pinName = if (isPin1) "PIN 1" else "PIN 2"
+                    val pinName = if (isPin1) pin1Name else pin2Name
                     val attempts = if (isPin1) pin1Attempts else pin2Attempts
                     val title = stringResource(R.string.confirm_change_title, pinName)
                     val msg =
@@ -650,7 +672,7 @@ internal fun CardManagementScreen(
 
                 ManagementTask.RESET_PIN1, ManagementTask.RESET_PIN2 -> {
                     val isPin1 = selectedTask == ManagementTask.RESET_PIN1
-                    val pinName = if (isPin1) "PIN 1" else "PIN 2"
+                    val pinName = if (isPin1) pin1Name else pin2Name
                     val attempts = pukAttempts
                     val title = stringResource(R.string.confirm_reset_title, pinName)
                     val msg =
@@ -668,9 +690,15 @@ internal fun CardManagementScreen(
                         if (needsPin1 && needsPin2) {
                             stringResource(R.string.confirm_activation_dialog_msg_both)
                         } else if (needsPin1) {
-                            stringResource(R.string.confirm_activation_dialog_msg_single, "PIN 1")
+                            stringResource(
+                                R.string.confirm_activation_dialog_msg_single,
+                                stringResource(R.string.pin1),
+                            )
                         } else {
-                            stringResource(R.string.confirm_activation_dialog_msg_single, "PIN 2")
+                            stringResource(
+                                R.string.confirm_activation_dialog_msg_single,
+                                stringResource(R.string.pin2),
+                            )
                         }
                     title to msg
                 }
@@ -779,6 +807,10 @@ private fun GuidanceBanner(
     }
 }
 
+/**
+ * The four tasks, one full-width button per row: a long Finnish PIN name
+ * fits on one line with its number only across the whole column.
+ */
 @Composable
 private fun TaskSelector(
     selectedTask: ManagementTask,
@@ -788,38 +820,17 @@ private fun TaskSelector(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        listOf(
+            Triple(ManagementTask.CHANGE_PIN1, R.string.change_pin1, "managementTask.changePin1"),
+            Triple(ManagementTask.CHANGE_PIN2, R.string.change_pin2, "managementTask.changePin2"),
+            Triple(ManagementTask.RESET_PIN1, R.string.reset_pin1, "managementTask.resetPin1"),
+            Triple(ManagementTask.RESET_PIN2, R.string.reset_pin2, "managementTask.resetPin2"),
+        ).forEach { (task, label, tag) ->
             TaskButton(
-                text = stringResource(R.string.change_pin1),
-                isSelected = selectedTask == ManagementTask.CHANGE_PIN1,
-                onClick = { onSelect(ManagementTask.CHANGE_PIN1) },
-                modifier = Modifier.weight(1f).testTag("managementTask.changePin1"),
-            )
-            TaskButton(
-                text = stringResource(R.string.change_pin2),
-                isSelected = selectedTask == ManagementTask.CHANGE_PIN2,
-                onClick = { onSelect(ManagementTask.CHANGE_PIN2) },
-                modifier = Modifier.weight(1f).testTag("managementTask.changePin2"),
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            TaskButton(
-                text = stringResource(R.string.reset_pin1),
-                isSelected = selectedTask == ManagementTask.RESET_PIN1,
-                onClick = { onSelect(ManagementTask.RESET_PIN1) },
-                modifier = Modifier.weight(1f).testTag("managementTask.resetPin1"),
-            )
-            TaskButton(
-                text = stringResource(R.string.reset_pin2),
-                isSelected = selectedTask == ManagementTask.RESET_PIN2,
-                onClick = { onSelect(ManagementTask.RESET_PIN2) },
-                modifier = Modifier.weight(1f).testTag("managementTask.resetPin2"),
+                text = stringResource(label),
+                isSelected = selectedTask == task,
+                onClick = { onSelect(task) },
+                modifier = Modifier.fillMaxWidth().testTag(tag),
             )
         }
     }
@@ -925,9 +936,9 @@ private fun ChangePinForm(
                 }
             val buttonLabel =
                 if (isPin2) {
-                    stringResource(R.string.change_signature_pin2)
+                    stringResource(R.string.change_pin2)
                 } else {
-                    stringResource(R.string.change_basic_pin1)
+                    stringResource(R.string.change_pin1)
                 }
             val pinRange = if (isPin2) pinLengths.pin2 else pinLengths.pin1
             val lengthHint = digitRangeHint(pinRange)
@@ -1137,7 +1148,7 @@ private fun CardActivationForm(
                 newPin1ConfirmState.text.isNotEmpty() &&
                     newPin1ConfirmState.text.toString() != newPin1State.text.toString()
 
-            Section(stringResource(R.string.pin1_section_title)) {
+            Section(stringResource(R.string.pin1)) {
                 NavigationGroup {
                     Column(
                         modifier =
@@ -1180,7 +1191,7 @@ private fun CardActivationForm(
                 newPin2ConfirmState.text.isNotEmpty() &&
                     newPin2ConfirmState.text.toString() != newPin2State.text.toString()
 
-            Section(stringResource(R.string.pin2_section_title)) {
+            Section(stringResource(R.string.pin2)) {
                 NavigationGroup {
                     Column(
                         modifier =
@@ -1246,6 +1257,7 @@ private fun digitRangeHint(range: IntRange): String? =
 private fun ManagedPasswordField(
     state: TextFieldState,
     label: String,
+    testTag: String,
     modifier: Modifier = Modifier,
     imeAction: ImeAction = ImeAction.Next,
     onKeyboardAction: (() -> Unit)? = null,
@@ -1253,49 +1265,17 @@ private fun ManagedPasswordField(
     supportingText: String? = null,
     isError: Boolean = false,
     errorMessage: String? = null,
-    testTag: String? = null,
 ) {
-    var passwordVisible by remember { mutableStateOf(false) }
-
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SecureTextField(
+        SecretField(
             state = state,
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
-            label = { Text(label) },
-            textObfuscationMode =
-                if (passwordVisible) {
-                    TextObfuscationMode.Visible
-                } else {
-                    TextObfuscationMode.Hidden
-                },
+            testTag = testTag,
+            modifier = Modifier.fillMaxWidth(),
+            label = label,
             inputTransformation = remember(maxLength) { digitsOnlyTransformation(maxLength) },
-            keyboardOptions =
-                KeyboardOptions(
-                    autoCorrectEnabled = false,
-                    keyboardType = KeyboardType.NumberPassword,
-                    imeAction = imeAction,
-                ),
-            onKeyboardAction = onKeyboardAction?.let { action -> { action() } },
-            trailingIcon = {
-                IconButton(
-                    onClick = { passwordVisible = !passwordVisible },
-                    modifier = Modifier.testTag(if (testTag != null) "${testTag}Toggle" else "passwordToggle"),
-                ) {
-                    Icon(
-                        painter =
-                            painterResource(
-                                if (passwordVisible) R.drawable.ic_visibility_off else R.drawable.ic_visibility,
-                            ),
-                        contentDescription =
-                            stringResource(
-                                if (passwordVisible) R.string.hide_pin else R.string.show_pin,
-                            ),
-                    )
-                }
-            },
+            imeAction = imeAction,
+            onKeyboardAction = onKeyboardAction,
+            revealNames = PinRevealNames,
         )
         if (isError && errorMessage != null) {
             Text(

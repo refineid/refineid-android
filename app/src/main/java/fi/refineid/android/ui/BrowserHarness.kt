@@ -26,13 +26,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material3.Button
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,9 +66,12 @@ import fi.refineid.android.browser.BundledIssuerCertificates
 import fi.refineid.android.browser.RefineIdCardProviderRegistration
 import fi.refineid.android.core.AuthenticationCardService
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.diagnostics.BuildDiagnostics
+import fi.refineid.android.nfc.NfcCardProblem
+import fi.refineid.android.nfc.NfcCardWait
 import fi.refineid.android.nfc.NfcReaderStatus
 import java.security.cert.X509Certificate
 import java.util.concurrent.atomic.AtomicBoolean
@@ -82,6 +83,8 @@ internal fun BrowserHarness(
     pinCache: fi.refineid.android.core.AuthenticationPinCache? = null,
     nfcStatus: NfcReaderStatus? = null,
     nfcPrimed: Boolean = false,
+    nfcCardKind: NfcCardKind? = null,
+    nfcCardProblem: NfcCardProblem? = null,
     enabled: Boolean = true,
     onPrepareAuthentication: ((() -> Unit, () -> Unit) -> Unit)? = null,
     onNfcConnect: (CanSubmission?, Pin1Submission) -> Unit = { _, _ -> },
@@ -123,6 +126,7 @@ internal fun BrowserHarness(
             pinCache = pinCache,
             nfcStatus = nfcStatus,
             nfcPrimed = nfcPrimed,
+            nfcCard = NfcCardAnswer(nfcCardKind, nfcCardProblem),
             onPrepareAuthentication = onPrepareAuthentication,
             onNfcConnect = onNfcConnect,
             onWrongPin = onWrongPin,
@@ -134,6 +138,12 @@ internal fun BrowserHarness(
     }
 }
 
+/** What the card in the field answered: its kind, or why it cannot be used. */
+private data class NfcCardAnswer(
+    val kind: NfcCardKind?,
+    val problem: NfcCardProblem?,
+)
+
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 // General sites need JavaScript; this browser exists only in debug
@@ -144,6 +154,7 @@ private fun BrowserDialog(
     pinCache: fi.refineid.android.core.AuthenticationPinCache?,
     nfcStatus: NfcReaderStatus?,
     nfcPrimed: Boolean,
+    nfcCard: NfcCardAnswer,
     onNfcConnect: (CanSubmission?, Pin1Submission) -> Unit,
     onPrepareAuthentication: ((() -> Unit, () -> Unit) -> Unit)? = null,
     onWrongPin: (() -> Unit)? = null,
@@ -268,6 +279,7 @@ private fun BrowserDialog(
         BrowserCardUnlockDialog(
             status = nfcStatus,
             primed = nfcPrimed,
+            card = nfcCard,
             isWaiting = unlockWaiting,
             onUnlock = { can, pin1 ->
                 unlockWaiting = true
@@ -473,10 +485,13 @@ private fun BrowserControlsBar(
 private fun BrowserCardUnlockDialog(
     status: NfcReaderStatus?,
     primed: Boolean,
+    card: NfcCardAnswer,
     isWaiting: Boolean,
     onUnlock: (CanSubmission?, Pin1Submission) -> Unit,
     onCancel: () -> Unit,
 ) {
+    val cardKind = card.kind
+    val cardProblem = card.problem
     val canState = remember { TextFieldState() }
     val pinState = remember { TextFieldState() }
     DisposableEffect(pinState) {
@@ -488,12 +503,21 @@ private fun BrowserCardUnlockDialog(
         status != NfcReaderStatus.TURNED_OFF &&
             status != NfcReaderStatus.NOT_AVAILABLE &&
             status != NfcReaderStatus.CARD_NOT_SUPPORTED
-    val canReady = primed || canEntryReady(canState.text)
+    // The access number is ready before the tap unless it is known; an
+    // organization card, which has none, opens with PIN 1 alone.
+    val asksCan =
+        NfcCardWait.offersAccessNumber(
+            status,
+            primed || fi.refineid.android.core.CanSessionStore.hasCan,
+            cardKind,
+        )
+    val canReady = !asksCan || canEntryReady(canState.text)
     val pinReady = Pin1Submission.isComplete(pinState.text)
+    val entryReady = cardEntryReady && canReady && pinReady && !isWaiting
     val submit = {
-        if (cardEntryReady && canReady && pinReady && !isWaiting) {
+        if (entryReady) {
             val can =
-                if (primed) {
+                if (!asksCan) {
                     null
                 } else {
                     fi.refineid.android.core.CanSessionStore
@@ -520,12 +544,20 @@ private fun BrowserCardUnlockDialog(
                     text = stringResource(R.string.sign_in),
                     style = MaterialTheme.typography.titleLarge,
                 )
-                Text(
-                    text = stringResource(R.string.hold_card),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                if (!primed) {
+                if (cardProblem != null) {
+                    Text(
+                        text = stringResource(cardProblemMessage(cardProblem)),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.hold_card),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                if (asksCan) {
                     CanField(
                         state = canState,
                         testTag = UiAutomationIds.BROWSER_UNLOCK_CAN_FIELD,
@@ -534,22 +566,14 @@ private fun BrowserCardUnlockDialog(
                         imeAction = ImeAction.Next,
                     )
                 }
-                SecureTextField(
+                SecretField(
                     state = pinState,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .testTag(UiAutomationIds.BROWSER_UNLOCK_PIN1_FIELD),
+                    testTag = UiAutomationIds.BROWSER_UNLOCK_PIN1_FIELD,
+                    modifier = Modifier.fillMaxWidth(),
                     enabled = !isWaiting,
-                    label = { Text(stringResource(R.string.pin1)) },
+                    label = stringResource(R.string.pin1),
                     inputTransformation = Pin1InputTransformation,
-                    textObfuscationMode = TextObfuscationMode.Hidden,
-                    keyboardOptions =
-                        KeyboardOptions(
-                            autoCorrectEnabled = false,
-                            keyboardType = KeyboardType.NumberPassword,
-                            imeAction = ImeAction.Done,
-                        ),
+                    imeAction = ImeAction.Done,
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -570,7 +594,7 @@ private fun BrowserCardUnlockDialog(
                             Modifier
                                 .weight(UNLOCK_BUTTON_WEIGHT)
                                 .testTag(UiAutomationIds.BROWSER_UNLOCK_ACTION),
-                        enabled = cardEntryReady && canReady && pinReady && !isWaiting,
+                        enabled = entryReady,
                     ) {
                         Text(stringResource(R.string.unlock))
                     }
@@ -626,21 +650,13 @@ private fun BrowserPinDialog(request: BrowserPinRequest) {
                     text = stringResource(R.string.pin1),
                     style = MaterialTheme.typography.titleLarge,
                 )
-                SecureTextField(
+                SecretField(
                     state = pinState,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .testTag(UiAutomationIds.BROWSER_PIN1_FIELD),
+                    testTag = UiAutomationIds.BROWSER_PIN1_FIELD,
+                    modifier = Modifier.fillMaxWidth(),
                     enabled = !wasSubmitted,
                     inputTransformation = Pin1InputTransformation,
-                    textObfuscationMode = TextObfuscationMode.Hidden,
-                    keyboardOptions =
-                        KeyboardOptions(
-                            autoCorrectEnabled = false,
-                            keyboardType = KeyboardType.NumberPassword,
-                            imeAction = ImeAction.Done,
-                        ),
+                    imeAction = ImeAction.Done,
                 )
                 Button(
                     onClick = submit,
@@ -673,7 +689,7 @@ private fun BrowserStatus(status: BrowserSignatureStatus) {
 
             BrowserSignatureStatus.WRONG_PIN -> stringResource(R.string.wrong_pin)
 
-            BrowserSignatureStatus.PIN_LOCKED -> stringResource(R.string.pin_locked)
+            BrowserSignatureStatus.PIN_LOCKED -> stringResource(R.string.pin1_blocked)
 
             BrowserSignatureStatus.REFUSED -> stringResource(R.string.unavailable)
 

@@ -116,11 +116,14 @@ transport.
   signature or batch and never held (section 11 item 2; credential
   custody).
 - The native card session reads the PIN status with a header-only VERIFY
-  before every verification and, without sending one, refuses two, one or
-  no remaining attempts, a blocked PIN, and a status that carries no count
-  and is not "verified" (`check_retry_floor` in refineid-auth); the
-  operation then ends as `retry_floor` and the holder is told the PUK can
-  set a new PIN on the phone. A wrong PIN
+  before every verification and, without sending one, refuses two or one
+  remaining attempts and a status that carries no count and is not
+  "verified" (`check_retry_floor` in refineid-auth); the operation then ends
+  as `retry_floor` and the holder is told the PUK can set a new PIN on the
+  phone. At no attempts left or a blocked PIN the VERIFY goes out and the
+  card answers for itself, spending nothing: the operation ends as
+  `retry_floor` on the wire and the holder is told that PIN is blocked and
+  the PUK resets it. A wrong PIN
   with at least three attempts left re-prompts on the phone with the count;
   the requester learns nothing of it (section 10.2).
 - A PIN command the card did not answer is sent again, once the card is

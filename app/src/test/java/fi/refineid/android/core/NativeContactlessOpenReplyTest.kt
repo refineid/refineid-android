@@ -93,6 +93,14 @@ class NativeContactlessOpenReplyTest {
     }
 
     @Test
+    fun anOrganizationCardIsNamedByItsOwnFailure() {
+        assertEquals(
+            NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.ORGANIZATION_CARD),
+            NativeContactlessOpenReply.decode(byteArrayOf(CERTIFICATE_ORGANIZATION_CARD)),
+        )
+    }
+
+    @Test
     fun rejectsMalformedNestedShapes() {
         val truncatedAtPreflight = successReply().copyOfRange(0, WRAPPER_HEADER_LENGTH + 2)
         val wrongPreflightLength =
@@ -162,7 +170,8 @@ class NativeContactlessOpenReplyTest {
         const val PREFLIGHT_LENGTH_OFFSET = 1
         const val WRAPPER_HEADER_LENGTH = 2
         const val SYNTHETIC_RETRY_COUNT: Byte = 3
-        const val UNKNOWN_TAG: Byte = 8
+        const val UNKNOWN_TAG: Byte = 9
+        const val CERTIFICATE_ORGANIZATION_CARD: Byte = 8
         const val TRAILING_GARBAGE: Byte = 0x7F
         const val ZERO_BYTE: Byte = 0
         val SYNTHETIC_DER = byteArrayOf(0x30, 0x00)

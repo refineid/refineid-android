@@ -29,6 +29,8 @@ class RefineIdApplication : Application() {
         private set
     internal lateinit var caCertificateStore: CaCertificateStore
         private set
+    internal val hasCaCertificateStore: Boolean
+        get() = this::caCertificateStore.isInitialized
     internal val authenticationPinCache = AuthenticationPinCache()
     internal val authenticationGeneration =
         java.util.concurrent.atomic

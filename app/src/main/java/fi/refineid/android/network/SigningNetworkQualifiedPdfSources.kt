@@ -10,6 +10,7 @@ import fi.refineid.android.document.QualifiedPdfTimestampSourceException
 import fi.refineid.android.document.QualifiedPdfValidationSource
 import fi.refineid.android.document.QualifiedPdfValidationSourceException
 import fi.refineid.android.document.Rfc3161TimestampException
+import fi.refineid.android.document.SignerAnchorSource
 import fi.refineid.android.document.TimestampTokenVerificationException
 import fi.refineid.android.document.ValidationMaterialCollectionException
 import fi.refineid.android.document.ValidationMaterialCollectionRequest
@@ -261,6 +262,7 @@ internal class NetworkQualifiedPdfValidationSource private constructor(
     private val dependencies: ValidationMaterialCollectorDependencies,
     private val ownedSignerTrustCertificates: List<ByteArray>,
     private val ownedAdditionalCandidates: List<ByteArray>,
+    private val signerAnchors: SignerAnchorSource,
     private val collector: SigningValidationMaterialCollector,
 ) : QualifiedPdfValidationSource,
     AutoCloseable {
@@ -277,14 +279,15 @@ internal class NetworkQualifiedPdfValidationSource private constructor(
         signatureTimestamp: VerifiedTimestampToken,
     ): PdfValidationMaterial {
         requireOpen()
+        val anchors = cardAnchorsFor(signerCertificate)
         return try {
             collector.collect(
                 request =
                     ValidationMaterialCollectionRequest(
                         signerCertificate = signerCertificate,
                         timestampTokens = listOf(signatureTimestamp),
-                        signerTrustCertificates = ownedSignerTrustCertificates,
-                        additionalCandidates = ownedAdditionalCandidates,
+                        signerTrustCertificates = ownedSignerTrustCertificates + anchors,
+                        additionalCandidates = ownedAdditionalCandidates + anchors,
                     ),
                 dependencies = dependencies,
             )
@@ -294,7 +297,39 @@ internal class NetworkQualifiedPdfValidationSource private constructor(
             throw QualifiedPdfValidationSourceException()
         } catch (_: RuntimeException) {
             throw QualifiedPdfValidationSourceException()
+        } finally {
+            anchors.clearBytes()
         }
+    }
+
+    /**
+     * The signer's card chain, within what the request admits: the anchors
+     * that fit beside the configured certificates, each within the size bound.
+     */
+    private fun cardAnchorsFor(signerCertificate: ByteArray): List<ByteArray> {
+        val supplied =
+            try {
+                signerAnchors.copyAnchorsFor(signerCertificate)
+            } catch (_: RuntimeException) {
+                emptyList()
+            }
+        val room =
+            (
+                PdfValidationMaterialLimits.MAXIMUM_CERTIFICATE_COUNT -
+                    maxOf(ownedSignerTrustCertificates.size, ownedAdditionalCandidates.size)
+            ).coerceAtLeast(NO_ROOM)
+        val kept = mutableListOf<ByteArray>()
+        for (anchor in supplied) {
+            if (kept.size < room &&
+                anchor.isNotEmpty() &&
+                anchor.size <= PdfValidationMaterialLimits.MAXIMUM_CERTIFICATE_BYTES
+            ) {
+                kept += anchor
+            } else {
+                anchor.fill(CLEARED_BYTE)
+            }
+        }
+        return kept
     }
 
     override fun close() {
@@ -326,6 +361,7 @@ internal class NetworkQualifiedPdfValidationSource private constructor(
             dependencies: ValidationMaterialCollectorDependencies,
             signerTrustCertificates: List<ByteArray>,
             additionalCandidates: List<ByteArray>,
+            signerAnchors: SignerAnchorSource = SignerAnchorSource.NONE,
             collector: SigningValidationMaterialCollector =
                 SigningValidationMaterialCollector(ValidationMaterialCollector::collect),
         ): NetworkQualifiedPdfValidationSource {
@@ -340,6 +376,7 @@ internal class NetworkQualifiedPdfValidationSource private constructor(
                 dependencies = dependencies,
                 ownedSignerTrustCertificates = signerTrustCertificates.map(ByteArray::copyOf),
                 ownedAdditionalCandidates = additionalCandidates.map(ByteArray::copyOf),
+                signerAnchors = signerAnchors,
                 collector = collector,
             )
         }
@@ -352,5 +389,6 @@ internal class NetworkQualifiedPdfValidationSource private constructor(
                 }
 
         private const val CLEARED_BYTE: Byte = 0
+        private const val NO_ROOM = 0
     }
 }

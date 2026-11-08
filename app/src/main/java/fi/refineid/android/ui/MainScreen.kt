@@ -25,10 +25,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -49,7 +47,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -77,7 +74,6 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -92,6 +88,7 @@ import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.AuthenticationPurpose
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.QualifiedCardService
 import fi.refineid.android.diagnostics.AppTrace
@@ -99,6 +96,7 @@ import fi.refineid.android.diagnostics.BuildDiagnostics
 import fi.refineid.android.diagnostics.DiagnosticsCollector
 import fi.refineid.android.nfc.NfcReaderSnapshot
 import fi.refineid.android.nfc.NfcReaderStatus
+import fi.refineid.android.nfc.SignTapFailure
 import fi.refineid.android.rapp.LocalNetworkPermission
 import fi.refineid.android.rapp.PairingPhase
 import fi.refineid.android.rapp.RappAuthorizationInbox
@@ -150,7 +148,7 @@ internal fun MainScreen(
     onForgetPrimedCard: () -> Unit = {},
     onCancelAwaitingCard: () -> Unit = {},
     nfcCardService: AuthenticationCardService? = null,
-    onSignBeginTap: (ByteArray?, () -> Unit, () -> Unit) -> Unit = { _, _, _ -> },
+    onSignBeginTap: (ByteArray?, () -> Unit, (SignTapFailure) -> Unit) -> Unit = { _, _, _ -> },
     onSignEndTap: () -> Unit = {},
     pinCache: AuthenticationPinCache? = null,
     rappPairingModel: RappPairingModel? = null,
@@ -211,6 +209,8 @@ internal fun MainScreen(
         AuthenticationPreparationDialog(
             authenticationPreparation,
             preparationState,
+            nfcProblem = if (usbReaderPresent) null else nfcSnapshot.cardProblem,
+            nfcCardKind = if (usbReaderPresent) null else nfcSnapshot.cardKind,
             nfcStatus =
                 if (usbReaderPresent || nfcSnapshot.status == NfcReaderStatus.NOT_AVAILABLE) {
                     null
@@ -245,36 +245,14 @@ internal fun MainScreen(
             destination
         }
 
-    // The card management screen's title and form depend on what the card
-    // is, so a readable card is asked first and the screen already shown
-    // stays until the card has answered; a screen already on display keeps
-    // itself while it asks.
+    // The card management screen opens at once and asks the card; its
+    // title, counters and lengths fill in as the card answers.
     val managementCardReady =
         usbCardReady || nfcSnapshot.status == NfcReaderStatus.CARD_READY || isActivationRequired
     val managementService =
         if (usbCardReady || usbActivationRequired) cardManagementService else nfcCardManagementService
     val healthReading =
         remember(managementService, managementCardReady, isActivationRequired) { CardHealthReading() }
-    var cardManagementOnScreen by remember { mutableStateOf(false) }
-    val shownDestination =
-        if (wantedDestination == MainDestination.CARD_MANAGEMENT &&
-            !cardManagementOnScreen &&
-            cardManagementAwaitsReading(managementCardReady, healthReading)
-        ) {
-            MainDestination.HOME
-        } else {
-            wantedDestination
-        }
-    SideEffect { cardManagementOnScreen = shownDestination == MainDestination.CARD_MANAGEMENT }
-    LaunchedEffect(wantedDestination, healthReading, managementService) {
-        if (wantedDestination == MainDestination.CARD_MANAGEMENT &&
-            !cardManagementOnScreen &&
-            cardManagementAwaitsReading(managementCardReady, healthReading) &&
-            !healthReading.isProbing
-        ) {
-            managementService?.let(healthReading::probe)
-        }
-    }
 
     // Signing follows the one-transport rule: a wired reader signs on
     // its open session, while a contactless card is never assumed
@@ -358,12 +336,18 @@ internal fun MainScreen(
             usbReaderPresent = usbReaderPresent,
             nfcStatus = nfcSnapshot.status,
             accessNumberKnown = nfcSnapshot.isPrimed || CanSessionStore.hasCan,
+            cardKind = nfcSnapshot.cardKind,
+            pin1AttemptsLeft = nfcSnapshot.pin1AttemptsLeft,
+            pin1Answer = nfcSnapshot.pin1Answer,
+            cardProblem = nfcSnapshot.cardProblem,
             onSubmitAccessNumber = { can -> onNfcConnect(can, null) },
+            onSubmitOrganizationPin1 = { pin1 -> onNfcConnect(null, pin1) },
         )
     }
 
     if (!preparationActive && rappInbox?.currentTapPrompt == null && nfcSnapshot.awaitingCard) {
         NfcCardTapDialog(
+            snapshot = nfcSnapshot,
             onCancel = onCancelAwaitingCard,
         )
     }
@@ -377,7 +361,7 @@ internal fun MainScreen(
             }
         }
 
-    BackHandler(enabled = shownDestination != MainDestination.HOME) {
+    BackHandler(enabled = wantedDestination != MainDestination.HOME) {
         rappPairingModel?.reset()
         validationUri = null
         if (isActivationRequired) activationDismissed = true
@@ -498,7 +482,7 @@ internal fun MainScreen(
         !isActivationRequired &&
             (usbCardReady || effectiveHolderName != null || remoteSigningAvailable)
 
-    when (shownDestination) {
+    when (wantedDestination) {
         MainDestination.HOME -> {
             HomeScreen(
                 signingAvailable = signingAvailable,
@@ -533,6 +517,7 @@ internal fun MainScreen(
                         nfcSnapshot.status
                     },
                 nfcPrimed = nfcSnapshot.isPrimed,
+                nfcSnapshot = nfcSnapshot,
                 onNfcConnect = onNfcConnect,
                 // A present wired card reads over its open session; the
                 // contactless path primes NFC for the next tap otherwise.
@@ -607,7 +592,7 @@ internal fun MainScreen(
                             DocumentSignTap(
                                 begin = onSignBeginTap,
                                 end = onSignEndTap,
-                                canRequired = !nfcSnapshot.isPrimed,
+                                canRequired = !nfcSnapshot.isPrimed && nfcSnapshot.cardKind != NfcCardKind.ORGANIZATION,
                             )
                         } else {
                             null
@@ -666,9 +651,8 @@ internal fun MainScreen(
         }
 
         MainDestination.CARD_MANAGEMENT -> {
-            // The title already shown stays while the card is asked again;
-            // before any answer there is none.
-            val decidedTitle = cardManagementTitle(healthReading.health)
+            // The title already shown stays while the card is asked again.
+            val decidedTitle = cardManagementTitle(healthReading.health, isActivationRequired)
             var shownTitle by remember { mutableStateOf(decidedTitle) }
             SideEffect { if (decidedTitle != null) shownTitle = decidedTitle }
             SubScreen(
@@ -706,6 +690,8 @@ internal fun MainScreen(
                     onConnectNfc = { can ->
                         onNfcConnect(can, null)
                     },
+                    nfcSnapshot = nfcSnapshot,
+                    onOpenOrganization = { pin1 -> onNfcConnect(null, pin1) },
                     isCardReady = managementCardReady,
                     activationRequired = isActivationRequired,
                     pinCache = pinCache,
@@ -783,6 +769,7 @@ private fun HomeScreen(
     pinCache: AuthenticationPinCache?,
     nfcStatus: NfcReaderStatus?,
     nfcPrimed: Boolean,
+    nfcSnapshot: NfcReaderSnapshot,
     onNfcConnect: (CanSubmission?, Pin1Submission?) -> Unit,
     onReadCard: (CanSubmission) -> Unit,
     timestampAuthorityRepository: TimestampAuthorityRepository?,
@@ -898,6 +885,8 @@ private fun HomeScreen(
                                 pinCache = pinCache,
                                 nfcStatus = nfcStatus,
                                 nfcPrimed = nfcPrimed,
+                                nfcCardKind = nfcSnapshot.cardKind,
+                                nfcCardProblem = nfcSnapshot.cardProblem,
                                 enabled = browserAvailable,
                                 onPrepareAuthentication = onPrepareAuthentication,
                                 onNfcConnect = { can, pin1 -> onNfcConnect(can, pin1) },
@@ -924,6 +913,8 @@ private fun HomeScreen(
                 isActivationRequired = isActivationRequired,
                 onForget = onForgetIdentity,
                 onReadCard = onReadCard,
+                nfcSnapshot = nfcSnapshot,
+                onOpenOrganization = { pin1 -> onNfcConnect(null, pin1) },
                 onOpenActivation = onOpenCardManagement,
                 pinCache = pinCache,
                 cards = cards,
@@ -984,6 +975,8 @@ private fun IdentitySection(
     isActivationRequired: Boolean = false,
     onForget: (() -> Unit)?,
     onReadCard: (CanSubmission) -> Unit,
+    nfcSnapshot: NfcReaderSnapshot,
+    onOpenOrganization: (Pin1Submission) -> Unit,
     onOpenActivation: () -> Unit = {},
     pinCache: AuthenticationPinCache? = null,
     cards: List<CardIdentityItem> = emptyList(),
@@ -1025,7 +1018,7 @@ private fun IdentitySection(
                     onOpenActivation = onOpenActivation,
                     onShowNfcRead = {
                         val currentCan = CanSessionStore.currentCan
-                        if (currentCan != null) {
+                        if (currentCan != null && nfcSnapshot.cardKind != NfcCardKind.ORGANIZATION) {
                             onReadCard(CanSubmission.from(currentCan))
                         } else {
                             showsNfcReadDialog = true
@@ -1039,10 +1032,12 @@ private fun IdentitySection(
 
     if (showsNfcReadDialog) {
         ReadCardNfcDialog(
+            snapshot = nfcSnapshot,
             onDismiss = { showsNfcReadDialog = false },
             onConnect = { can ->
                 onReadCard(can)
             },
+            onOpenOrganization = onOpenOrganization,
         )
     }
 }
@@ -1131,11 +1126,20 @@ private fun SingleIdentityRow(
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 private fun ReadCardNfcDialog(
+    snapshot: NfcReaderSnapshot,
     onDismiss: () -> Unit,
     onConnect: (CanSubmission) -> Unit,
+    onOpenOrganization: (Pin1Submission) -> Unit,
 ) {
     val canState = remember { TextFieldState() }
     val canReady = canEntryReady(canState.text)
+    val cardKind = snapshot.cardKind
+    val organizationReady =
+        cardKind == NfcCardKind.ORGANIZATION &&
+            (snapshot.status == NfcReaderStatus.CARD_READY || snapshot.status == NfcReaderStatus.ACTIVATION_REQUIRED)
+    LaunchedEffect(organizationReady) {
+        if (organizationReady) onDismiss()
+    }
 
     val submit = {
         canEntrySubmission(canState.text)?.let { can ->
@@ -1162,21 +1166,39 @@ private fun ReadCardNfcDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                CanField(
-                    state = canState,
-                    testTag = UiAutomationIds.NFC_CAN_FIELD,
-                    modifier = Modifier.fillMaxWidth(),
-                    onKeyboardAction = { submit() },
-                )
+                // The access number is ready before the tap; an organization
+                // card, which has none, is asked for PIN 1 once it answers.
+                when (cardKind) {
+                    null, NfcCardKind.PERSONAL -> {
+                        NfcCardProblemText(snapshot)
+                        CanField(
+                            state = canState,
+                            testTag = UiAutomationIds.NFC_CAN_FIELD,
+                            modifier = Modifier.fillMaxWidth(),
+                            onKeyboardAction = { submit() },
+                        )
+                    }
+
+                    NfcCardKind.ORGANIZATION -> {
+                        OrganizationPin1Entry(
+                            attemptsLeft = snapshot.pin1AttemptsLeft,
+                            answer = snapshot.pin1Answer,
+                            isOpening = snapshot.status == NfcReaderStatus.CONNECTING,
+                            onSubmit = onOpenOrganization,
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
-            Button(
-                onClick = submit,
-                enabled = canReady,
-                modifier = Modifier.testTag(UiAutomationIds.NFC_CONNECT_ACTION),
-            ) {
-                Text(stringResource(R.string.read_identity_card))
+            if (cardKind != NfcCardKind.ORGANIZATION) {
+                Button(
+                    onClick = submit,
+                    enabled = canReady,
+                    modifier = Modifier.testTag(UiAutomationIds.NFC_CONNECT_ACTION),
+                ) {
+                    Text(stringResource(R.string.read_identity_card))
+                }
             }
         },
         dismissButton = {
@@ -1189,7 +1211,10 @@ private fun ReadCardNfcDialog(
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
-private fun NfcCardTapDialog(onCancel: () -> Unit) {
+private fun NfcCardTapDialog(
+    snapshot: NfcReaderSnapshot,
+    onCancel: () -> Unit,
+) {
     Dialog(
         onDismissRequest = onCancel,
         properties =
@@ -1218,6 +1243,7 @@ private fun NfcCardTapDialog(onCancel: () -> Unit) {
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                 )
+                NfcCardProblemText(snapshot)
 
                 CircularProgressIndicator(
                     modifier = Modifier.padding(vertical = 8.dp),
@@ -1462,7 +1488,11 @@ private fun NfcCard(
                 snapshot.status == NfcReaderStatus.WRONG_CAN ||
                 snapshot.status == NfcReaderStatus.TRANSPORT_ERROR
             ) {
-                NfcCredentialEntry(isPrimed = snapshot.isPrimed, onConnect = onConnect)
+                NfcCredentialEntry(
+                    // PIN 1 alone opens a kept card and any organization card.
+                    isPrimed = snapshot.isPrimed || snapshot.cardKind == NfcCardKind.ORGANIZATION,
+                    onConnect = onConnect,
+                )
             }
 
             if (snapshot.status == NfcReaderStatus.CARD_READY) {
@@ -1563,21 +1593,13 @@ private fun NfcCredentialEntry(
             imeAction = ImeAction.Next,
         )
     }
-    SecureTextField(
+    SecretField(
         state = pinState,
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .testTag(UiAutomationIds.NFC_PIN1_FIELD),
-        label = { Text(stringResource(R.string.pin1)) },
+        testTag = UiAutomationIds.NFC_PIN1_FIELD,
+        modifier = Modifier.fillMaxWidth(),
+        label = stringResource(R.string.pin1),
         inputTransformation = Pin1InputTransformation,
-        textObfuscationMode = TextObfuscationMode.Hidden,
-        keyboardOptions =
-            KeyboardOptions(
-                autoCorrectEnabled = false,
-                keyboardType = KeyboardType.NumberPassword,
-                imeAction = ImeAction.Done,
-            ),
+        imeAction = ImeAction.Done,
         onKeyboardAction = { submit() },
     )
     Button(

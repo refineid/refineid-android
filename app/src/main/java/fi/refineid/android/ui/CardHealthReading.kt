@@ -13,10 +13,9 @@ import fi.refineid.android.core.NativePinReferenceScheme
 
 /**
  * The credential probe's answer for the card the phone holds: its kind,
- * activation scheme, activation needs and counters. The main screen's
- * routing and the card management screen's title and form all read this one
- * answer, so a view that depends on what the card is appears only once the
- * card has said it.
+ * activation scheme, activation needs and counters. The card management
+ * screen's title and form read this one answer; the screen opens before it
+ * and fills in what the card says as it arrives.
  */
 @Stable
 internal class CardHealthReading {
@@ -71,23 +70,18 @@ internal enum class CardManagementTitle {
 }
 
 /**
- * The title the card's answer decides, or null while no card has answered:
- * the screen draws no title before the card has said what it is.
+ * The title the card's answer decides. Before any answer a card that
+ * awaits no activation is shown its PINs; one awaiting activation has no
+ * title until it has said whether it is an identity or an organisation
+ * card.
  */
-internal fun cardManagementTitle(health: CredentialHealth?): CardManagementTitle? =
+internal fun cardManagementTitle(
+    health: CredentialHealth?,
+    activationRequired: Boolean,
+): CardManagementTitle? =
     when {
-        health == null -> null
+        health == null -> if (activationRequired) null else CardManagementTitle.CARD_PINS
         !health.activationNeeds.any -> CardManagementTitle.CARD_PINS
         health.scheme == NativePinReferenceScheme.ORGANIZATIONAL -> CardManagementTitle.ORGANISATION_CARD_ACTIVATION
         else -> CardManagementTitle.IDENTITY_CARD_ACTIVATION
     }
-
-/**
- * Whether the card management screen waits before it is first drawn: a
- * readable card has not answered the probe yet, so the screen the holder
- * already sees stays until the card has said what it is.
- */
-internal fun cardManagementAwaitsReading(
-    cardReadable: Boolean,
-    reading: CardHealthReading,
-): Boolean = cardReadable && !reading.hasAnswered

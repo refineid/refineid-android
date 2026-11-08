@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import fi.refineid.android.RefineIdApplication
+import fi.refineid.android.core.AuthenticationCardIdentity
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
@@ -25,10 +26,24 @@ import fi.refineid.android.core.NativeCertificateReadFailure
 import fi.refineid.android.core.NativeContactlessCore
 import fi.refineid.android.core.NativeContactlessOpenResult
 import fi.refineid.android.core.NativeContactlessSession
+import fi.refineid.android.core.NativeOrganizationCard
+import fi.refineid.android.core.NativeOrganizationOpenResult
+import fi.refineid.android.core.NativePin1PreflightResult
+import fi.refineid.android.core.NativeQualifiedCertificate
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.PersonCardDetails
+import fi.refineid.android.core.Pin1Retention
 import fi.refineid.android.core.Pin1Submission
+import fi.refineid.android.core.Pin1Verification
+import fi.refineid.android.core.Pin1VerificationResult
+import fi.refineid.android.core.attemptsLeft
+import fi.refineid.android.core.organizationPin1Refused
+import fi.refineid.android.core.primedAuthenticationCertificate
+import fi.refineid.android.core.primedQualifiedCertificate
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.prime.PrimedCanStore
+import fi.refineid.android.trust.CardCaCustody
+import fi.refineid.android.trust.StoreCardCaCustody
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -43,9 +58,10 @@ import kotlin.coroutines.resume
 /**
  * Contactless discovery and card sessions bound to one foreground
  * activity. Reader mode delivers each discovered tag once; recognition
- * runs a credential-free EF.CardAccess probe, and a holder-entered CAN
- * opens a contactless session whose every operation re-runs PACE inside
- * one bounded ISO-DEP connection on a dedicated worker thread.
+ * runs a credential-free EF.CardAccess probe that names the card's kind. A
+ * holder-entered CAN opens a citizen card's session, and PIN 1 an organization
+ * card's; every operation re-runs PACE inside one bounded ISO-DEP connection on
+ * a dedicated worker thread.
  */
 @Suppress("TooManyFunctions", "LargeClass")
 internal class NfcReaderController(
@@ -95,9 +111,28 @@ internal class NfcReaderController(
     private val reprobeThrottle = NfcReprobeThrottle()
 
     // Worker-thread confined. Main-thread state never owns a session.
-    private var activeSession: ContactlessSession? = null
+    private var activeSession: ContactlessCardSession? = null
+
+    /** What opens the card last read in the field; null before one has answered. */
+    @Volatile
+    private var recognizedKind: NfcCardKind? = null
+
+    /** An organization card's PIN 1 tries, read before any entry. */
+    @Volatile
+    private var organizationPin1Attempts: Int? = null
+
+    /** The organization card's answer to the PIN 1 last offered to open it. */
+    @Volatile
+    private var organizationPin1Answer: Pin1Verification? = null
+
+    /** Why the card last read in the field cannot be used. */
+    @Volatile
+    private var cardProblem: NfcCardProblem? = null
 
     private val isOpeningSession = AtomicBoolean(false)
+
+    /** PIN 1 typed for an organization card not in the field; it opens the card at the next tap. */
+    private val typedOrganizationPin1 = TypedOrganizationPin1(SystemClock::elapsedRealtime)
 
     /** Remote or local operations currently waiting on the card. */
     private val activeWaits = AtomicInteger(0)
@@ -111,17 +146,22 @@ internal class NfcReaderController(
     private val feedback = NfcFeedback(applicationContext)
 
     // Tap-to-sign: a qualified signature waits for the holder to present
-    // the card instead of requiring a pre-opened session. Confined to the
-    // shared worker thread for session mutation; the transient session it
-    // opens is the same one the qualified card service serves.
+    // the card. A session this controller holds serves it and stays this
+    // controller's; one the tap opens is the tap's to close. Session mutation
+    // runs on the shared worker thread, so the qualified card service serves
+    // whichever session is open.
     internal val tapToSign =
         NfcTapToSign(
-            probeExecutor = probeExecutor,
-            mainHandler = mainHandler,
-            latestIsoDep = { latestIsoDep },
-            primedCan = { primedCanStore.read() },
-            activeSession = { activeSession },
-            adoptSession = { session -> activeSession = session },
+            worker = probeExecutor,
+            mainThread = HandlerSignTapMainThread(mainHandler),
+            latestTag = { latestIsoDep },
+            card =
+                IsoDepSignTapCard(
+                    activeSession = { activeSession },
+                    adoptSession = { session -> activeSession = session },
+                    organizationSession = ::organizationSessionFromStore,
+                ),
+            accessNumber = { CanSessionStore.canBytes() ?: primedCanStore.read() },
             closeSession = { closeActiveSession() },
         )
 
@@ -229,6 +269,7 @@ internal class NfcReaderController(
 
     fun stop() {
         probeGeneration += 1
+        typedOrganizationPin1.drop()
         latestIsoDep = null
         tapToSign.cancel()
         probeExecutor.execute(::closeActiveSession)
@@ -319,7 +360,304 @@ internal class NfcReaderController(
         }
     }
 
-    private fun accessNumberKnown(): Boolean = CanSessionStore.hasCan || primedCardStored
+    private fun accessNumberKnown(): Boolean = CanSessionStore.hasCan || primedCanStore.hasAccessNumber()
+
+    /** The holder's PIN 1 for an organization card the phone has not read yet. */
+    private fun connectOrganization(pin1: Pin1Submission) {
+        val resting = latestIsoDep
+        if (pinCache.isRejected(pin1)) {
+            pin1.close()
+            if (resting != null) {
+                organizationPin1Answer = Pin1Verification(Pin1VerificationResult.WRONG_PIN)
+                publish(latestSnapshot)
+            } else {
+                awaitTap()
+            }
+            return
+        }
+        if (resting == null) {
+            // The card left the field: the PIN waits for its next tap.
+            typedOrganizationPin1.hold(pin1)
+            awaitTap()
+            return
+        }
+        if (!isOpeningSession.compareAndSet(false, true)) {
+            pin1.close()
+            return
+        }
+        val generation = probeGeneration
+        publish(NfcReaderSnapshot(status = NfcReaderStatus.CONNECTING))
+        try {
+            probeExecutor.execute { openOrganization(pin1, generation, resting) }
+        } catch (_: RejectedExecutionException) {
+            isOpeningSession.set(false)
+            pin1.close()
+        }
+    }
+
+    /** Asks for the card to be tapped again. */
+    private fun awaitTap() {
+        refreshReaderMode(forceCycle = true, publishWaiting = false)
+        publish(NfcReaderSnapshot(status = NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true))
+    }
+
+    /** Worker-thread confined; PACE with PIN 1 and the reads through the channel. */
+    private fun openOrganization(
+        pin1: Pin1Submission,
+        generation: Int,
+        isoDep: IsoDep,
+    ) {
+        try {
+            closeActiveSession()
+            if (generation != probeGeneration) {
+                pin1.close()
+                AppTrace.nfcSessionOpenFailed()
+                publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true)
+                return
+            }
+            if (!ensureIsoDepConnected(isoDep)) {
+                // The card left before the PIN reached it: the PIN waits for its next tap.
+                typedOrganizationPin1.hold(pin1)
+                AppTrace.nfcSessionOpenFailed()
+                publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true)
+                return
+            }
+            val candidate = pin1.copyBytes()
+            try {
+                val exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep))
+                when (val opened = NativeOrganizationCard.open(pin1, exchange)) {
+                    is NativeOrganizationOpenResult.Opened -> {
+                        handleOrganizationOpened(generation, opened, candidate, isoDep)
+                    }
+
+                    is NativeOrganizationOpenResult.Refused -> {
+                        handleOrganizationRefused(generation, opened.answer, candidate, isoDep)
+                    }
+
+                    is NativeOrganizationOpenResult.Unreadable -> {
+                        cardProblem = NfcCardProblem.READ_FAILED
+                        closeResting(isoDep)
+                        publishAsync(generation, opened.kind.toConnectStatus())
+                    }
+                }
+            } finally {
+                candidate.fill(0)
+            }
+        } finally {
+            isOpeningSession.set(false)
+        }
+    }
+
+    private fun handleOrganizationOpened(
+        generation: Int,
+        opened: NativeOrganizationOpenResult.Opened,
+        candidate: ByteArray,
+        isoDep: IsoDep,
+    ) {
+        val identity = opened.identity
+        if (generation != probeGeneration) {
+            identity.certificate.close()
+            opened.qualifiedCertificate?.close()
+            return
+        }
+        val (cardDetails, holderName) = extractCardDetails(identity)
+        val certDer = identity.certificate.copyDer()
+        val previous = currentAuthCertDer ?: primedCanStore.readAuthCertificateDer()
+        if (previous != null && !previous.contentEquals(certDer)) {
+            pinCache.clear()
+        }
+        // The handshake proved the digits, and MSE:Set AT's answer before it is
+        // the counter custody decides on: held only at the full allowance.
+        val retention =
+            Pin1Retention.of(
+                AuthenticationCardIdentity.of(certDer),
+                identity.preflight.state.attemptsLeft(),
+            )
+        if (retention != null) pinCache.recordVerified(candidate.copyOf(), retention)
+        CanSessionStore.drop()
+        primedCanStore.writeOrganization(certDer, opened.qualifiedCertificate?.copyDer(), holderName)
+        primedCardStored = true
+        rememberedHolderName = holderName
+        rememberedDetails = cardDetails
+        currentAuthCertDer = certDer
+        recognizedKind = NfcCardKind.ORGANIZATION
+        organizationPin1Attempts = identity.preflight.state.attemptsLeft()
+        organizationPin1Answer = null
+        saveCardCaCertificates()
+        // The open leaves the card inside PIN 1's secure-messaging channel, where
+        // it refuses the plain EF.CardAccess read every later operation starts
+        // with; dropping the connection resets the card's ISO-DEP session.
+        dropConnection(isoDep)
+        activeSession =
+            OrganizationContactlessSession(
+                isoDep = isoDep,
+                authenticationCertificate = identity.certificate,
+                qualifiedCertificate = opened.qualifiedCertificate,
+                caCustody = caCustody(),
+            )
+        feedback.onCardSuccess()
+        publishAsync(generation, NfcReaderStatus.CARD_READY, holderName = holderName, cardDetails = cardDetails)
+    }
+
+    /**
+     * The card's answer reaches the holder with its count. Digits it refused
+     * are remembered and never sent again; a card that is not an organization
+     * card is read anew and named no PIN.
+     */
+    private fun handleOrganizationRefused(
+        generation: Int,
+        answer: Pin1Verification,
+        candidate: ByteArray,
+        isoDep: IsoDep,
+    ) {
+        when (answer.result) {
+            Pin1VerificationResult.CARD_UNAVAILABLE -> {
+                closeResting(isoDep)
+                signalLostCard()
+                publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true)
+            }
+
+            Pin1VerificationResult.PACE_REJECTED -> {
+                probe(isoDep, generation)
+            }
+
+            Pin1VerificationResult.TRANSPORT_ERROR, Pin1VerificationResult.BRIDGE_ERROR -> {
+                cardProblem = NfcCardProblem.READ_FAILED
+                closeResting(isoDep)
+                publishAsync(generation, NfcReaderStatus.TRANSPORT_ERROR)
+            }
+
+            else -> {
+                if (answer.result == Pin1VerificationResult.WRONG_PIN) {
+                    pinCache.recordRejected(candidate.copyOf())
+                    organizationPin1Attempts = answer.remainingRetries
+                }
+                organizationPin1Answer = answer
+                feedback.onCardError()
+                val pukNext =
+                    answer.result == Pin1VerificationResult.PIN_LOCKED ||
+                        answer.result == Pin1VerificationResult.SAFETY_REFUSED ||
+                        organizationPin1Refused(organizationPin1Attempts)
+                if (pukNext) {
+                    organizationRecognized(isoDep, generation)
+                } else {
+                    publishAsync(generation, NfcReaderStatus.CARD_RECOGNIZED)
+                }
+            }
+        }
+    }
+
+    /**
+     * Worker-thread confined; an organization card answered in the field. A
+     * kept card's session comes from its stored certificates, and each
+     * operation opens its own channel. An unknown card's PIN 1 counter is read
+     * with no secret: a PIN the floor would refuse goes to the PUK's form,
+     * otherwise the holder is asked for PIN 1.
+     */
+    private fun organizationRecognized(
+        isoDep: IsoDep,
+        generation: Int,
+    ) {
+        if (generation != probeGeneration) return
+        recognizedKind = NfcCardKind.ORGANIZATION
+        val stored = organizationSessionFromStore(isoDep)
+        if (stored != null) {
+            typedOrganizationPin1.drop()
+            activeSession?.close()
+            activeSession = stored
+            currentAuthCertDer = primedCanStore.readAuthCertificateDer()
+            organizationPin1Answer = null
+            publishAsync(generation, NfcReaderStatus.CARD_READY)
+            return
+        }
+        val counter = NativeOrganizationCard.probePin1(NfcNativeBlockExchange(IsoDepCardChannel(isoDep)))
+        val state = (counter as? NativePin1PreflightResult.Success)?.preflight?.state
+        organizationPin1Attempts = state?.attemptsLeft()
+        if (organizationPin1Refused(organizationPin1Attempts)) {
+            typedOrganizationPin1.drop()
+            activeSession?.close()
+            activeSession =
+                OrganizationContactlessSession(
+                    isoDep = isoDep,
+                    authenticationCertificate = null,
+                    qualifiedCertificate = null,
+                    onUnlocked = { reprobeOrganization(isoDep, generation) },
+                    caCustody = caCustody(),
+                )
+            publishAsync(generation, NfcReaderStatus.ACTIVATION_REQUIRED)
+            return
+        }
+        val typed = typedOrganizationPin1.take()
+        if (typed == null || pinCache.isRejected(typed)) {
+            typed?.close()
+            publishAsync(generation, NfcReaderStatus.CARD_RECOGNIZED)
+            return
+        }
+        // The holder typed PIN 1 before this tap; it opens the card now.
+        isOpeningSession.set(true)
+        publishAsync(generation, NfcReaderStatus.CONNECTING)
+        openOrganization(typed, generation, isoDep)
+    }
+
+    /** Worker-thread confined; the session for the organization card this phone keeps, or null. */
+    private fun organizationSessionFromStore(isoDep: IsoDep): ContactlessCardSession? {
+        if (!primedCanStore.isOrganizationPrimed()) return null
+        val certificate =
+            primedCanStore.readAuthCertificateDer()?.let(::primedAuthenticationCertificate) ?: return null
+        val qualified: NativeQualifiedCertificate? =
+            primedCanStore.readQualifiedCertificateDer()?.let(::primedQualifiedCertificate)
+        return OrganizationContactlessSession(
+            isoDep = isoDep,
+            authenticationCertificate = certificate,
+            qualifiedCertificate = qualified,
+            caCustody = caCustody(),
+        )
+    }
+
+    /** A card with no PIN blocked any more opens with PIN 1; it is read anew. */
+    private fun reprobeOrganization(
+        isoDep: IsoDep,
+        generation: Int,
+    ) {
+        if (generation != probeGeneration) return
+        try {
+            probeExecutor.execute { probe(isoDep, generation) }
+        } catch (_: RejectedExecutionException) {
+            AppTrace.nfcProbeResultDiscarded()
+        }
+    }
+
+    private fun closeResting(isoDep: IsoDep) {
+        dropConnection(isoDep)
+        if (latestIsoDep == isoDep) latestIsoDep = null
+        AppTrace.nfcSessionClosed()
+    }
+
+    /** Close the tag's connection; the card stays in the field for the next operation. */
+    private fun dropConnection(isoDep: IsoDep) {
+        try {
+            isoDep.close()
+        } catch (_: IOException) {
+            // The tag may already be gone; the result stands.
+        } catch (_: SecurityException) {
+            // The tag handle is out of date.
+        } catch (_: IllegalStateException) {
+            // Tag service unavailable.
+        }
+    }
+
+    /** The application's CA cache as a session sees it, or none before the application has one. */
+    private fun caCustody(): CardCaCustody =
+        (applicationContext as? RefineIdApplication)
+            ?.takeIf { app -> app.hasCaCertificateStore }
+            ?.let { app -> StoreCardCaCustody(app.caCertificateStore) }
+            ?: CardCaCustody.NONE
+
+    private fun saveCardCaCertificates() {
+        val app = applicationContext as? RefineIdApplication
+        NativeCardCa.readRootCaCertificate()?.let { app?.caCertificateStore?.saveCertificate(it) }
+        NativeCardCa.readIntermediateCaCertificate()?.let { app?.caCertificateStore?.saveCertificate(it) }
+    }
 
     /** Opens a session on the recognized card resting in the field, when it can. */
     private fun openRestingCard(status: NfcReaderStatus) {
@@ -368,6 +706,10 @@ internal class NfcReaderController(
         pin1: Pin1Submission? = null,
     ) {
         checkMainThread()
+        if (can == null && pin1 != null && recognizedKind == NfcCardKind.ORGANIZATION && !isCardReady) {
+            connectOrganization(pin1)
+            return
+        }
         val currentCan = CanSessionStore.currentCan
         can?.let { CanSessionStore.remember(it) }
         val generation = probeGeneration
@@ -385,7 +727,9 @@ internal class NfcReaderController(
         if (resting == null || !resting.isConnected) {
             latestIsoDep = null
             inMemoryCanBytes?.fill(0)
-            pin1?.close()
+            // A PIN 1 typed before the tap waits for the card: it opens an
+            // organization card once the card names its kind.
+            pin1?.let(typedOrganizationPin1::hold)
             probeGeneration += 1
             refreshReaderMode(forceCycle = true, publishWaiting = false)
             // The holder asked to connect with no tag in the field:
@@ -412,8 +756,15 @@ internal class NfcReaderController(
                 val canBytes = inMemoryCanBytes ?: CanSessionStore.canBytes() ?: primedCanStore.read()
                 if (canBytes == null) {
                     isOpeningSession.set(false)
-                    pin1?.close()
-                    publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true)
+                    pin1?.let(typedOrganizationPin1::hold)
+                    // A card with no access number, or one not read yet, says
+                    // what it needs when it answers; a PIN 1 typed for it
+                    // opens an organization card.
+                    if (ensureIsoDepConnected(resting)) {
+                        probe(resting, generation)
+                    } else {
+                        publishAsync(generation, NfcReaderStatus.WAITING_FOR_CARD, awaitingCard = true)
+                    }
                     return@execute
                 }
                 val mint = can != null || CanSessionStore.hasCan
@@ -570,9 +921,14 @@ internal class NfcReaderController(
         isoDep: IsoDep,
         generation: Int,
     ) {
-        val session = activeSession
-        if (session == null || generation != probeGeneration) {
+        if (generation != probeGeneration) {
             AppTrace.nfcProbeResultDiscarded()
+            return
+        }
+        val session = activeSession
+        if (session == null) {
+            // The snapshot outlived its session; the card is read anew.
+            probe(isoDep, generation)
             return
         }
         AppTrace.nfcTagAdopted()
@@ -628,7 +984,15 @@ internal class NfcReaderController(
                 exchangeLevel = NativeCardExchangeLevel.APDU,
                 exchange = NfcNativeBlockExchange(IsoDepCardChannel(isoDep)),
             )
-        if (result !is NativeCardAccessResult.Success) {
+        cardProblem = result.cardProblem()
+        if (result is NativeCardAccessResult.Success) {
+            recognizedKind = result.summary.cardKind
+            if (result.summary.cardKind == NfcCardKind.ORGANIZATION) {
+                organizationRecognized(isoDep, generation)
+                return
+            }
+            typedOrganizationPin1.drop()
+        } else {
             try {
                 isoDep.close()
             } catch (_: IOException) {
@@ -676,6 +1040,8 @@ internal class NfcReaderController(
         material: NativeCardSessionMaterial,
     ) {
         CanSessionStore.remember(String(canBytes, Charsets.US_ASCII))
+        recognizedKind = NfcCardKind.PERSONAL
+        typedOrganizationPin1.drop()
         val (cardDetails, holderName) = extractCardDetails(opened)
         if (holderName != null) {
             rememberedHolderName = holderName
@@ -689,15 +1055,7 @@ internal class NfcReaderController(
             pinCache.clear()
         }
         currentAuthCertDer = certDer.copyOf()
-        val app = applicationContext as? RefineIdApplication
-        val rootCa = NativeCardCa.readRootCaCertificate()
-        if (rootCa != null) {
-            app?.caCertificateStore?.saveCertificate(rootCa)
-        }
-        val intermediateCa = NativeCardCa.readIntermediateCaCertificate()
-        if (intermediateCa != null) {
-            app?.caCertificateStore?.saveCertificate(intermediateCa)
-        }
+        saveCardCaCertificates()
         if (mintOnSuccess) {
             primedCanStore.write(canBytes.copyOf())
             primedCanStore.writeHolderName(holderName)
@@ -731,6 +1089,7 @@ internal class NfcReaderController(
     ) {
         CanSessionStore.remember(String(canBytes, Charsets.US_ASCII))
         pin1?.close()
+        typedOrganizationPin1.drop()
         // PACE proved the access number against this card, so it is kept
         // from here on, activated or not: the holder is not asked for it
         // again at the activation tap, and a mismatch on a later tap
@@ -764,10 +1123,18 @@ internal class NfcReaderController(
         pin1: Pin1Submission?,
         material: NativeCardSessionMaterial,
         isoDep: IsoDep,
+        organizationCard: Boolean,
     ) {
         currentAuthCertDer = null
-        pin1?.close()
+        if (organizationCard) {
+            // The card named itself an organization card: the PIN 1 typed
+            // with the access number opens it.
+            pin1?.let(typedOrganizationPin1::hold)
+        } else {
+            pin1?.close()
+        }
         if (status == NfcReaderStatus.WRONG_CAN) {
+            recognizedKind = NfcCardKind.PERSONAL
             CanSessionStore.drop()
             primedCanStore.clear()
             primedCardStored = false
@@ -778,6 +1145,12 @@ internal class NfcReaderController(
         canBytes.fill(0)
         material.close()
         NativeContactlessSession.close()
+        // The card has no access number and the one offered was not named to
+        // it; what the holder kept stays, and the card says what it needs.
+        if (organizationCard) {
+            organizationRecognized(isoDep, generation)
+            return
+        }
         val keepAlive = status == NfcReaderStatus.WRONG_CAN && isoDep.isConnected
         if (!keepAlive) {
             try {
@@ -867,7 +1240,15 @@ internal class NfcReaderController(
                 }
 
                 is NativeContactlessOpenResult.Failure -> {
-                    handleOpenFailure(generation, opened.kind.toConnectStatus(), canBytes, pin1, material, isoDep)
+                    handleOpenFailure(
+                        generation = generation,
+                        status = opened.kind.toConnectStatus(),
+                        canBytes = canBytes,
+                        pin1 = pin1,
+                        material = material,
+                        isoDep = isoDep,
+                        organizationCard = opened.kind == NativeCertificateReadFailure.ORGANIZATION_CARD,
+                    )
                 }
             }
         } finally {
@@ -909,6 +1290,10 @@ internal class NfcReaderController(
         rememberedHolderName = null
         rememberedDetails = null
         primedCardStored = false
+        recognizedKind = null
+        organizationPin1Attempts = null
+        organizationPin1Answer = null
+        typedOrganizationPin1.drop()
         isForgetting = true
         probeGeneration += 1
         try {
@@ -936,6 +1321,7 @@ internal class NfcReaderController(
     fun forgetPin1() {
         checkMainThread()
         pinCache.clear()
+        typedOrganizationPin1.drop()
     }
 
     /**
@@ -957,6 +1343,7 @@ internal class NfcReaderController(
 
     fun cancelAwaitingCard() {
         checkMainThread()
+        typedOrganizationPin1.drop()
         if (latestSnapshot.awaitingCard) {
             publish(latestSnapshot.copy(awaitingCard = false))
         }
@@ -997,13 +1384,26 @@ internal class NfcReaderController(
             snapshot.cardDetails
                 ?: (if (holder != null && holder == rememberedHolderName) rememberedDetails else null)
                 ?: holder?.let { PersonCardDetails.fromHolderName(it) }
-        latestSnapshot = snapshot.copy(isPrimed = primedCardStored, holderName = holder, cardDetails = details)
+        val kind = recognizedKind
+        latestSnapshot =
+            snapshot.copy(
+                // A kept organization card opens a citizen card with nothing.
+                isPrimed = primedCardStored && (kind != NfcCardKind.PERSONAL || !primedOrganizationOnly()),
+                holderName = holder,
+                cardDetails = details,
+                cardKind = kind,
+                pin1AttemptsLeft = organizationPin1Attempts,
+                pin1Answer = organizationPin1Answer,
+                cardProblem = if (snapshot.status in CARD_UNUSABLE) cardProblem ?: NfcCardProblem.READ_FAILED else null,
+            )
         AppTrace.nfcSnapshotPublished(latestSnapshot.status)
         if (latestSnapshot.awaitingCard) {
             AppTrace.nfcAwaitingCard()
         }
         stateListeners.toList().forEach { listener -> listener(latestSnapshot) }
     }
+
+    private fun primedOrganizationOnly(): Boolean = !primedCanStore.hasAccessNumber() && !CanSessionStore.hasCan
 
     private fun checkMainThread() {
         check(Looper.myLooper() == Looper.getMainLooper()) {

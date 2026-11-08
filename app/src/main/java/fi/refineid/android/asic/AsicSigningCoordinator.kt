@@ -46,6 +46,9 @@ internal sealed interface AsicSigningFailure {
 
     /** Network/validation sources unavailable. */
     data object ValidationUnavailable : AsicSigningFailure
+
+    /** Completion after the card signature stopped on an unexpected fault. */
+    data object InternalError : AsicSigningFailure
 }
 
 /** The container bytes, or why they could not be produced. */
