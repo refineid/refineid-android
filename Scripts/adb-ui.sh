@@ -12,6 +12,8 @@ ui_default_timeout_seconds=20
 # A cold start right after the emulator boots loads the native library and
 # compiles; it has taken longer than the default wait.
 ui_launch_timeout_seconds=90
+# The deepest screen stack the scripts back out of to reach home.
+ui_back_limit=4
 ui_device_dump="/sdcard/refineid-ui.xml"
 
 # One adb for every script: the SDK's platform-tools when present, so the
@@ -130,9 +132,10 @@ ui_checked() {
   ui_attribute "$(ui_node "$1" resource-id "$2")" checked
 }
 
-# The test tags device $1 shows, without any node text.
+# The test tags device $1 shows, without any node text. A screen without
+# tags, or a dump that fails, gives none rather than an error.
 ui_tags() {
-  ui_dump "$1" | grep -oE ' resource-id="[^"]+"' | sed -E 's/^ resource-id="([^"]*)"$/\1/' | grep -v '^android:id/'
+  { ui_dump "$1" || true; } | grep -oE ' resource-id="[^"]+"' | sed -E 's/^ resource-id="([^"]*)"$/\1/' | grep -v '^android:id/' || true
 }
 
 # Brings RefineID to the front on device $1 at its home screen.
@@ -140,6 +143,23 @@ ui_launch_refineid() {
   local serial="$1"
   "${ui_adb}" -s "${serial}" shell am force-stop fi.refineid.android
   "${ui_adb}" -s "${serial}" shell am start -n fi.refineid.android/.MainActivity > /dev/null
+  ui_wait "${serial}" mainScreen "${ui_launch_timeout_seconds}"
+}
+
+# Brings RefineID to the front on device $1 without restarting it, and
+# backs out to its home screen. A custodian keeps its RAPP listener and
+# port: a restart registers a new port under the same mDNS name, and a
+# requester's mDNS cache keeps dialling the old one until it expires.
+ui_open_refineid() {
+  local serial="$1" attempt
+  "${ui_adb}" -s "${serial}" shell am start -n fi.refineid.android/.MainActivity > /dev/null 2>&1
+  for ((attempt = 0; attempt < ui_back_limit; attempt++)); do
+    if ui_has "${serial}" mainScreen; then
+      return 0
+    fi
+    "${ui_adb}" -s "${serial}" shell input keyevent KEYCODE_BACK
+    sleep "${ui_poll_seconds}"
+  done
   ui_wait "${serial}" mainScreen "${ui_launch_timeout_seconds}"
 }
 

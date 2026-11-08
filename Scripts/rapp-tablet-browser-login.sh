@@ -9,8 +9,10 @@
 #   Scripts/rapp-tablet-browser-login.sh [--url <https url>] [--tablet <serial>] [--phone <serial>]
 #
 # The tablet must be paired (Scripts/rapp-tablet-pair.sh) and run a debug
-# build. When the phone asks for PIN 1, the script says so and waits: the
-# PIN is entered on the phone by its holder, never by a script. A PIN field
+# build. The card signs on the phone, so it must lie on the phone's NFC
+# reader; when the phone asks for the card or for PIN 1, the script says so
+# and waits. The PIN is entered on the phone by its holder, never by a
+# script. A PIN field
 # on the tablet fails the run. Page content is never printed; it can hold
 # the certificate subject. See doc/process/tablet-emulator.md.
 set -euo pipefail
@@ -24,6 +26,7 @@ readonly login_timeout_seconds=120
 readonly trace_tag=" RefineID: "
 readonly tablet_pin_tags=(browserPin1Field browserUnlockPin1Field browserUnlockCanField)
 readonly phone_pin_tag="rappPinField"
+readonly phone_card_tag="RappCardTapMessage"
 
 usage() {
   echo "usage: $0 [--url <https url>] [--tablet <serial>] [--phone <serial>]" >&2
@@ -79,6 +82,7 @@ ui_type "${tablet}" "${url}"
 echo "tablet: waiting for the client-certificate handshake"
 deadline=$((SECONDS + login_timeout_seconds))
 asked_for_pin=""
+asked_for_card=""
 outcome=""
 traces=""
 while ((SECONDS < deadline)); do
@@ -89,7 +93,12 @@ while ((SECONDS < deadline)); do
       exit 1
     fi
   done
-  if [[ -z "${asked_for_pin}" ]] && ui_has "${phone}" "${phone_pin_tag}"; then
+  phone_tags="$(ui_tags "${phone}")"
+  if [[ -z "${asked_for_card}" ]] && grep -qx "${phone_card_tag}" <<< "${phone_tags}"; then
+    echo "phone: hold the card to the phone"
+    asked_for_card="yes"
+  fi
+  if [[ -z "${asked_for_pin}" ]] && grep -qx "${phone_pin_tag}" <<< "${phone_tags}"; then
     echo "phone: enter PIN 1 on the phone"
     asked_for_pin="yes"
   fi

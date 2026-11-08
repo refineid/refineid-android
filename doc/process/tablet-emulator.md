@@ -72,7 +72,9 @@ Scripts/rapp-tablet-pair.sh [--phone <serial>] [--tablet <serial>]
 
 The phone is the one device on Wi-Fi debugging (see
 [test-devices.md](test-devices.md)) and holds a primed card. The script
-opens Remote Access on the phone and turns Card Remote Access on, reads
+opens Remote Access on the phone (bringing the running app to the front
+rather than restarting it, so the phone keeps PIN 1 and its listener)
+and turns Card Remote Access on, reads
 the offered code from the screen into a variable, opens Remote Access on
 the tablet, turns remote use on, types the code, and waits for the entry
 to close. Progress goes to stdout and the last line is `paired`; it
@@ -110,9 +112,12 @@ its completion and the signature status. It prints the traces, which
 carry only enum values and counts, and ends with `logged in`. It never
 prints page content, which can carry the certificate subject.
 
-- When the phone asks for PIN 1 (`rappPinField`), the script says so and
-  waits for the holder to enter it on the phone. With PIN 1 cached on the
-  phone, the signature goes through without a prompt.
+- The card signs on the phone, so it lies on the phone's NFC reader for
+  the whole run. When the phone asks for the card (`RappCardTapMessage`)
+  or for PIN 1 (`rappPinField`), the script says so and waits for the
+  holder. With the card present and PIN 1 held on the phone, the
+  signature goes through without a prompt. Without the card the phone
+  waits and the tablet's signature ends in `ERROR` after a minute.
 - A PIN or CAN field on the tablet fails the run: a remote login never
   asks the requester for a secret (AGENTS.md RULE #1).
 - The default service does not trust the Finnish card root, so its page
