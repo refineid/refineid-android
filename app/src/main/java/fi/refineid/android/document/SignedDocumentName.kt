@@ -37,15 +37,15 @@ internal object SignedDocumentName {
     }
 
     /**
-     * The mark a development build puts on a document below PAdES-B-LTA,
+     * The mark a development build puts on a signed file below B-LTA,
      * e.g. `-dev-B-T`, so it cannot be taken for a production signature.
      */
-    fun developmentSuffix(level: PadesBaselineLevel): String = DEVELOPMENT_MARK + level.label
+    fun developmentSuffix(level: BaselineLevel): String = DEVELOPMENT_MARK + level.label
 
     /** [name] with [developmentSuffix] before its extension. */
     fun belowLongTerm(
         name: String,
-        level: PadesBaselineLevel,
+        level: BaselineLevel,
     ): String {
         val base = name.substringBeforeLast('.', name)
         val extension = name.substringAfterLast('.', "")

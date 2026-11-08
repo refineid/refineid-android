@@ -46,7 +46,7 @@ internal enum class DocumentSigningStatus {
     SAVING,
     SIGNED,
 
-    /** Development build only: saved below PAdES-B-LTA, see [BelowLongTermNotice]. */
+    /** Development build only: saved below B-LTA, see [BelowLongTermNotice]. */
     SIGNED_BELOW_LONG_TERM,
     NO_CARD,
     CARD_LEFT,

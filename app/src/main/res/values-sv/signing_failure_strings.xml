@@ -8,7 +8,7 @@
     <string name="signing_outcome_not_saved">Det signerade dokumentet kasserades.</string>
     <string name="signing_outcome_partly_saved">En del signerade dokument sparades, resten kasserades.</string>
     <string name="signing_frame_validation_material">materialet för långtidsvalidering kunde inte samlas in: %1$s</string>
-    <string name="signed_below_long_term">Utvecklingsversion: sparad som PAdES %1$s utan material för långtidsvalidering; filnamnet slutar på %2$s. Orsak: %3$s.</string>
+    <string name="signed_below_long_term">Utvecklingsversion: sparad som %1$s-%2$s, under långtidsarkiveringsnivån B-LTA; filnamnet slutar på %3$s. Orsak: %4$s.</string>
     <string name="signing_cause_issuer_unavailable">certifikatets utfärdare hittades inte</string>
     <string name="signing_cause_revocation_unavailable">certifikatets spärrstatus kunde inte hämtas</string>
     <string name="signing_cause_random_unavailable">telefonen kunde inte ta fram ett säkert slumpvärde för spärrfrågan</string>
@@ -24,6 +24,7 @@
     <string name="signing_cause_validation_services_unreachable">valideringstjänsterna kunde inte nås</string>
     <string name="signing_cause_signature_timestamp_failed">ingen giltig tidsstämpel för signaturen erhölls</string>
     <string name="signing_cause_archive_timestamp_failed">ingen giltig arkivtidsstämpel erhölls</string>
+    <string name="signing_cause_archive_timestamp_path_uncovered">arkivtidsstämpelns utfärdares certifikat saknas i materialet för långtidsvalidering</string>
     <string name="signing_cause_document_assembly_failed">det signerade dokumentet kunde inte sättas ihop</string>
     <string name="signing_cause_container_too_large">behållaren skulle överskrida sin storleksgräns</string>
     <string name="signing_cause_internal_error">ett internt fel inträffade</string>

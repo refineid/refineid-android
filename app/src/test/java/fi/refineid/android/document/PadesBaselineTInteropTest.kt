@@ -397,7 +397,8 @@ private class PadesSigningFixture private constructor(
     }
 }
 
-private class VerifiedTimestampAuthority private constructor(
+/** A synthetic OpenSSL timestamp authority whose tokens pass the production verifier. */
+internal class VerifiedTimestampAuthority private constructor(
     private val environment: PadesInteropEnvironment,
     private val ownedTrustedCertificate: ByteArray,
 ) : AutoCloseable {
@@ -450,7 +451,8 @@ private class VerifiedTimestampAuthority private constructor(
     }
 }
 
-private class PadesInteropEnvironment private constructor(
+/** OpenSSL, qpdf and pdfsig over a temporary directory of synthetic keys, certificates and CRLs. */
+internal class PadesInteropEnvironment private constructor(
     private val executables: PadesInteropExecutables,
     private val directory: Path,
 ) : AutoCloseable {
@@ -964,13 +966,13 @@ private class PadesInteropEnvironment private constructor(
     private class UnexpectedValidationIoException : Exception()
 }
 
-private data class PadesInteropExecutables(
+internal data class PadesInteropExecutables(
     val openssl: Path,
     val qpdf: Path,
     val pdfsig: Path,
 )
 
-private data class PadesToolResult(
+internal data class PadesToolResult(
     val output: String,
     val exitCode: Int,
 )

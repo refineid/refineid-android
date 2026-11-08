@@ -59,8 +59,8 @@ checked after shrinking.
 
 ### Level below B-LTA
 
-The caller passes a `PadesLevelPolicy`, and the signing screen derives it
-only from `BuildConfig.DEBUG` through `PadesLevelPolicy.forBuild`; no setting
+The caller passes an `ArchivalLevelPolicy`, and the signing screen derives it
+only from `BuildConfig.DEBUG` through `ArchivalLevelPolicy.forBuild`; no setting
 selects it at run time.
 
 - A release build uses `LONG_TERM_ONLY`. A failure at any step discards the
@@ -71,11 +71,13 @@ selects it at run time.
 - A debug build uses `HIGHEST_REACHED`. A failure of the signature timestamp
   returns the PAdES-B-B document; a failure after step 3 returns a copy of the
   PAdES-B-T document. The result names the level and the failure. The saved
-  file name ends in `-dev-B-B` or `-dev-B-T`, and the status line says it is a
-  development-build document without long-term validation material, and why.
+  file name ends in `-dev-B-B` or `-dev-B-T`, and the status line names the
+  format and level, says it is below the long-term archival level B-LTA, and
+  why.
 
-ASiC-E completion has no reduced level: a failure discards the container in
-both builds.
+The same policy governs ASiC-E containers, which reach XAdES-B-LTA through
+their own archive timestamp; [ADR 0049](0049-xades-archive-timestamp.md)
+records that completion and its reduced levels.
 
 The certificate chain is not checked before PIN 2 is entered. On a
 contactless card the signing certificate is read inside the tap that the

@@ -8,7 +8,7 @@
     <string name="signing_outcome_not_saved">The signed document was discarded.</string>
     <string name="signing_outcome_partly_saved">Some signed documents were saved; the rest were discarded.</string>
     <string name="signing_frame_validation_material">the material for long-term validation could not be collected: %1$s</string>
-    <string name="signed_below_long_term">Development build: saved as PAdES %1$s without long-term validation material; the file name ends in %2$s. Reason: %3$s.</string>
+    <string name="signed_below_long_term">Development build: saved as %1$s-%2$s, below the long-term archival level B-LTA; the file name ends in %3$s. Reason: %4$s.</string>
     <string name="signing_cause_issuer_unavailable">the issuer of the certificate could not be found</string>
     <string name="signing_cause_revocation_unavailable">the revocation status of the certificate could not be fetched</string>
     <string name="signing_cause_random_unavailable">the phone could not produce a secure random value for the revocation query</string>
@@ -24,6 +24,7 @@
     <string name="signing_cause_validation_services_unreachable">the validation services could not be reached</string>
     <string name="signing_cause_signature_timestamp_failed">no valid signature timestamp was obtained</string>
     <string name="signing_cause_archive_timestamp_failed">no valid archive timestamp was obtained</string>
+    <string name="signing_cause_archive_timestamp_path_uncovered">the certificates of the archive timestamp’s authority are not in the long-term validation material</string>
     <string name="signing_cause_document_assembly_failed">the signed document could not be assembled</string>
     <string name="signing_cause_container_too_large">the container would exceed its size limit</string>
     <string name="signing_cause_internal_error">an internal error occurred</string>

@@ -10,6 +10,9 @@ import fi.refineid.android.core.QualifiedCardService
 import fi.refineid.android.core.QualifiedSignFailure
 import fi.refineid.android.core.QualifiedSignResult
 import fi.refineid.android.core.QualifiedSigningAlgorithm
+import fi.refineid.android.document.ArchivalLevelPolicy
+import fi.refineid.android.document.BaselineLevel
+import fi.refineid.android.document.QualifiedPdfTimestampPhase
 import fi.refineid.android.document.ValidationMaterialCollectionFailure
 import fi.refineid.android.document.ValidationPathRole
 import java.time.Instant
@@ -35,8 +38,17 @@ internal sealed interface AsicSigningFailure {
         val kind: QualifiedSignFailure,
     ) : AsicSigningFailure
 
-    /** TSA timestamp request failed. */
-    data object Timestamp : AsicSigningFailure
+    /** No verified timestamp for the exact digest of [phase] was obtained. */
+    data class Timestamp(
+        val phase: QualifiedPdfTimestampPhase,
+    ) : AsicSigningFailure
+
+    /**
+     * The archive timestamp's signer path is not entirely inside the
+     * CertificateValues already written, so a later verifier could not
+     * validate it from the container alone.
+     */
+    data object ArchiveTimestampPathUncovered : AsicSigningFailure
 
     /** OCSP/CRL validation material collection failed. */
     data class Validation(
@@ -53,9 +65,22 @@ internal sealed interface AsicSigningFailure {
 
 /** The container bytes, or why they could not be produced. */
 internal sealed interface AsicSigningResult {
+    /** A container whose signature is XAdES-B-LTA. */
     class Success(
         val container: ByteArray,
     ) : AsicSigningResult
+
+    /**
+     * Only under [ArchivalLevelPolicy.HIGHEST_REACHED]: B-LTA failed with
+     * [reason], and [container] carries the [level] reached before it.
+     */
+    class BelowLongTerm(
+        val container: ByteArray,
+        val level: BaselineLevel,
+        val reason: AsicSigningFailure,
+    ) : AsicSigningResult {
+        override fun toString(): String = "BelowLongTerm(level=" + level + ", reason=" + reason + ")"
+    }
 
     class Failure(
         val reason: AsicSigningFailure,
@@ -63,8 +88,9 @@ internal sealed interface AsicSigningResult {
 }
 
 /**
- * Prepares and signs a set of files into one ASiC-E container, ported from
- * the reference `AsicSigner`.
+ * Has the card sign a set of files for one ASiC-E container, ported from
+ * the reference `AsicSigner`. [QualifiedAsicArchivalCompletion] turns the
+ * prepared signature into the container.
  */
 internal class AsicSigningCoordinator(
     private val cardService: QualifiedCardService,
@@ -138,34 +164,6 @@ internal class AsicSigningCoordinator(
                             }
                         }
                     }
-                }
-            }
-        }
-    }
-
-    fun sign(
-        objects: List<AsicDataObject>,
-        pin2: Pin2Submission,
-        onResult: (AsicSigningResult) -> Unit,
-    ) {
-        prepare(objects, pin2) { preparedResult ->
-            when (preparedResult) {
-                is PreparedAsicSignatureResult.Failure -> {
-                    onResult(AsicSigningResult.Failure(preparedResult.reason))
-                }
-
-                is PreparedAsicSignatureResult.Success -> {
-                    val prepared = preparedResult.prepared
-                    val document = prepared.plan.document(prepared.rawSignature)
-                    val archive = AsicContainer.container(prepared.objects, document.encodeToByteArray())
-                    prepared.close()
-                    onResult(
-                        if (archive == null) {
-                            AsicSigningResult.Failure(AsicSigningFailure.ContainerOverflow)
-                        } else {
-                            AsicSigningResult.Success(archive)
-                        },
-                    )
                 }
             }
         }
