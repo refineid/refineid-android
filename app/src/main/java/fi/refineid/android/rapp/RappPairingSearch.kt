@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * The phones in pairing mode one search tries, by the service instance
- * each was found under.
+ * each was found under and the address it resolved to.
  */
 internal interface RappPairingEndpoints : AutoCloseable {
     /** Reports every phone found in pairing mode until [close]. */
@@ -133,9 +133,15 @@ internal class RappPairingSearch(
         val table = ConcurrentHashMap<String, Endpoint>()
         val foundSignal = Channel<Unit>(Channel.UNLIMITED)
         endpoints.start { instance, host, port ->
-            table.putIfAbsent(instance, Endpoint(host, port))
+            // A phone that restarts its listener announces the same instance
+            // on a new port, while a requester's mDNS cache can still resolve
+            // the old one. Each resolved address is its own endpoint (section
+            // 4.2 item 1); the offer_id still allows one guess per phone
+            // (item 2), and the connection limit bounds the openings (item 5).
+            val endpoint = endpointKey(instance, host, port)
+            table.putIfAbsent(endpoint, Endpoint(host, port))
             try {
-                ledger.found(instance)
+                ledger.found(endpoint)
             } catch (_: RappBindingException) {
             }
             foundSignal.trySend(Unit)
@@ -406,6 +412,19 @@ internal class RappPairingSearch(
 
     internal companion object {
         private val RANDOM_BYTE_COUNTS = rappRandomByteCounts()
+
+        /** Separates the parts of an endpoint's ledger name; no host or port holds it. */
+        private const val ENDPOINT_KEY_SEPARATOR = "\n"
+
+        /**
+         * The ledger's name for the endpoint [instance] resolved to at
+         * [host] and [port]. It names nothing outside this search.
+         */
+        private fun endpointKey(
+            instance: String,
+            host: String,
+            port: Int,
+        ): String = listOf(instance, host, port.toString()).joinToString(ENDPOINT_KEY_SEPARATOR)
 
         /** How long a search waits for a phone in pairing mode before reporting none found. */
         const val INITIAL_DISCOVERY_MS = 10_000L
