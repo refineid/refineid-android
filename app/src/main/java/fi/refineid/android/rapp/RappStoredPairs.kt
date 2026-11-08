@@ -4,7 +4,6 @@ package fi.refineid.android.rapp
 
 import fi.refineid.android.diagnostics.AppTrace
 import uniffi.refineid_rapp.RappBindingException
-import uniffi.refineid_rapp.RappEndpointRole
 import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappPairVault
 
@@ -21,13 +20,13 @@ internal class RappStoredPair(
  * A record in a format the core does not decode, or one the vault no longer
  * holds, is removed from the catalog and the vault, so its device pairs
  * again. A record stored before its peer confirmed storage (RAPP v26.11.2
- * section 4.3 item 4) is revoked. A forgotten record whose close has not
- * reached its peer within 30 days of the forgetting (section 4.6 item 3) is
- * revoked too, by every load: the start, each routed connection, each
- * discovery-hint window and each change of the pairings rebuild the served
- * set, so a record past its window neither routes nor stays announced. A
- * storage failure removes nothing. The start also sweeps every pairing for
- * idle expiry ([RappIdleExpiry]).
+ * section 4.3 item 4) is revoked. A forgotten record whose revocation
+ * notice window passed (section 4.6 item 3) is revoked too, by every load:
+ * the start, each routed connection, each discovery-hint window and each
+ * change of the pairings rebuild the served set, so a record past its
+ * window neither routes nor stays announced. A storage failure removes
+ * nothing. The start also sweeps every pairing for idle expiry
+ * ([RappIdleExpiry]).
  */
 internal object RappStoredPairs {
     /**
@@ -50,43 +49,22 @@ internal object RappStoredPairs {
      * Removes every catalogued pairing whose record the core no longer
      * decodes, revokes catalogued records left unconfirmed or past their
      * notice window, sweeps the others for idle expiry with no session open
-     * (section 4.6 item 5), destroys the requester's revoking records whose
-     * bound passed with the process, and revokes every vault record no
-     * catalogue entry names: a ceremony interrupted after it stored its
-     * record leaves one behind (section 4.3 item 4).
+     * (section 4.6 item 5), and revokes every vault record no catalogue
+     * entry names: a ceremony interrupted after it stored its record leaves
+     * one behind (section 4.3 item 4). A requester's forgotten pairings
+     * stay in the revocation backlog across the restart (section 4.6 item
+     * 6); only ones past their idle expiry go, through the served set.
      */
     fun cleanAtStartup(
         catalog: RappPairCatalog,
         vault: AndroidRappVault,
     ) {
         RappIdleExpiry.sweep(catalog, vault, RappClock.wallMs(), session = null)
-        destroyStaleRequesterRevocations(catalog, vault)
         RappIdleExpiry.sweepRequester(catalog, vault, RappClock.wallMs(), session = null)
         val catalogued = catalog.allPairs().map { it.pairIdHex }
         for (pairIdHex in orphanPairIds(vault.storedPairIds, catalogued)) {
             val pairId = RappPairId.fromKey(pairIdHex) ?: continue
             RappPairRevocation.revoke(pairId, vault)
-        }
-    }
-
-    /**
-     * Destroys every requester record left forgotten: its revocation
-     * attempt ran with the process that forgot it, and a requester keeps no
-     * revoking pairing longer than its bound (section 4.6 item 6). Each
-     * leaves the catalog; custodian records are untouched.
-     */
-    internal fun destroyStaleRequesterRevocations(
-        catalog: RappPairCatalog,
-        vault: RappPairVault,
-    ) {
-        for (stored in served(catalog, vault)) {
-            val pairing = stored.pairing
-            if (pairing.role == RappEndpointRole.REQUESTER && pairing.state is RappPairState.Forgotten) {
-                RappPairRevocation.revoke(pairing.id, stored.record, vault)
-                catalog.removePair(stored.peer.pairIdHex)
-            } else {
-                stored.record.close()
-            }
         }
     }
 

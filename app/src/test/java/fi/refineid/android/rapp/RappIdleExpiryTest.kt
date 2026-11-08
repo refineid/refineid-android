@@ -3,6 +3,7 @@
 package fi.refineid.android.rapp
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -12,6 +13,7 @@ import uniffi.refineid_rapp.RappPairMetadata
 import uniffi.refineid_rapp.RappPairRecord
 import uniffi.refineid_rapp.RappPairVault
 import uniffi.refineid_rapp.RappSessionBridge
+import uniffi.refineid_rapp.RappSweepOutcome
 import uniffi.refineid_rapp.RappVaultException
 import uniffi.refineid_rapp.rappPairingIdleExpiryMs
 import uniffi.refineid_rapp.rappRandomByteCounts
@@ -42,6 +44,9 @@ class RappIdleExpiryTest {
         /** When, after the pairing's creation, its one session is established. */
         const val SESSION_AFTER_DAYS = 10L
         val SESSION_AFTER_MS = TimeUnit.DAYS.toMillis(SESSION_AFTER_DAYS).toULong()
+
+        /** When, after that session, the holder forgets the pairing. */
+        const val FORGOTTEN_AFTER_DAYS = 5L
 
         /** How long that session stays established. */
         const val SESSION_HOURS = 2L
@@ -175,7 +180,7 @@ class RappIdleExpiryTest {
         val (computer, phone) = served.handshake(forgotten.record)
         val echo =
             RappBridgeOutcome.from(
-                computer.receiveReady(phone.deliverRevocationNotice(), NOW, RappTestOffers.COMPUTER_NAME),
+                computer.receiveReady(phone.deliverRevocationNotice(limitMs), NOW, RappTestOffers.COMPUTER_NAME),
             )
         val echoed = (echo as RappBridgeOutcome.Send).close as RappSentClose.Echo
         assertEquals(RappCloseReason.PAIRING_REVOKED, echoed.reason)
@@ -364,32 +369,36 @@ class RappIdleExpiryTest {
     }
 
     @Test
-    fun staleRequesterRevocationsAreDestroyedAtLaunch() {
+    fun aForgottenRequesterPairingWaitsInTheBacklogUntilItsIdleExpiry() {
         val held = held()
-        // Forgotten with this process, whose bound passed with it.
-        val forgottenAtMs = RappClock.wallMs()
+        val sessionMs = RappClock.wallMs()
+        assertEquals(RappSweepOutcome.RECORDED, held.requester.sweep(held.vault, sessionMs, true))
+        // Forgotten five days after its last session, as section 4.6 item 6 says.
+        val forgottenAtMs = sessionMs + TimeUnit.DAYS.toMillis(FORGOTTEN_AFTER_DAYS).toULong()
         held.requester.forget(held.vault, forgottenAtMs)
         held.requester.close()
         held.catalog.markForgotten(held.pairId.key, forgottenAtMs.toLong())
 
-        val (otherRequester, otherCustodian) = RappTestOffers.pairRecords(PROFILES, NOW)
-        otherRequester.close()
-        otherCustodian.persistDeviceOnly(held.vault)
-        val otherPairId = otherCustodian.pairing().id
-        otherCustodian.forget(held.vault, forgottenAtMs)
-        otherCustodian.close()
-        held.catalog.savePair(otherPairId.toWire(), DISPLAY_NAME, PLATFORM, held.createdAtMs.toLong())
-        held.catalog.markForgotten(otherPairId.key, forgottenAtMs.toLong())
-
-        RappStoredPairs.destroyStaleRequesterRevocations(held.catalog, held.vault)
-
-        assertTrue(held.vault.isRevoked(held.pairId.toWire()))
+        // The backlog survives the restart: the forgotten pairing is still served.
+        val waiting = RappStoredPairs.served(held.catalog, held.vault) { forgottenAtMs }
+        assertTrue(waiting.single().pairing.state is RappPairState.Forgotten)
+        waiting.forEach { it.record.close() }
         assertEquals(
-            otherPairId.key,
+            held.pairId.key,
             held.catalog
                 .forgottenPairs()
                 .single()
                 .pairIdHex,
         )
+        assertFalse(held.vault.isRevoked(held.pairId.toWire()))
+
+        // Past its idle expiry, 30 days after the last session, it goes untold.
+        val limitMs = sessionMs + IDLE_EXPIRY_MS
+        val kept = RappStoredPairs.served(held.catalog, held.vault) { limitMs - MARGIN_MS }
+        assertTrue(kept.isNotEmpty())
+        kept.forEach { it.record.close() }
+        assertTrue(RappStoredPairs.served(held.catalog, held.vault) { limitMs }.isEmpty())
+        assertTrue(held.catalog.allPairs().isEmpty())
+        assertTrue(held.vault.isRevoked(held.pairId.toWire()))
     }
 }

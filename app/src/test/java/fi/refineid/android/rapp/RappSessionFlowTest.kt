@@ -288,7 +288,7 @@ class RappSessionFlowTest {
             custodian.sendReady(random(RANDOM_BYTE_COUNTS.sessionReadyNonce), RappTestOffers.PHONE_NAME)
         }
 
-        val notice = custodian.deliverRevocationNotice()
+        val notice = custodian.deliverRevocationNotice(WALL_MS)
         requester.enterAuthentication()
         val echo = RappBridgeOutcome.from(requester.receiveReady(notice, NOW, RappTestOffers.COMPUTER_NAME))
         val echoed = (echo as RappBridgeOutcome.Send).close as RappSentClose.Echo

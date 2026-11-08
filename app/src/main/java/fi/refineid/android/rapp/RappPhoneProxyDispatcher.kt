@@ -949,7 +949,7 @@ internal class RappPhoneProxyDispatcher(
         session: RappSessionBridge,
         pair: RappStoredPair,
     ) {
-        send(session.deliverRevocationNotice())
+        send(session.deliverRevocationNotice(RappClock.wallMs()))
         routed = null
         val ended = CompletableDeferred<Unit>()
         closing = ended
