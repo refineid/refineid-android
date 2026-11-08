@@ -83,6 +83,8 @@ log="${log_dir%/}/${avd_name}-emulator.log"
 
 # Netsim's packet-streamed Wi-Fi otherwise owns the virtio Wi-Fi device and
 # keeps wlan0 behind user-mode NAT; with it disabled, vmnet backs wlan0.
+# The log is opened by the invoking user so it stays the user's file.
+# shellcheck disable=SC2024
 sudo env \
   HOME="${HOME}" \
   ANDROID_SDK_ROOT="${sdk}" \
