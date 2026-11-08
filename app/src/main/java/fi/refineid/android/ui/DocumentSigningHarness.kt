@@ -18,11 +18,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import fi.refineid.android.BuildConfig
 import fi.refineid.android.R
 import fi.refineid.android.asic.AsicContainer
 import fi.refineid.android.asic.AsicDataObject
 import fi.refineid.android.asic.AsicSigningCoordinator
-import fi.refineid.android.asic.AsicSigningFailure
 import fi.refineid.android.asic.AsicSigningResult
 import fi.refineid.android.asic.PreparedAsicSignature
 import fi.refineid.android.asic.PreparedAsicSignatureResult
@@ -31,17 +31,16 @@ import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.Pin2Submission
 import fi.refineid.android.core.QualifiedCardService
 import fi.refineid.android.diagnostics.AppTrace
+import fi.refineid.android.document.PadesLevelPolicy
 import fi.refineid.android.document.PdfSignatureClaim
 import fi.refineid.android.document.PreparedQualifiedPdfSignature
 import fi.refineid.android.document.QualifiedPdfArchivalCompletion
-import fi.refineid.android.document.QualifiedPdfArchivalFailure
 import fi.refineid.android.document.QualifiedPdfArchivalResult
 import fi.refineid.android.document.QualifiedPdfPreparationResult
 import fi.refineid.android.document.QualifiedPdfSigningCoordinator
-import fi.refineid.android.document.QualifiedPdfSigningFailure
 import fi.refineid.android.document.SignedDocumentName
 import fi.refineid.android.document.SignedPdfDocument
-import fi.refineid.android.document.ValidationMaterialCollectionFailure
+import fi.refineid.android.nfc.SignTapFailure
 import fi.refineid.android.settings.TimestampAuthorityRepository
 import fi.refineid.android.settings.TimestampAuthorityStoreException
 import kotlinx.coroutines.CancellationException
@@ -65,7 +64,7 @@ import kotlin.coroutines.resume
  * supplied only when no card has been primed.
  */
 internal class DocumentSignTap(
-    val begin: (canBytes: ByteArray?, onReady: () -> Unit, onNoCard: () -> Unit) -> Unit,
+    val begin: (canBytes: ByteArray?, onReady: () -> Unit, onFailure: (SignTapFailure) -> Unit) -> Unit,
     val end: () -> Unit,
     val canRequired: Boolean,
 )
@@ -187,6 +186,8 @@ internal fun DocumentSigningHarness(
         canRequired = tap?.canRequired == true,
         canSign = signingAvailable,
         status = session.status,
+        failure = session.failure,
+        belowLongTerm = session.belowLongTerm,
         onChooseDocuments = { chooseFilesLauncher.launch(arrayOf(ANY_MEDIA_TYPE)) },
         onAddDocument = { addFilesLauncher.launch(arrayOf(ANY_MEDIA_TYPE)) },
         onSign = session::sign,
@@ -224,6 +225,7 @@ internal class DocumentSigningHarnessSession(
     private var signedDocument: SignedPdfDocument? = null
     private var signedBatchPdfs: List<Pair<String, SignedPdfDocument>>? = null
     private var signedContainer: ByteArray? = null
+    private val padesLevelPolicy = PadesLevelPolicy.forBuild(isDebugBuild = BuildConfig.DEBUG)
 
     val documentNames: List<String>
         get() = selectedItems.map { it.name }
@@ -239,6 +241,16 @@ internal class DocumentSigningHarnessSession(
 
     var status by mutableStateOf(DocumentSigningStatus.IDLE)
         private set
+
+    /** Why signing stopped; read while [status] is [DocumentSigningStatus.FAILED]. */
+    var failure by mutableStateOf<DocumentSigningFailure?>(null)
+        private set
+
+    /** What the saved development document lacks; read while [status] is SIGNED_BELOW_LONG_TERM. */
+    var belowLongTerm by mutableStateOf<BelowLongTermNotice?>(null)
+        private set
+
+    private var pendingBelowLongTerm: BelowLongTermNotice? = null
 
     var saveRequest by mutableStateOf<DocumentSaveRequest?>(null)
         private set
@@ -339,7 +351,7 @@ internal class DocumentSigningHarnessSession(
         if (!isAvailable() || service == null) {
             pin2.close()
             can?.close()
-            status = DocumentSigningStatus.UNAVAILABLE
+            fail(CardNotReadyFailure)
             return
         }
         withOpenCard(pin2, can) { granted ->
@@ -374,10 +386,10 @@ internal class DocumentSigningHarnessSession(
                     pin2.close()
                 }
             },
-            {
+            { failure ->
                 pin2.close()
                 if (!isClosed) {
-                    status = DocumentSigningStatus.NO_CARD
+                    status = failure.signingStatus()
                 }
             },
         )
@@ -431,7 +443,7 @@ internal class DocumentSigningHarnessSession(
                                     pendingArchivalSources = null
                                 }
                                 sources.close()
-                                status = prepResult.reason.status()
+                                stop(prepResult.reason.signingStop())
                             }
 
                             is PreparedAsicSignatureResult.Success -> {
@@ -454,15 +466,15 @@ internal class DocumentSigningHarnessSession(
                     throw cancelled
                 } catch (_: TimestampAuthorityStoreException) {
                     tap()?.end?.invoke()
-                    if (!isClosed) {
-                        status = DocumentSigningStatus.UNAVAILABLE
-                    }
+                    fail(TimestampSettingsFailure)
+                } catch (_: IOException) {
+                    pin2.close()
+                    tap()?.end?.invoke()
+                    fail(FileUnreadableFailure)
                 } catch (_: Exception) {
                     pin2.close()
                     tap()?.end?.invoke()
-                    if (!isClosed) {
-                        status = DocumentSigningStatus.ERROR
-                    }
+                    fail(internalFailure(SigningFailureOutcome.NOT_SIGNED))
                 }
             }
         signingSetupJob = running
@@ -485,7 +497,7 @@ internal class DocumentSigningHarnessSession(
                         }
                     when (result) {
                         is AsicSigningResult.Failure -> {
-                            status = result.reason.status()
+                            stop(result.reason.signingStop())
                         }
 
                         is AsicSigningResult.Success -> {
@@ -497,9 +509,7 @@ internal class DocumentSigningHarnessSession(
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: RuntimeException) {
-                    if (!isClosed) {
-                        status = DocumentSigningStatus.ERROR
-                    }
+                    fail(internalFailure(SigningFailureOutcome.SIGNATURE_DISCARDED))
                 } finally {
                     archivalSources.close()
                 }
@@ -598,7 +608,7 @@ internal class DocumentSigningHarnessSession(
                                         pendingArchivalSources = null
                                     }
                                     sources.close()
-                                    status = prepResult.kind.status()
+                                    stop(prepResult.kind.signingStop())
                                     break
                                 }
 
@@ -627,14 +637,13 @@ internal class DocumentSigningHarnessSession(
                     throw cancelled
                 } catch (_: TimestampAuthorityStoreException) {
                     tap()?.end?.invoke()
-                    if (!isClosed) {
-                        status = DocumentSigningStatus.UNAVAILABLE
-                    }
+                    fail(TimestampSettingsFailure)
+                } catch (_: IOException) {
+                    tap()?.end?.invoke()
+                    fail(FileUnreadableFailure)
                 } catch (_: RuntimeException) {
                     tap()?.end?.invoke()
-                    if (!isClosed) {
-                        status = DocumentSigningStatus.ERROR
-                    }
+                    fail(internalFailure(SigningFailureOutcome.NOT_SIGNED))
                 } finally {
                     pinBytes.fill(0)
                     loadedPdfs?.forEach { it.close() }
@@ -664,13 +673,24 @@ internal class DocumentSigningHarnessSession(
                                     prepared = prepared,
                                     timestampSource = archivalSources.timestamp,
                                     validationSource = archivalSources.validation,
+                                    policy = padesLevelPolicy,
                                 )
                             }
                         when (result) {
                             is QualifiedPdfArchivalResult.Failure -> {
                                 failed = true
-                                status = result.kind.status()
+                                fail(result.kind.signingFailure())
                                 break
+                            }
+
+                            is QualifiedPdfArchivalResult.BelowLongTerm -> {
+                                if (pendingBelowLongTerm == null) {
+                                    pendingBelowLongTerm =
+                                        BelowLongTermNotice(result.level, result.kind.signingFailure())
+                                }
+                                completedDocs.add(
+                                    SignedDocumentName.belowLongTerm(suggestedName, result.level) to result.document,
+                                )
                             }
 
                             is QualifiedPdfArchivalResult.Success -> {
@@ -688,6 +708,7 @@ internal class DocumentSigningHarnessSession(
                             saveFolderRequest = true
                         }
                     } else {
+                        pendingBelowLongTerm = null
                         completedDocs.forEach { it.second.close() }
                     }
                 } catch (cancelled: CancellationException) {
@@ -697,9 +718,9 @@ internal class DocumentSigningHarnessSession(
                         cancellation.initCause(interrupted)
                     }
                 } catch (_: RuntimeException) {
-                    if (!isClosed) {
-                        status = DocumentSigningStatus.ERROR
-                    }
+                    pendingBelowLongTerm = null
+                    completedDocs.forEach { it.second.close() }
+                    fail(internalFailure(SigningFailureOutcome.SIGNATURE_DISCARDED))
                 } finally {
                     archivalSources.close()
                     preparedList.forEach { it.second.close() }
@@ -734,13 +755,10 @@ internal class DocumentSigningHarnessSession(
                     AppTrace.documentOutputCompleted(isSuccessful = ok, documentLength = document.length)
                     ok
                 }
-            if (!isClosed) {
-                if (saved) {
-                    selectedItems = emptyList()
-                    status = DocumentSigningStatus.SIGNED
-                } else {
-                    status = DocumentSigningStatus.ERROR
-                }
+            if (saved) {
+                completeSave()
+            } else {
+                fail(saveFailure(partly = false))
             }
         }
     }
@@ -759,6 +777,7 @@ internal class DocumentSigningHarnessSession(
         status = DocumentSigningStatus.SAVING
         scope.launch {
             var allSaved = true
+            var savedCount = 0
             val total = batch.size
             try {
                 withContext(Dispatchers.IO) {
@@ -777,8 +796,8 @@ internal class DocumentSigningHarnessSession(
                                 PDF_MEDIA_TYPE,
                                 name,
                             )
-                        if (newFileUri != null) {
-                            save(signedDoc, newFileUri)
+                        if (newFileUri != null && save(signedDoc, newFileUri)) {
+                            savedCount++
                         } else {
                             allSaved = false
                         }
@@ -793,13 +812,10 @@ internal class DocumentSigningHarnessSession(
             } finally {
                 batch.forEach { it.second.close() }
             }
-            if (!isClosed) {
-                if (allSaved) {
-                    selectedItems = emptyList()
-                    status = DocumentSigningStatus.SIGNED
-                } else {
-                    status = DocumentSigningStatus.ERROR
-                }
+            if (allSaved) {
+                completeSave()
+            } else {
+                fail(saveFailure(partly = savedCount > 0))
             }
         }
     }
@@ -893,9 +909,40 @@ internal class DocumentSigningHarnessSession(
 
     private fun failInput() {
         if (!isClosed) {
-            status = DocumentSigningStatus.ERROR
+            fail(FileUnreadableFailure)
             AppTrace.documentInputCompleted(isAccepted = false, documentLength = null)
         }
+    }
+
+    private fun fail(cause: DocumentSigningFailure) {
+        if (!isClosed) {
+            failure = cause
+            status = DocumentSigningStatus.FAILED
+        }
+    }
+
+    private fun stop(stop: DocumentSigningStop) {
+        when (stop) {
+            is DocumentSigningStop.Failed -> fail(stop.failure)
+            is DocumentSigningStop.Status -> if (!isClosed) status = stop.status
+        }
+    }
+
+    /** A save that wrote every file: the status names a development document below B-LTA. */
+    private fun completeSave() {
+        if (isClosed) {
+            return
+        }
+        selectedItems = emptyList()
+        val notice = pendingBelowLongTerm
+        pendingBelowLongTerm = null
+        belowLongTerm = notice
+        status =
+            if (notice == null) {
+                DocumentSigningStatus.SIGNED
+            } else {
+                DocumentSigningStatus.SIGNED_BELOW_LONG_TERM
+            }
     }
 
     private fun discardSigned() {
@@ -906,6 +953,7 @@ internal class DocumentSigningHarnessSession(
         signedBatchPdfs?.forEach { it.second.close() }
         signedBatchPdfs = null
         signedContainer = null
+        pendingBelowLongTerm = null
         progressText = null
     }
 
@@ -928,126 +976,24 @@ internal class DocumentSigningHarnessSession(
         }
     }
 
-    private fun QualifiedPdfArchivalFailure.status(): DocumentSigningStatus =
-        when (this) {
-            is QualifiedPdfArchivalFailure.Timestamp,
-            QualifiedPdfArchivalFailure.ValidationUnavailable,
-            -> {
-                DocumentSigningStatus.UNAVAILABLE
-            }
-
-            // The card produced a valid signature; only the long-term
-            // validation refused, because the certificate is revoked. That
-            // is a certificate fact, not a signing fault, so it reads apart
-            // from a generic error.
-            is QualifiedPdfArchivalFailure.Validation -> {
-                if (kind == ValidationMaterialCollectionFailure.REVOKED) {
-                    DocumentSigningStatus.CERT_REVOKED
-                } else {
-                    DocumentSigningStatus.ERROR
-                }
-            }
-
-            is QualifiedPdfArchivalFailure.Cms,
-            is QualifiedPdfArchivalFailure.Document,
-            QualifiedPdfArchivalFailure.InternalError,
-            -> {
-                DocumentSigningStatus.ERROR
-            }
-        }
-
-    private fun QualifiedPdfSigningFailure.status(): DocumentSigningStatus =
-        when (this) {
-            is QualifiedPdfSigningFailure.Card -> {
-                when (kind) {
-                    fi.refineid.android.core.QualifiedSignFailure.WRONG_PIN -> {
-                        DocumentSigningStatus.WRONG_PIN
-                    }
-
-                    fi.refineid.android.core.QualifiedSignFailure.PIN_LOCKED -> {
-                        DocumentSigningStatus.PIN_LOCKED
-                    }
-
-                    fi.refineid.android.core.QualifiedSignFailure.CARD_UNAVAILABLE,
-                    fi.refineid.android.core.QualifiedSignFailure.TRANSPORT_ERROR,
-                    fi.refineid.android.core.QualifiedSignFailure.SAFETY_REFUSED,
-                    -> {
-                        DocumentSigningStatus.UNAVAILABLE
-                    }
-
-                    fi.refineid.android.core.QualifiedSignFailure.INVALID_PIN,
-                    fi.refineid.android.core.QualifiedSignFailure.VERIFICATION_REJECTED,
-                    fi.refineid.android.core.QualifiedSignFailure.CERTIFICATE_REJECTED,
-                    fi.refineid.android.core.QualifiedSignFailure.INVALID_CERTIFICATE,
-                    fi.refineid.android.core.QualifiedSignFailure.CERTIFICATE_MISMATCH,
-                    fi.refineid.android.core.QualifiedSignFailure.KEY_PROFILE_MISMATCH,
-                    fi.refineid.android.core.QualifiedSignFailure.SIGNING_REJECTED,
-                    fi.refineid.android.core.QualifiedSignFailure.LOCAL_VERIFICATION_FAILED,
-                    fi.refineid.android.core.QualifiedSignFailure.BRIDGE_ERROR,
-                    -> {
-                        DocumentSigningStatus.ERROR
-                    }
-                }
-            }
-
-            is QualifiedPdfSigningFailure.Certificate,
-            QualifiedPdfSigningFailure.KeyProfileUnsupported,
-            -> {
-                DocumentSigningStatus.UNAVAILABLE
-            }
-
-            is QualifiedPdfSigningFailure.Cms,
-            is QualifiedPdfSigningFailure.Document,
-            QualifiedPdfSigningFailure.InternalError,
-            -> {
-                DocumentSigningStatus.ERROR
-            }
-        }
-
-    private fun AsicSigningFailure.status(): DocumentSigningStatus =
-        when (this) {
-            AsicSigningFailure.KeyProfileUnsupported,
-            is AsicSigningFailure.Certificate,
-            AsicSigningFailure.ValidationUnavailable,
-            -> DocumentSigningStatus.UNAVAILABLE
-
-            AsicSigningFailure.UnusableNames,
-            AsicSigningFailure.ContainerOverflow,
-            AsicSigningFailure.Timestamp,
-            is AsicSigningFailure.Validation,
-            -> DocumentSigningStatus.ERROR
-
-            is AsicSigningFailure.Card -> kind.status()
-        }
-
-    private fun fi.refineid.android.core.QualifiedSignFailure.status(): DocumentSigningStatus =
-        when (this) {
-            fi.refineid.android.core.QualifiedSignFailure.WRONG_PIN -> DocumentSigningStatus.WRONG_PIN
-
-            fi.refineid.android.core.QualifiedSignFailure.PIN_LOCKED -> DocumentSigningStatus.PIN_LOCKED
-
-            fi.refineid.android.core.QualifiedSignFailure.CARD_UNAVAILABLE,
-            fi.refineid.android.core.QualifiedSignFailure.TRANSPORT_ERROR,
-            fi.refineid.android.core.QualifiedSignFailure.SAFETY_REFUSED,
-            -> DocumentSigningStatus.UNAVAILABLE
-
-            fi.refineid.android.core.QualifiedSignFailure.INVALID_PIN,
-            fi.refineid.android.core.QualifiedSignFailure.VERIFICATION_REJECTED,
-            fi.refineid.android.core.QualifiedSignFailure.CERTIFICATE_REJECTED,
-            fi.refineid.android.core.QualifiedSignFailure.INVALID_CERTIFICATE,
-            fi.refineid.android.core.QualifiedSignFailure.CERTIFICATE_MISMATCH,
-            fi.refineid.android.core.QualifiedSignFailure.KEY_PROFILE_MISMATCH,
-            fi.refineid.android.core.QualifiedSignFailure.SIGNING_REJECTED,
-            fi.refineid.android.core.QualifiedSignFailure.LOCAL_VERIFICATION_FAILED,
-            fi.refineid.android.core.QualifiedSignFailure.BRIDGE_ERROR,
-            -> DocumentSigningStatus.ERROR
-        }
-
     private companion object {
         const val WRITE_MODE = "w"
         const val DEFAULT_DOCUMENT_NAME = "document.pdf"
     }
 }
+
+/** What the signing screen says when a contactless card did not serve the signature. */
+internal fun SignTapFailure.signingStatus(): DocumentSigningStatus =
+    when (this) {
+        SignTapFailure.NO_CARD -> DocumentSigningStatus.NO_CARD
+        SignTapFailure.CARD_LEFT -> DocumentSigningStatus.CARD_LEFT
+        SignTapFailure.ACCESS_NUMBER_REQUIRED -> DocumentSigningStatus.ACCESS_NUMBER_REQUIRED
+        SignTapFailure.ORGANIZATION_CARD_NOT_READ -> DocumentSigningStatus.ORGANIZATION_CARD_NOT_READ
+        SignTapFailure.NO_KNOWN_KIND -> DocumentSigningStatus.CARD_NO_KNOWN_KIND
+        SignTapFailure.ACCESS_FILE_REFUSED -> DocumentSigningStatus.CARD_ACCESS_FILE_REFUSED
+        SignTapFailure.ACCESS_FILE_MALFORMED -> DocumentSigningStatus.CARD_ACCESS_FILE_MALFORMED
+        SignTapFailure.READ_FAILED -> DocumentSigningStatus.CARD_READ_FAILED
+    }
 
 private const val PDF_MEDIA_TYPE = "application/pdf"
 private const val ANY_MEDIA_TYPE = "*/*"

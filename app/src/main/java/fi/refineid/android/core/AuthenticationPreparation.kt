@@ -28,6 +28,12 @@ internal enum class CardConnection {
     ABSENT,
     WRONG_CAN,
     REFUSED,
+
+    /** A citizen card answered and its access number is not known. */
+    NEEDS_ACCESS_NUMBER,
+
+    /** An organization card answered and is not yet read: PIN 1 opens it. */
+    NEEDS_ORGANIZATION_PIN1,
 }
 
 internal interface AuthenticationPreparationBackend {
@@ -36,17 +42,26 @@ internal interface AuthenticationPreparationBackend {
     /** Arms the reader with the holder's access number, when one is needed, and waits for the card. */
     suspend fun connect(can: CanSubmission?): CardConnection
 
+    /** Opens the organization card in the field with [pin1], which it consumes. */
+    suspend fun openOrganization(pin1: Pin1Submission): Pin1Verification {
+        pin1.close()
+        return Pin1Verification(Pin1VerificationResult.CARD_UNAVAILABLE)
+    }
+
     /** The card [connect] proved ready, named by its authentication certificate; null when it cannot be read. */
     suspend fun connectedCard(): AuthenticationCardIdentity?
 
     /** PIN 1 attempts the ready card allows, read without a VERIFY; null when it cannot be read. */
     suspend fun pin1AttemptsLeft(): Int?
 
-    /** Takes ownership of [pin1] and [outcome]; see [runPin1Verification]. */
+    /**
+     * Takes ownership of [pin1] and [outcome]; see [runPin1Verification].
+     * A wrong PIN's answer carries the count the card reported with it.
+     */
     suspend fun verify(
         pin1: Pin1Submission,
         outcome: Pin1VerificationOutcome,
-    ): Pin1VerificationResult
+    ): Pin1Verification
 
     /**
      * Holds [pin], which the ready card accepted, for the card [retention]
@@ -96,6 +111,8 @@ internal sealed interface AuthenticationPreparationState {
 
     data class Failed(
         val result: Pin1VerificationResult,
+        /** The card's count after a wrong PIN, when it said. */
+        val attemptsLeft: Int? = null,
     ) : AuthenticationPreparationState
 }
 
@@ -226,23 +243,16 @@ internal class AuthenticationPreparation(
      */
     private suspend fun attempt(): Boolean {
         mutableState.value = AuthenticationPreparationState.WaitingForCard
-        when (backend.connect(heldCan?.copy())) {
-            CardConnection.ABSENT -> {
+        when (reachCard()) {
+            CardReach.NONE -> {
                 return true
             }
 
-            CardConnection.WRONG_CAN -> {
-                releaseCan()
-                fail(Pin1VerificationResult.PACE_REJECTED)
+            CardReach.ENDED -> {
                 return false
             }
 
-            CardConnection.REFUSED -> {
-                fail(Pin1VerificationResult.CARD_UNAVAILABLE)
-                return false
-            }
-
-            CardConnection.READY -> {}
+            CardReach.READY -> {}
         }
         if (!mutablePurpose.value.needsPin1) {
             complete()
@@ -264,7 +274,8 @@ internal class AuthenticationPreparation(
         attemptsBeforeVerify = attempts
         mutableState.value = AuthenticationPreparationState.Verifying
         answerLost = true
-        val result = verifyHeld(held)
+        val answer = verifyHeld(held)
+        val result = answer.result
         coroutineContext.ensureActive()
         when (result) {
             Pin1VerificationResult.CARD_UNAVAILABLE, Pin1VerificationResult.TRANSPORT_ERROR -> {
@@ -291,9 +302,72 @@ internal class AuthenticationPreparation(
 
             else -> {
                 answerLost = false
-                fail(result)
+                // A wrong PIN's answer carries the card's count; it is not read again.
+                fail(result, answer.remainingRetries)
             }
         }
+        return false
+    }
+
+    /** How one wait for the card ended: ready, nothing answered, or the preparation stopped. */
+    private enum class CardReach {
+        READY,
+        NONE,
+        ENDED,
+    }
+
+    private suspend fun reachCard(): CardReach =
+        when (backend.connect(heldCan?.copy())) {
+            CardConnection.ABSENT -> {
+                CardReach.NONE
+            }
+
+            CardConnection.WRONG_CAN -> {
+                releaseCan()
+                fail(Pin1VerificationResult.PACE_REJECTED)
+                CardReach.ENDED
+            }
+
+            CardConnection.REFUSED -> {
+                fail(Pin1VerificationResult.CARD_UNAVAILABLE)
+                CardReach.ENDED
+            }
+
+            CardConnection.NEEDS_ACCESS_NUMBER -> {
+                val purposeNeedsPin = mutablePurpose.value.needsPin1 && heldPin == null && !pinCache.hasPin
+                mutableState.value = AuthenticationPreparationState.Credentials(true, purposeNeedsPin)
+                CardReach.ENDED
+            }
+
+            CardConnection.NEEDS_ORGANIZATION_PIN1 -> {
+                if (openOrganization()) CardReach.READY else CardReach.ENDED
+            }
+
+            CardConnection.READY -> {
+                CardReach.READY
+            }
+        }
+
+    /**
+     * PIN 1 opens an organization card, the one thing that does; asked for
+     * when none is in hand. True once the card is open; the card's answer
+     * otherwise ends the preparation with its count.
+     */
+    private suspend fun openOrganization(): Boolean {
+        val held = heldPin
+        if (held == null) {
+            mutableState.value = AuthenticationPreparationState.Credentials(false, true)
+            return false
+        }
+        if (pinCache.isRejected(held)) {
+            fail(Pin1VerificationResult.WRONG_PIN)
+            return false
+        }
+        mutableState.value = AuthenticationPreparationState.Verifying
+        val answer = backend.openOrganization(Pin1Submission.fromOwnedBytes(held.copyBytes()))
+        coroutineContext.ensureActive()
+        if (answer.result == Pin1VerificationResult.VERIFIED) return true
+        fail(answer.result, answer.remainingRetries)
         return false
     }
 
@@ -326,7 +400,7 @@ internal class AuthenticationPreparation(
     }
 
     /** Sends the held PIN once; the copies the verifier takes are zeroed here on every path. */
-    private suspend fun verifyHeld(held: Pin1Submission): Pin1VerificationResult {
+    private suspend fun verifyHeld(held: Pin1Submission): Pin1Verification {
         val candidate = held.copyBytes()
         val submitted = held.copyBytes()
         return try {
@@ -403,9 +477,12 @@ internal class AuthenticationPreparation(
     }
 
     /** The card's answer about the PIN ends the hold; a card not reached keeps it for the retry. */
-    private fun fail(result: Pin1VerificationResult) {
+    private fun fail(
+        result: Pin1VerificationResult,
+        attemptsLeft: Int? = null,
+    ) {
         if (result in PIN_ANSWERS) releasePin()
-        mutableState.value = AuthenticationPreparationState.Failed(result)
+        mutableState.value = AuthenticationPreparationState.Failed(result, attemptsLeft)
     }
 
     private fun releasePin() {

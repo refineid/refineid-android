@@ -20,18 +20,24 @@
 //! the core's qualified-key unlock, which on an organization card makes
 //! DF.ESIGN current before it sends PIN2 through the non-replayable credential
 //! path; the key it returns signs once with one MSE/PSO chain.
+//!
+//! The retry rule is core's, for every credential: refused at two or one tries
+//! left or an unreadable counter, sent otherwise. At no tries left or blocked
+//! the VERIFY goes out and the card's own answer reaches the holder. The
+//! preflight refuses before the certificate read; the unlock then reads the
+//! counter in the directory PIN2 lives in and floors on that reading itself.
 
 use refineid_apdu::{CardTransport, TransportOutcome};
-use refineid_auth::{Pin2, UnvalidatedSecret, VerifyOutcome};
+use refineid_auth::{AuthError, Pin2, UnvalidatedSecret, VerifyOutcome};
 use refineid_digest::Sha384;
 use refineid_pkcs15::Pkcs15Error;
-use refineid_sign::{QualifiedUnlockError, SignError, SignOps, SignScheme};
+use refineid_sign::{QualifiedUnlockError, SignError, SignOps, SignScheme, SigningKey};
 
 use crate::card_certificate::{
     CardCertificate, CardKeyProfile, CertificateReadFailure, read_qualified_certificate,
 };
 use crate::card_transport::{AndroidCardTransport, SingleBlockExchange};
-use crate::pin2_status::{Pin2PreflightFailure, Pin2State, map_auth_error, probe_pin2_preflight};
+use crate::pin2_status::{Pin2PreflightFailure, map_auth_error, probe_pin2_preflight};
 
 /// Upper bound for the exact CMS signed-attribute bytes hashed here.
 pub(crate) const MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH: usize = 1_024 * 1_024;
@@ -55,7 +61,7 @@ pub(crate) enum QualifiedSigningInput<'a> {
 }
 
 impl QualifiedSigningAlgorithm {
-    const fn accepts_profile(self, profile: CardKeyProfile) -> bool {
+    pub(crate) const fn accepts_profile(self, profile: CardKeyProfile) -> bool {
         matches!(
             (self, profile),
             (Self::RsaPkcs1Sha384, CardKeyProfile::Rsa3072)
@@ -93,9 +99,9 @@ impl Drop for QualifiedSignature {
 pub(crate) enum QualifiedSignFailure {
     /// The submitted PIN2 did not satisfy its local digit predicate.
     InvalidPin,
-    /// The live counter state did not permit a qualified-signature try.
+    /// The retry floor refused: two or one tries left, or an unreadable counter.
     SafetyRefused,
-    /// PIN2 is blocked, invalidated, or became exhausted on this attempt.
+    /// The card answered that PIN2 is blocked, invalidated, or became exhausted on this attempt.
     PinLocked,
     /// The card rejected the submitted PIN2 without exhausting it.
     WrongPin {
@@ -151,29 +157,12 @@ pub(crate) fn qualified_sign<T>(
 where
     T: QualifiedCertificateSource,
 {
-    let digest = match input {
-        QualifiedSigningInput::Message(content) => {
-            if content.len() > MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH {
-                return Err(QualifiedSignFailure::Bridge);
-            }
-            Sha384::of(content)
-        }
-        QualifiedSigningInput::Prehashed(digest_bytes) => digest_bytes
-            .try_into()
-            .map(Sha384::from_bytes)
-            .map_err(|_| QualifiedSignFailure::Bridge)?,
-    };
+    let digest = prepared_qualified_digest(input)?;
     let pin_input = UnvalidatedSecret::from_owned_bytes(pin_bytes);
     let pin = Pin2::reconstruct(pin_input).map_err(|_| QualifiedSignFailure::InvalidPin)?;
     let preflight = probe_pin2_preflight(transport).map_err(map_preflight_failure)?;
     if !preflight.retry_floor_permits {
-        return Err(match preflight.state {
-            Pin2State::Locked => QualifiedSignFailure::PinLocked,
-            Pin2State::Verified
-            | Pin2State::Remaining(_)
-            | Pin2State::NoInformation
-            | Pin2State::Unrecognised => QualifiedSignFailure::SafetyRefused,
-        });
+        return Err(QualifiedSignFailure::SafetyRefused);
     }
 
     let certificate = transport
@@ -189,6 +178,34 @@ where
     let key = transport
         .unlock_qualified_key(SignScheme::from(preflight.scheme), pin)
         .map_err(map_unlock_error)?;
+    sign_with_qualified_key(key, algorithm, digest)
+}
+
+/// The SHA-384 digest a qualified signature signs: the hash of bounded
+/// content, or a caller's digest of the exact length.
+pub(crate) fn prepared_qualified_digest(
+    input: QualifiedSigningInput<'_>,
+) -> Result<Sha384, QualifiedSignFailure> {
+    match input {
+        QualifiedSigningInput::Message(content) => {
+            if content.len() > MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH {
+                return Err(QualifiedSignFailure::Bridge);
+            }
+            Ok(Sha384::of(content))
+        }
+        QualifiedSigningInput::Prehashed(digest_bytes) => digest_bytes
+            .try_into()
+            .map(Sha384::from_bytes)
+            .map_err(|_| QualifiedSignFailure::Bridge),
+    }
+}
+
+/// One signature by a qualified key already made ready to sign.
+pub(crate) fn sign_with_qualified_key<T: CardTransport>(
+    key: SigningKey<'_, T>,
+    algorithm: QualifiedSigningAlgorithm,
+    digest: Sha384,
+) -> Result<QualifiedSignature, QualifiedSignFailure> {
     let bytes = match algorithm {
         QualifiedSigningAlgorithm::RsaPkcs1Sha384 => key
             .sign_prehashed_sha384_rsa(digest.into_bytes())
@@ -198,7 +215,6 @@ where
             .map(|signature| signature.into_bytes()),
     }
     .map_err(map_sign_error)?;
-
     Ok(QualifiedSignature { algorithm, bytes })
 }
 
@@ -220,13 +236,16 @@ fn map_unlock_error<E>(error: QualifiedUnlockError<E>) -> QualifiedSignFailure {
         }
         // The core never reports an accepted PIN as a refusal.
         QualifiedUnlockError::PinRefused(VerifyOutcome::Ok) => QualifiedSignFailure::Bridge,
+        QualifiedUnlockError::Verify(AuthError::RetryFloor(_)) => {
+            QualifiedSignFailure::SafetyRefused
+        }
         QualifiedUnlockError::Verify(error) => map_preflight_failure(map_auth_error(error)),
         QualifiedUnlockError::Directory(error) => map_directory_error(error),
     }
 }
 
 /// DF.ESIGN would not become current, so PIN2 was never sent.
-fn map_directory_error<E>(error: Pkcs15Error<E>) -> QualifiedSignFailure {
+pub(crate) fn map_directory_error<E>(error: Pkcs15Error<E>) -> QualifiedSignFailure {
     match error {
         Pkcs15Error::Outcome(TransportOutcome::NoCard | TransportOutcome::ReaderRemoved) => {
             QualifiedSignFailure::CardUnavailable
@@ -255,7 +274,9 @@ const fn map_preflight_failure(failure: Pin2PreflightFailure) -> QualifiedSignFa
     }
 }
 
-const fn map_certificate_failure(failure: CertificateReadFailure) -> QualifiedSignFailure {
+pub(crate) const fn map_certificate_failure(
+    failure: CertificateReadFailure,
+) -> QualifiedSignFailure {
     match failure {
         CertificateReadFailure::CardUnavailable => QualifiedSignFailure::CardUnavailable,
         CertificateReadFailure::Rejected => QualifiedSignFailure::CertificateRejected,
@@ -265,7 +286,8 @@ const fn map_certificate_failure(failure: CertificateReadFailure) -> QualifiedSi
         // refusal reaching it is a local impossibility.
         CertificateReadFailure::PaceRejected
         | CertificateReadFailure::Bridge
-        | CertificateReadFailure::ActivationRequired => QualifiedSignFailure::Bridge,
+        | CertificateReadFailure::ActivationRequired
+        | CertificateReadFailure::OrganizationCard => QualifiedSignFailure::Bridge,
     }
 }
 
@@ -314,11 +336,16 @@ mod tests {
 
     const SAFE_RETRIES: u8 = 3;
     const LOW_RETRIES: u8 = 2;
+    const NO_RETRIES: u8 = 0;
     const PUBLIC_PREFLIGHT_CALLS: usize = 2;
-    const FULL_RSA_PUBLIC_CALLS: usize = 5;
-    const PSO_HASH_PUBLIC_COMMAND_INDEX: usize = 3;
-    /// Three probes, SELECT MF and SELECT DF.ESIGN precede the PIN2.
-    const ORGANIZATION_PIN2_AFTER_PUBLIC_CALLS: usize = 5;
+    /// The preflight's two probes and the probe of the VERIFY primitive's floor.
+    const PUBLIC_CALLS_BEFORE_PIN2: usize = 3;
+    /// Those three probes, MSE:SET, PSO:HASH and PSO:CDS.
+    const FULL_RSA_PUBLIC_CALLS: usize = 6;
+    const PSO_HASH_PUBLIC_COMMAND_INDEX: usize = 4;
+    /// The preflight's three probes, SELECT MF, SELECT DF.ESIGN and the floor's
+    /// PIN2 probe inside DF.ESIGN precede the PIN2.
+    const ORGANIZATION_PIN2_AFTER_PUBLIC_CALLS: usize = 6;
     const VERIFY_INSTRUCTION: u8 = 0x20;
     const INSTRUCTION_OFFSET: usize = 1;
     const REFERENCE_OFFSET: usize = 3;
@@ -429,6 +456,7 @@ mod tests {
         ScriptedTransport::new(
             vec![
                 safe.clone(),
+                safe.clone(),
                 safe,
                 response(StatusWord::Success, Vec::new()),
                 response(StatusWord::Success, Vec::new()),
@@ -471,9 +499,11 @@ mod tests {
                 // card; the organization PIN1 and PIN2 probes answer.
                 response(StatusWord::ReferenceDataNotFound, Vec::new()),
                 safe.clone(),
+                safe.clone(),
+                ok.clone(),
+                ok.clone(),
+                // The floor's PIN2 probe answers inside DF.ESIGN.
                 safe,
-                ok.clone(),
-                ok.clone(),
                 ok,
                 response(
                     StatusWord::Success,
@@ -507,12 +537,13 @@ mod tests {
                 VERIFY_INS,
                 SelectFile::INS,
                 SelectFile::INS,
+                VERIFY_INS,
                 MSE_INS,
                 PSO_INS
             ]
             .map(Some)
             .to_vec(),
-            "probes, SELECT MF, SELECT DF.ESIGN, MSE:Set, one inline PSO:CDS"
+            "probes, SELECT MF, SELECT DF.ESIGN, floor probe, MSE:Set, one inline PSO:CDS"
         );
         // PIN2 goes out only after both SELECTs, under the organization
         // reference.
@@ -606,6 +637,54 @@ mod tests {
     }
 
     #[test]
+    fn a_blocked_pin2_reaches_the_card_and_its_answer_reports_blocked() {
+        for blocked in [StatusWord::AuthenticationBlocked, status(NO_RETRIES)] {
+            let safe = response(status(SAFE_RETRIES), Vec::new());
+            let probe = response(blocked, Vec::new());
+            let mut transport = ScriptedTransport::new(
+                vec![safe, probe.clone(), probe],
+                blocked,
+                CardKeyProfile::Rsa3072,
+            );
+
+            let result = qualified_sign(
+                &mut transport,
+                QualifiedSigningAlgorithm::RsaPkcs1Sha384,
+                SYNTHETIC_PIN2.to_vec(),
+                QualifiedSigningInput::Message(SYNTHETIC_CONTENT),
+                SYNTHETIC_CERTIFICATE,
+            );
+
+            assert!(matches!(result, Err(QualifiedSignFailure::PinLocked)));
+            assert_eq!(transport.credential_calls, 1);
+            assert_eq!(transport.public_calls, PUBLIC_CALLS_BEFORE_PIN2);
+        }
+    }
+
+    #[test]
+    fn a_counter_that_falls_below_the_floor_after_the_preflight_is_refused_as_a_safety_refusal() {
+        for last_probe in [status(LOW_RETRIES), StatusWord::AuthenticationFailed] {
+            let safe = response(status(SAFE_RETRIES), Vec::new());
+            let mut transport = ScriptedTransport::new(
+                vec![safe.clone(), safe, response(last_probe, Vec::new())],
+                StatusWord::Success,
+                CardKeyProfile::Rsa3072,
+            );
+
+            let result = qualified_sign(
+                &mut transport,
+                QualifiedSigningAlgorithm::RsaPkcs1Sha384,
+                SYNTHETIC_PIN2.to_vec(),
+                QualifiedSigningInput::Message(SYNTHETIC_CONTENT),
+                SYNTHETIC_CERTIFICATE,
+            );
+
+            assert!(matches!(result, Err(QualifiedSignFailure::SafetyRefused)));
+            assert_eq!(transport.credential_calls, 0);
+        }
+    }
+
+    #[test]
     fn a_certificate_mismatch_refuses_before_pin2_is_sent() {
         let mut transport = success_script(CardKeyProfile::Rsa3072, RSA_3072_SIG_BYTES);
 
@@ -649,7 +728,7 @@ mod tests {
     fn a_wrong_pin2_stops_before_mse_and_is_never_replayed() {
         let safe = response(status(SAFE_RETRIES), Vec::new());
         let mut transport = ScriptedTransport::new(
-            vec![safe.clone(), safe],
+            vec![safe.clone(), safe.clone(), safe],
             status(LOW_RETRIES),
             CardKeyProfile::Rsa3072,
         );
@@ -669,7 +748,7 @@ mod tests {
             })
         ));
         assert_eq!(transport.credential_calls, 1);
-        assert_eq!(transport.public_calls, PUBLIC_PREFLIGHT_CALLS);
+        assert_eq!(transport.public_calls, PUBLIC_CALLS_BEFORE_PIN2);
     }
 
     #[test]

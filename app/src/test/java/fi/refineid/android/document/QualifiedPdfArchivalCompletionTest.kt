@@ -27,6 +27,7 @@ class QualifiedPdfArchivalCompletionTest {
                 prepared = preparedFixture.prepared,
                 timestampSource = timestamps,
                 validationSource = validation,
+                policy = PadesLevelPolicy.LONG_TERM_ONLY,
             )
 
         val success = result as QualifiedPdfArchivalResult.Success
@@ -68,6 +69,7 @@ class QualifiedPdfArchivalCompletionTest {
                     prepared = preparedFixture.prepared,
                     timestampSource = timestamps,
                     validationSource = validation,
+                    policy = PadesLevelPolicy.LONG_TERM_ONLY,
                 )
 
             assertEquals(
@@ -99,6 +101,7 @@ class QualifiedPdfArchivalCompletionTest {
                 prepared = preparedFixture.prepared,
                 timestampSource = timestamps,
                 validationSource = validation,
+                policy = PadesLevelPolicy.LONG_TERM_ONLY,
             )
 
         assertEquals(
@@ -128,6 +131,7 @@ class QualifiedPdfArchivalCompletionTest {
                 prepared = cmsPrepared.prepared,
                 timestampSource = cmsTimestamps,
                 validationSource = unusedValidation,
+                policy = PadesLevelPolicy.LONG_TERM_ONLY,
             )
 
         assertEquals(
@@ -148,6 +152,7 @@ class QualifiedPdfArchivalCompletionTest {
                 prepared = validationPrepared.prepared,
                 timestampSource = validationTimestamps,
                 validationSource = unavailableValidation,
+                policy = PadesLevelPolicy.LONG_TERM_ONLY,
             )
 
         assertEquals(
@@ -162,6 +167,80 @@ class QualifiedPdfArchivalCompletionTest {
             unavailableValidation,
         )
     }
+
+    @Test
+    fun aReleaseBuildRefusesEveryDocumentBelowLongTerm() {
+        assertEquals(PadesLevelPolicy.LONG_TERM_ONLY, PadesLevelPolicy.forBuild(isDebugBuild = false))
+        assertEquals(PadesLevelPolicy.HIGHEST_REACHED, PadesLevelPolicy.forBuild(isDebugBuild = true))
+        val releasePolicy = PadesLevelPolicy.forBuild(isDebugBuild = false)
+        for (case in REDUCIBLE_FAILURE_CASES) {
+            val events = mutableListOf<CompletionEvent>()
+            val cryptography = RecordingCryptography(events)
+            val preparedFixture = preparedFixture(cryptography)
+            val timestamps = case.timestamps(events)
+            val validation = case.validation(events)
+
+            val result =
+                QualifiedPdfArchivalCompletion.complete(
+                    prepared = preparedFixture.prepared,
+                    timestampSource = timestamps,
+                    validationSource = validation,
+                    policy = releasePolicy,
+                )
+
+            assertEquals(case.name, QualifiedPdfArchivalResult.Failure(case.kind), result)
+            assertFalse(case.name, events.contains(CompletionEvent.BASELINE_ASSEMBLY))
+            assertCompletionOwnersCleared(preparedFixture, cryptography, timestamps, validation)
+        }
+    }
+
+    @Test
+    fun aDebugBuildKeepsTheHighestLevelReachedAndNamesTheFailure() {
+        val debugPolicy = PadesLevelPolicy.forBuild(isDebugBuild = true)
+        for (case in REDUCIBLE_FAILURE_CASES) {
+            val events = mutableListOf<CompletionEvent>()
+            val cryptography = RecordingCryptography(events)
+            val preparedFixture = preparedFixture(cryptography)
+            val timestamps = case.timestamps(events)
+            val validation = case.validation(events)
+
+            val result =
+                QualifiedPdfArchivalCompletion.complete(
+                    prepared = preparedFixture.prepared,
+                    timestampSource = timestamps,
+                    validationSource = validation,
+                    policy = debugPolicy,
+                )
+
+            val reduced = result as QualifiedPdfArchivalResult.BelowLongTerm
+            try {
+                assertEquals(case.name, case.level, reduced.level)
+                assertEquals(case.name, case.kind, reduced.kind)
+                reduced.document.useBytes { document ->
+                    PdfDocumentIndex.parse(document)
+                    val text = document.toString(Charsets.ISO_8859_1)
+                    assertFalse(case.name, text.contains(VALIDATION_STORE_TYPE))
+                    assertFalse(case.name, text.contains(DOCUMENT_TIMESTAMP_TYPE))
+                }
+                assertEquals(
+                    case.name,
+                    case.level == PadesBaselineLevel.B_B,
+                    events.contains(CompletionEvent.BASELINE_ASSEMBLY),
+                )
+            } finally {
+                reduced.document.close()
+            }
+            assertCompletionOwnersCleared(preparedFixture, cryptography, timestamps, validation)
+        }
+    }
+
+    private class ReducibleFailureCase(
+        val name: String,
+        val kind: QualifiedPdfArchivalFailure,
+        val level: PadesBaselineLevel,
+        val timestamps: (MutableList<CompletionEvent>) -> RecordingTimestampSource,
+        val validation: (MutableList<CompletionEvent>) -> RecordingValidationSource,
+    )
 
     @Test
     fun interruptionEscapesAfterClearingThePreparedCardMaterial() {
@@ -183,6 +262,7 @@ class QualifiedPdfArchivalCompletionTest {
                         QualifiedPdfValidationSource { _, _ ->
                             error("validation must not follow interruption")
                         },
+                    policy = PadesLevelPolicy.LONG_TERM_ONLY,
                 ).closeDocument()
         }
 
@@ -294,7 +374,12 @@ class QualifiedPdfArchivalCompletionTest {
             signedAttributes: ByteArray,
             signature: NativeQualifiedSignature,
             signerCertificate: NativeQualifiedCertificate,
-        ): ByteArray = error("baseline assembly was not requested")
+        ): ByteArray {
+            events += CompletionEvent.BASELINE_ASSEMBLY
+            assertArrayEquals(SYNTHETIC_SIGNED_ATTRIBUTES, signedAttributes)
+            assertEquals(QualifiedSigningAlgorithm.RSA_PKCS1_SHA384, signature.algorithm)
+            return SYNTHETIC_BASELINE_CMS.copyOf().also { cms -> returnedCms = cms }
+        }
 
         override fun signatureTimestampDigest(signature: NativeQualifiedSignature): ByteArray {
             events += CompletionEvent.SIGNATURE_DIGEST
@@ -458,6 +543,7 @@ class QualifiedPdfArchivalCompletionTest {
     }
 
     private enum class CompletionEvent {
+        BASELINE_ASSEMBLY,
         SIGNATURE_DIGEST,
         SIGNATURE_TIMESTAMP,
         TIMESTAMPED_ASSEMBLY,
@@ -486,6 +572,7 @@ class QualifiedPdfArchivalCompletionTest {
         val SYNTHETIC_CERTIFICATE = "synthetic qualified certificate".encodeToByteArray()
         val SYNTHETIC_SIGNED_ATTRIBUTES = "synthetic signed attributes".encodeToByteArray()
         val SYNTHETIC_CMS_PREFIX = "synthetic timestamped CMS".encodeToByteArray()
+        val SYNTHETIC_BASELINE_CMS = "synthetic baseline CMS".encodeToByteArray()
         val SYNTHETIC_TIMESTAMP_CERTIFICATE = "synthetic timestamp certificate".encodeToByteArray()
         val SYNTHETIC_TIMESTAMP_INTERMEDIATE = "synthetic timestamp intermediate".encodeToByteArray()
         val SYNTHETIC_TIMESTAMP_TRUST_ANCHOR = "synthetic timestamp trust anchor".encodeToByteArray()
@@ -522,6 +609,61 @@ class QualifiedPdfArchivalCompletionTest {
                 CompletionEvent.SIGNATURE_DIGEST,
                 CompletionEvent.SIGNATURE_TIMESTAMP,
                 CompletionEvent.TIMESTAMPED_ASSEMBLY,
+            )
+        val REDUCIBLE_FAILURE_CASES =
+            listOf(
+                ReducibleFailureCase(
+                    name = "issuer unavailable",
+                    kind =
+                        QualifiedPdfArchivalFailure.Validation(
+                            kind = ValidationMaterialCollectionFailure.ISSUER_UNAVAILABLE,
+                            pathRole = null,
+                        ),
+                    level = PadesBaselineLevel.B_T,
+                    timestamps = { events -> RecordingTimestampSource(events) },
+                    validation = { events ->
+                        RecordingValidationSource(
+                            events,
+                            collectionFailure =
+                                ValidationMaterialCollectionException(
+                                    ValidationMaterialCollectionFailure.ISSUER_UNAVAILABLE,
+                                ),
+                        )
+                    },
+                ),
+                ReducibleFailureCase(
+                    name = "validation unavailable",
+                    kind = QualifiedPdfArchivalFailure.ValidationUnavailable,
+                    level = PadesBaselineLevel.B_T,
+                    timestamps = { events -> RecordingTimestampSource(events) },
+                    validation = { events -> RecordingValidationSource(events, unavailable = true) },
+                ),
+                ReducibleFailureCase(
+                    name = "archive timestamp",
+                    kind = QualifiedPdfArchivalFailure.Timestamp(QualifiedPdfTimestampPhase.ARCHIVE),
+                    level = PadesBaselineLevel.B_T,
+                    timestamps = { events ->
+                        RecordingTimestampSource(
+                            events = events,
+                            failurePhase = QualifiedPdfTimestampPhase.ARCHIVE,
+                            failureMode = TimestampFailureMode.UNAVAILABLE,
+                        )
+                    },
+                    validation = { events -> RecordingValidationSource(events) },
+                ),
+                ReducibleFailureCase(
+                    name = "signature timestamp",
+                    kind = QualifiedPdfArchivalFailure.Timestamp(QualifiedPdfTimestampPhase.SIGNATURE),
+                    level = PadesBaselineLevel.B_B,
+                    timestamps = { events ->
+                        RecordingTimestampSource(
+                            events = events,
+                            failurePhase = QualifiedPdfTimestampPhase.SIGNATURE,
+                            failureMode = TimestampFailureMode.UNAVAILABLE,
+                        )
+                    },
+                    validation = { events -> RecordingValidationSource(events) },
+                ),
             )
         val TIMESTAMP_FAILURE_CASES =
             TimestampFailureMode.entries.flatMap { mode ->

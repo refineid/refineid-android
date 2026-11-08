@@ -130,8 +130,13 @@ mod tests {
     const BELOW_FLOOR_RETRIES: u8 = 2;
     const LAST_RETRY: u8 = 1;
     const NO_RETRIES: u8 = 0;
-    const SERVED_RETRIES: [u8; 3] = [PRISTINE_RETRIES, ONE_SPENT_RETRIES, SAFE_RETRIES];
-    const REFUSED_RETRIES: [u8; 3] = [BELOW_FLOOR_RETRIES, LAST_RETRY, NO_RETRIES];
+    const SERVED_RETRIES: [u8; 4] = [
+        PRISTINE_RETRIES,
+        ONE_SPENT_RETRIES,
+        SAFE_RETRIES,
+        NO_RETRIES,
+    ];
+    const REFUSED_RETRIES: [u8; 2] = [BELOW_FLOOR_RETRIES, LAST_RETRY];
     const CITIZEN_PREFLIGHT_COMMAND_COUNT: usize = 2;
     const ORGANIZATIONAL_PREFLIGHT_COMMAND_COUNT: usize = 3;
     const CITIZEN_REFERENCE_COMMAND_INDEX: usize = 0;
@@ -258,11 +263,12 @@ mod tests {
     }
 
     #[test]
-    fn retry_floor_serves_five_four_three_and_verified() {
-        let served = SERVED_RETRIES
-            .into_iter()
-            .map(remaining)
-            .chain([StatusWord::Success]);
+    fn retry_floor_serves_five_four_three_zero_blocked_and_verified() {
+        let served = SERVED_RETRIES.into_iter().map(remaining).chain([
+            StatusWord::Success,
+            StatusWord::AuthenticationBlocked,
+            StatusWord::ReferenceDataInvalidated,
+        ]);
         for status in served {
             let mut transport = ScriptedTransport::new(&[remaining(SAFE_RETRIES), status]);
 
@@ -274,13 +280,11 @@ mod tests {
     }
 
     #[test]
-    fn retry_floor_refuses_two_one_zero_blocked_and_unreadable() {
-        let refused = REFUSED_RETRIES.into_iter().map(remaining).chain([
-            StatusWord::AuthenticationFailed,
-            StatusWord::AuthenticationBlocked,
-            StatusWord::ReferenceDataInvalidated,
-            StatusWord::FileNotFound,
-        ]);
+    fn retry_floor_refuses_two_one_and_unreadable() {
+        let refused = REFUSED_RETRIES
+            .into_iter()
+            .map(remaining)
+            .chain([StatusWord::AuthenticationFailed, StatusWord::FileNotFound]);
         for status in refused {
             let mut transport = ScriptedTransport::new(&[remaining(SAFE_RETRIES), status]);
 

@@ -38,6 +38,7 @@ import fi.refineid.android.core.NativePin2PreflightResult
 import fi.refineid.android.core.NativePin2State
 import fi.refineid.android.core.NativePinReferenceScheme
 import fi.refineid.android.core.NativeQualifiedCertificate
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin2Submission
@@ -352,6 +353,11 @@ internal class MainScreenTest {
                     snapshot = UsbReaderSnapshot(),
                     onRequestPermission = {},
                     hasNfc = true,
+                    nfcSnapshot =
+                        NfcReaderSnapshot(
+                            status = NfcReaderStatus.CARD_RECOGNIZED,
+                            cardKind = NfcCardKind.PERSONAL,
+                        ),
                 )
             }
         }
@@ -410,6 +416,7 @@ internal class MainScreenTest {
                     nfcSnapshot =
                         NfcReaderSnapshot(
                             status = NfcReaderStatus.WRONG_CAN,
+                            cardKind = NfcCardKind.PERSONAL,
                         ),
                     onNfcConnect = { can, _ ->
                         connectedCan = can?.peekDigits()

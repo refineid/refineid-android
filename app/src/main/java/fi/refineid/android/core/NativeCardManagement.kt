@@ -509,7 +509,7 @@ internal object NativeCardManagement {
             CardManagementScheme.UNKNOWN -> ACTIVATION_SCHEME_UNKNOWN
         }
 
-    private fun decodeCredentialHealth(reply: ByteArray): CardManagementResult<CredentialHealth> {
+    internal fun decodeCredentialHealth(reply: ByteArray): CardManagementResult<CredentialHealth> {
         if (reply.isEmpty()) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
@@ -567,7 +567,7 @@ internal object NativeCardManagement {
         )
     }
 
-    private fun decodeManageOutcome(reply: ByteArray): CardManagementResult<ManageOutcome> {
+    internal fun decodeManageOutcome(reply: ByteArray): CardManagementResult<ManageOutcome> {
         if (reply.isEmpty()) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }

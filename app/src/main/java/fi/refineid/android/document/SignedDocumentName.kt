@@ -15,6 +15,7 @@ import java.time.temporal.ChronoUnit
 internal object SignedDocumentName {
     private const val SEPARATOR = " - "
     private const val DEFAULT_EXTENSION = "pdf"
+    private const val DEVELOPMENT_MARK = "-dev-"
 
     /**
      * The name a signed output should be offered under, given the
@@ -33,6 +34,23 @@ internal object SignedDocumentName {
             extensionOverride
                 ?: originalExtension.ifBlank { DEFAULT_EXTENSION }
         return base + SEPARATOR + signedAtPhrase + "." + extension
+    }
+
+    /**
+     * The mark a development build puts on a document below PAdES-B-LTA,
+     * e.g. `-dev-B-T`, so it cannot be taken for a production signature.
+     */
+    fun developmentSuffix(level: PadesBaselineLevel): String = DEVELOPMENT_MARK + level.label
+
+    /** [name] with [developmentSuffix] before its extension. */
+    fun belowLongTerm(
+        name: String,
+        level: PadesBaselineLevel,
+    ): String {
+        val base = name.substringBeforeLast('.', name)
+        val extension = name.substringAfterLast('.', "")
+        val marked = base + developmentSuffix(level)
+        return if (extension.isEmpty()) marked else "$marked.$extension"
     }
 
     /**

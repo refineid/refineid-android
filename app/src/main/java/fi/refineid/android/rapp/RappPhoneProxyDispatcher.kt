@@ -1396,6 +1396,14 @@ internal class RappPhoneProxyDispatcher(
                 scope.launch(Dispatchers.Main) { inbox.tell(R.string.rapp_retry_floor) }
             }
 
+            RappCardFailure.PIN1_BLOCKED -> {
+                scope.launch(Dispatchers.Main) { inbox.tell(R.string.pin1_blocked) }
+            }
+
+            RappCardFailure.PIN2_BLOCKED -> {
+                scope.launch(Dispatchers.Main) { inbox.tell(R.string.pin2_blocked) }
+            }
+
             RappCardFailure.USER_CANCELLED,
             RappCardFailure.CARD_ERROR,
             RappCardFailure.UNSUPPORTED,
@@ -1406,9 +1414,16 @@ internal class RappPhoneProxyDispatcher(
         act(bridge) {
             when (failure) {
                 RappCardFailure.USER_CANCELLED -> it.deny(wire)
-                RappCardFailure.RETRY_FLOOR -> it.retryFloor(wire)
+
+                RappCardFailure.RETRY_FLOOR,
+                RappCardFailure.PIN1_BLOCKED,
+                RappCardFailure.PIN2_BLOCKED,
+                -> it.retryFloor(wire)
+
                 RappCardFailure.CARD_ERROR -> it.cardError(wire)
+
                 RappCardFailure.UNSUPPORTED -> it.requestInvalidOrUnsupported(wire)
+
                 RappCardFailure.OPERATION_FAILED -> it.operationFailed(wire)
             }
         }

@@ -35,16 +35,16 @@ class NativePin2PreflightReplyTest {
                     permitted = false,
                 ),
                 Case(
-                    wire = success(PIN_REFERENCE_CITIZEN, PIN2_STATE_REMAINING, EXHAUSTED_RETRY_COUNT, false),
+                    wire = success(PIN_REFERENCE_CITIZEN, PIN2_STATE_REMAINING, EXHAUSTED_RETRY_COUNT, true),
                     scheme = NativePinReferenceScheme.CITIZEN,
                     state = NativePin2State.Remaining(EXHAUSTED_RETRY_COUNT),
-                    permitted = false,
+                    permitted = true,
                 ),
                 Case(
-                    wire = success(PIN_REFERENCE_CITIZEN, PIN2_STATE_LOCKED, NO_RETRY_COUNT, false),
+                    wire = success(PIN_REFERENCE_CITIZEN, PIN2_STATE_LOCKED, NO_RETRY_COUNT, true),
                     scheme = NativePinReferenceScheme.CITIZEN,
                     state = NativePin2State.Locked,
-                    permitted = false,
+                    permitted = true,
                 ),
                 Case(
                     wire = success(PIN_REFERENCE_CITIZEN, PIN2_STATE_NO_INFORMATION, NO_RETRY_COUNT, false),
@@ -103,7 +103,8 @@ class NativePin2PreflightReplyTest {
                 success(PIN_REFERENCE_CITIZEN, PIN2_STATE_REMAINING, NO_RETRY_COUNT, false),
                 success(PIN_REFERENCE_CITIZEN, PIN2_STATE_REMAINING, LAST_RETRY_COUNT, true),
                 success(PIN_REFERENCE_CITIZEN, PIN2_STATE_REMAINING, ABOVE_POLICY_RETRY_COUNT, true),
-                success(PIN_REFERENCE_CITIZEN, PIN2_STATE_LOCKED, NO_RETRY_COUNT, true),
+                success(PIN_REFERENCE_CITIZEN, PIN2_STATE_LOCKED, NO_RETRY_COUNT, false),
+                success(PIN_REFERENCE_CITIZEN, PIN2_STATE_REMAINING, EXHAUSTED_RETRY_COUNT, false),
                 byteArrayOf(PREFLIGHT_CARD_UNAVAILABLE.toByte(), UNKNOWN_VALUE.toByte()),
             )
 

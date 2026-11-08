@@ -7,6 +7,7 @@ import fi.refineid.android.document.QualifiedPdfTimestampSourceException
 import fi.refineid.android.document.QualifiedPdfValidationSourceException
 import fi.refineid.android.document.Rfc3161TimestampException
 import fi.refineid.android.document.Rfc3161TimestampFailure
+import fi.refineid.android.document.SignerAnchorSource
 import fi.refineid.android.document.ValidationMaterialCollectionException
 import fi.refineid.android.document.ValidationMaterialCollectionFailure
 import fi.refineid.android.document.ValidationMaterialCollectorDependencies
@@ -229,6 +230,44 @@ class SigningNetworkQualifiedPdfSourcesTest {
     }
 
     @Test
+    fun theSignerCardChainAnchorsTheCollectionBesideTheConfiguredTrust() {
+        val anchor = byteArrayOf(CARD_ANCHOR_MARKER)
+        var askedFor: ByteArray? = null
+        var trustSeen: List<List<Byte>> = emptyList()
+        var candidatesSeen: List<List<Byte>> = emptyList()
+        val source =
+            NetworkQualifiedPdfValidationSource.copyOf(
+                dependencies = UNUSED_VALIDATION_DEPENDENCIES,
+                signerTrustCertificates = listOf(byteArrayOf(SIGNER_TRUST_MARKER)),
+                additionalCandidates = listOf(byteArrayOf(ADDITIONAL_CANDIDATE_MARKER)),
+                signerAnchors =
+                    SignerAnchorSource { signer ->
+                        askedFor = signer
+                        listOf(anchor)
+                    },
+                collector =
+                    SigningValidationMaterialCollector { request, _ ->
+                        trustSeen = request.signerTrustCertificates.map(ByteArray::toList)
+                        candidatesSeen = request.additionalCandidates.map(ByteArray::toList)
+                        PdfValidationMaterial.copyOf(emptyList(), emptyList(), emptyList())
+                    },
+            )
+        val signerCertificate = SYNTHETIC_SIGNER_CERTIFICATE.copyOf()
+        val timestamp = verifiedToken(SYNTHETIC_DIGEST)
+        try {
+            source.collect(signerCertificate, timestamp).close()
+            assertSame(signerCertificate, askedFor)
+            assertEquals(listOf(listOf(SIGNER_TRUST_MARKER), listOf(CARD_ANCHOR_MARKER)), trustSeen)
+            assertEquals(listOf(listOf(ADDITIONAL_CANDIDATE_MARKER), listOf(CARD_ANCHOR_MARKER)), candidatesSeen)
+            assertAllZero(anchor)
+        } finally {
+            timestamp.close()
+            source.close()
+            signerCertificate.fill(CLEARED_BYTE)
+        }
+    }
+
+    @Test
     fun validationSourcePreservesTypedFailureAndCoarsensNetworkFailure() {
         val typed =
             ValidationMaterialCollectionException(
@@ -322,6 +361,7 @@ class SigningNetworkQualifiedPdfSourcesTest {
         const val EXCESS_AUTHORITY_MARKER: Byte = 0x37
         const val SIGNER_TRUST_MARKER: Byte = 0x41
         const val ADDITIONAL_CANDIDATE_MARKER: Byte = 0x42
+        const val CARD_ANCHOR_MARKER: Byte = 0x43
         const val SYNTHETIC_DIGEST_FILL: Byte = 0x51
         const val SYNTHETIC_TIMESTAMP_CERTIFICATE_MARKER: Byte = 0x52
         const val SYNTHETIC_TIMESTAMP_TRUST_MARKER: Byte = 0x53

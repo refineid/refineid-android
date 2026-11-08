@@ -2,6 +2,8 @@
 
 package fi.refineid.android.trust
 
+import fi.refineid.android.document.ValidationMaterialCollectorFixture
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -66,7 +68,44 @@ class CaCertificateStoreTest {
         }
     }
 
+    @Test
+    fun aCardIssuingCaAnchorsItsSignerAndARootNeedsItsIssuingCa() {
+        val tempDir = Files.createTempDirectory("test-card-chain").toFile()
+        try {
+            ValidationMaterialCollectorFixture.create().use { fixture ->
+                val store = CaCertificateStore(baseDirectory = tempDir)
+                store.load()
+                val signer = fixture.documentSignerCertificate
+                assertFalse(store.hasChainFor(signer))
+                assertTrue(store.copyAnchorsFor(signer).isEmpty())
+
+                assertEquals(
+                    NOTHING_ADMITTED,
+                    store.admitCardChain(rootDer = fixture.issuerCertificate, issuingDer = null),
+                )
+                assertEquals(NOTHING_ADMITTED, store.admitCardChain(rootDer = null, issuingDer = signer))
+                assertFalse(store.hasChainFor(signer))
+
+                assertEquals(ONE_ADMITTED, store.admitCardChain(rootDer = null, issuingDer = fixture.issuerCertificate))
+                assertTrue(store.hasChainFor(signer))
+                assertEquals(
+                    listOf(fixture.issuerCertificate.toList()),
+                    store.copyAnchorsFor(signer).map(ByteArray::toList),
+                )
+                assertTrue("a root anchors nothing above it", store.copyAnchorsFor(fixture.issuerCertificate).isEmpty())
+
+                val reloaded = CaCertificateStore(baseDirectory = tempDir)
+                reloaded.load()
+                assertTrue("the admitted CA persists", reloaded.hasChainFor(signer))
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
     private companion object {
+        private const val NOTHING_ADMITTED = 0
+        private const val ONE_ADMITTED = 1
         private const val CA_CERTIFICATES_DIRECTORY_NAME = "ca-certificates"
         private const val HEX_RADIX = 16
         private const val HEX_CHARS_PER_BYTE = 2

@@ -73,6 +73,7 @@ PIN values and candidate strings were held in immutable strings and unmanaged by
 
 ### Remediation
 - **Unconditional Window Flags**: In `MainActivity.kt`, `FLAG_SECURE` and `setRecentsScreenshotEnabled(false)` are now enabled unconditionally across both release and debug builds.
+  - *Correction, 2026-11-07:* this sentence is not true of the code. `MainActivity` sets both only when `BuildConfig.DEBUG` is false: release builds refuse screen capture and recents thumbnails, and debug builds leave the window capturable. The sentence above is left as written in September so the report stays a dated record.
 - **Diagnostic Configuration**: In `BuildDiagnostics.kt`, `SCREEN_CAPTURE_ALLOWED` is permanently set to `false`.
 - **Compose Dialog Policies**: Configured `DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)` on:
   - `RappAuthorizationDialog`

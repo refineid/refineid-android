@@ -39,7 +39,6 @@
     <string name="signing">Signerar</string>
     <string name="signed">Signerat</string>
     <string name="wrong_pin">Fel PIN</string>
-    <string name="pin_locked">PIN låst</string>
     <string name="pin_attempts_left" tools:ignore="PluralsCandidate">%1$d försök kvar</string>
     <string name="unavailable">Inte tillgänglig</string>
     <string name="card_not_found">Kortet hittades inte</string>
@@ -58,38 +57,38 @@
     <string name="hold_card_against_back">Håll ID-kortet mot baksidan.</string>
     <string name="connect_id_card">Anslut identitetskort</string>
     <string name="card_pins">PIN-koder</string>
-    <string name="change_pin1">Ändra PIN 1</string>
-    <string name="change_pin2">Ändra PIN 2</string>
-    <string name="reset_pin1">Återställ PIN 1</string>
-    <string name="reset_pin2">Återställ PIN 2</string>
+    <string name="pin1">Grund PIN&#160;1</string>
+    <string name="pin2">Signaturkod&#160;2</string>
+    <string name="change_pin1">Byt grund PIN&#160;1</string>
+    <string name="change_pin2">Byt signaturkod&#160;2</string>
+    <string name="reset_pin1">Återställ grund PIN&#160;1</string>
+    <string name="reset_pin2">Återställ signaturkod&#160;2</string>
     <string name="activate_card">Aktivera kort</string>
     <string name="identity_card_activation">Aktivering av identitetskortet</string>
     <string name="organisation_card_activation">Aktivering av organisationskortet</string>
-    <string name="current_pin1">Nuvarande PIN 1</string>
-    <string name="current_pin2">Nuvarande PIN 2</string>
-    <string name="new_pin1">Ny PIN 1</string>
-    <string name="new_pin2">Ny PIN 2</string>
-    <string name="new_pin1_again">Ny PIN 1 igen</string>
-    <string name="new_pin2_again">Ny PIN 2 igen</string>
+    <string name="current_pin1">Nuvarande grund PIN&#160;1</string>
+    <string name="current_pin2">Nuvarande signaturkod&#160;2</string>
+    <string name="new_pin1">Ny grund PIN&#160;1</string>
+    <string name="new_pin2">Ny signaturkod&#160;2</string>
+    <string name="new_pin1_again">Grund PIN&#160;1 igen</string>
+    <string name="new_pin2_again">Signaturkod&#160;2 igen</string>
     <string name="puk_code">PUK</string>
     <string name="activation_pin">Aktiveringskod</string>
-    <string name="change_basic_pin1">Ändra grund-PIN 1</string>
-    <string name="change_signature_pin2">Ändra underskrifts-PIN 2</string>
     <string name="pin_changed_success">%1$s ändrades</string>
     <string name="pin_reset_success">%1$s återställdes</string>
     <string name="card_activated_success">Kortet har aktiverats.</string>
-    <string name="confirm_change_title">Bekräfta byte av %1$s</string>
-    <string name="confirm_reset_title">Bekräfta återställning av %1$s</string>
+    <string name="confirm_change_title">%1$s byts</string>
+    <string name="confirm_reset_title">%1$s återställs</string>
     <string name="confirm_activation_title">Bekräfta kortaktivering</string>
-    <string name="confirm_pin_change_warning" tools:ignore="PluralsCandidate">En felaktig nuvarande %1$s förbrukar ett försök. %2$d försök återstår.</string>
+    <string name="confirm_pin_change_warning" tools:ignore="PluralsCandidate">%1$s: en felaktig nuvarande kod förbrukar ett försök. %2$d försök återstår.</string>
     <string name="confirm_pin_reset_warning" tools:ignore="PluralsCandidate">En felaktig %1$s förbrukar ett försök. %2$d försök återstår.</string>
     <string name="proceed">Fortsätt</string>
     <string name="spent_attempts_notice">%1$s: %2$d av %3$d försök kvar.</string>
     <string name="refuse_low_attempts_pin">RefineID använder inte en kod med två eller färre försök kvar. En ny kod kan anges här med PUK-koden.</string>
     <string name="refuse_low_attempts_puk">RefineID använder inte något av de två sista PUK-försöken.</string>
     <string name="rapp_retry_floor">RefineID använder inte en PIN-kod med två eller färre försök kvar. Med PUK-koden kan en ny PIN-kod anges.</string>
-    <string name="recovery_guidance_pin1">PIN 1 måste återställas\nÅterställ PIN 1 med din PUK-kod.</string>
-    <string name="recovery_guidance_pin2">PIN 2 måste återställas\nÅterställ PIN 2 med din PUK-kod.</string>
+    <string name="pin1_blocked">Grund PIN&#160;1 spärrad\nÅterställ grund PIN&#160;1 med din PUK-kod.</string>
+    <string name="pin2_blocked">Signaturkod&#160;2 spärrad\nÅterställ signaturkod&#160;2 med din PUK-kod.</string>
     <string name="puk_reported_blocked">Kortet rapporterar PUK-koden spärrad
 En kod från utfärdaren kan ändå prövas: kortet avgör och förbrukar inget.</string>
     <string name="diagnostics">Diagnostik</string>
@@ -108,12 +107,10 @@ En kod från utfärdaren kan ändå prövas: kortet avgör och förbrukar inget.
     <string name="pins_do_not_match">PIN-koderna stämmer inte överens</string>
     <string name="digit_count_hint" tools:ignore="PluralsCandidate">%1$d siffror</string>
     <string name="digit_range_hint" tools:ignore="PluralsCandidate">%1$d–%2$d siffror</string>
-    <string name="half_activated_pin1_needed">PIN 2 är redan aktiverad. Ange aktiveringskoden för att aktivera PIN 1.</string>
-    <string name="half_activated_pin2_needed">PIN 1 är redan aktiverad. Ange aktiveringskoden för att aktivera PIN 2.</string>
-    <string name="confirm_activation_dialog_msg_both">Du aktiverar både PIN 1 och PIN 2. De träder i kraft omedelbart. Se till att du har skrivit upp dem.</string>
-    <string name="confirm_activation_dialog_msg_single">Du aktiverar den saknade koden (%1$s). Den träder i kraft omedelbart. Se till att du har skrivit upp den.</string>
-    <string name="pin1_section_title">Grund-PIN (PIN 1)</string>
-    <string name="pin2_section_title">Underskrifts-PIN (PIN 2)</string>
+    <string name="half_activated_pin1_needed">Signaturkod&#160;2 är redan aktiverad. Ange aktiveringskoden för att aktivera grund PIN&#160;1.</string>
+    <string name="half_activated_pin2_needed">Grund PIN&#160;1 är redan aktiverad. Ange aktiveringskoden för att aktivera signaturkod&#160;2.</string>
+    <string name="confirm_activation_dialog_msg_both">Du aktiverar både grund PIN&#160;1 och signaturkod&#160;2. De träder i kraft omedelbart. Se till att du har skrivit upp dem.</string>
+    <string name="confirm_activation_dialog_msg_single">%1$s aktiveras. Den träder i kraft omedelbart. Se till att du har skrivit upp den.</string>
     <string name="paired_devices">Kopplade datorer</string>
     <string name="card_remote_access">Fjärråtkomst för kort</string>
     <string name="remote_requests_channel">Förfrågningar</string>
@@ -127,6 +124,11 @@ En kod från utfärdaren kan ändå prövas: kortet avgör och förbrukar inget.
     <string name="card_reading_hold_still">Kortet läses. Håll det stilla.</string>
     <string name="card_contact_lost">Kontakten med kortet bröts. Håll det mot telefonen igen.</string>
     <string name="card_found_enter_can" tools:ignore="Typos">Kortet hittades. Ange dess CAN.</string>
+    <string name="organization_card_found_enter_pin1">Organisationskortet hittades. Ange grund PIN&#160;1.</string>
+    <string name="wrong_pin1">Fel grund PIN&#160;1</string>
+    <string name="card_problem_no_known_kind">Kortet stöds inte: det är varken ett identitetskort eller ett organisationskort.</string>
+    <string name="card_problem_access_file_refused">Kortet stöds inte: det vägrade läsning av sin åtkomstfil.</string>
+    <string name="card_problem_access_file_malformed">Kortet stöds inte: dess åtkomstfil är felaktig.</string>
     <string name="allow_notifications">Tillåt aviseringar</string>
     <plurals name="remote_signature_request_many">
         <item quantity="one">%1$s begär %2$d underskrift.</item>

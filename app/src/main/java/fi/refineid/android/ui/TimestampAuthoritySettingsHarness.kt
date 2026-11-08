@@ -14,14 +14,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -319,22 +317,15 @@ private fun TimestampAuthorityFields(
                 ),
             lineLimits = TextFieldLineLimits.SingleLine,
         )
-        SecureTextField(
+        SecretField(
             state = editor.password,
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .testTag(UiAutomationIds.timestampPasswordField(index)),
+            testTag = UiAutomationIds.timestampPasswordField(index),
+            modifier = Modifier.fillMaxWidth(),
             enabled = enabled,
-            label = { Text(stringResource(R.string.password)) },
+            label = stringResource(R.string.password),
             inputTransformation = passwordInputTransformation(onEdit),
-            textObfuscationMode = TextObfuscationMode.Hidden,
-            keyboardOptions =
-                KeyboardOptions(
-                    autoCorrectEnabled = false,
-                    keyboardType = KeyboardType.Password,
-                    imeAction = ImeAction.Done,
-                ),
+            keyboardType = KeyboardType.Password,
+            imeAction = ImeAction.Done,
         )
         Row(
             modifier = Modifier.fillMaxWidth(),

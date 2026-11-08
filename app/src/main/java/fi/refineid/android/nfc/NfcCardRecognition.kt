@@ -3,7 +3,9 @@ package fi.refineid.android.nfc
 import fi.refineid.android.core.NativeCardAccessFailure
 import fi.refineid.android.core.NativeCardAccessResult
 import fi.refineid.android.core.NativeCertificateReadFailure
+import fi.refineid.android.core.NfcCardKind
 import fi.refineid.android.core.PersonCardDetails
+import fi.refineid.android.core.Pin1Verification
 
 internal enum class NfcReaderStatus {
     NOT_AVAILABLE,
@@ -36,13 +38,67 @@ internal data class NfcReaderSnapshot(
     val holderName: String? = null,
     /** The detailed cardholder identity info parsed from the certificate. */
     val cardDetails: PersonCardDetails? = null,
+    /** What opens the card last read in the field; null before one has answered. */
+    val cardKind: NfcCardKind? = null,
+    /** An organization card's PIN 1 tries, read before any entry; null when not read. */
+    val pin1AttemptsLeft: Int? = null,
+    /** The organization card's answer to the PIN 1 last offered to open it. */
+    val pin1Answer: Pin1Verification? = null,
+    /** Why the card in the field cannot be used, while the status says so. */
+    val cardProblem: NfcCardProblem? = null,
 )
+
+/** Why a card that answered cannot be used; the holder is told which. */
+internal enum class NfcCardProblem {
+    /** EF.CardAccess names neither a citizen nor an organization card. */
+    NO_KNOWN_KIND,
+
+    /** The card refused the read of EF.CardAccess. */
+    ACCESS_FILE_REFUSED,
+
+    /** EF.CardAccess did not parse. */
+    ACCESS_FILE_MALFORMED,
+
+    /** The exchange with the card failed. */
+    READ_FAILED,
+}
+
+/** Why the probe leaves the card unusable; null for a usable card or one that left the field. */
+internal fun NativeCardAccessResult.cardProblem(): NfcCardProblem? =
+    when (this) {
+        is NativeCardAccessResult.Success -> {
+            if (summary.cardKind == null) NfcCardProblem.NO_KNOWN_KIND else null
+        }
+
+        is NativeCardAccessResult.Failure -> {
+            when (kind) {
+                NativeCardAccessFailure.CARD_UNAVAILABLE -> {
+                    null
+                }
+
+                NativeCardAccessFailure.REJECTED -> {
+                    NfcCardProblem.ACCESS_FILE_REFUSED
+                }
+
+                NativeCardAccessFailure.INVALID_CARD_ACCESS -> {
+                    NfcCardProblem.ACCESS_FILE_MALFORMED
+                }
+
+                NativeCardAccessFailure.TRANSPORT_ERROR, NativeCardAccessFailure.BRIDGE_ERROR -> {
+                    NfcCardProblem.READ_FAILED
+                }
+            }
+        }
+    }
+
+/** The statuses in which the card in the field cannot be used, and the holder is told why. */
+internal val CARD_UNUSABLE = setOf(NfcReaderStatus.CARD_NOT_SUPPORTED, NfcReaderStatus.TRANSPORT_ERROR)
 
 /** Coarse holder-facing status for one completed card-access probe. */
 internal fun NativeCardAccessResult.toReaderStatus(): NfcReaderStatus =
     when (this) {
         is NativeCardAccessResult.Success -> {
-            if (summary.supportsPublishedPaceProfile) {
+            if (summary.cardKind != null) {
                 NfcReaderStatus.CARD_RECOGNIZED
             } else {
                 NfcReaderStatus.CARD_NOT_SUPPORTED
@@ -76,6 +132,8 @@ internal fun NativeCardAccessResult.toReaderStatus(): NfcReaderStatus =
 internal fun NativeCertificateReadFailure.toConnectStatus(): NfcReaderStatus =
     when (this) {
         NativeCertificateReadFailure.PACE_REJECTED -> NfcReaderStatus.WRONG_CAN
+
+        NativeCertificateReadFailure.ORGANIZATION_CARD -> NfcReaderStatus.CARD_RECOGNIZED
 
         NativeCertificateReadFailure.CARD_UNAVAILABLE -> NfcReaderStatus.WAITING_FOR_CARD
 
