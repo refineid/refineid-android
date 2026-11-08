@@ -53,13 +53,13 @@ internal suspend fun runPin1Verification(
     context: CoroutineContext,
     pin1: Pin1Submission,
     outcome: Pin1VerificationOutcome,
-    verify: (Pin1Submission) -> Pin1VerificationResult,
-): Pin1VerificationResult =
+    verify: (Pin1Submission) -> Pin1Verification,
+): Pin1Verification =
     outcome.use {
         pin1.use {
             withContext(context) {
                 ensureActive()
-                verify(pin1).also(outcome::report)
+                verify(pin1).also { answer -> outcome.report(answer.result) }
             }
         }
     }
