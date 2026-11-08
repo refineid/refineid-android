@@ -14,6 +14,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -131,9 +132,9 @@ class RappPairingSearchLoopbackTest {
     private fun Peer.serveOffer(
         code: String,
         vault: RappMemoryVault,
+        offerId: ByteArray = ByteArray(OFFER_ID_BYTES).also(SecureRandom()::nextBytes),
     ): ByteArray {
         val now = monotonicMs()
-        val offerId = ByteArray(OFFER_ID_BYTES).also(SecureRandom()::nextBytes)
         val bridge =
             RappPairingBridge.createCustodianOffer(
                 offerId,
@@ -176,6 +177,29 @@ class RappPairingSearchLoopbackTest {
                     return pairId
                 }
             }
+        }
+    }
+
+    /**
+     * Serves one connection with the bootstrap of offer [offerId] and
+     * reports whether the requester sent anything after it.
+     */
+    private fun Peer.serveBootstrapOnly(offerId: ByteArray): Boolean {
+        val now = monotonicMs()
+        val bridge =
+            RappPairingBridge.createCustodianOffer(
+                offerId,
+                PROFILES,
+                listOf(RappTestOffers.STREAM_PROFILE),
+                now,
+            )
+        readFrame()
+        writeFrame(bridge.bootstrapBytes(now))
+        return try {
+            readFrame()
+            true
+        } catch (_: IOException) {
+            false
         }
     }
 
@@ -300,8 +324,11 @@ class RappPairingSearchLoopbackTest {
             val requesterVault = RappMemoryVault()
             val custodianVault = RappMemoryVault()
             // A listener the phone no longer runs: its port refuses connections.
-            val stalePort = ServerSocket(0).use { it.localPort }
+            // It closes only once the live listener holds its own port.
+            val staleListener = ServerSocket(0)
+            val stalePort = staleListener.localPort
             val server = ServerSocket(0)
+            staleListener.close()
             try {
                 val peerDone =
                     scope.launch {
@@ -323,6 +350,67 @@ class RappPairingSearchLoopbackTest {
                 withTimeout(SEARCH_TIMEOUT_MS) { peerDone.join() }
             } finally {
                 server.close()
+            }
+        }
+
+    @Test
+    fun onlyStaleRecordsOfAPhoneFindNone() =
+        runBlocking {
+            val code = RappPairingCode.generate()
+            val first = ServerSocket(0)
+            val second = ServerSocket(0)
+            val stalePorts = listOf(first.localPort, second.localPort)
+            first.close()
+            second.close()
+            val instances = stalePorts.map { port -> Triple(INSTANCE, LOOPBACK_HOST, port) }
+            val outcome =
+                withTimeout(SEARCH_TIMEOUT_MS) {
+                    search(0, RappMemoryVault(), instances, initialDiscoveryMs = EMPTY_SEARCH_GRACE_MS).search(code)
+                }
+            assertEquals(RappPairingSearch.Outcome.NoneFound, outcome)
+        }
+
+    @Test
+    fun aPhoneReannouncedAfterRefusingTheCodeGetsNoSecondGuess() =
+        runBlocking {
+            val code = RappPairingCode.generate()
+            var wrong = RappPairingCode.generate()
+            while (wrong == code) {
+                wrong = RappPairingCode.generate()
+            }
+            val offerId = ByteArray(OFFER_ID_BYTES).also(SecureRandom()::nextBytes)
+            val before = ServerSocket(0)
+            val after = ServerSocket(0)
+            try {
+                val refused =
+                    scope.launch {
+                        Peer(before.accept()).use { peer ->
+                            try {
+                                peer.serveOffer(code, RappMemoryVault(), offerId)
+                            } catch (_: Exception) {
+                                // The search drops a refusal without goodbye.
+                            }
+                        }
+                    }
+                val sentAfterBootstrap =
+                    scope.async {
+                        Peer(after.accept()).use { peer -> peer.serveBootstrapOnly(offerId) }
+                    }
+                val instances =
+                    listOf(
+                        Triple(INSTANCE, LOOPBACK_HOST, before.localPort),
+                        Triple(INSTANCE, LOOPBACK_HOST, after.localPort),
+                    )
+                val outcome =
+                    withTimeout(SEARCH_TIMEOUT_MS) {
+                        search(before.localPort, RappMemoryVault(), instances).search(wrong)
+                    }
+                assertEquals(RappPairingSearch.Outcome.NotAccepted, outcome)
+                withTimeout(SEARCH_TIMEOUT_MS) { refused.join() }
+                assertFalse(withTimeout(SEARCH_TIMEOUT_MS) { sentAfterBootstrap.await() })
+            } finally {
+                before.close()
+                after.close()
             }
         }
 
