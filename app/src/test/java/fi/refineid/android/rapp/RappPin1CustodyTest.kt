@@ -5,7 +5,10 @@ package fi.refineid.android.rapp
 import fi.refineid.android.core.AuthenticationCardIdentity
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.FINEID_PIN_TRY_LIMIT
+import fi.refineid.android.core.NativeCardSessionMaterial
+import fi.refineid.android.core.NativePin1Preflight
 import fi.refineid.android.core.NativePin1State
+import fi.refineid.android.core.NativePinReferenceScheme
 import fi.refineid.android.core.PIN1_MINIMUM_LENGTH
 import fi.refineid.android.core.Pin1Retention
 import fi.refineid.android.core.Pin1Submission
@@ -109,6 +112,90 @@ class RappPin1CustodyTest {
         assertNull(custody.held(CARD_A))
     }
 
+    /**
+     * Two authentications on one held secure channel, as the NFC session
+     * and a PACE card in the USB reader run them: the count the second one
+     * reads before using the held PIN is the try limit the accepted VERIFY
+     * set, so the PIN stays held and needs no prompt.
+     */
+    @Test
+    fun aPinAcceptedOnAHeldChannelIsSpentWithNoPromptNextTime() {
+        val cache = AuthenticationPinCache()
+        val custody = RappPin1Custody(cache)
+        val channel = NativeCardSessionMaterial()
+        channel.cachePin1Preflight(openedAt(FINEID_PIN_TRY_LIMIT))
+
+        syntheticPin().use { entered ->
+            val retention = Pin1Retention.of(CARD_A, attemptsLeft(channel))
+            assertTrue(custody.admits(CARD_A, heldFor = null, retention = retention))
+            // VERIFY, then the signature, each accepted by the card.
+            repeat(PIN_COMMANDS_PER_AUTHENTICATION) {
+                channel.pin1CountUnknown()
+                channel.pin1Accepted()
+            }
+            assertTrue(custody.hold(entered, checkNotNull(retention), custody.generation))
+        }
+
+        repeat(LATER_AUTHENTICATIONS) {
+            val held = checkNotNull(custody.held(CARD_A)) { "a held PIN is spent with no prompt" }
+            held.use { pin ->
+                val retention = Pin1Retention.of(CARD_A, attemptsLeft(channel))
+                assertTrue(custody.admits(CARD_A, heldFor = CARD_A, retention = retention))
+                assertTrue(custody.holds(pin, CARD_A))
+                channel.pin1CountUnknown()
+                channel.pin1Accepted()
+                assertTrue(custody.hold(pin, checkNotNull(retention), custody.generation))
+            }
+        }
+        assertTrue(cache.holds(CARD_A))
+    }
+
+    /**
+     * A PIN command on the held channel whose effect is not known leaves the
+     * count unread; the next authentication then ends the hold and asks.
+     */
+    @Test
+    fun aCountLeftUnknownOnAHeldChannelEndsTheHold() {
+        val cache = AuthenticationPinCache()
+        val custody = RappPin1Custody(cache)
+        val channel = NativeCardSessionMaterial()
+        channel.cachePin1Preflight(openedAt(FINEID_PIN_TRY_LIMIT))
+        acceptEntered(custody, syntheticPin(), NativePin1State.Remaining(FINEID_PIN_TRY_LIMIT))
+
+        channel.pin1CountUnknown()
+
+        assertNull(attemptsLeft(channel))
+        val retention = Pin1Retention.of(CARD_A, attemptsLeft(channel))
+        assertFalse(custody.admits(CARD_A, heldFor = CARD_A, retention = retention))
+        assertNull(custody.held(CARD_A))
+    }
+
+    @Test
+    fun aPinRefusedOnAHeldChannelIsNotHeld() {
+        val cache = AuthenticationPinCache()
+        val custody = RappPin1Custody(cache)
+        val channel = NativeCardSessionMaterial()
+        channel.cachePin1Preflight(openedAt(FINEID_PIN_TRY_LIMIT))
+        acceptEntered(custody, syntheticPin(), NativePin1State.Remaining(FINEID_PIN_TRY_LIMIT))
+
+        channel.pin1CountUnknown()
+        syntheticPin().use(custody::refuse)
+
+        assertNull(attemptsLeft(channel))
+        assertNull(custody.held(CARD_A))
+        syntheticPin().use { assertTrue(custody.refused(it)) }
+    }
+
+    private fun attemptsLeft(channel: NativeCardSessionMaterial): Int? =
+        channel.cachedPin1Preflight()?.state?.attemptsLeft()
+
+    private fun openedAt(attempts: Int): NativePin1Preflight =
+        NativePin1Preflight(
+            referenceScheme = NativePinReferenceScheme.CITIZEN,
+            state = NativePin1State.Remaining(attempts),
+            retryFloorPermits = true,
+        )
+
     /** The first authentication: the holder enters [pin], the card accepts it, and custody holds it. */
     private fun acceptEntered(
         custody: RappPin1Custody,
@@ -125,6 +212,7 @@ class RappPin1CustodyTest {
 
     private companion object {
         const val LATER_AUTHENTICATIONS = 3
+        const val PIN_COMMANDS_PER_AUTHENTICATION = 2
         const val ONE_ATTEMPT_SPENT = FINEID_PIN_TRY_LIMIT - 1
         val CARD_A =
             checkNotNull(AuthenticationCardIdentity.of("synthetic authentication certificate A".encodeToByteArray()))

@@ -28,6 +28,26 @@ internal class NativeCardSessionMaterial : AutoCloseable {
         return requireAuthenticationCertificate().copyOwned()
     }
 
+    /**
+     * A PIN command left on the held secure channel whose effect on the
+     * PIN 1 count is not known: the cached preflight says nothing of the
+     * count until the channel is opened afresh.
+     */
+    fun pin1CountUnknown() {
+        checkOpen()
+        pin1Preflight = pin1Preflight?.copy(state = NativePin1State.NoInformation, retryFloorPermits = false)
+    }
+
+    /**
+     * The card accepted a VERIFY of PIN 1 on the held secure channel, which
+     * sets the try counter to the PIN Try Limit (FINEID S1 v4.2 sections
+     * 3.5 and 3.11): the cached preflight reads verified.
+     */
+    fun pin1Accepted() {
+        checkOpen()
+        pin1Preflight = pin1Preflight?.copy(state = NativePin1State.Verified, retryFloorPermits = true)
+    }
+
     fun cachedPin1Preflight(): NativePin1Preflight? {
         checkOpen()
         return pin1Preflight

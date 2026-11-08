@@ -31,7 +31,6 @@ import fi.refineid.android.core.NativeContactlessSession
 import fi.refineid.android.core.NativeCore
 import fi.refineid.android.core.NativePin1PreflightFailure
 import fi.refineid.android.core.NativePin1PreflightResult
-import fi.refineid.android.core.NativePin1State
 import fi.refineid.android.core.NativePin2PreflightResult
 import fi.refineid.android.core.NativeQualifiedCertificate
 import fi.refineid.android.core.NativeQualifiedCore
@@ -127,11 +126,6 @@ internal class CcidUsbSession(
     // the session at close.
     private var contactlessSessionActive = false
     private val sessionMaterial = NativeCardSessionMaterial()
-
-    // True once a PIN command has left on the held secure-messaging channel
-    // since the open read the PIN 1 preflight, so the count it reported is
-    // no longer known; a fresh open clears it.
-    private var attemptsStale = false
 
     fun startRemovalListener(onCardRemoved: () -> Unit) {
         checkOwnerThread()
@@ -237,7 +231,6 @@ internal class CcidUsbSession(
         val result = NativeContactlessSession.connect(canBytes, nativeExchange)
         if (result is NativeContactlessOpenResult.Success) {
             contactlessSessionActive = true
-            attemptsStale = false
             sessionMaterial.cacheAuthenticationCertificate(result.certificate)
             sessionMaterial.cachePin1Preflight(result.preflight)
         } else if (result is NativeContactlessOpenResult.ActivationRequired) {
@@ -330,8 +323,9 @@ internal class CcidUsbSession(
      * The PIN 1 preflight. A contact card is asked afresh without a VERIFY.
      * A card opened under PACE is not: the card refuses a plain command on
      * its secure-messaging channel and ends the channel, so the preflight
-     * is the one the open read, and it says nothing once a PIN command has
-     * left on the channel since, as the NFC session does.
+     * is the one the open read, it reads verified once the card accepted
+     * PIN 1 on the channel since, and it says nothing once another PIN
+     * command has left on the channel since, as the NFC session does.
      */
     fun cachePin1Preflight(): NativePin1PreflightResult {
         checkOwnerThread()
@@ -340,11 +334,11 @@ internal class CcidUsbSession(
         }
         if (contactlessSessionActive) {
             val opened = sessionMaterial.cachedPin1Preflight()
-            AppTrace.usbPin1PreflightFromHeldSession(known = opened != null && !attemptsStale)
-            return when {
-                opened == null -> NativePin1PreflightResult.Failure(NativePin1PreflightFailure.CARD_UNAVAILABLE)
-                attemptsStale -> NativePin1PreflightResult.Success(opened.copy(state = NativePin1State.NoInformation))
-                else -> NativePin1PreflightResult.Success(opened)
+            AppTrace.usbPin1PreflightFromHeldSession(known = opened?.state?.attemptsLeft() != null)
+            return if (opened == null) {
+                NativePin1PreflightResult.Failure(NativePin1PreflightFailure.CARD_UNAVAILABLE)
+            } else {
+                NativePin1PreflightResult.Success(opened)
             }
         }
         val result =
@@ -440,13 +434,20 @@ internal class CcidUsbSession(
                 fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE,
             )
         }
-        if (contactlessSessionActive) attemptsStale = true
-        return fi.refineid.android.core.NativePin1Verification.verify(
-            pin1 = pin1,
-            exchange = nativeExchange,
-            exchangeLevel = exchangeLevel,
-            heldSession = contactlessSessionActive,
-        )
+        if (contactlessSessionActive) sessionMaterial.pin1CountUnknown()
+        val verification =
+            fi.refineid.android.core.NativePin1Verification.verify(
+                pin1 = pin1,
+                exchange = nativeExchange,
+                exchangeLevel = exchangeLevel,
+                heldSession = contactlessSessionActive,
+            )
+        if (contactlessSessionActive &&
+            verification.result == fi.refineid.android.core.Pin1VerificationResult.VERIFIED
+        ) {
+            sessionMaterial.pin1Accepted()
+        }
+        return verification
     }
 
     fun authenticateAndSign(
@@ -491,44 +492,47 @@ internal class CcidUsbSession(
             )
         }
 
-        if (contactlessSessionActive) attemptsStale = true
-        return when (
-            val result =
-                if (contactlessSessionActive) {
-                    // The PICC card requires secure messaging; the session was
-                    // already proven under PACE at connect, so signing rebuilds
-                    // that channel and skips the handshake.
-                    NativeContactlessSession.authenticateAndSignOnSession(
-                        algorithm = algorithm,
-                        inputMode = inputMode,
-                        pin1 = pin1,
-                        input = input,
-                        exchange = nativeExchange,
-                    )
-                } else {
-                    when (inputMode) {
-                        AuthenticationSigningInputMode.MESSAGE -> {
-                            NativeCore.authenticateAndSign(
-                                exchangeLevel = exchangeLevel,
-                                algorithm = algorithm,
-                                pin1 = pin1,
-                                message = input,
-                                exchange = nativeExchange,
-                            )
-                        }
+        if (contactlessSessionActive) sessionMaterial.pin1CountUnknown()
+        val nativeResult =
+            if (contactlessSessionActive) {
+                // The PICC card requires secure messaging; the session was
+                // already proven under PACE at connect, so signing rebuilds
+                // that channel and skips the handshake.
+                NativeContactlessSession.authenticateAndSignOnSession(
+                    algorithm = algorithm,
+                    inputMode = inputMode,
+                    pin1 = pin1,
+                    input = input,
+                    exchange = nativeExchange,
+                )
+            } else {
+                when (inputMode) {
+                    AuthenticationSigningInputMode.MESSAGE -> {
+                        NativeCore.authenticateAndSign(
+                            exchangeLevel = exchangeLevel,
+                            algorithm = algorithm,
+                            pin1 = pin1,
+                            message = input,
+                            exchange = nativeExchange,
+                        )
+                    }
 
-                        AuthenticationSigningInputMode.PREHASHED -> {
-                            NativeCore.authenticateAndSignPrehashed(
-                                exchangeLevel = exchangeLevel,
-                                algorithm = algorithm,
-                                pin1 = pin1,
-                                digest = input,
-                                exchange = nativeExchange,
-                            )
-                        }
+                    AuthenticationSigningInputMode.PREHASHED -> {
+                        NativeCore.authenticateAndSignPrehashed(
+                            exchangeLevel = exchangeLevel,
+                            algorithm = algorithm,
+                            pin1 = pin1,
+                            digest = input,
+                            exchange = nativeExchange,
+                        )
                     }
                 }
-        ) {
+            }
+        // A signature proves the card accepted the VERIFY that preceded it.
+        if (contactlessSessionActive && nativeResult is NativeAuthenticationSignResult.Success) {
+            sessionMaterial.pin1Accepted()
+        }
+        return when (val result = nativeResult) {
             is NativeAuthenticationSignResult.Success -> {
                 val isVerified =
                     when (inputMode) {
@@ -616,7 +620,7 @@ internal class CcidUsbSession(
             if (contactlessSessionActive) {
                 // The PICC card requires secure messaging; the qualified
                 // signature runs inside the channel proven at connect.
-                attemptsStale = true
+                sessionMaterial.pin1CountUnknown()
                 NativeContactlessSession.qualifiedSignInputOnSession(
                     algorithm = algorithm,
                     inputMode = inputMode,
@@ -796,7 +800,7 @@ internal class CcidUsbSession(
             "CCID session is closed"
         }
         return if (contactlessSessionActive) {
-            attemptsStale = true
+            sessionMaterial.pin1CountUnknown()
             NativeCardManagement.contactlessChangePin1OnSession(currentPin, newPin, nativeExchange)
         } else {
             NativeCardManagement.changePin1(exchangeLevel, currentPin, newPin, nativeExchange)
@@ -812,7 +816,7 @@ internal class CcidUsbSession(
             "CCID session is closed"
         }
         return if (contactlessSessionActive) {
-            attemptsStale = true
+            sessionMaterial.pin1CountUnknown()
             NativeCardManagement.contactlessChangePin2OnSession(currentPin, newPin, nativeExchange)
         } else {
             NativeCardManagement.changePin2(exchangeLevel, currentPin, newPin, nativeExchange)
@@ -828,7 +832,7 @@ internal class CcidUsbSession(
             "CCID session is closed"
         }
         return if (contactlessSessionActive) {
-            attemptsStale = true
+            sessionMaterial.pin1CountUnknown()
             NativeCardManagement.contactlessUnblockPin1OnSession(puk, newPin, nativeExchange)
         } else {
             NativeCardManagement.unblockPin1(exchangeLevel, puk, newPin, nativeExchange)
@@ -844,7 +848,7 @@ internal class CcidUsbSession(
             "CCID session is closed"
         }
         return if (contactlessSessionActive) {
-            attemptsStale = true
+            sessionMaterial.pin1CountUnknown()
             NativeCardManagement.contactlessUnblockPin2OnSession(puk, newPin, nativeExchange)
         } else {
             NativeCardManagement.unblockPin2(exchangeLevel, puk, newPin, nativeExchange)
@@ -862,7 +866,7 @@ internal class CcidUsbSession(
             "CCID session is closed"
         }
         return if (contactlessSessionActive) {
-            attemptsStale = true
+            sessionMaterial.pin1CountUnknown()
             NativeCardManagement.contactlessActivateCardOnSession(scheme, code, newPin1, newPin2, nativeExchange)
         } else {
             NativeCardManagement.activateCard(exchangeLevel, scheme, code, newPin1, newPin2, nativeExchange)
