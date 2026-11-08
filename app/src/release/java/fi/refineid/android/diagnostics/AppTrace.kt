@@ -279,7 +279,17 @@ internal object AppTrace {
 
     fun rappConnectionRejected(reason: String) = Unit
 
-    fun rappConnectionDropped(reason: String) = Unit
+    fun rappConnectionDropped(
+        reason: String,
+        device: String,
+        transport: String,
+    ) = Unit
+
+    fun rappSessionClosed(
+        cause: String,
+        device: String,
+        transport: String,
+    ) = Unit
 
     fun rappOperationReceived(opType: String) = Unit
 
@@ -309,7 +319,10 @@ internal object AppTrace {
 
     fun rappPairingCompleted() = Unit
 
-    fun rappPeerWithdrew() = Unit
+    fun rappPeerWithdrew(
+        device: String,
+        transport: String,
+    ) = Unit
 
     fun rappPairingExpired() = Unit
 
@@ -329,6 +342,7 @@ internal object AppTrace {
     fun rappDialRefused(
         transport: RappTransportProfile,
         refusal: RappDialRefusal,
+        device: String,
     ) = Unit
 
     fun usbPermissionRequestFailed() = Unit

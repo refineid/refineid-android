@@ -48,7 +48,13 @@ import fi.refineid.android.usb.ccid.CcidExchangeLevel
 import fi.refineid.android.usb.ccid.CcidProtocolErrorKind
 import fi.refineid.android.usb.ccid.CcidSessionOpenResult
 
-/** Debug-only application trace. Arguments must already be sanitized. */
+/**
+ * Debug-only application trace. Arguments must already be sanitized, with
+ * one narrow exception: the session lines below take the paired device's
+ * label and its transport, so a failed session says who was talking. The
+ * label is the pair record's device label, never holder, card, or network
+ * identifiers.
+ */
 internal object AppTrace {
     fun activityCreated() {
         debug(
@@ -554,9 +560,23 @@ internal object AppTrace {
         DevErrorLog.report("rapp:connection-rejected", reason)
     }
 
-    fun rappConnectionDropped(reason: String) {
-        debug("rapp:connection-dropped reason=" + reason)
-        DevErrorLog.report("rapp:connection-dropped", reason)
+    fun rappConnectionDropped(
+        reason: String,
+        device: String,
+        transport: String,
+    ) {
+        debug("rapp:connection-dropped reason=" + reason + " peer=" + device + " transport=" + transport)
+        DevErrorLog.report("rapp:connection-dropped", reason + ", " + device + ", " + transport)
+    }
+
+    /** A session failed or closed: its cause, the paired device, and the transport that carried it. */
+    fun rappSessionClosed(
+        cause: String,
+        device: String,
+        transport: String,
+    ) {
+        debug("rapp:session-closed cause=" + cause + " peer=" + device + " transport=" + transport)
+        DevErrorLog.report("rapp:session-closed", cause + ", " + device + ", " + transport)
     }
 
     fun rappOperationReceived(opType: String) {
@@ -613,8 +633,11 @@ internal object AppTrace {
     }
 
     /** The paired computer closed its session as withdrawn: it is off, not failed. */
-    fun rappPeerWithdrew() {
-        debug("rapp:peer-withdrawn")
+    fun rappPeerWithdrew(
+        device: String,
+        transport: String,
+    ) {
+        debug("rapp:peer-withdrawn peer=" + device + " transport=" + transport)
     }
 
     /** Idle expiry forgot a pairing (RAPP v26.11.2 section 4.6 item 5). */
@@ -690,13 +713,14 @@ internal object AppTrace {
         }
     }
 
-    /** A dial that got no session, with why. */
+    /** A dial that got no session, with why, and the paired device it belonged to. */
     fun rappDialRefused(
         transport: RappTransportProfile,
         refusal: RappDialRefusal,
+        device: String,
     ) {
-        debug("rapp:error dial-refused transport=" + transport + " refusal=" + refusal)
-        DevErrorLog.report("rapp:dial-refused", transport.toString() + " " + refusal)
+        debug("rapp:error dial-refused transport=" + transport + " refusal=" + refusal + " peer=" + device)
+        DevErrorLog.report("rapp:dial-refused", transport.toString() + " " + refusal + " " + device)
     }
 
     fun browserOpened() {

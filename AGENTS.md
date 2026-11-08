@@ -44,7 +44,11 @@
   only in the Android Keystore-backed `PrimedCanStore`.
 - Debug tracing serves development and may record whatever protocol detail the
   work needs, but never a name, address or identifier of a peer, holder, device
-  or operation. A USB reader is traced by the vendor and product ids of its
+  or operation. One exception (maintainer decision 2026-11-08): the debug line
+  of a failed or closed RAPP session names the paired device by the display
+  label its pair record keeps (such as `macOS - example-host`) and the
+  transport, so the line says who was talking. Never the holder's name, a card
+  value, an address or an identifier. A USB reader is traced by the vendor and product ids of its
   model only. `verifyDebugTraceParameters` checks the debug trace signatures.
   Keep credential values out of anything persisted or committed.
   Release builds emit no logs, zero telemetry, and zero third-party network egress.

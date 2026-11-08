@@ -481,6 +481,7 @@ internal class RappRequesterClient(
 
     /** The transport failed: the dial fails, and an open session is a loss. */
     private fun transportFailed() {
+        trace(RappSessionFailureLog.TRANSPORT_CLOSED, null)
         failOpen(null)
         liveOperation?.result?.complete(null)
         if (phase == Phase.ESTABLISHED) reportEnd(RappRequesterSessionEnd.LOSS)
@@ -692,6 +693,7 @@ internal class RappRequesterClient(
         if (end == null) return
         if (closing.get() && !crossing) return
         if (endReported.compareAndSet(false, true)) {
+            trace(RappSessionFailureLog.sessionEnd(end), null)
             try {
                 listener.onSessionEnd(end)
             } catch (e: Exception) {
@@ -702,10 +704,12 @@ internal class RappRequesterClient(
 
     /** Fails the dial, unless it already ended; [end] says what a close exchanged. */
     private fun failOpen(end: RappRequesterSessionEnd?) {
+        if (end != null) trace(RappSessionFailureLog.sessionEnd(end), null)
         openResult.complete(OpenOutcome.Failed(end))
     }
 
     private fun dialTimedOut(): OpenOutcome {
+        trace(RappSessionFailureLog.DIAL_TIMED_OUT, null)
         openResult.complete(OpenOutcome.Failed(null))
         return OpenOutcome.Failed(null)
     }
@@ -851,12 +855,23 @@ internal class RappRequesterClient(
         }
     }
 
+    /**
+     * The dev log: every line names the paired phone and the stream
+     * transport, so a failed session says who was talking. The name is the
+     * pair record's device label, refreshed every session (RAPP v26.11.2
+     * section 4.3 items 3 and 4).
+     */
     private fun trace(
         message: String,
         error: Exception?,
     ) {
         if (BuildConfig.DEBUG) {
-            android.util.Log.w(TRACE_TAG, message, error)
+            android.util.Log.w(
+                TRACE_TAG,
+                message + ", " + RappSessionFailureLog.peerName(pairRecord) +
+                    ", " + RappSessionFailureLog.NETWORK_TRANSPORT,
+                error,
+            )
         }
     }
 }
