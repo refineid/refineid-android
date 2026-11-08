@@ -59,7 +59,7 @@ internal val PinRevealNames = SecretRevealNames(show = R.string.show_pin, hide =
 internal val CanRevealNames = SecretRevealNames(show = R.string.show_can, hide = R.string.hide_can)
 
 /**
- * Entry for a secret: a PIN, the PUK, an activation code, a card access
+ * Entry for a secret: a PIN, the PUK, an activation PIN, a card access
  * number, or a password. Every such field in the app is this one.
  *
  * The field draws a bullet per character unless the holder reveals it, and
