@@ -11,7 +11,17 @@ on:
     branches:
       - main
     paths:
-      - '**/Cargo.lock'
+      - 'native/*/Cargo.lock'
+  # track-core-main moves the lock files with the workflow token, and a
+  # push made with that token starts no other workflow; its completion
+  # does. The checkout then takes main with the move merged.
+  workflow_run:
+    workflows:
+      - track-core-main
+    types:
+      - completed
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -29,6 +39,7 @@ jobs:
   audit:
     name: Audit the lock files against the RustSec advisory database
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,7 +54,6 @@ jobs:
       # Every native crate's lock file, so a new crate is audited without
       # being listed here.
       - name: Audit every lock file
-        id: audit
         run: |
           status=0
           found=0
@@ -60,17 +70,21 @@ jobs:
           fi
           exit $status
 
+      # Any failed step, the install included, reaches the maintainer:
+      # one open issue, assigned again with every further failure.
       - name: Report a failed audit to the maintainer
-        if: failure() && steps.audit.outcome == 'failure'
+        if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh label create dependency-audit --description 'A dependency carries a published advisory' --color B60205 --force
-          number=$(gh issue list --label dependency-audit --state open --json number --jq '.[0].number')
+          gh label create dependency-audit --description 'The dependency advisory audit failed' --color B60205 --force --repo "$REPO"
+          number=$(gh issue list --repo "$REPO" --label dependency-audit --state open --json number --jq '.[0].number // empty')
           if [ -z "$number" ]; then
-            gh issue create --title 'Dependency audit failed' --label dependency-audit --assignee "$MAINTAINER" \
-              --body "The scheduled advisory audit failed. See the run: $RUN_URL"
+            gh issue create --repo "$REPO" --title 'Dependency audit failed' --label dependency-audit --assignee "$MAINTAINER" \
+              --body "The advisory audit failed. See the run: $RUN_URL"
           else
-            gh issue comment "$number" --body "The advisory audit failed again: $RUN_URL"
+            gh issue edit "$number" --repo "$REPO" --add-assignee "$MAINTAINER"
+            gh issue comment "$number" --repo "$REPO" --body "The advisory audit failed again: $RUN_URL"
           fi

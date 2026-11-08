@@ -8,6 +8,10 @@ on:
     - cron: '30 5 * * *'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 permissions:
   pull-requests: write
   issues: write
@@ -15,23 +19,28 @@ permissions:
 env:
   MAINTAINER: petri-koistinen-refineid
   DUE_DAYS: '14'
+  # Above Dependabot's open pull request limits summed over every ecosystem.
+  OPEN_UPDATES_LIMIT: '1000'
 
 jobs:
   overdue:
     name: Name the maintainer on overdue dependency updates
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Find Dependabot pull requests open past the due time
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
+          # A failed listing fails the run instead of feeding the loop nothing.
+          set -o pipefail
           gh label create dependency-overdue --description 'A dependency update open past its due time' --color D93F0B --force --repo "$REPO"
           # gh's --jq takes one expression and no --arg; the cutoff reaches
           # it through the environment.
           CUTOFF=$(date -u -d "-${DUE_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)
           export CUTOFF
-          gh pr list --repo "$REPO" --author app/dependabot --state open --limit 100 \
+          gh pr list --repo "$REPO" --author app/dependabot --state open --limit "$OPEN_UPDATES_LIMIT" \
             --json number,createdAt,labels,url \
             --jq '.[] | select(.createdAt < env.CUTOFF) | select(all(.labels[]; .name != "dependency-overdue")) | "\(.number) \(.url)"' |
           while read -r number url; do
