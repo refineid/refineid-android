@@ -3,6 +3,8 @@
 *.sh text eol=lf
 .githooks/** text eol=lf
 gradlew text eol=lf
+# Properties files, which the scripts and the build parse, keep LF too.
+*.properties text eol=lf
 
 # A Windows batch file keeps the CRLF it is committed with.
 gradlew.bat -text

@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 sdk_root="${ANDROID_SDK_ROOT:-${HOME}/Library/Android/sdk}"
 rust_android_targets=(aarch64-linux-android x86_64-linux-android)
 # The JDK the Gradle daemon requires, as updateDaemonJvm recorded it.
-jdk_version=$(sed -n 's/^toolchainVersion=\([0-9]*\).*/\1/p' gradle/gradle-daemon-jvm.properties)
+jdk_version=$(sed -n 's/^toolchainVersion=//p' gradle/gradle-daemon-jvm.properties)
 if [[ -z "${jdk_version}" ]]; then
   echo "Error: could not read toolchainVersion from gradle/gradle-daemon-jvm.properties." >&2
   exit 1

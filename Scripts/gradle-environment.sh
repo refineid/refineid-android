@@ -11,7 +11,7 @@
 refineid_daemon_jvm_properties="gradle/gradle-daemon-jvm.properties"
 refineid_required_jdk=""
 if [ -r "${refineid_daemon_jvm_properties}" ]; then
-  refineid_required_jdk="$(sed -n 's/^toolchainVersion=\([0-9]*\).*/\1/p' "${refineid_daemon_jvm_properties}")"
+  refineid_required_jdk="$(sed -n 's/^toolchainVersion=//p' "${refineid_daemon_jvm_properties}")"
 fi
 
 # The major version a JDK home declares in its release file; empty when the
