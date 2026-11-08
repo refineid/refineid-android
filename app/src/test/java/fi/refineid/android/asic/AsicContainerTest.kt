@@ -118,7 +118,11 @@ class AsicContainerTest {
             )
         assertTrue(doc.contains("<xades:UnsignedProperties>"))
         assertTrue(doc.contains("<xades:UnsignedSignatureProperties>"))
-        assertTrue(doc.contains("<xades:SignatureTimeStamp Id=\"SIG-1-TS-0\">"))
+        assertTrue(
+            doc.contains(
+                "<xades:SignatureTimeStamp xmlns:xades=\"" + XadesSignature.NAMESPACE_XADES + "\" Id=\"SIG-1-TS-0\">",
+            ),
+        )
         assertTrue(doc.contains("<xades:EncapsulatedTimeStamp>"))
     }
 

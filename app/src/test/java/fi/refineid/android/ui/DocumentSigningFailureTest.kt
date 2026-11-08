@@ -6,7 +6,7 @@ import fi.refineid.android.R
 import fi.refineid.android.asic.AsicSigningFailure
 import fi.refineid.android.core.NativeCertificateReadFailure
 import fi.refineid.android.core.QualifiedSignFailure
-import fi.refineid.android.document.PadesBaselineLevel
+import fi.refineid.android.document.BaselineLevel
 import fi.refineid.android.document.PdfSigningFailure
 import fi.refineid.android.document.QualifiedDocumentCmsFailure
 import fi.refineid.android.document.QualifiedPdfArchivalFailure
@@ -57,7 +57,8 @@ class DocumentSigningFailureTest {
     fun aDevelopmentDocumentBelowLongTermNamesItsLevelMarkAndCause() {
         val notice =
             BelowLongTermNotice(
-                level = PadesBaselineLevel.B_T,
+                standard = SignatureStandard.PADES,
+                level = BaselineLevel.B_T,
                 failure =
                     QualifiedPdfArchivalFailure
                         .Validation(ValidationMaterialCollectionFailure.ISSUER_UNAVAILABLE, pathRole = null)
@@ -65,11 +66,30 @@ class DocumentSigningFailureTest {
             )
 
         assertEquals(
-            "Development build: saved as PAdES B-T without long-term validation material; " +
+            "Development build: saved as PAdES-B-T, below the long-term archival level B-LTA; " +
                 "the file name ends in -dev-B-T. Reason: the material for long-term validation " +
                 "could not be collected: the issuer of the certificate could not be found.",
             notice.text(ENGLISH::string, ENGLISH::formatList),
         )
+    }
+
+    @Test
+    fun aDevelopmentContainerWithoutArchiveTimestampNamesXadesBltAndCause() {
+        val notice =
+            BelowLongTermNotice(
+                standard = SignatureStandard.XADES,
+                level = BaselineLevel.B_LT,
+                failure = AsicSigningFailure.Timestamp(QualifiedPdfTimestampPhase.ARCHIVE).archivalFailure(),
+            )
+
+        assertEquals(
+            "Development build: saved as XAdES-B-LT, below the long-term archival level B-LTA; " +
+                "the file name ends in -dev-B-LT. Reason: no valid archive timestamp was obtained.",
+            notice.text(ENGLISH::string, ENGLISH::formatList),
+        )
+        listOf(FINNISH, SWEDISH).forEach { language ->
+            assertTrue(notice.text(language::string, language::formatList).contains("-dev-B-LT"))
+        }
     }
 
     @Test
@@ -100,7 +120,9 @@ class DocumentSigningFailureTest {
         val pdf = pdfArchivalFailures().map { it.signingFailure() }
         val container =
             listOf(
-                AsicSigningFailure.Timestamp,
+                AsicSigningFailure.Timestamp(QualifiedPdfTimestampPhase.SIGNATURE),
+                AsicSigningFailure.Timestamp(QualifiedPdfTimestampPhase.ARCHIVE),
+                AsicSigningFailure.ArchiveTimestampPathUncovered,
                 AsicSigningFailure.ValidationUnavailable,
                 AsicSigningFailure.ContainerOverflow,
                 AsicSigningFailure.InternalError,

@@ -23,15 +23,19 @@ internal class XadesPlan(
     private val objects: List<AsicDataObject>,
 ) {
     /**
-     * The finished `signatures0.xml` at level B-B, B-T, or B-LT: the SignedInfo and
-     * SignedProperties are inserted byte-for-byte as they were signed
-     * and digested, so a verifier canonicalises them to the same bytes.
+     * The finished `signatures0.xml` at level B-B, B-T, B-LT or, with
+     * [archiveTimestampToken], B-LTA: the SignedInfo and SignedProperties
+     * are inserted byte-for-byte as they were signed and digested, so a
+     * verifier canonicalises them to the same bytes.
      */
     fun document(
         xmlSignature: ByteArray,
         timestampTokens: List<ByteArray> = emptyList(),
         material: PdfValidationMaterial? = null,
+        archiveTimestampToken: ByteArray? = null,
     ): String {
+        val properties = XadesUnsignedProperties.signatureProperties(timestampTokens, material).toMutableList()
+        archiveTimestampToken?.let { token -> properties += XadesUnsignedProperties.archiveTimestampElement(token) }
         val out = StringBuilder()
         out.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         out.append("<asic:XAdESSignatures xmlns:asic=\"").append(XadesSignature.NAMESPACE_ASIC).append("\">\n")
@@ -39,20 +43,60 @@ internal class XadesPlan(
         out.append("\" Id=\"").append(XadesSignature.SIGNATURE_ID).append("\">\n")
         out.append(signedInfo).append("\n")
         out.append(XadesSignature.signatureValueElement(xmlSignature)).append("\n")
-        out.append("<ds:KeyInfo>\n<ds:X509Data>\n")
-        out.append("<ds:X509Certificate>").append(base64(certificateDer)).append("</ds:X509Certificate>\n")
-        out.append("</ds:X509Data>\n</ds:KeyInfo>\n")
+        out.append(keyInfo()).append("\n")
         out.append("<ds:Object>\n")
         out.append("<xades:QualifyingProperties xmlns:xades=\"").append(XadesSignature.NAMESPACE_XADES)
         out.append("\" Target=\"#").append(XadesSignature.SIGNATURE_ID).append("\">\n")
         out.append(signedProperties).append("\n")
-        out.append(XadesSignature.unsignedProperties(timestampTokens, material))
+        out.append(XadesUnsignedProperties.wrapped(properties))
         out.append("</xades:QualifyingProperties>\n")
         out.append("</ds:Object>\n")
         out.append("</ds:Signature>\n")
         out.append("</asic:XAdESSignatures>\n")
         return out.toString()
     }
+
+    /**
+     * The message imprint of an archive timestamp placed after the
+     * unsigned properties [document] writes for the same arguments
+     * (ETSI EN 319 132-1 V1.3.1 clause 5.5.2.3, not the distributed
+     * case), digested with the signature timestamp's algorithm.
+     *
+     * In order: what each `ds:Reference` digests (every data object's
+     * content, which a detached reference without transforms
+     * dereferences to as an octet stream, then the canonical
+     * SignedProperties), the canonical SignedInfo, SignatureValue and
+     * KeyInfo, then every unsigned signature property in document
+     * order. The only `ds:Object` holds the QualifyingProperties, so
+     * step 6 adds nothing. Every element is written in exclusive
+     * canonical form, so these are the document's own bytes.
+     */
+    fun archiveTimestampDigest(
+        xmlSignature: ByteArray,
+        timestampTokens: List<ByteArray>,
+        material: PdfValidationMaterial,
+    ): ByteArray {
+        val digest = XadesSignature.timestampMessageDigest()
+        objects.forEach { obj -> digest.update(obj.content) }
+        digest.update(signedProperties.encodeToByteArray())
+        digest.update(signedInfo.encodeToByteArray())
+        digest.update(XadesSignature.signatureValueElement(xmlSignature).encodeToByteArray())
+        digest.update(keyInfo().encodeToByteArray())
+        for (property in XadesUnsignedProperties.signatureProperties(timestampTokens, material)) {
+            digest.update(property.encodeToByteArray())
+        }
+        return digest.digest()
+    }
+
+    /**
+     * `ds:KeyInfo` with the signer's certificate. It declares the `ds`
+     * prefix itself, as the apex of a subset it digests alone must
+     * (Exclusive XML Canonicalization 1.0 section 3).
+     */
+    private fun keyInfo(): String =
+        "<ds:KeyInfo xmlns:ds=\"" + XadesSignature.NAMESPACE_DSIG + "\">\n<ds:X509Data>\n" +
+            "<ds:X509Certificate>" + base64(certificateDer) + "</ds:X509Certificate>\n" +
+            "</ds:X509Data>\n</ds:KeyInfo>"
 
     private fun base64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
 }
@@ -69,6 +113,9 @@ internal class XadesPlan(
 internal object XadesSignature {
     const val NAMESPACE_DSIG = "http://www.w3.org/2000/09/xmldsig#"
     const val NAMESPACE_XADES = "http://uri.etsi.org/01903/v1.3.2#"
+
+    // XAdES 1.4.1, home of ArchiveTimeStamp (ETSI EN 319 132-1 V1.3.1 clause 5.5.2).
+    const val NAMESPACE_XADES_141 = "http://uri.etsi.org/01903/v1.4.1#"
     const val NAMESPACE_ASIC = "http://uri.etsi.org/02918/v1.2.1#"
     const val DIGEST_METHOD_SHA384 = "http://www.w3.org/2001/04/xmldsig-more#sha384"
     const val CANONICALIZATION_EXCLUSIVE = "http://www.w3.org/2001/10/xml-exc-c14n#"
@@ -81,6 +128,16 @@ internal object XadesSignature {
     const val SIGNATURE_ID = "SIG-1"
     const val SIGNED_PROPERTIES_ID = "SIG-1-SIGNEDPROPS"
     const val SIGNATURE_VALUE_ID = "SIG-1-SIGVAL"
+    const val ARCHIVE_TIMESTAMP_ID = "SIG-1-ATS-0"
+
+    /** Joins [SIGNATURE_ID] and a signature timestamp's index into its Id. */
+    const val SIGNATURE_TIMESTAMP_ID_INFIX = "-TS-"
+
+    // The Java name of the digest DIGEST_METHOD_SHA384 identifies.
+    private const val SHA384_ALGORITHM = "SHA-384"
+
+    // Every timestamp of this signature, signature and archive alike, imprints SHA-384.
+    private const val TIMESTAMP_DIGEST_ALGORITHM = SHA384_ALGORITHM
 
     /** Build the plan: the SignedProperties digest feeds the SignedInfo. */
     fun plan(
@@ -160,77 +217,6 @@ internal object XadesSignature {
         return out.toString()
     }
 
-    /**
-     * The unsigned properties: timestamps and validation material.
-     * Schema order is fixed: timestamps, then CertificateValues, then RevocationValues.
-     */
-    fun unsignedProperties(
-        timestampTokens: List<ByteArray>,
-        material: PdfValidationMaterial?,
-    ): String {
-        if (timestampTokens.isEmpty() && (material == null || material.isEmpty)) {
-            return ""
-        }
-        val out = StringBuilder()
-        out.append("<xades:UnsignedProperties>\n")
-        out.append("<xades:UnsignedSignatureProperties>\n")
-        timestampTokens.forEachIndexed { index, token ->
-            out
-                .append("<xades:SignatureTimeStamp Id=\"")
-                .append(SIGNATURE_ID)
-                .append("-TS-")
-                .append(index)
-                .append("\">\n")
-            out
-                .append("<ds:CanonicalizationMethod Algorithm=\"")
-                .append(CANONICALIZATION_EXCLUSIVE)
-                .append("\"></ds:CanonicalizationMethod>\n")
-            out.append("<xades:EncapsulatedTimeStamp>").append(base64(token)).append("</xades:EncapsulatedTimeStamp>\n")
-            out.append("</xades:SignatureTimeStamp>\n")
-        }
-        if (material != null && !material.isEmpty) {
-            material.useCopies { certificates, ocspResponses, revocationLists ->
-                if (certificates.isNotEmpty()) {
-                    out.append("<xades:CertificateValues>\n")
-                    for (cert in certificates) {
-                        out
-                            .append("<xades:EncapsulatedX509Certificate>")
-                            .append(base64(cert))
-                            .append("</xades:EncapsulatedX509Certificate>\n")
-                    }
-                    out.append("</xades:CertificateValues>\n")
-                }
-                if (revocationLists.isNotEmpty() || ocspResponses.isNotEmpty()) {
-                    out.append("<xades:RevocationValues>\n")
-                    if (revocationLists.isNotEmpty()) {
-                        out.append("<xades:CRLValues>\n")
-                        for (crl in revocationLists) {
-                            out
-                                .append("<xades:EncapsulatedCRLValue>")
-                                .append(base64(crl))
-                                .append("</xades:EncapsulatedCRLValue>\n")
-                        }
-                        out.append("</xades:CRLValues>\n")
-                    }
-                    if (ocspResponses.isNotEmpty()) {
-                        out.append("<xades:OCSPValues>\n")
-                        for (ocsp in ocspResponses) {
-                            out
-                                .append("<xades:EncapsulatedOCSPValue>")
-                                .append(base64(ocsp))
-                                .append("</xades:EncapsulatedOCSPValue>\n")
-                        }
-                        out.append("</xades:OCSPValues>\n")
-                    }
-                    out.append("</xades:RevocationValues>\n")
-                }
-            }
-        }
-        out.append("</xades:UnsignedSignatureProperties>\n")
-        out.append("</xades:UnsignedProperties>\n")
-        return out.toString()
-    }
-
     /** The `ds:SignatureValue` element, canonical and standalone. */
     fun signatureValueElement(xmlSignature: ByteArray): String =
         "<ds:SignatureValue xmlns:ds=\"" + NAMESPACE_DSIG + "\" Id=\"" +
@@ -239,6 +225,9 @@ internal object XadesSignature {
     /** SHA-384 over the canonicalised SignatureValue element (EN 319 132-1). */
     fun timestampDigest(xmlSignature: ByteArray): ByteArray =
         sha384(signatureValueElement(xmlSignature).encodeToByteArray())
+
+    /** A fresh digest of the algorithm every timestamp of this signature imprints. */
+    fun timestampMessageDigest(): MessageDigest = MessageDigest.getInstance(TIMESTAMP_DIGEST_ALGORITHM)
 
     fun signatureMethod(profile: NativeCardKeyProfile): String =
         when (profile) {
@@ -304,7 +293,7 @@ internal object XadesSignature {
     fun dateTime(instant: Instant): String =
         DateTimeFormatter.ISO_INSTANT.format(instant.truncatedTo(ChronoUnit.SECONDS))
 
-    private fun sha384(content: ByteArray): ByteArray = MessageDigest.getInstance("SHA-384").digest(content)
+    private fun sha384(content: ByteArray): ByteArray = MessageDigest.getInstance(SHA384_ALGORITHM).digest(content)
 
     private fun base64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
 

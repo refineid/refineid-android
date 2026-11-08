@@ -8,7 +8,7 @@
     <string name="signing_outcome_not_saved">Allekirjoitettu asiakirja hylättiin.</string>
     <string name="signing_outcome_partly_saved">Osa allekirjoitetuista asiakirjoista tallennettiin, loput hylättiin.</string>
     <string name="signing_frame_validation_material">pitkäaikaisen validoinnin aineistoa ei saatu kerättyä: %1$s</string>
-    <string name="signed_below_long_term">Kehitysversio: tallennettiin PAdES %1$s -tasoisena ilman pitkäaikaisen validoinnin aineistoa; tiedostonimen loppu on %2$s. Syy: %3$s.</string>
+    <string name="signed_below_long_term">Kehitysversio: tallennettiin %1$s-%2$s-tasoisena, alle pitkäaikaisarkistoinnin tason B-LTA; tiedostonimen loppu on %3$s. Syy: %4$s.</string>
     <string name="signing_cause_issuer_unavailable">varmenteen myöntäjää ei löytynyt</string>
     <string name="signing_cause_revocation_unavailable">varmenteen sulkutietoa ei saatu haettua</string>
     <string name="signing_cause_random_unavailable">puhelin ei pystynyt tuottamaan turvallista satunnaislukua sulkutietokyselyyn</string>
@@ -24,6 +24,7 @@
     <string name="signing_cause_validation_services_unreachable">validointipalveluihin ei saatu yhteyttä</string>
     <string name="signing_cause_signature_timestamp_failed">kelvollista allekirjoituksen aikaleimaa ei saatu</string>
     <string name="signing_cause_archive_timestamp_failed">kelvollista arkistoaikaleimaa ei saatu</string>
+    <string name="signing_cause_archive_timestamp_path_uncovered">arkistoaikaleiman myöntäjän varmenteet puuttuvat pitkäaikaisen validoinnin aineistosta</string>
     <string name="signing_cause_document_assembly_failed">allekirjoitettua asiakirjaa ei saatu koottua</string>
     <string name="signing_cause_container_too_large">salkku ylittäisi kokorajansa</string>
     <string name="signing_cause_internal_error">tapahtui sisäinen virhe</string>

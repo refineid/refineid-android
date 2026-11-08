@@ -61,42 +61,6 @@ internal sealed interface QualifiedPdfArchivalFailure {
     data object InternalError : QualifiedPdfArchivalFailure
 }
 
-/** A PAdES baseline level a completion reached before it stopped. */
-internal enum class PadesBaselineLevel(
-    /** The level's name in ETSI EN 319 142-1, clause 6. */
-    val label: String,
-) {
-    /** The card signature with its certificate, no timestamp. */
-    B_B("B-B"),
-
-    /** B-B with a signature timestamp. */
-    B_T("B-T"),
-}
-
-/**
- * What a completion does when it cannot reach PAdES-B-LTA. The build
- * fixes it at compile time through [forBuild]; nothing at run time
- * selects it.
- */
-internal enum class PadesLevelPolicy {
-    /** Only a PAdES-B-LTA document leaves the completion; anything less is discarded. */
-    LONG_TERM_ONLY,
-
-    /** The highest level reached is handed out, named by its level, for development use. */
-    HIGHEST_REACHED,
-    ;
-
-    companion object {
-        /** A release build makes only B-LTA documents; a debug build keeps what it reached. */
-        fun forBuild(isDebugBuild: Boolean): PadesLevelPolicy =
-            if (isDebugBuild) {
-                HIGHEST_REACHED
-            } else {
-                LONG_TERM_ONLY
-            }
-    }
-}
-
 internal sealed interface QualifiedPdfArchivalResult {
     class Success(
         val document: SignedPdfDocument,
@@ -105,12 +69,12 @@ internal sealed interface QualifiedPdfArchivalResult {
     }
 
     /**
-     * Only under [PadesLevelPolicy.HIGHEST_REACHED]: B-LTA failed with
+     * Only under [ArchivalLevelPolicy.HIGHEST_REACHED]: B-LTA failed with
      * [kind], and [document] carries the [level] reached before it.
      */
     class BelowLongTerm(
         val document: SignedPdfDocument,
-        val level: PadesBaselineLevel,
+        val level: BaselineLevel,
         val kind: QualifiedPdfArchivalFailure,
     ) : QualifiedPdfArchivalResult {
         override fun toString(): String = "BelowLongTerm(level=" + level + ", kind=" + kind + ", " + document + ")"
@@ -127,7 +91,7 @@ internal object QualifiedPdfArchivalCompletion {
         prepared: PreparedQualifiedPdfSignature,
         timestampSource: QualifiedPdfTimestampSource,
         validationSource: QualifiedPdfValidationSource,
-        policy: PadesLevelPolicy,
+        policy: ArchivalLevelPolicy,
     ): QualifiedPdfArchivalResult {
         val startedAt = AppTrace.qualifiedPdfArchivalStarted()
         val result =
@@ -169,7 +133,7 @@ internal object QualifiedPdfArchivalCompletion {
         prepared: PreparedQualifiedPdfSignature,
         timestampSource: QualifiedPdfTimestampSource,
         validationSource: QualifiedPdfValidationSource,
-        policy: PadesLevelPolicy,
+        policy: ArchivalLevelPolicy,
     ): SignedPdfDocument =
         prepared.copySignerCertificate().useOwnedBytes { signerCertificate ->
             prepared.signatureTimestampDigest().useOwnedBytes { signatureDigest ->
@@ -182,7 +146,7 @@ internal object QualifiedPdfArchivalCompletion {
                 ).use { signatureTimestamp ->
                     AppTrace.qualifiedPdfArchivalStage(QualifiedPdfArchivalStage.TIMESTAMPED_SIGNATURE)
                     prepared.completeTimestamped(listOf(signatureTimestamp)).use { timestampedDocument ->
-                        keepingReached(policy, timestampedDocument, PadesBaselineLevel.B_T) {
+                        keepingReached(policy, timestampedDocument, BaselineLevel.B_T) {
                             AppTrace.qualifiedPdfArchivalStage(QualifiedPdfArchivalStage.VALIDATION_MATERIAL)
                             validationMaterial(
                                 source = validationSource,
@@ -207,14 +171,14 @@ internal object QualifiedPdfArchivalCompletion {
         }
 
     /**
-     * The signature timestamp. Under [PadesLevelPolicy.HIGHEST_REACHED] a
+     * The signature timestamp. Under [ArchivalLevelPolicy.HIGHEST_REACHED] a
      * failed request ends the completion with the B-B document instead.
      */
     private fun signatureTimestamp(
         prepared: PreparedQualifiedPdfSignature,
         source: QualifiedPdfTimestampSource,
         digest: ByteArray,
-        policy: PadesLevelPolicy,
+        policy: ArchivalLevelPolicy,
     ): VerifiedTimestampToken =
         try {
             acquireTimestamp(
@@ -223,25 +187,25 @@ internal object QualifiedPdfArchivalCompletion {
                 phase = QualifiedPdfTimestampPhase.SIGNATURE,
             )
         } catch (failure: CompletionException) {
-            if (policy != PadesLevelPolicy.HIGHEST_REACHED) {
+            if (policy != ArchivalLevelPolicy.HIGHEST_REACHED) {
                 throw failure
             }
             throw ReducedCompletion(
                 document = prepared.completeBaseline(),
-                level = PadesBaselineLevel.B_B,
+                level = BaselineLevel.B_B,
                 kind = failure.kind,
                 cause = failure,
             )
         }
 
     /**
-     * Runs the stages above [reached]. Under [PadesLevelPolicy.HIGHEST_REACHED]
+     * Runs the stages above [reached]. Under [ArchivalLevelPolicy.HIGHEST_REACHED]
      * a typed failure there ends the completion with a copy of [reached].
      */
     private inline fun <T> keepingReached(
-        policy: PadesLevelPolicy,
+        policy: ArchivalLevelPolicy,
         reached: SignedPdfDocument,
-        level: PadesBaselineLevel,
+        level: BaselineLevel,
         operation: () -> T,
     ): T =
         try {
@@ -254,15 +218,15 @@ internal object QualifiedPdfArchivalCompletion {
             throw reducedOr(failure, policy, reached, level, QualifiedPdfArchivalFailure.Document(failure.kind))
         }
 
-    /** [failure] itself, or under [PadesLevelPolicy.HIGHEST_REACHED] the reduced completion carrying [reached]. */
+    /** [failure] itself, or under [ArchivalLevelPolicy.HIGHEST_REACHED] the reduced completion carrying [reached]. */
     private fun reducedOr(
         failure: RuntimeException,
-        policy: PadesLevelPolicy,
+        policy: ArchivalLevelPolicy,
         reached: SignedPdfDocument,
-        level: PadesBaselineLevel,
+        level: BaselineLevel,
         kind: QualifiedPdfArchivalFailure,
     ): RuntimeException =
-        if (policy == PadesLevelPolicy.HIGHEST_REACHED) {
+        if (policy == ArchivalLevelPolicy.HIGHEST_REACHED) {
             ReducedCompletion(
                 document = SignedPdfDocument(reached.copyBytes()),
                 level = level,
@@ -359,7 +323,7 @@ internal object QualifiedPdfArchivalCompletion {
     /** Carries the document reached below B-LTA out of the completion. */
     private class ReducedCompletion(
         val document: SignedPdfDocument,
-        val level: PadesBaselineLevel,
+        val level: BaselineLevel,
         val kind: QualifiedPdfArchivalFailure,
         cause: Throwable,
     ) : RuntimeException(null, cause)

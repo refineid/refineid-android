@@ -7,7 +7,7 @@ import fi.refineid.android.R
 import fi.refineid.android.asic.AsicSigningFailure
 import fi.refineid.android.core.NativeCertificateReadFailure
 import fi.refineid.android.core.QualifiedSignFailure
-import fi.refineid.android.document.PadesBaselineLevel
+import fi.refineid.android.document.BaselineLevel
 import fi.refineid.android.document.PdfSigningFailure
 import fi.refineid.android.document.QualifiedDocumentCmsFailure
 import fi.refineid.android.document.QualifiedPdfArchivalFailure
@@ -71,12 +71,27 @@ internal data class DocumentSigningFailure(
     }
 }
 
-/** A development document saved below PAdES-B-LTA: the [level] it reached and why it went no further. */
+/** The signature standard a signed file follows, by the name it gives its signatures. */
+internal enum class SignatureStandard(
+    val label: String,
+) {
+    /** A PDF signed in place (ETSI EN 319 142-1). */
+    PADES("PAdES"),
+
+    /** The signature of an ASiC-E container (ETSI EN 319 132-1). */
+    XADES("XAdES"),
+}
+
+/**
+ * A development file saved below B-LTA: its [standard], the [level] it
+ * reached and why it went no further.
+ */
 internal data class BelowLongTermNotice(
-    val level: PadesBaselineLevel,
+    val standard: SignatureStandard,
+    val level: BaselineLevel,
     val failure: DocumentSigningFailure,
 ) {
-    /** The status line naming the level, the file-name mark and the cause. */
+    /** The status line naming the standard and level, the file-name mark and the cause. */
     fun text(
         string: (Int) -> String,
         format: (Int, List<String>) -> String,
@@ -84,6 +99,7 @@ internal data class BelowLongTermNotice(
         format(
             R.string.signed_below_long_term,
             listOf(
+                standard.label,
                 level.label,
                 SignedDocumentName.developmentSuffix(level),
                 failure.problem(string) { id, argument -> format(id, listOf(argument)) },
@@ -214,8 +230,18 @@ internal fun AsicSigningFailure.signingStop(): DocumentSigningStop {
             )
         }
 
-        AsicSigningFailure.Timestamp -> {
-            DocumentSigningStop.Failed(timestampFailure(QualifiedPdfTimestampPhase.SIGNATURE))
+        is AsicSigningFailure.Timestamp -> {
+            DocumentSigningStop.Failed(timestampFailure(phase))
+        }
+
+        AsicSigningFailure.ArchiveTimestampPathUncovered -> {
+            DocumentSigningStop.Failed(
+                DocumentSigningFailure(
+                    discarded,
+                    R.string.signing_cause_archive_timestamp_path_uncovered,
+                    R.string.signing_action_timestamp_authority,
+                ),
+            )
         }
 
         is AsicSigningFailure.Validation -> {
@@ -231,6 +257,17 @@ internal fun AsicSigningFailure.signingStop(): DocumentSigningStop {
         }
     }
 }
+
+/**
+ * The failure a completion-stage reason reports, as a development
+ * container below B-LTA names it. Every such reason stops as
+ * [DocumentSigningStop.Failed]; a card status cannot arise there.
+ */
+internal fun AsicSigningFailure.archivalFailure(): DocumentSigningFailure =
+    when (val stop = signingStop()) {
+        is DocumentSigningStop.Failed -> stop.failure
+        is DocumentSigningStop.Status -> internalFailure(SigningFailureOutcome.SIGNATURE_DISCARDED)
+    }
 
 internal fun QualifiedSignFailure.signingStop(): DocumentSigningStop =
     when (this) {

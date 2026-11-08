@@ -8,9 +8,9 @@ import androidx.test.uiautomator.uiAutomator
 import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.browser.BundledIssuerCertificates
 import fi.refineid.android.core.Pin2Submission
+import fi.refineid.android.document.ArchivalLevelPolicy
 import fi.refineid.android.document.DocumentValidationResult
 import fi.refineid.android.document.DocumentValidator
-import fi.refineid.android.document.PadesLevelPolicy
 import fi.refineid.android.document.PdfSignatureClaim
 import fi.refineid.android.document.QualifiedPdfArchivalCompletion
 import fi.refineid.android.document.QualifiedPdfArchivalFailure
@@ -149,7 +149,7 @@ internal class LiveNfcSigningOutcomeUiAutomatorTest {
                     prepared = prepared,
                     timestampSource = sources.timestamp,
                     validationSource = sources.validation,
-                    policy = PadesLevelPolicy.LONG_TERM_ONLY,
+                    policy = ArchivalLevelPolicy.LONG_TERM_ONLY,
                 )
             } finally {
                 sources.close()

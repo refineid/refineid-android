@@ -27,7 +27,7 @@ class QualifiedPdfArchivalCompletionTest {
                 prepared = preparedFixture.prepared,
                 timestampSource = timestamps,
                 validationSource = validation,
-                policy = PadesLevelPolicy.LONG_TERM_ONLY,
+                policy = ArchivalLevelPolicy.LONG_TERM_ONLY,
             )
 
         val success = result as QualifiedPdfArchivalResult.Success
@@ -69,7 +69,7 @@ class QualifiedPdfArchivalCompletionTest {
                     prepared = preparedFixture.prepared,
                     timestampSource = timestamps,
                     validationSource = validation,
-                    policy = PadesLevelPolicy.LONG_TERM_ONLY,
+                    policy = ArchivalLevelPolicy.LONG_TERM_ONLY,
                 )
 
             assertEquals(
@@ -101,7 +101,7 @@ class QualifiedPdfArchivalCompletionTest {
                 prepared = preparedFixture.prepared,
                 timestampSource = timestamps,
                 validationSource = validation,
-                policy = PadesLevelPolicy.LONG_TERM_ONLY,
+                policy = ArchivalLevelPolicy.LONG_TERM_ONLY,
             )
 
         assertEquals(
@@ -131,7 +131,7 @@ class QualifiedPdfArchivalCompletionTest {
                 prepared = cmsPrepared.prepared,
                 timestampSource = cmsTimestamps,
                 validationSource = unusedValidation,
-                policy = PadesLevelPolicy.LONG_TERM_ONLY,
+                policy = ArchivalLevelPolicy.LONG_TERM_ONLY,
             )
 
         assertEquals(
@@ -152,7 +152,7 @@ class QualifiedPdfArchivalCompletionTest {
                 prepared = validationPrepared.prepared,
                 timestampSource = validationTimestamps,
                 validationSource = unavailableValidation,
-                policy = PadesLevelPolicy.LONG_TERM_ONLY,
+                policy = ArchivalLevelPolicy.LONG_TERM_ONLY,
             )
 
         assertEquals(
@@ -170,9 +170,9 @@ class QualifiedPdfArchivalCompletionTest {
 
     @Test
     fun aReleaseBuildRefusesEveryDocumentBelowLongTerm() {
-        assertEquals(PadesLevelPolicy.LONG_TERM_ONLY, PadesLevelPolicy.forBuild(isDebugBuild = false))
-        assertEquals(PadesLevelPolicy.HIGHEST_REACHED, PadesLevelPolicy.forBuild(isDebugBuild = true))
-        val releasePolicy = PadesLevelPolicy.forBuild(isDebugBuild = false)
+        assertEquals(ArchivalLevelPolicy.LONG_TERM_ONLY, ArchivalLevelPolicy.forBuild(isDebugBuild = false))
+        assertEquals(ArchivalLevelPolicy.HIGHEST_REACHED, ArchivalLevelPolicy.forBuild(isDebugBuild = true))
+        val releasePolicy = ArchivalLevelPolicy.forBuild(isDebugBuild = false)
         for (case in REDUCIBLE_FAILURE_CASES) {
             val events = mutableListOf<CompletionEvent>()
             val cryptography = RecordingCryptography(events)
@@ -196,7 +196,7 @@ class QualifiedPdfArchivalCompletionTest {
 
     @Test
     fun aDebugBuildKeepsTheHighestLevelReachedAndNamesTheFailure() {
-        val debugPolicy = PadesLevelPolicy.forBuild(isDebugBuild = true)
+        val debugPolicy = ArchivalLevelPolicy.forBuild(isDebugBuild = true)
         for (case in REDUCIBLE_FAILURE_CASES) {
             val events = mutableListOf<CompletionEvent>()
             val cryptography = RecordingCryptography(events)
@@ -224,7 +224,7 @@ class QualifiedPdfArchivalCompletionTest {
                 }
                 assertEquals(
                     case.name,
-                    case.level == PadesBaselineLevel.B_B,
+                    case.level == BaselineLevel.B_B,
                     events.contains(CompletionEvent.BASELINE_ASSEMBLY),
                 )
             } finally {
@@ -237,7 +237,7 @@ class QualifiedPdfArchivalCompletionTest {
     private class ReducibleFailureCase(
         val name: String,
         val kind: QualifiedPdfArchivalFailure,
-        val level: PadesBaselineLevel,
+        val level: BaselineLevel,
         val timestamps: (MutableList<CompletionEvent>) -> RecordingTimestampSource,
         val validation: (MutableList<CompletionEvent>) -> RecordingValidationSource,
     )
@@ -262,7 +262,7 @@ class QualifiedPdfArchivalCompletionTest {
                         QualifiedPdfValidationSource { _, _ ->
                             error("validation must not follow interruption")
                         },
-                    policy = PadesLevelPolicy.LONG_TERM_ONLY,
+                    policy = ArchivalLevelPolicy.LONG_TERM_ONLY,
                 ).closeDocument()
         }
 
@@ -619,7 +619,7 @@ class QualifiedPdfArchivalCompletionTest {
                             kind = ValidationMaterialCollectionFailure.ISSUER_UNAVAILABLE,
                             pathRole = null,
                         ),
-                    level = PadesBaselineLevel.B_T,
+                    level = BaselineLevel.B_T,
                     timestamps = { events -> RecordingTimestampSource(events) },
                     validation = { events ->
                         RecordingValidationSource(
@@ -634,14 +634,14 @@ class QualifiedPdfArchivalCompletionTest {
                 ReducibleFailureCase(
                     name = "validation unavailable",
                     kind = QualifiedPdfArchivalFailure.ValidationUnavailable,
-                    level = PadesBaselineLevel.B_T,
+                    level = BaselineLevel.B_T,
                     timestamps = { events -> RecordingTimestampSource(events) },
                     validation = { events -> RecordingValidationSource(events, unavailable = true) },
                 ),
                 ReducibleFailureCase(
                     name = "archive timestamp",
                     kind = QualifiedPdfArchivalFailure.Timestamp(QualifiedPdfTimestampPhase.ARCHIVE),
-                    level = PadesBaselineLevel.B_T,
+                    level = BaselineLevel.B_T,
                     timestamps = { events ->
                         RecordingTimestampSource(
                             events = events,
@@ -654,7 +654,7 @@ class QualifiedPdfArchivalCompletionTest {
                 ReducibleFailureCase(
                     name = "signature timestamp",
                     kind = QualifiedPdfArchivalFailure.Timestamp(QualifiedPdfTimestampPhase.SIGNATURE),
-                    level = PadesBaselineLevel.B_B,
+                    level = BaselineLevel.B_B,
                     timestamps = { events ->
                         RecordingTimestampSource(
                             events = events,

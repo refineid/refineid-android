@@ -31,7 +31,7 @@ import fi.refineid.android.core.CanSubmission
 import fi.refineid.android.core.Pin2Submission
 import fi.refineid.android.core.QualifiedCardService
 import fi.refineid.android.diagnostics.AppTrace
-import fi.refineid.android.document.PadesLevelPolicy
+import fi.refineid.android.document.ArchivalLevelPolicy
 import fi.refineid.android.document.PdfSignatureClaim
 import fi.refineid.android.document.PreparedQualifiedPdfSignature
 import fi.refineid.android.document.QualifiedPdfArchivalCompletion
@@ -225,7 +225,7 @@ internal class DocumentSigningHarnessSession(
     private var signedDocument: SignedPdfDocument? = null
     private var signedBatchPdfs: List<Pair<String, SignedPdfDocument>>? = null
     private var signedContainer: ByteArray? = null
-    private val padesLevelPolicy = PadesLevelPolicy.forBuild(isDebugBuild = BuildConfig.DEBUG)
+    private val archivalLevelPolicy = ArchivalLevelPolicy.forBuild(isDebugBuild = BuildConfig.DEBUG)
 
     val documentNames: List<String>
         get() = selectedItems.map { it.name }
@@ -493,11 +493,28 @@ internal class DocumentSigningHarnessSession(
                                 prepared = prepared,
                                 timestampSource = archivalSources.timestamp,
                                 validationSource = archivalSources.validation,
+                                policy = archivalLevelPolicy,
                             )
                         }
                     when (result) {
                         is AsicSigningResult.Failure -> {
                             stop(result.reason.signingStop())
+                        }
+
+                        is AsicSigningResult.BelowLongTerm -> {
+                            discardSigned()
+                            signedContainer = result.container
+                            pendingBelowLongTerm =
+                                BelowLongTermNotice(
+                                    standard = SignatureStandard.XADES,
+                                    level = result.level,
+                                    failure = result.reason.archivalFailure(),
+                                )
+                            saveRequest =
+                                DocumentSaveRequest(
+                                    suggestedName = SignedDocumentName.belowLongTerm(containerName(), result.level),
+                                    isContainer = true,
+                                )
                         }
 
                         is AsicSigningResult.Success -> {
@@ -673,7 +690,7 @@ internal class DocumentSigningHarnessSession(
                                     prepared = prepared,
                                     timestampSource = archivalSources.timestamp,
                                     validationSource = archivalSources.validation,
-                                    policy = padesLevelPolicy,
+                                    policy = archivalLevelPolicy,
                                 )
                             }
                         when (result) {
@@ -686,7 +703,11 @@ internal class DocumentSigningHarnessSession(
                             is QualifiedPdfArchivalResult.BelowLongTerm -> {
                                 if (pendingBelowLongTerm == null) {
                                     pendingBelowLongTerm =
-                                        BelowLongTermNotice(result.level, result.kind.signingFailure())
+                                        BelowLongTermNotice(
+                                            standard = SignatureStandard.PADES,
+                                            level = result.level,
+                                            failure = result.kind.signingFailure(),
+                                        )
                                 }
                                 completedDocs.add(
                                     SignedDocumentName.belowLongTerm(suggestedName, result.level) to result.document,
