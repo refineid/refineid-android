@@ -44,6 +44,10 @@ tablet="${tablet:-$(ui_emulator)}"
 
 echo "phone: opening pairing"
 ui_open_refineid "${phone}"
+if ! ui_wait "${phone}" RappPairingRow; then
+  echo "phone: no Remote Access; the phone shows it only while it knows a card" >&2
+  exit 1
+fi
 ui_tap "${phone}" RappPairingRow
 ui_wait "${phone}" cardRemoteAccessSwitch
 ui_set_switch "${phone}" cardRemoteAccessSwitch true
