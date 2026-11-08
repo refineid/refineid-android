@@ -126,7 +126,8 @@ internal object XadesUnsignedProperties {
         "<ds:CanonicalizationMethod xmlns:ds=\"" + XadesSignature.NAMESPACE_DSIG + "\" Algorithm=\"" +
             XadesSignature.CANONICALIZATION_EXCLUSIVE + "\"></ds:CanonicalizationMethod>"
 
-    private fun timestampId(index: Int): String = XadesSignature.SIGNATURE_ID + XadesSignature.SIGNATURE_TIMESTAMP_ID_INFIX + index
+    private fun timestampId(index: Int): String =
+        XadesSignature.SIGNATURE_ID + XadesSignature.SIGNATURE_TIMESTAMP_ID_INFIX + index
 
     private fun base64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
 }
