@@ -96,6 +96,35 @@ of `uiautomator dump` shape the pairing script:
 - The boxes clear their semantics, so they cannot confirm what was
   typed; the outcome (`pairingFailure`, or the boxes gone) does.
 
+## Log in from the tablet's browser
+
+```bash
+Scripts/rapp-tablet-browser-login.sh [--url <https url>]
+```
+
+With the tablet paired, the script opens the in-app browser on the
+tablet, loads the URL (by default a public service that requests a
+client certificate from any issuer) and judges the TLS handshake from
+the debug build's `browser:` traces: the client-certificate request,
+its completion and the signature status. It prints the traces, which
+carry only enum values and counts, and ends with `logged in`. It never
+prints page content, which can carry the certificate subject.
+
+- When the phone asks for PIN 1 (`rappPinField`), the script says so and
+  waits for the holder to enter it on the phone. With PIN 1 cached on the
+  phone, the signature goes through without a prompt.
+- A PIN or CAN field on the tablet fails the run: a remote login never
+  asks the requester for a secret (AGENTS.md RULE #1).
+- The default service does not trust the Finnish card root, so its page
+  reports the chain as unverified while it still receives the card's
+  certificate; the script's verdict is the handshake, not the page.
+
+Keep hands off the emulator while a script drives it. Touches on the
+emulator window can switch the tablet into desktop windowing and bring
+other apps' windows over RefineID, and the scripts' taps then land in
+the wrong window. `Scripts/stop-tablet-emulator.sh` and a fresh start
+restore a known state.
+
 ## Build signing
 
 The main checkout signs debug builds with the key named in its
