@@ -130,6 +130,9 @@ internal object XadesSignature {
     const val SIGNATURE_VALUE_ID = "SIG-1-SIGVAL"
     const val ARCHIVE_TIMESTAMP_ID = "SIG-1-ATS-0"
 
+    /** Joins [SIGNATURE_ID] and a signature timestamp's index into its Id. */
+    const val SIGNATURE_TIMESTAMP_ID_INFIX = "-TS-"
+
     // The Java name of the digest DIGEST_METHOD_SHA384 identifies.
     private const val SHA384_ALGORITHM = "SHA-384"
 

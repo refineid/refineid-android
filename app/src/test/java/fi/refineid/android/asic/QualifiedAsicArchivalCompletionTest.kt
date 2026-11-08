@@ -286,6 +286,12 @@ class QualifiedAsicArchivalCompletionTest {
                     timestampMode = TimestampFailureMode.UNAVAILABLE,
                 ),
                 ReducibleCase(
+                    level = BaselineLevel.B_B,
+                    reason = AsicSigningFailure.Timestamp(QualifiedPdfTimestampPhase.SIGNATURE),
+                    timestampFailure = QualifiedPdfTimestampPhase.SIGNATURE,
+                    timestampMode = TimestampFailureMode.WRONG_IMPRINT,
+                ),
+                ReducibleCase(
                     level = BaselineLevel.B_T,
                     reason =
                         AsicSigningFailure.Validation(

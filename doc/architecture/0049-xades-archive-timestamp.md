@@ -18,8 +18,8 @@ cannot be validated once the signer's or the authority's certificates expire
 or their algorithms weaken; the archive timestamp is what carries it past
 that point.
 
-refineid-core (Rust) and refineid-apple (Swift) write the same element with
-the same bytes, so a container from any of them reads the same everywhere.
+refineid-core (Rust) and refineid-apple (Swift) write the same element. No
+cross-implementation test compares the bytes the three write.
 
 ## Decision
 

@@ -71,19 +71,17 @@ internal object QualifiedAsicArchivalCompletion {
                 reachedOnFailure(policy, prepared, BaselineLevel.B_T, { plan.document(signature, tokens) }) {
                     validationMaterial(validationSource, prepared.certificateDer, verifiedSignatureTimestamp)
                 }.use { material ->
-                    reachedOnFailure(
-                        policy,
-                        prepared,
-                        BaselineLevel.B_LT,
-                        { plan.document(signature, tokens, material) },
-                    ) {
+                    val longTermDocument = { plan.document(signature, tokens, material) }
+                    reachedOnFailure(policy, prepared, BaselineLevel.B_LT, longTermDocument) {
                         archiveTimestamp(prepared, timestampSource, tokens, material)
                     }.use { archiveTimestamp ->
                         archiveTimestamp.copyEncoding().useOwnedBytes { archiveTokenBytes ->
-                            container(
-                                prepared,
-                                plan.document(signature, tokens, material, archiveTokenBytes),
-                            )
+                            reachedOnFailure(policy, prepared, BaselineLevel.B_LT, longTermDocument) {
+                                container(
+                                    prepared,
+                                    plan.document(signature, tokens, material, archiveTokenBytes),
+                                )
+                            }
                         }
                     }
                 }
