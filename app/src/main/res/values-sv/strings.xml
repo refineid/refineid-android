@@ -140,4 +140,5 @@ En kod från utfärdaren kan ändå prövas: kortet avgör och förbrukar inget.
     <string name="browser_copy_link">Kopiera länk</string>
     <string name="browser_share">Dela</string>
     <string name="browser_open_external">Öppna i webbläsare</string>
+    <string name="browser_link">Länk</string>
 </resources>

@@ -140,4 +140,5 @@ Myöntäjältä saatua koodia voi silti yrittää: kortti päättää eikä kulu
     <string name="browser_copy_link">Kopioi linkki</string>
     <string name="browser_share">Jaa</string>
     <string name="browser_open_external">Avaa selaimessa</string>
+    <string name="browser_link">Linkki</string>
 </resources>

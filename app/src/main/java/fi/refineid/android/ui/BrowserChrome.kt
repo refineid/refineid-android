@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.TextRange
@@ -90,6 +91,7 @@ internal class BrowserPageState {
     }
 
     internal companion object {
+        const val PAGE_START_PERCENT = 0
         const val PAGE_LOADED_PERCENT = 100
     }
 }
@@ -99,8 +101,8 @@ internal typealias BrowserFileChooser = (WebChromeClient.FileChooserParams, (Arr
 
 /**
  * Reports page progress to [page] and opens the system file picker for a
- * page's file input through [chooseFiles]. Pages that ask for a new window
- * load in the same view: the WebView does not support multiple windows.
+ * page's file input through [chooseFiles]. The WebView keeps its default
+ * single-window mode, so no other window opens.
  */
 internal class BrowserChromeClient(
     private val page: BrowserPageState,
@@ -110,7 +112,8 @@ internal class BrowserChromeClient(
         view: WebView,
         newProgress: Int,
     ) {
-        page.progressPercent = newProgress
+        page.progressPercent =
+            newProgress.coerceIn(BrowserPageState.PAGE_START_PERCENT, BrowserPageState.PAGE_LOADED_PERCENT)
     }
 
     override fun onShowFileChooser(
@@ -144,6 +147,8 @@ internal fun rememberBrowserFileChooser(): BrowserFileChooser {
             try {
                 launcher.launch(params.createIntent())
             } catch (_: ActivityNotFoundException) {
+                pending.getAndSet(null)?.invoke(null)
+            } catch (_: SecurityException) {
                 pending.getAndSet(null)?.invoke(null)
             }
         }
@@ -286,7 +291,7 @@ private fun BrowserSuggestions(
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .clickable { onPick(address) }
+                            .clickable(role = Role.Button) { onPick(address) }
                             .padding(horizontal = SUGGESTION_HORIZONTAL_PADDING, vertical = SUGGESTION_VERTICAL_PADDING)
                             .testTag(UiAutomationIds.BROWSER_SUGGESTION),
                 )
@@ -352,7 +357,9 @@ private fun copyLink(
     context: Context,
     url: String,
 ) {
-    context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(LINK_CLIP_LABEL, url))
+    context
+        .getSystemService(ClipboardManager::class.java)
+        ?.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.browser_link), url))
 }
 
 private fun startOrIgnore(
@@ -363,11 +370,12 @@ private fun startOrIgnore(
         context.startActivity(intent)
     } catch (_: ActivityNotFoundException) {
         // No app takes it; the menu item then does nothing.
+    } catch (_: SecurityException) {
+        // The app that would take it refuses this caller; likewise nothing.
     }
 }
 
 private const val PLAIN_TEXT = "text/plain"
-private const val LINK_CLIP_LABEL = "link"
 private const val BROWSER_FIELD_WEIGHT = 1F
 private const val FLOATING_BAR_ALPHA = 0.95f
 private val BROWSER_ITEM_SPACING = 12.dp

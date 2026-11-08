@@ -1,6 +1,8 @@
 // Copyright 2026 Petri Koistinen. Licensed under the Apache License, Version 2.0.
 package fi.refineid.android.browser
 
+import java.util.Locale
+
 /**
  * The addresses the in-app browser visited while this process lives, newest
  * first, for completing what the holder types. Nothing is written anywhere:
@@ -33,11 +35,11 @@ internal class BrowserSessionHistory(
         typed: String,
         limit: Int = SUGGESTION_LIMIT,
     ): List<String> {
-        val query = withoutScheme(typed.trim()).lowercase()
+        val query = withoutScheme(typed.trim()).lowercase(Locale.ROOT)
         if (query.isEmpty()) return emptyList()
-        val matching = entries.filter { withoutScheme(it).lowercase().contains(query) }
-        if (matching.any { withoutScheme(it).lowercase() == query }) return emptyList()
-        val (prefixed, contained) = matching.partition { readable(it).lowercase().startsWith(query) }
+        val matching = entries.filter { withoutScheme(it).lowercase(Locale.ROOT).contains(query) }
+        if (matching.any { withoutScheme(it).lowercase(Locale.ROOT) == query }) return emptyList()
+        val (prefixed, contained) = matching.partition { readable(it).lowercase(Locale.ROOT).startsWith(query) }
         return (prefixed + contained).take(limit)
     }
 
@@ -70,7 +72,10 @@ internal class BrowserSessionHistory(
         }
 
         /** [url] as the holder reads it: without the scheme. */
-        fun readable(url: String): String = withoutScheme(url).removePrefix(WWW_PREFIX)
+        fun readable(url: String): String {
+            val address = withoutScheme(url)
+            return if (address.startsWith(WWW_PREFIX, ignoreCase = true)) address.drop(WWW_PREFIX.length) else address
+        }
 
         private fun withoutScheme(url: String): String =
             if (url.startsWith(HTTPS_PREFIX, ignoreCase = true)) url.drop(HTTPS_PREFIX.length) else url

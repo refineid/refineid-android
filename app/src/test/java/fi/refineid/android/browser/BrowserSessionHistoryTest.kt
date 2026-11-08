@@ -13,6 +13,7 @@ class BrowserSessionHistoryTest {
         const val EXAMPLE_CALLBACK = "https://example.test/callback"
         const val OTHER = "https://www.other.test/"
         const val OTHER_INDEX = "https://www.other.test/index"
+        const val OTHER_UPPER_WWW = "https://WWW.other.test/"
         const val CLEARTEXT = "http://example.test/"
         const val SMALL_LIMIT = 2
     }
@@ -68,6 +69,13 @@ class BrowserSessionHistoryTest {
         assertTrue(history.suggestions("http://example").isEmpty())
         assertTrue(history.suggestions(EXAMPLE).isEmpty())
         assertNull(BrowserSessionHistory.entryOf(CLEARTEXT))
+    }
+
+    @Test
+    fun anAddressReadsWithoutSchemeAndWww() {
+        assertEquals("other.test/", BrowserSessionHistory.readable(OTHER))
+        assertEquals("other.test/", BrowserSessionHistory.readable(OTHER_UPPER_WWW))
+        assertEquals("example.test/start", BrowserSessionHistory.readable(EXAMPLE))
     }
 
     @Test
