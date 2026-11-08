@@ -38,9 +38,9 @@ bootstrap installs: a JDK of the version `gradle/gradle-daemon-jvm.properties`
 names, with `JAVA_HOME` pointing at it, the SDK platform
 and the NDK pinned in `app/build.gradle.kts` through `sdkmanager`, the Rust
 Android targets with `rustup target add`, `cargo install cargo-ndk`, and
-ShellCheck (`winget install koalaman.shellcheck`). Shell scripts, patches and
-the provider contract sources check out with LF on every host
-(`.gitattributes`); the Kotlin sources follow `core.autocrlf`.
+ShellCheck (`winget install koalaman.shellcheck`). Every text file checks out
+with LF on every host whatever `core.autocrlf` says, except `gradlew.bat`,
+which `cmd.exe` needs in CRLF (`.gitattributes`).
 
 ### Managing build cache
 
