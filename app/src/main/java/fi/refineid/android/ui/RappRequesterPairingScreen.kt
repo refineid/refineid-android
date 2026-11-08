@@ -3,11 +3,8 @@ package fi.refineid.android.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -63,13 +60,10 @@ internal fun RappRequesterPairingScreen(
         if (searchPhase is RemoteCardModel.SearchPhase.Entry) entry = ""
     }
 
+    // The enclosing SubScreen scrolls, pads and carries the screen's tag;
+    // a second vertical scroll inside it would be measured unbounded.
     Column(
-        modifier =
-            modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
-                .testTag(UiAutomationIds.REQUESTER_PAIRING_SCREEN),
+        modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         RemoteUseSwitchCard(
