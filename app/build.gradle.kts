@@ -1,4 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.io.File
+import java.io.IOException
 import java.io.StringReader
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
@@ -134,7 +136,22 @@ require(refineIdVersionCode in minimumGooglePlayVersionCode..maximumGooglePlayVe
     "derived versionCode is outside the Google Play range"
 }
 
-val playPropertiesFile = rootProject.layout.projectDirectory.file("play.properties")
+// Release secrets live outside every source tree (refineid-release
+// releng/android-release-secrets.md): the upload keystore and the Play
+// publisher files sit in the maintainer's secrets home, and the keystore
+// password stays in the macOS Keychain. Automated builders without a
+// Keychain name an out-of-tree properties file through
+// REFINEID_KEYSTORE_PROPERTIES instead. Nothing here reads a secret from
+// the repository. File checks below can lag the Keychain until the next
+// invalidation; the live build clock and the per-build version stamp keep
+// that window at about a minute.
+val secretsHomeRelativePath = ".signing/refineid"
+val secretsHome = File(providers.systemProperty("user.home").get(), secretsHomeRelativePath)
+val uploadKeystoreFileName = "upload-2026-11.keystore"
+val uploadKeyAlias = "upload"
+val uploadKeychainService = "refineid-android-upload-2026-11"
+
+val playPropertiesFile = layout.projectDirectory.file(File(secretsHome, "play.properties").absolutePath)
 val playProperties =
     if (playPropertiesFile.asFile.exists()) {
         Properties().apply {
@@ -148,19 +165,122 @@ val playProperties =
         null
     }
 
-val keystorePropertiesFile = rootProject.layout.projectDirectory.file("keystore.properties")
-val keystoreProperties =
-    if (keystorePropertiesFile.asFile.exists()) {
+// The upload-key password, read from the login Keychain through a value
+// source: the Keychain stays the source of truth, while Gradle's
+// configuration cache necessarily holds a project-local copy under
+// .gradle/ (git-ignored, never cloned into worktrees). Absent on
+// non-macOS hosts, without the Keychain item, or when access is denied;
+// every caller treats null as "no upload key" and falls back to the
+// unsigned/debug-key behavior. Grant the `security` tool Always Allow for
+// the item, or each cache miss prompts.
+interface UploadKeyPasswordParameters : ValueSourceParameters {
+    val keychainService: Property<String>
+}
+
+abstract class UploadKeyPassword : ValueSource<String, UploadKeyPasswordParameters> {
+    override fun obtain(): String? {
+        if (!System.getProperty("os.name").startsWith("Mac OS X")) {
+            return null
+        }
+        return try {
+            val keychainLookup =
+                ProcessBuilder(
+                    "/usr/bin/security",
+                    "find-generic-password",
+                    "-s",
+                    parameters.keychainService.get(),
+                    "-w",
+                )
+            keychainLookup.redirectErrorStream(true)
+            val lookup = keychainLookup.start()
+            val password =
+                lookup.inputStream
+                    .bufferedReader(Charsets.UTF_8)
+                    .use { it.readText() }
+                    .trimEnd('\r', '\n')
+            val exitCode = lookup.waitFor()
+            if (exitCode == 0 && password.isNotEmpty()) password else null
+        } catch (_: IOException) {
+            null
+        }
+    }
+}
+
+data class SigningCredentials(
+    val storeFile: File,
+    val storePassword: String,
+    val keyAlias: String,
+    val keyPassword: String,
+)
+
+// Explicit file-based credentials for automated builders (Linux, no
+// Keychain): REFINEID_KEYSTORE_PROPERTIES names an out-of-tree properties
+// file in keystore.properties format. It wins over the Keychain lookup.
+val keystorePropertiesEnvName = "REFINEID_KEYSTORE_PROPERTIES"
+val envKeystorePath = providers.environmentVariable(keystorePropertiesEnvName).orNull
+val envKeystoreFile = envKeystorePath?.let { File(it) }?.takeIf { it.isFile }
+if (envKeystorePath != null && envKeystoreFile == null) {
+    error("$keystorePropertiesEnvName points at '$envKeystorePath', which is not a readable file")
+}
+if (envKeystoreFile != null && !envKeystoreFile.isAbsolute) {
+    error("$keystorePropertiesEnvName must name an absolute file (got '$envKeystorePath')")
+}
+
+fun requireKeystoreKey(
+    properties: Properties,
+    key: String,
+    file: File,
+): String = requireNotNull(properties.getProperty(key)) { "Missing '$key' in $file" }
+
+val envKeystoreProperties: Properties? =
+    envKeystoreFile?.let { keystoreFile ->
         Properties().apply {
             load(
                 StringReader(
-                    providers.fileContents(keystorePropertiesFile).asText.get(),
+                    providers
+                        .fileContents(layout.projectDirectory.file(keystoreFile.absolutePath))
+                        .asText
+                        .get(),
                 ),
             )
         }
+    }
+val envSigningCredentials: SigningCredentials? =
+    envKeystoreFile?.let { keystoreFile ->
+        envKeystoreProperties?.let { properties ->
+            SigningCredentials(
+                storeFile =
+                    keystoreFile.parentFile.resolve(
+                        requireKeystoreKey(properties, "storeFile", keystoreFile),
+                    ),
+                storePassword = requireKeystoreKey(properties, "storePassword", keystoreFile),
+                keyAlias = requireKeystoreKey(properties, "keyAlias", keystoreFile),
+                keyPassword = requireKeystoreKey(properties, "keyPassword", keystoreFile),
+            )
+        }
+    }
+
+val uploadKeystoreFile = File(secretsHome, uploadKeystoreFileName)
+val uploadKeyPassword =
+    providers
+        .of(UploadKeyPassword::class) {
+            parameters.keychainService.set(uploadKeychainService)
+        }.getOrNull()
+val keychainPassword = uploadKeyPassword
+val keychainSigningCredentials: SigningCredentials? =
+    if (uploadKeystoreFile.isFile && keychainPassword != null) {
+        SigningCredentials(
+            storeFile = uploadKeystoreFile,
+            storePassword = keychainPassword,
+            keyAlias = uploadKeyAlias,
+            keyPassword = keychainPassword,
+        )
     } else {
         null
     }
+
+val signingCredentials = envSigningCredentials ?: keychainSigningCredentials
+val releaseSigningAvailable = signingCredentials != null
 
 android {
     namespace = "fi.refineid.android"
@@ -183,12 +303,13 @@ android {
     }
 
     signingConfigs {
-        if (keystoreProperties != null) {
+        val credentials = signingCredentials
+        if (credentials != null) {
             register("release") {
-                storeFile = file(keystoreProperties.getProperty("storeFile"))
-                storePassword = keystoreProperties.getProperty("storePassword")
-                keyAlias = keystoreProperties.getProperty("keyAlias")
-                keyPassword = keystoreProperties.getProperty("keyPassword")
+                storeFile = credentials.storeFile
+                storePassword = credentials.storePassword
+                keyAlias = credentials.keyAlias
+                keyPassword = credentials.keyPassword
             }
         }
     }
@@ -506,7 +627,7 @@ tasks.configureEach {
 
 val releaseApk =
     layout.buildDirectory.file(
-        if (keystoreProperties != null) {
+        if (releaseSigningAvailable) {
             "outputs/apk/release/app-release.apk"
         } else {
             "outputs/apk/release/app-release-unsigned.apk"

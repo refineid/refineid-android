@@ -24,8 +24,10 @@ colliding and keeps the main checkout pristine for integration.
 1. Update local main: `git checkout main && git pull --ff-only`.
 2. Create the worktree: `git worktree add ../wt/refineid-android-<topic> -b <topic>`.
 3. Copy `local.properties` into the worktree (machine-global SDK path).
-   Never copy signing secrets (`keystore.properties`, service accounts):
-   worktrees build debug only, release signing stays in the main checkout.
+   Copy no secrets: signing credentials live outside every source tree and
+   the build reads them from the secrets home and the Keychain. Releases are
+   still cut from the main checkout only (the release scripts refuse any
+   other branch).
 4. Run `Scripts/agent-housekeeping.sh` and act on what it reports.
 
 Gradle and Cargo dependency caches live outside the checkout, and the

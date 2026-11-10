@@ -26,6 +26,7 @@ import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
+import java.util.Properties
 import kotlin.system.exitProcess
 
 val APP_PACKAGE = "fi.refineid.android"
@@ -169,19 +170,19 @@ class GooglePlayClient(val serviceAccountFile: File) {
 }
 
 fun findServiceAccountFile(): File {
-    val localFile = File("play-service-account.json")
-    if (localFile.exists()) return localFile
-
-    val propFile = File("play.properties")
+    val secretsHome = File(System.getProperty("user.home"), ".signing/refineid")
+    val propFile = File(secretsHome, "play.properties")
     if (propFile.exists()) {
-        val propPath = propFile.readLines().firstOrNull { it.startsWith("serviceAccountCredentials=") }
-            ?.substringAfter("=")?.trim()
+        val properties = Properties()
+        propFile.inputStream().use { properties.load(it) }
+        val propPath = properties.getProperty("serviceAccountCredentials")?.trim()
         if (propPath != null) {
-            val f = File(propPath)
-            if (f.exists()) return f
+            val candidate = File(propPath)
+            val resolved = if (candidate.isAbsolute) candidate else File(propFile.parentFile, propPath)
+            if (resolved.exists()) return resolved
         }
     }
-    fail("Could not find play-service-account.json in working directory or play.properties")
+    fail("Could not find play-service-account.json via $propFile")
 }
 
 fun extractReleasesArray(json: String): String? {

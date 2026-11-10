@@ -1,3 +1,0 @@
-# Google Play Store credentials
-# The path is relative to the repository root.
-serviceAccountCredentials=path/to/service-account.json

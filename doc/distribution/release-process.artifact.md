@@ -16,7 +16,7 @@ automated workflows for both paths.
 The `com.github.triplet.play` plugin manages the communication with the Google
 Play Developer API. It is configured in the `:app` module to:
 
-1. Use a service account for authentication, loaded from `play.properties`.
+1. Use a service account for authentication, loaded from the secrets home's `play.properties` (see Configuration).
 2. Default to the `internal` test track for new uploads.
 3. Build and upload Android App Bundles (AAB).
 
@@ -53,10 +53,28 @@ Both distribution paths share a mandatory verification sequence:
 
 ## Configuration
 
-Credentials and local paths are kept in properties files at the repository root,
-which are excluded from version control:
+Release secrets live outside every source tree, in the maintainer's secrets
+home (`~/.signing/refineid/`), with the upload-key password in the macOS
+Keychain; see
+[android-release-secrets.md](https://github.com/refineid/refineid-release/blob/main/releng/android-release-secrets.md).
+The build reads them from there directly:
 
-- `keystore.properties`: Signing keys for production builds.
-- `play.properties`: Google Play service account credentials.
+- `upload-2026-11.keystore`: Play upload key (key alias `upload`); its
+  password comes from the Keychain item `refineid-android-upload-2026-11`.
+  Grant the `security` tool Always Allow for that item, or every build
+  prompts for Keychain access.
+- `play.properties`: Play Publisher plugin configuration; its
+  `serviceAccountCredentials` names the service-account file by absolute path.
+- `play-service-account.json`: Google Play Developer API credentials.
 
-Templates are provided as `*.properties.example`.
+Automated Linux builders without a Keychain set
+`REFINEID_KEYSTORE_PROPERTIES` to an out-of-tree properties file (the
+`storeFile`/`storePassword`/`keyAlias`/`keyPassword` keys) instead; it
+takes precedence over the Keychain lookup. The builder host setup keeps
+that file in `~/secrets/`, outside the checkout. A relative `storeFile`
+resolves against the properties file's own directory.
+
+Without credentials (no Keychain item and no
+`REFINEID_KEYSTORE_PROPERTIES`) the `release` signing config is absent:
+debug builds fall back to the SDK debug key and release builds come out
+unsigned, for hardware signing with the identity card.
