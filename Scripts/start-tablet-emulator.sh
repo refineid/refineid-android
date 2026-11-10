@@ -127,8 +127,8 @@ fi
 # The tablet is on the host's network when its wlan0 address shares the
 # host interface's network prefix under the interface's subnet mask.
 ipv4_to_integer() {
-  local IFS=.
-  read -r first second third fourth <<< "$1"
+  local first second third fourth
+  IFS=. read -r first second third fourth <<< "$1"
   echo $(((first << 24) | (second << 16) | (third << 8) | fourth))
 }
 host_address="$(ipconfig getifaddr "${interface}" || true)"
