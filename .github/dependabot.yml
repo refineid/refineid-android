@@ -10,7 +10,7 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default-days: 2
+      default-days: 7
     open-pull-requests-limit: 10
     groups:
       gradle-dependencies:
@@ -33,7 +33,7 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default-days: 2
+      default-days: 7
     open-pull-requests-limit: 10
     groups:
       cargo-dependencies:
@@ -45,7 +45,7 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default-days: 2
+      default-days: 7
     open-pull-requests-limit: 10
     groups:
       cargo-dependencies:
@@ -57,7 +57,7 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default-days: 2
+      default-days: 7
     open-pull-requests-limit: 10
     groups:
       actions-dependencies:
