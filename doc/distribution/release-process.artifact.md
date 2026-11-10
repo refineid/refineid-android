@@ -71,9 +71,10 @@ Automated Linux builders without a Keychain set
 `REFINEID_KEYSTORE_PROPERTIES` to an out-of-tree properties file (the
 `storeFile`/`storePassword`/`keyAlias`/`keyPassword` keys) instead; it
 takes precedence over the Keychain lookup. The builder host setup keeps
-that file in `~/secrets/`, outside the checkout.
+that file in `~/secrets/`, outside the checkout. A relative `storeFile`
+resolves against the properties file's own directory.
 
-Without the Keychain item (other hosts, CI, fresh machines) the `release`
-signing config is absent: debug builds fall back to the SDK debug key and
-release builds come out unsigned, for hardware signing with the identity
-card.
+Without credentials (no Keychain item and no
+`REFINEID_KEYSTORE_PROPERTIES`) the `release` signing config is absent:
+debug builds fall back to the SDK debug key and release builds come out
+unsigned, for hardware signing with the identity card.

@@ -1,5 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.io.File
+import java.io.IOException
 import java.io.StringReader
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
@@ -141,9 +142,11 @@ require(refineIdVersionCode in minimumGooglePlayVersionCode..maximumGooglePlayVe
 // password stays in the macOS Keychain. Automated builders without a
 // Keychain name an out-of-tree properties file through
 // REFINEID_KEYSTORE_PROPERTIES instead. Nothing here reads a secret from
-// the repository.
-val secretsHomeDirectoryName = ".signing/refineid"
-val secretsHome = File(System.getProperty("user.home"), secretsHomeDirectoryName)
+// the repository. File checks below can lag the Keychain until the next
+// invalidation; the live build clock and the per-build version stamp keep
+// that window at about a minute.
+val secretsHomeRelativePath = ".signing/refineid"
+val secretsHome = File(providers.systemProperty("user.home").get(), secretsHomeRelativePath)
 val uploadKeystoreFileName = "upload-2026-11.keystore"
 val uploadKeyAlias = "upload"
 val uploadKeychainService = "refineid-android-upload-2026-11"
@@ -192,12 +195,12 @@ abstract class UploadKeyPassword : ValueSource<String, UploadKeyPasswordParamete
             val lookup = keychainLookup.start()
             val password =
                 lookup.inputStream
-                    .bufferedReader()
-                    .readText()
-                    .trim()
+                    .bufferedReader(Charsets.UTF_8)
+                    .use { it.readText() }
+                    .trimEnd('\r', '\n')
             val exitCode = lookup.waitFor()
             if (exitCode == 0 && password.isNotEmpty()) password else null
-        } catch (_: java.io.IOException) {
+        } catch (_: IOException) {
             null
         }
     }
@@ -216,6 +219,19 @@ data class SigningCredentials(
 val keystorePropertiesEnvName = "REFINEID_KEYSTORE_PROPERTIES"
 val envKeystorePath = providers.environmentVariable(keystorePropertiesEnvName).orNull
 val envKeystoreFile = envKeystorePath?.let { File(it) }?.takeIf { it.isFile }
+if (envKeystorePath != null && envKeystoreFile == null) {
+    error("$keystorePropertiesEnvName points at '$envKeystorePath', which is not a readable file")
+}
+if (envKeystoreFile != null && !envKeystoreFile.isAbsolute) {
+    error("$keystorePropertiesEnvName must name an absolute file (got '$envKeystorePath')")
+}
+
+fun requireKeystoreKey(
+    properties: Properties,
+    key: String,
+    file: File,
+): String = requireNotNull(properties.getProperty(key)) { "Missing '$key' in $file" }
+
 val envKeystoreProperties: Properties? =
     envKeystoreFile?.let { keystoreFile ->
         Properties().apply {
@@ -233,10 +249,13 @@ val envSigningCredentials: SigningCredentials? =
     envKeystoreFile?.let { keystoreFile ->
         envKeystoreProperties?.let { properties ->
             SigningCredentials(
-                storeFile = keystoreFile.parentFile.resolve(properties.getProperty("storeFile")),
-                storePassword = properties.getProperty("storePassword"),
-                keyAlias = properties.getProperty("keyAlias"),
-                keyPassword = properties.getProperty("keyPassword"),
+                storeFile =
+                    keystoreFile.parentFile.resolve(
+                        requireKeystoreKey(properties, "storeFile", keystoreFile),
+                    ),
+                storePassword = requireKeystoreKey(properties, "storePassword", keystoreFile),
+                keyAlias = requireKeystoreKey(properties, "keyAlias", keystoreFile),
+                keyPassword = requireKeystoreKey(properties, "keyPassword", keystoreFile),
             )
         }
     }
