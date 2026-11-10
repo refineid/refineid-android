@@ -67,6 +67,12 @@ The build reads them from there directly:
   `serviceAccountCredentials` names the service-account file by absolute path.
 - `play-service-account.json`: Google Play Developer API credentials.
 
+Automated Linux builders without a Keychain set
+`REFINEID_KEYSTORE_PROPERTIES` to an out-of-tree properties file (the
+`storeFile`/`storePassword`/`keyAlias`/`keyPassword` keys) instead; it
+takes precedence over the Keychain lookup. The builder host setup keeps
+that file in `~/secrets/`, outside the checkout.
+
 Without the Keychain item (other hosts, CI, fresh machines) the `release`
 signing config is absent: debug builds fall back to the SDK debug key and
 release builds come out unsigned, for hardware signing with the identity

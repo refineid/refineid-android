@@ -138,7 +138,9 @@ require(refineIdVersionCode in minimumGooglePlayVersionCode..maximumGooglePlayVe
 // Release secrets live outside every source tree (refineid-release
 // releng/android-release-secrets.md): the upload keystore and the Play
 // publisher files sit in the maintainer's secrets home, and the keystore
-// password stays in the macOS Keychain. Nothing here reads a secret from
+// password stays in the macOS Keychain. Automated builders without a
+// Keychain name an out-of-tree properties file through
+// REFINEID_KEYSTORE_PROPERTIES instead. Nothing here reads a secret from
 // the repository.
 val secretsHomeDirectoryName = ".signing/refineid"
 val secretsHome = File(System.getProperty("user.home"), secretsHomeDirectoryName)
@@ -201,13 +203,65 @@ abstract class UploadKeyPassword : ValueSource<String, UploadKeyPasswordParamete
     }
 }
 
+data class SigningCredentials(
+    val storeFile: File,
+    val storePassword: String,
+    val keyAlias: String,
+    val keyPassword: String,
+)
+
+// Explicit file-based credentials for automated builders (Linux, no
+// Keychain): REFINEID_KEYSTORE_PROPERTIES names an out-of-tree properties
+// file in keystore.properties format. It wins over the Keychain lookup.
+val keystorePropertiesEnvName = "REFINEID_KEYSTORE_PROPERTIES"
+val envKeystorePath = providers.environmentVariable(keystorePropertiesEnvName).orNull
+val envKeystoreFile = envKeystorePath?.let { File(it) }?.takeIf { it.isFile }
+val envKeystoreProperties: Properties? =
+    envKeystoreFile?.let { keystoreFile ->
+        Properties().apply {
+            load(
+                StringReader(
+                    providers
+                        .fileContents(layout.projectDirectory.file(keystoreFile.absolutePath))
+                        .asText
+                        .get(),
+                ),
+            )
+        }
+    }
+val envSigningCredentials: SigningCredentials? =
+    envKeystoreFile?.let { keystoreFile ->
+        envKeystoreProperties?.let { properties ->
+            SigningCredentials(
+                storeFile = keystoreFile.parentFile.resolve(properties.getProperty("storeFile")),
+                storePassword = properties.getProperty("storePassword"),
+                keyAlias = properties.getProperty("keyAlias"),
+                keyPassword = properties.getProperty("keyPassword"),
+            )
+        }
+    }
+
 val uploadKeystoreFile = File(secretsHome, uploadKeystoreFileName)
 val uploadKeyPassword =
     providers
         .of(UploadKeyPassword::class) {
             parameters.keychainService.set(uploadKeychainService)
         }.getOrNull()
-val releaseSigningAvailable = uploadKeystoreFile.isFile && uploadKeyPassword != null
+val keychainPassword = uploadKeyPassword
+val keychainSigningCredentials: SigningCredentials? =
+    if (uploadKeystoreFile.isFile && keychainPassword != null) {
+        SigningCredentials(
+            storeFile = uploadKeystoreFile,
+            storePassword = keychainPassword,
+            keyAlias = uploadKeyAlias,
+            keyPassword = keychainPassword,
+        )
+    } else {
+        null
+    }
+
+val signingCredentials = envSigningCredentials ?: keychainSigningCredentials
+val releaseSigningAvailable = signingCredentials != null
 
 android {
     namespace = "fi.refineid.android"
@@ -230,13 +284,13 @@ android {
     }
 
     signingConfigs {
-        val uploadPassword = uploadKeyPassword
-        if (uploadKeystoreFile.isFile && uploadPassword != null) {
+        val credentials = signingCredentials
+        if (credentials != null) {
             register("release") {
-                storeFile = uploadKeystoreFile
-                storePassword = uploadPassword
-                keyAlias = uploadKeyAlias
-                keyPassword = uploadPassword
+                storeFile = credentials.storeFile
+                storePassword = credentials.storePassword
+                keyAlias = credentials.keyAlias
+                keyPassword = credentials.keyPassword
             }
         }
     }
