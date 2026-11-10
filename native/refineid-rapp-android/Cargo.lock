@@ -661,7 +661,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 [[package]]
 name = "refineid-rapp"
 version = "26.11.10"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#76ac214f8152a46a8104e4ff30b7b19e7d43c7cd"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#07214656e1518c2a5ab7d2211570e613f7b06864"
 dependencies = [
  "chacha20poly1305",
  "curve25519-dalek",
