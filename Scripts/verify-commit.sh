@@ -9,6 +9,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+python3 -B Scripts/TestDocumentationGate.py
+
 # shellcheck source=Scripts/gradle-environment.sh
 source Scripts/gradle-environment.sh
 
