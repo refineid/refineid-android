@@ -132,12 +132,14 @@ restore a known state.
 
 ## Build signing
 
-The main checkout signs debug builds with the key named in its
-untracked `keystore.properties`; a worktree without that file signs with
-the SDK debug key. A device holding a build from one cannot update to a
-build from the other (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`), and
-uninstalling clears its pairings and primed CAN. Keep the custodian phone
-on builds from one origin; the tablet can be uninstalled freely.
+Every checkout signs debug builds with the upload key from the
+maintainer's secrets home (`~/.signing/refineid/`) and the macOS Keychain,
+so builds from the main checkout and from worktrees update over each other.
+A checkout whose Keychain item is missing or denied falls back to the SDK
+debug key, and a device holding a build from one signer cannot update to a
+build from the other (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`); uninstalling
+clears its pairings and primed CAN. Keep the custodian phone on upload-key
+builds; the tablet can be uninstalled freely.
 
 ## Instrumented tests
 

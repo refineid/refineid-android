@@ -169,10 +169,8 @@ class GooglePlayClient(val serviceAccountFile: File) {
 }
 
 fun findServiceAccountFile(): File {
-    val localFile = File("play-service-account.json")
-    if (localFile.exists()) return localFile
-
-    val propFile = File("play.properties")
+    val secretsHome = File(System.getProperty("user.home"), ".signing/refineid")
+    val propFile = File(secretsHome, "play.properties")
     if (propFile.exists()) {
         val propPath = propFile.readLines().firstOrNull { it.startsWith("serviceAccountCredentials=") }
             ?.substringAfter("=")?.trim()
@@ -181,7 +179,7 @@ fun findServiceAccountFile(): File {
             if (f.exists()) return f
         }
     }
-    fail("Could not find play-service-account.json in working directory or play.properties")
+    fail("Could not find play-service-account.json via $propFile")
 }
 
 fun extractReleasesArray(json: String): String? {

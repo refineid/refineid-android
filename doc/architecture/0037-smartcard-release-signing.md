@@ -23,7 +23,7 @@ physical cards reach their 5-year expiration cycle.
 ## Decision
 
 1. **Hardware-Bound Release Signing**:
-   When file-based \`keystore.properties\` is absent, release artifacts are signed
+   When the Keychain upload-key credentials are absent, release artifacts are signed
    directly using the developer's identity card PIN 2 (qualified signature) key
    through the local PKCS#11 bridge (\`/usr/local/lib/librefineid_pkcs11_sign.dylib\`)
    and JDK's \`SunPKCS11\` provider.
