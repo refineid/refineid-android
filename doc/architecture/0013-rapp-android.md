@@ -256,8 +256,9 @@ local core checkout is never required.
 - **Physical Card**: Finnish Citizen Identity Card (FINEID S1, P-384 authentication
   profile).
 - **Pairing Ceremony**: Mutual Noise XXpsk3 pairing completed over mDNS local
-  TCP stream using a 6-digit numeric pairing code. Automated end-to-end via
-  `scripts/test-pairing-e2e.sh`.
+  TCP stream using a 6-digit numeric pairing code (verified at the time with an
+  early pairing script since retired; the maintained automated pairing harness
+  is `Scripts/rapp-tablet-pair.sh`, see `doc/process/tablet-emulator.md`).
 - **Connection Management**: Persistent storage in `RappPairCatalog` and
   `AndroidRappVault`. Paired computers can be removed individually from the UI;
   when all pairs are deleted, the background stream listener stops.
