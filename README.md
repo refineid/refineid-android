@@ -37,7 +37,8 @@ the repository's shell scripts under it. Set up by hand what the macOS
 bootstrap installs: a JDK of the version `gradle/gradle-daemon-jvm.properties`
 names, with `JAVA_HOME` pointing at it, the SDK platform
 and the NDK pinned in `app/build.gradle.kts` through `sdkmanager`, the Rust
-Android targets with `rustup target add`, `cargo install cargo-ndk`, and
+Android targets with `rustup target add`, the `cargo-ndk` version pinned in
+`.github/workflows/check.yml` (`cargo install --locked --version <version> cargo-ndk`), and
 ShellCheck (`winget install koalaman.shellcheck`). Every text file checks out
 with LF on every host whatever `core.autocrlf` says, except `gradlew.bat`,
 which `cmd.exe` needs in CRLF (`.gitattributes`).
