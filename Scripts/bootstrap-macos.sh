@@ -38,11 +38,12 @@ if brew list --formula rust >/dev/null 2>&1; then
   exit 1
 fi
 
-# The Gradle build is the single source of truth for the pinned versions.
+# The Gradle build and CI workflow are the single source of truth for pinned versions.
 ndk_version=$(sed -n 's/^ *ndkVersion = "\(.*\)"$/\1/p' app/build.gradle.kts)
 platform_api=$(sed -n 's/^val currentAndroidApi = \([0-9]*\)$/\1/p' app/build.gradle.kts)
-if [[ -z "${ndk_version}" || -z "${platform_api}" ]]; then
-  echo "Error: could not read ndkVersion or currentAndroidApi from app/build.gradle.kts." >&2
+cargo_ndk_version=$(sed -n 's/^ *tool: cargo-ndk@\([0-9][0-9.]*\)$/\1/p' .github/workflows/check.yml)
+if [[ -z "${ndk_version}" || -z "${platform_api}" || -z "${cargo_ndk_version}" ]]; then
+  echo "Error: could not read pinned NDK, Android API, or cargo-ndk version." >&2
   exit 1
 fi
 
@@ -89,7 +90,9 @@ if ! rustup show active-toolchain >/dev/null 2>&1; then
 fi
 rustup target add "${rust_android_targets[@]}"
 
-command -v cargo-ndk >/dev/null || cargo install cargo-ndk
+if [[ "$(cargo ndk --version 2>/dev/null || true)" != "cargo-ndk ${cargo_ndk_version}" ]]; then
+  cargo install --locked --version "${cargo_ndk_version}" cargo-ndk
+fi
 
 Scripts/install-hooks.sh
 
