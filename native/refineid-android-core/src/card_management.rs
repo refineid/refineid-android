@@ -463,21 +463,67 @@ mod tests {
     const SYNTHETIC_PIN2: &[u8] = b"135790";
     const SYNTHETIC_NEW_PIN2: &[u8] = b"246802";
     const SYNTHETIC_PUK: &[u8] = b"97531864";
+    const SYNTHETIC_PRESET_ACTIVATION_PIN: &[u8] = b"1357902";
     const SERVED_RETRIES: u8 = 3;
     const BELOW_FLOOR_RETRIES: u8 = 2;
     const LAST_RETRY: u8 = 1;
     const NO_RETRIES: u8 = 0;
     /// Offset of the instruction byte in a command's wire bytes.
     const INSTRUCTION_OFFSET: usize = 1;
+    /// Offset of the P1 byte in a command's wire bytes.
+    const P1_OFFSET: usize = 2;
+    /// Offset of the P2 byte in a command's wire bytes.
+    const P2_OFFSET: usize = 3;
+
+    /// Instruction byte of GET DATA (ISO 7816-4:2020 section 11.4.2),
+    /// the command that reads a PIN container (FINEID S1 v4.2 section
+    /// 3.15.2 Table 16).
+    const GET_DATA_INS: u8 = 0xCB;
+    /// GET DATA P1 of a PIN container query (FINEID S1 v4.2 section
+    /// 3.15.2).
+    const CONTAINER_QUERY_P1: u8 = 0x00;
+    /// GET DATA P2 of a PIN container query (FINEID S1 v4.2 section
+    /// 3.15.2).
+    const CONTAINER_QUERY_P2: u8 = 0xFF;
+
+    /// High byte of the PIN changed tag (FINEID S1 v4.2 section 3.15.3).
+    const PIN_CHANGED_TAG_HIGH: u8 = 0xDF;
+    /// Low byte of the PIN changed tag (FINEID S1 v4.2 section 3.15.3).
+    const PIN_CHANGED_TAG_LOW: u8 = 0x2F;
+    /// Value length of the PIN changed tag.
+    const PIN_CHANGED_LEN: u8 = 1;
+    /// Changed-flag value of a PIN never changed since manufacture.
+    const PIN_CHANGED_FLAG_UNCHANGED: u8 = 0x00;
+
+    /// The body of a PIN container read for a PIN never changed since
+    /// manufacture: the changed flag carrying the unchanged value.
+    const UNCHANGED_PIN_CONTAINER: [u8; 4] = [
+        PIN_CHANGED_TAG_HIGH,
+        PIN_CHANGED_TAG_LOW,
+        PIN_CHANGED_LEN,
+        PIN_CHANGED_FLAG_UNCHANGED,
+    ];
+
+    /// Whether `wire` is a PIN container query: GET DATA with the
+    /// container query parameters.
+    fn is_container_query(wire: &[u8]) -> bool {
+        wire.get(INSTRUCTION_OFFSET) == Some(&GET_DATA_INS)
+            && wire.get(P1_OFFSET) == Some(&CONTAINER_QUERY_P1)
+            && wire.get(P2_OFFSET) == Some(&CONTAINER_QUERY_P2)
+    }
 
     /// Answers public commands from a script and records every credential
     /// command, answering it only when `credential_answer` names a status.
     /// A SELECT is answered file not found without taking a scripted answer,
-    /// so the PIN length read finds no EF.AOD.
+    /// so the PIN length read finds no EF.AOD. A PIN container query the
+    /// script answers with success carries `container_body`, so a
+    /// change-record read can report a PIN unchanged since manufacture;
+    /// every other answer carries no body.
     struct ScriptedTransport {
         responses: VecDeque<StatusWord>,
         credential_calls: usize,
         credential_answer: Option<StatusWord>,
+        container_body: Vec<u8>,
     }
 
     impl ScriptedTransport {
@@ -486,6 +532,7 @@ mod tests {
                 responses: statuses.iter().copied().collect(),
                 credential_calls: 0,
                 credential_answer: None,
+                container_body: Vec::new(),
             }
         }
     }
@@ -494,19 +541,21 @@ mod tests {
         type Error = &'static str;
 
         fn transmit(&mut self, command: &CommandApdu) -> Result<TransportOutcome, Self::Error> {
-            let status = if command.as_bytes().get(INSTRUCTION_OFFSET) == Some(&SelectFile::INS) {
+            let wire = command.as_bytes();
+            let status = if wire.get(INSTRUCTION_OFFSET) == Some(&SelectFile::INS) {
                 StatusWord::FileNotFound
             } else {
                 self.responses
                     .pop_front()
                     .ok_or("missing scripted response")?
             };
+            let body = if status == StatusWord::Success && is_container_query(wire) {
+                self.container_body.clone()
+            } else {
+                Vec::new()
+            };
             let [sw1, sw2] = status.as_u16().to_be_bytes();
-            Ok(TransportOutcome::Response(ResponseApdu {
-                body: Vec::new(),
-                sw1,
-                sw2,
-            }))
+            Ok(TransportOutcome::Response(ResponseApdu { body, sw1, sw2 }))
         }
 
         fn transmit_credential(
@@ -841,6 +890,96 @@ mod tests {
             assert_eq!(result, Err(CardManagementFailure::TransportError));
             assert_eq!(transport.credential_calls, 1);
             assert!(transport.responses.is_empty());
+        }
+    }
+
+    /// Answers a citizen card awaiting activation by the preset
+    /// activation PIN gives after the PIN length read: for PIN 1 and
+    /// PIN 2 the PIN container read, answered with success so it
+    /// carries the unchanged container, and the status probe. The
+    /// numbering comes from the length read, so no probe resolves it
+    /// again.
+    fn preset_activation_preamble(
+        pin1_probe: StatusWord,
+        pin2_probe: StatusWord,
+    ) -> [StatusWord; 4] {
+        [
+            StatusWord::Success,
+            pin1_probe,
+            StatusWord::Success,
+            pin2_probe,
+        ]
+    }
+
+    /// A citizen card awaiting activation by the preset activation
+    /// PIN, with each PIN's status probe answering `pin1_probe` and
+    /// `pin2_probe` and each PIN unchanged since manufacture.
+    fn preset_activation_transport(
+        pin1_probe: StatusWord,
+        pin2_probe: StatusWord,
+    ) -> ScriptedTransport {
+        let mut transcript = lengths_read(&[remaining(SERVED_RETRIES)]);
+        transcript.extend(preset_activation_preamble(pin1_probe, pin2_probe));
+        let mut transport = ScriptedTransport::new(&transcript);
+        transport.container_body = UNCHANGED_PIN_CONTAINER.to_vec();
+        transport
+    }
+
+    fn activate_by_preset(
+        transport: &mut ScriptedTransport,
+    ) -> Result<ActivationReport, CardManagementFailure> {
+        activate_card(
+            transport,
+            ACTIVATION_SCHEME_PRESET,
+            SYNTHETIC_PRESET_ACTIVATION_PIN.to_vec(),
+            Some(SYNTHETIC_NEW_PIN1.to_vec()),
+            Some(SYNTHETIC_NEW_PIN2.to_vec()),
+        )
+    }
+
+    #[test]
+    fn preset_activation_is_refused_below_the_pin_retry_floor_without_presenting_it() {
+        for low_probe in [remaining(BELOW_FLOOR_RETRIES), remaining(LAST_RETRY)] {
+            for other_probe in [
+                remaining(SERVED_RETRIES),
+                remaining(NO_RETRIES),
+                StatusWord::AuthenticationBlocked,
+            ] {
+                for pin1_low in [true, false] {
+                    let (pin1_probe, pin2_probe) = if pin1_low {
+                        (low_probe, other_probe)
+                    } else {
+                        (other_probe, low_probe)
+                    };
+                    let mut transport = preset_activation_transport(pin1_probe, pin2_probe);
+
+                    let result = activate_by_preset(&mut transport);
+
+                    assert_eq!(result, Err(CardManagementFailure::SafetyRefused));
+                    assert_eq!(transport.credential_calls, 0);
+                    assert!(transport.responses.is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn preset_activation_at_the_pin_floor_exhausted_or_blocked_reaches_the_card() {
+        let served = [
+            remaining(SERVED_RETRIES),
+            remaining(NO_RETRIES),
+            StatusWord::AuthenticationBlocked,
+        ];
+        for pin1_probe in served {
+            for pin2_probe in served {
+                let mut transport = preset_activation_transport(pin1_probe, pin2_probe);
+
+                let result = activate_by_preset(&mut transport);
+
+                assert_eq!(result, Err(CardManagementFailure::TransportError));
+                assert_eq!(transport.credential_calls, 1);
+                assert!(transport.responses.is_empty());
+            }
         }
     }
 
