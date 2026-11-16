@@ -2,6 +2,10 @@
 
 package fi.refineid.android.document
 
+import fi.refineid.android.network.SigningNetworkBasicCredentials
+import fi.refineid.android.network.SigningNetworkEndpoint
+import fi.refineid.android.network.SigningNetworkLimits
+import fi.refineid.android.network.SigningNetworkTransport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -124,7 +128,96 @@ class DocumentValidatorTest {
         )
     }
 
+    @Test
+    fun neverFetchesRevocationForAnUntrustedDocumentTimestamp() {
+        val fixture = SignedPdfFixture.buildTimestamped()
+        val transport = RevocationTransport()
+        val result =
+            DocumentValidator(
+                trustAnchors = listOf(fixture.certificate),
+                transport = transport,
+            ).validate(fixture.pdf) as DocumentValidationResult.Completed
+        assertTrue(result.signatures.last().isDocumentTimestamp)
+        assertTrue(transport.addresses.isEmpty())
+    }
+
+    @Test
+    fun routesTrustedSignerOcspThroughBoundedCertificateMaterialTransport() {
+        val fixture = SignedPdfFixture.build(ocspAddress = SYNTHETIC_OCSP_ADDRESS)
+        val transport = RevocationTransport()
+        DocumentValidator(
+            trustAnchors = listOf(fixture.certificate),
+            transport = transport,
+        ).validate(fixture.pdf)
+        assertEquals(listOf(SYNTHETIC_OCSP_ADDRESS), transport.addresses)
+    }
+
+    @Test
+    fun neverFetchesRevocationForAnUnknownSigner() {
+        val fixture =
+            SignedPdfFixture.build(
+                ocspAddress = SYNTHETIC_OCSP_ADDRESS,
+                revocationListAddress = SYNTHETIC_CRL_ADDRESS,
+            )
+        val transport = RevocationTransport()
+        DocumentValidator(trustAnchors = emptyList(), transport = transport).validate(fixture.pdf)
+        assertTrue(transport.addresses.isEmpty())
+    }
+
+    @Test
+    fun routesTrustedSignerCrlThroughBoundedCertificateMaterialTransport() {
+        val fixture = SignedPdfFixture.build(revocationListAddress = SYNTHETIC_CRL_ADDRESS)
+        val transport = RevocationTransport()
+        DocumentValidator(trustAnchors = listOf(fixture.certificate), transport = transport).validate(fixture.pdf)
+        assertEquals(listOf(SYNTHETIC_CRL_ADDRESS), transport.addresses)
+    }
+
+    @Test
+    fun fetchesBothRevocationSourcesForAnExplicitlyTrustedTimestamp() {
+        val fixture = SignedPdfFixture.buildTimestamped()
+        val transport = RevocationTransport()
+        DocumentValidator(
+            trustAnchors = listOf(fixture.certificate, checkNotNull(fixture.timestampCertificate)),
+            transport = transport,
+        ).validate(fixture.pdf)
+        assertEquals(listOf(SYNTHETIC_TSA_OCSP_ADDRESS, SYNTHETIC_CRL_ADDRESS), transport.addresses)
+    }
+
+    private class RevocationTransport : SigningNetworkTransport {
+        val addresses = mutableListOf<String>()
+
+        override fun get(
+            address: String,
+            maximumResponseBytes: Int,
+            endpoint: SigningNetworkEndpoint,
+        ): ByteArray {
+            addresses += address
+            assertEquals(SigningNetworkEndpoint.CERTIFICATE_MATERIAL, endpoint)
+            assertEquals(PdfValidationMaterialLimits.MAXIMUM_REVOCATION_LIST_BYTES, maximumResponseBytes)
+            return "unavailable".encodeToByteArray()
+        }
+
+        override fun post(
+            body: ByteArray,
+            address: String,
+            contentType: String,
+            credentials: SigningNetworkBasicCredentials?,
+            maximumResponseBytes: Int,
+            endpoint: SigningNetworkEndpoint,
+        ): ByteArray {
+            addresses += address
+            assertEquals(SigningNetworkEndpoint.CERTIFICATE_MATERIAL, endpoint)
+            assertEquals(SigningNetworkLimits.MAXIMUM_SHORT_RESPONSE_BYTES, maximumResponseBytes)
+            assertEquals("application/ocsp-request", contentType)
+            assertEquals(null, credentials)
+            return "unavailable".encodeToByteArray()
+        }
+    }
+
     private companion object {
+        const val SYNTHETIC_CRL_ADDRESS = "http://status.example/revocation-list"
+        const val SYNTHETIC_TSA_OCSP_ADDRESS = "http://status.example/untrusted-tsa"
+        const val SYNTHETIC_OCSP_ADDRESS = "http://status.example/ocsp"
         const val SIGNER_COMMON_NAME = "Test Signer"
         const val TAMPER_OFFSET = 5
     }
@@ -133,8 +226,14 @@ class DocumentValidatorTest {
 private class SignedPdfFixture private constructor(
     val pdf: ByteArray,
     val certificate: X509Certificate,
+    val timestampCertificate: X509Certificate? = null,
 ) {
     companion object {
+        private const val CERTIFICATE_EXTENSIONS_TAG = 0xA3
+        private const val URI_TAG = 0x86
+        private const val CRL_DISTRIBUTION_POINTS_OID = "2.5.29.31"
+        private const val AIA_OID = "1.3.6.1.5.5.7.1.1"
+        private const val OCSP_OID = "1.3.6.1.5.5.7.48.1"
         private const val CN_OID = "2.5.4.3"
         private const val ECDSA_WITH_SHA384_OID = "1.2.840.10045.4.3.3"
         private const val ID_DATA_OID = "1.2.840.113549.1.7.1"
@@ -155,9 +254,13 @@ private class SignedPdfFixture private constructor(
         private const val PLACEHOLDER_WIDTH = 10
         private const val FIXED_HEX_LENGTH = 4096
 
-        fun build(commonName: String = COMMON_NAME): SignedPdfFixture {
+        fun build(
+            commonName: String = COMMON_NAME,
+            ocspAddress: String? = null,
+            revocationListAddress: String? = null,
+        ): SignedPdfFixture {
             val keyPair = generateKeyPair()
-            val certificate = selfSignedCertificate(keyPair, commonName)
+            val certificate = selfSignedCertificate(keyPair, commonName, ocspAddress, revocationListAddress)
 
             // A fixed, oversized Contents placeholder removes the
             // circular dependency between the byte range and the CMS
@@ -196,7 +299,13 @@ private class SignedPdfFixture private constructor(
         fun buildTimestamped(): SignedPdfFixture {
             val base = build()
             val keyPair = generateKeyPair()
-            val tsaCert = selfSignedCertificate(keyPair, "Test TSA")
+            val tsaCert =
+                selfSignedCertificate(
+                    keyPair,
+                    "Test TSA",
+                    "http://status.example/untrusted-tsa",
+                    "http://status.example/revocation-list",
+                )
 
             val basePdf = base.pdf
             val tail = ">>\nendobj\n%%EOF".encodeToByteArray()
@@ -227,7 +336,7 @@ private class SignedPdfFixture private constructor(
             val paddedHex = hex.padEnd(FIXED_HEX_LENGTH, '0')
 
             val pdf = prefix + "<$paddedHex>".encodeToByteArray() + tail
-            return SignedPdfFixture(pdf, base.certificate)
+            return SignedPdfFixture(pdf, base.certificate, tsaCert)
         }
 
         private fun pad(value: Int): String = value.toString().padStart(PLACEHOLDER_WIDTH, '0')
@@ -241,6 +350,8 @@ private class SignedPdfFixture private constructor(
         private fun selfSignedCertificate(
             keyPair: KeyPair,
             commonName: String = COMMON_NAME,
+            ocspAddress: String? = null,
+            revocationListAddress: String? = null,
         ): X509Certificate {
             val name =
                 DerEncoder.sequence(
@@ -275,7 +386,7 @@ private class SignedPdfFixture private constructor(
                         validity,
                         name,
                         keyPair.public.encoded,
-                    ),
+                    ) + listOfNotNull(revocationExtensions(ocspAddress, revocationListAddress)),
                 )
             val tbsSignature = sign(keyPair, tbs)
             val certificate =
@@ -289,6 +400,55 @@ private class SignedPdfFixture private constructor(
             return CertificateFactory
                 .getInstance("X.509")
                 .generateCertificate(certificate.inputStream()) as X509Certificate
+        }
+
+        private fun revocationExtensions(
+            ocspAddress: String?,
+            revocationListAddress: String?,
+        ): ByteArray? {
+            val extensions =
+                listOfNotNull(
+                    ocspAddress?.let(::ocspExtension),
+                    revocationListAddress?.let(::revocationListExtension),
+                )
+            return if (extensions.isEmpty()) {
+                null
+            } else {
+                DerEncoder.tlv(CERTIFICATE_EXTENSIONS_TAG, DerEncoder.sequence(extensions))
+            }
+        }
+
+        private fun ocspExtension(address: String): ByteArray =
+            DerEncoder.sequence(
+                listOf(
+                    DerEncoder.objectIdentifier(AIA_OID),
+                    DerEncoder.octetString(
+                        DerEncoder.sequence(
+                            listOf(
+                                DerEncoder.sequence(
+                                    listOf(
+                                        DerEncoder.objectIdentifier(OCSP_OID),
+                                        DerEncoder.tlv(URI_TAG, address.encodeToByteArray()),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+
+        private fun revocationListExtension(address: String): ByteArray {
+            val pointName =
+                DerEncoder.tlv(
+                    CONTEXT_0_TAG,
+                    DerEncoder.tlv(CONTEXT_0_TAG, DerEncoder.tlv(URI_TAG, address.encodeToByteArray())),
+                )
+            return DerEncoder.sequence(
+                listOf(
+                    DerEncoder.objectIdentifier(CRL_DISTRIBUTION_POINTS_OID),
+                    DerEncoder.octetString(DerEncoder.sequence(listOf(DerEncoder.sequence(listOf(pointName))))),
+                ),
+            )
         }
 
         private fun buildTstInfo(messageDigest: ByteArray): ByteArray {

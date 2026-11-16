@@ -2,8 +2,10 @@
 
 package fi.refineid.android.document
 
-import java.net.HttpURLConnection
-import java.net.URL
+import fi.refineid.android.network.HttpSigningNetwork
+import fi.refineid.android.network.SigningNetworkEndpoint
+import fi.refineid.android.network.SigningNetworkLimits
+import fi.refineid.android.network.SigningNetworkTransport
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.Signature
@@ -80,6 +82,7 @@ internal sealed interface DocumentValidationResult {
 internal class DocumentValidator(
     private val trustAnchors: List<X509Certificate>,
     private val checkRevocation: Boolean = true,
+    private val transport: SigningNetworkTransport = HttpSigningNetwork(),
 ) {
     fun validate(bytes: ByteArray): DocumentValidationResult {
         if (fi.refineid.android.asic.AsicValidator
@@ -89,7 +92,11 @@ internal class DocumentValidator(
                 archiveBytes = bytes,
                 trustAnchors = trustAnchors,
                 checkRevocation = { cert ->
-                    if (checkRevocation) checkRevocationForCertificate(cert) else RevocationStatus.UNCHECKED
+                    if (checkRevocation && isChainTrusted(cert)) {
+                        checkRevocationForCertificate(cert)
+                    } else {
+                        RevocationStatus.UNCHECKED
+                    }
                 },
             )
         }
@@ -161,7 +168,7 @@ internal class DocumentValidator(
         val signatureValid = verifyCmsSignature(cms, signerCertificate)
         val chainTrusted = if (cms.isDocumentTimestamp) true else isChainTrusted(signerCertificate)
         val revocationStatus =
-            if (checkRevocation && (chainTrusted || cms.isDocumentTimestamp)) {
+            if (checkRevocation && isChainTrusted(signerCertificate)) {
                 checkRevocation(signerCertificate, cms)
             } else {
                 RevocationStatus.UNCHECKED
@@ -228,7 +235,7 @@ internal class DocumentValidator(
     ): RevocationStatus =
         try {
             val issuerFacts = CertificateFacts.parse(issuerCertificate.encoded) ?: return RevocationStatus.UNCHECKED
-            val nonce = ByteArray(NONCE_BYTE_COUNT).also { SecureRandom().nextBytes(it) }
+            val nonce = ByteArray(OcspRequest.NONCE_BYTE_COUNT).also { SecureRandom().nextBytes(it) }
             val request =
                 issuerFacts.use { parsedIssuer ->
                     targetFacts.useOcspIdentity { issuerName, serialNumber ->
@@ -295,33 +302,25 @@ internal class DocumentValidator(
         contentType: String,
     ): ByteArray? =
         try {
-            val connection = URL(urlString).openConnection() as HttpURLConnection
-            connection.requestMethod = "POST"
-            connection.connectTimeout = HTTP_TIMEOUT_MS
-            connection.readTimeout = HTTP_TIMEOUT_MS
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", contentType)
-            connection.outputStream.use { it.write(body) }
-            if (connection.responseCode in HTTP_OK_RANGE) {
-                connection.inputStream.use { it.readBytes() }
-            } else {
-                null
-            }
+            transport.post(
+                body = body,
+                address = urlString,
+                contentType = contentType,
+                credentials = null,
+                maximumResponseBytes = SigningNetworkLimits.MAXIMUM_SHORT_RESPONSE_BYTES,
+                endpoint = SigningNetworkEndpoint.CERTIFICATE_MATERIAL,
+            )
         } catch (_: Exception) {
             null
         }
 
     private fun httpGet(urlString: String): ByteArray? =
         try {
-            val connection = URL(urlString).openConnection() as HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.connectTimeout = HTTP_TIMEOUT_MS
-            connection.readTimeout = HTTP_TIMEOUT_MS
-            if (connection.responseCode in HTTP_OK_RANGE) {
-                connection.inputStream.use { it.readBytes() }
-            } else {
-                null
-            }
+            transport.get(
+                address = urlString,
+                maximumResponseBytes = PdfValidationMaterialLimits.MAXIMUM_REVOCATION_LIST_BYTES,
+                endpoint = SigningNetworkEndpoint.CERTIFICATE_MATERIAL,
+            )
         } catch (_: Exception) {
             null
         }
@@ -369,9 +368,6 @@ internal class DocumentValidator(
     private fun String.unescapeRfc2253(): String = replace(Regex("""\\(.)"""), "$1")
 
     private companion object {
-        const val HTTP_TIMEOUT_MS = 3500
-        val HTTP_OK_RANGE = 200..299
-        const val NONCE_BYTE_COUNT = 16
         const val HEX_RADIX = 16
         val COMMON_NAME_PATTERN = Regex("""CN=([^,]+)""")
         val SERIAL_NUMBER_PATTERN = Regex("""(?:SERIALNUMBER|SERIAL)=([^,]+)""", RegexOption.IGNORE_CASE)
