@@ -34,6 +34,8 @@ import fi.refineid.android.core.QualifiedSigningAlgorithm
 import fi.refineid.android.core.QualifiedSigningInputMode
 import fi.refineid.android.core.attemptsLeft
 import fi.refineid.android.core.organizationPin1Refused
+import fi.refineid.android.core.verifiedAuthenticationResult
+import fi.refineid.android.core.verifiedQualifiedResult
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.trust.CardCaCustody
 import java.io.IOException
@@ -131,7 +133,13 @@ internal class OrganizationContactlessSession(
                 exchange = exchange(),
             )
         closeIsoDep()
-        return verifiedAuthenticationResult(certificate, inputMode, input, nativeResult)
+        return verifiedAuthenticationResult(
+            certificate = certificate,
+            inputMode = inputMode,
+            input = input,
+            nativeResult = nativeResult,
+            paceRejectedFailure = AuthenticationSignFailure.TRANSPORT_ERROR,
+        )
     }
 
     /** The certificate PIN 1's channel read; no channel opens without a PIN. */

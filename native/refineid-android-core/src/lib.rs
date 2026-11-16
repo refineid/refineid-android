@@ -33,8 +33,7 @@ use card_certificate::{
 use card_transport::{AndroidCardTransport, CardExchangeLevel};
 use contactless::{
     ContactlessChannel, ContactlessOpenOutcome, contactless_authenticate_and_sign,
-    contactless_authenticate_and_sign_on_session, contactless_close, contactless_connect,
-    contactless_open, contactless_probe_pin2, contactless_qualified_sign,
+    contactless_close, contactless_connect, contactless_probe_pin2, contactless_qualified_sign,
     contactless_read_qualified_certificate, contactless_verify_pin1_on_session,
     sign_selection_failure,
 };
@@ -293,14 +292,6 @@ const _: NativeMethod = jni::native_method! {
 
 const _: NativeMethod = jni::native_method! {
     java_type = "fi.refineid.android.core.NativeContactlessCore",
-    static extern fn contactless_open_native(
-        can: [jbyte],
-        callback: JObject,
-    ) -> [jbyte],
-};
-
-const _: NativeMethod = jni::native_method! {
-    java_type = "fi.refineid.android.core.NativeContactlessCore",
     static extern fn contactless_authenticate_and_sign_native(
         can: [jbyte],
         request: jint,
@@ -549,35 +540,9 @@ fn probe_card_access_native<'local>(
     java_reply
 }
 
-fn contactless_open_native<'local>(
-    env: &mut Env<'local>,
-    _class: JClass<'local>,
-    can: JByteArray<'local>,
-    callback: JObject<'local>,
-) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let can_bytes = take_secret_bytes(env, &can)?;
-
-    let (result, bridge_failed) = {
-        let exchange = JniBlockExchange::new(env, callback);
-        let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
-        let (result, exchange) = contactless_open(transport, can_bytes);
-        (result, exchange.bridge_failed())
-    };
-
-    let mut reply = if bridge_failed {
-        vec![CERTIFICATE_BRIDGE_ERROR]
-    } else {
-        encode_contactless_open_reply(result)
-    };
-    let java_reply = env.byte_array_from_slice(&reply);
-    reply.fill(0);
-    java_reply
-}
-
-/// The persistent-session opener. Identical to `contactless_open_native`
-/// except it runs `contactless_connect`, which retains the live
-/// secure-messaging session on full success so the sign that follows can
-/// skip PACE.
+/// The persistent-session opener: runs `contactless_connect`, which retains
+/// the live secure-messaging session on full success so the operation that
+/// follows can skip PACE.
 fn contactless_connect_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
@@ -615,56 +580,14 @@ fn contactless_authenticate_and_sign_on_session_native<'local>(
     message: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let mut pin_bytes = take_secret_bytes(env, &pin)?;
-
-    let Some((algorithm, input_mode)) = authentication_request_from_jint(request) else {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
-    };
-    let message_length = match message.len(env) {
-        Ok(length) => length,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    if message_length > MAXIMUM_AUTHENTICATION_MESSAGE_LENGTH {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
-    }
-    let mut message_bytes = match env.convert_byte_array(&message) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-
-    let (result, bridge_failed) = {
-        let exchange = JniBlockExchange::new(env, callback);
-        let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
-        let input = match input_mode {
-            AuthenticationSigningInputMode::Message => {
-                AuthenticationSigningInput::Message(&message_bytes)
-            }
-            AuthenticationSigningInputMode::Prehashed => {
-                AuthenticationSigningInput::Prehashed(&message_bytes)
-            }
-        };
-        let (result, exchange) =
-            contactless_authenticate_and_sign_on_session(transport, algorithm, pin_bytes, input);
-        (result, exchange.bridge_failed())
-    };
-    message_bytes.fill(0);
-
-    let mut reply = if bridge_failed {
-        vec![AUTHENTICATION_SIGNATURE_BRIDGE_ERROR]
-    } else {
-        encode_authentication_signature_reply(result)
-    };
-    let java_reply = env.byte_array_from_slice(&reply);
-    reply.fill(0);
-    java_reply
+    contactless_authentication_sign_reply(
+        env,
+        ContactlessChannel::HeldSession,
+        request,
+        &pin,
+        &message,
+        callback,
+    )
 }
 
 /// Drop the held contactless session and its keys. No card interaction: the
@@ -782,67 +705,42 @@ fn contactless_authenticate_and_sign_native<'local>(
     message: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let mut can_bytes = take_secret_bytes(env, &can)?;
-    let mut pin_bytes = match take_secret_bytes(env, &pin) {
+    let can_bytes = match take_secret_bytes(env, &can) {
         Ok(bytes) => bytes,
         Err(error) => {
-            can_bytes.fill(0);
+            best_effort_clear_java_arrays(env, &[&pin]);
             return Err(error);
         }
     };
+    contactless_authentication_sign_reply(
+        env,
+        ContactlessChannel::Pace(can_bytes),
+        request,
+        &pin,
+        &message,
+        callback,
+    )
+}
 
-    let Some((algorithm, input_mode)) = authentication_request_from_jint(request) else {
-        can_bytes.fill(0);
-        pin_bytes.fill(0);
-        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
-    };
-    let message_length = match message.len(env) {
-        Ok(length) => length,
-        Err(error) => {
-            can_bytes.fill(0);
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    if message_length > MAXIMUM_AUTHENTICATION_MESSAGE_LENGTH {
-        can_bytes.fill(0);
-        pin_bytes.fill(0);
-        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
-    }
-    let mut message_bytes = match env.convert_byte_array(&message) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            can_bytes.fill(0);
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-
-    let (result, bridge_failed) = {
-        let exchange = JniBlockExchange::new(env, callback);
-        let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
-        let input = match input_mode {
-            AuthenticationSigningInputMode::Message => {
-                AuthenticationSigningInput::Message(&message_bytes)
-            }
-            AuthenticationSigningInputMode::Prehashed => {
-                AuthenticationSigningInput::Prehashed(&message_bytes)
-            }
-        };
-        let (result, exchange) =
-            contactless_authenticate_and_sign(transport, can_bytes, algorithm, pin_bytes, input);
-        (result, exchange.bridge_failed())
-    };
-    message_bytes.fill(0);
-
-    let mut reply = if bridge_failed {
-        vec![AUTHENTICATION_SIGNATURE_BRIDGE_ERROR]
-    } else {
-        encode_authentication_signature_reply(result)
-    };
-    let java_reply = env.byte_array_from_slice(&reply);
-    reply.fill(0);
-    java_reply
+fn contactless_authentication_sign_reply<'local>(
+    env: &mut Env<'local>,
+    channel: ContactlessChannel,
+    request: jint,
+    pin: &JByteArray<'local>,
+    message: &JByteArray<'local>,
+    callback: JObject<'local>,
+) -> Result<JByteArray<'local>, jni::errors::Error> {
+    jni_authentication_sign_reply(
+        env,
+        request,
+        pin,
+        message,
+        callback,
+        |exchange, algorithm, pin_bytes, input| {
+            let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
+            contactless_authenticate_and_sign(transport, channel, algorithm, pin_bytes, input)
+        },
+    )
 }
 
 fn contactless_read_qualified_certificate_native<'local>(
@@ -926,11 +824,11 @@ fn contactless_pin2_reply<'local>(
 }
 
 /// The Java arrays and request code of one qualified signature.
-struct QualifiedSignRequest<'a, 'local> {
-    algorithm: jint,
-    pin: &'a JByteArray<'local>,
-    content: &'a JByteArray<'local>,
-    expected_certificate: &'a JByteArray<'local>,
+pub(crate) struct QualifiedSignRequest<'a, 'local> {
+    pub(crate) algorithm: jint,
+    pub(crate) pin: &'a JByteArray<'local>,
+    pub(crate) content: &'a JByteArray<'local>,
+    pub(crate) expected_certificate: &'a JByteArray<'local>,
 }
 
 #[allow(
@@ -947,14 +845,20 @@ fn contactless_qualified_sign_native<'local>(
     expected_certificate: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let channel = ContactlessChannel::Pace(take_secret_bytes(env, &can)?);
+    let can_bytes = match take_secret_bytes(env, &can) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            best_effort_clear_java_arrays(env, &[&pin]);
+            return Err(error);
+        }
+    };
     let request = QualifiedSignRequest {
         algorithm,
         pin: &pin,
         content: &content,
         expected_certificate: &expected_certificate,
     };
-    contactless_qualified_sign_reply(env, channel, request, callback)
+    contactless_qualified_sign_reply(env, ContactlessChannel::Pace(can_bytes), request, callback)
 }
 
 fn contactless_qualified_sign_on_session_native<'local>(
@@ -984,87 +888,15 @@ fn contactless_qualified_sign_reply<'local>(
     request: QualifiedSignRequest<'_, 'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let mut pin_bytes = take_secret_bytes(env, request.pin)?;
-
-    let Some((algorithm, input_mode)) = qualified_request_from_jint(request.algorithm) else {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
-    };
-    let content_length = match request.content.len(env) {
-        Ok(length) => length,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    let content_length_accepted = match input_mode {
-        QualifiedSigningInputMode::Message => {
-            content_length <= MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH
-        }
-        QualifiedSigningInputMode::Prehashed => content_length == SHA384_DIGEST_LENGTH,
-    };
-    if !content_length_accepted {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
-    }
-    let certificate_length = match request.expected_certificate.len(env) {
-        Ok(length) => length,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    if certificate_length == 0 || certificate_length > MAXIMUM_EXPECTED_CERTIFICATE_LENGTH {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
-    }
-
-    let mut content_bytes = match env.convert_byte_array(request.content) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    let mut certificate_bytes = match env.convert_byte_array(request.expected_certificate) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            pin_bytes.fill(0);
-            content_bytes.fill(0);
-            return Err(error);
-        }
-    };
-
-    let (result, bridge_failed) = {
-        let exchange = JniBlockExchange::new(env, callback);
-        let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
-        let input = match input_mode {
-            QualifiedSigningInputMode::Message => QualifiedSigningInput::Message(&content_bytes),
-            QualifiedSigningInputMode::Prehashed => {
-                QualifiedSigningInput::Prehashed(&content_bytes)
-            }
-        };
-        let (result, exchange) = contactless_qualified_sign(
-            transport,
-            channel,
-            algorithm,
-            pin_bytes,
-            input,
-            &certificate_bytes,
-        );
-        (result, exchange.bridge_failed())
-    };
-    content_bytes.fill(0);
-    certificate_bytes.fill(0);
-
-    let mut reply = if bridge_failed {
-        vec![QUALIFIED_SIGNATURE_BRIDGE_ERROR]
-    } else {
-        encode_qualified_signature_reply(result)
-    };
-    let java_reply = env.byte_array_from_slice(&reply);
-    reply.fill(0);
-    java_reply
+    jni_qualified_sign_reply(
+        env,
+        request,
+        callback,
+        |exchange, algorithm, pin_bytes, input, expected| {
+            let transport = AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu);
+            contactless_qualified_sign(transport, channel, algorithm, pin_bytes, input, expected)
+        },
+    )
 }
 
 fn probe_pin1_status_native<'local>(
@@ -1490,63 +1322,22 @@ fn authenticate_and_sign_native<'local>(
     message: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let mut pin_bytes = match env.convert_byte_array(&pin) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            let _ = clear_java_byte_array(env, &pin);
-            return Err(error);
-        }
-    };
-    if let Err(error) = clear_java_byte_array(env, &pin) {
-        pin_bytes.fill(0);
-        return Err(error);
-    }
-
     let Some(level) = exchange_level_from_jint(exchange_level) else {
-        pin_bytes.fill(0);
+        let _pin = OwnedSecret(take_secret_bytes(env, &pin)?);
         return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
     };
-    let Some((algorithm, input_mode)) = authentication_request_from_jint(request) else {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
-    };
-    if message.len(env)? > MAXIMUM_AUTHENTICATION_MESSAGE_LENGTH {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
-    }
-
-    let mut message_bytes = match env.convert_byte_array(&message) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    let (result, bridge_failed) = {
-        let exchange = JniBlockExchange::new(env, callback);
-        let mut transport = AndroidCardTransport::new(exchange, level);
-        let input = match input_mode {
-            AuthenticationSigningInputMode::Message => {
-                AuthenticationSigningInput::Message(&message_bytes)
-            }
-            AuthenticationSigningInputMode::Prehashed => {
-                AuthenticationSigningInput::Prehashed(&message_bytes)
-            }
-        };
-        let result = authenticate_and_sign(&mut transport, algorithm, pin_bytes, input);
-        let exchange = transport.into_exchange();
-        (result, exchange.bridge_failed())
-    };
-    message_bytes.fill(0);
-
-    let mut reply = if bridge_failed {
-        vec![AUTHENTICATION_SIGNATURE_BRIDGE_ERROR]
-    } else {
-        encode_authentication_signature_reply(result)
-    };
-    let java_reply = env.byte_array_from_slice(&reply);
-    reply.fill(0);
-    java_reply
+    jni_authentication_sign_reply(
+        env,
+        request,
+        &pin,
+        &message,
+        callback,
+        |exchange, algorithm, pin_bytes, input| {
+            let mut transport = AndroidCardTransport::new(exchange, level);
+            let result = authenticate_and_sign(&mut transport, algorithm, pin_bytes, input);
+            (result, transport.into_exchange())
+        },
+    )
 }
 
 #[allow(
@@ -1563,95 +1354,150 @@ fn qualified_sign_native<'local>(
     expected_certificate: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let mut pin_bytes = match env.convert_byte_array(&pin) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            let _ = clear_java_byte_array(env, &pin);
-            return Err(error);
-        }
-    };
-    if let Err(error) = clear_java_byte_array(env, &pin) {
-        pin_bytes.fill(0);
-        return Err(error);
-    }
-
     let Some(level) = exchange_level_from_jint(exchange_level) else {
-        pin_bytes.fill(0);
+        let _pin = OwnedSecret(take_secret_bytes(env, &pin)?);
         return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
     };
-    let Some((algorithm, input_mode)) = qualified_request_from_jint(algorithm) else {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
+    let request = QualifiedSignRequest {
+        algorithm,
+        pin: &pin,
+        content: &content,
+        expected_certificate: &expected_certificate,
     };
-    let content_length = match content.len(env) {
-        Ok(length) => length,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    match input_mode {
-        QualifiedSigningInputMode::Message => {
-            if content_length > MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH {
-                pin_bytes.fill(0);
-                return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
-            }
-        }
-        QualifiedSigningInputMode::Prehashed => {
-            if content_length != SHA384_DIGEST_LENGTH {
-                pin_bytes.fill(0);
-                return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
-            }
-        }
-    }
-    let certificate_length = match expected_certificate.len(env) {
-        Ok(length) => length,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    if certificate_length == 0 || certificate_length > MAXIMUM_EXPECTED_CERTIFICATE_LENGTH {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
-    }
+    jni_qualified_sign_reply(
+        env,
+        request,
+        callback,
+        |exchange, algorithm, pin_bytes, input, expected| {
+            let mut transport = AndroidCardTransport::new(exchange, level);
+            let result = qualified_sign(&mut transport, algorithm, pin_bytes, input, expected);
+            (result, transport.into_exchange())
+        },
+    )
+}
 
-    let mut content_bytes = match env.convert_byte_array(&content) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
+/// Validate one authentication-signature JNI request, clear the Java PIN copy
+/// immediately, bound the input length before copying, run `sign` over the JNI
+/// exchange, and encode the bounded reply. Any secondary secret owned by `sign`
+/// (such as a `ContactlessChannel::Pace` CAN) drops and wipes automatically on
+/// early exit or JNI error.
+pub(crate) fn jni_authentication_sign_reply<'local>(
+    env: &mut Env<'local>,
+    request: jint,
+    pin: &JByteArray<'local>,
+    message: &JByteArray<'local>,
+    callback: JObject<'local>,
+    sign: impl for<'env, 'input> FnOnce(
+        JniBlockExchange<'env, 'local>,
+        AuthenticationSigningAlgorithm,
+        Vec<u8>,
+        AuthenticationSigningInput<'input>,
+    ) -> (
+        Result<AuthenticationSignature, AuthenticationSignFailure>,
+        JniBlockExchange<'env, 'local>,
+    ),
+) -> Result<JByteArray<'local>, jni::errors::Error> {
+    let pin = OwnedSecret(take_secret_bytes(env, pin)?);
+    if callback.is_null() || message.is_null() {
+        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
+    }
+    let Some((algorithm, input_mode)) = authentication_request_from_jint(request) else {
+        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
     };
-    let mut certificate_bytes = match env.convert_byte_array(&expected_certificate) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            pin_bytes.fill(0);
-            content_bytes.fill(0);
-            return Err(error);
-        }
-    };
+    let message_length = message.len(env)?;
+    if message_length > MAXIMUM_AUTHENTICATION_MESSAGE_LENGTH {
+        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
+    }
+    let message_bytes = OwnedSecret(env.convert_byte_array(message)?);
+
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
-        let mut transport = AndroidCardTransport::new(exchange, level);
         let input = match input_mode {
-            QualifiedSigningInputMode::Message => QualifiedSigningInput::Message(&content_bytes),
-            QualifiedSigningInputMode::Prehashed => {
-                QualifiedSigningInput::Prehashed(&content_bytes)
+            AuthenticationSigningInputMode::Message => {
+                AuthenticationSigningInput::Message(&message_bytes.0)
+            }
+            AuthenticationSigningInputMode::Prehashed => {
+                AuthenticationSigningInput::Prehashed(&message_bytes.0)
             }
         };
-        let result = qualified_sign(
-            &mut transport,
-            algorithm,
-            pin_bytes,
-            input,
-            &certificate_bytes,
-        );
-        let exchange = transport.into_exchange();
+        let (result, exchange) = sign(exchange, algorithm, pin.into_vec(), input);
         (result, exchange.bridge_failed())
     };
-    content_bytes.fill(0);
-    certificate_bytes.fill(0);
+    drop(message_bytes);
+
+    let mut reply = if bridge_failed {
+        vec![AUTHENTICATION_SIGNATURE_BRIDGE_ERROR]
+    } else {
+        encode_authentication_signature_reply(result)
+    };
+    let java_reply = env.byte_array_from_slice(&reply);
+    reply.fill(0);
+    java_reply
+}
+
+/// Validate one qualified-signature JNI request, clear the Java PIN copy
+/// immediately, bound the content and certificate lengths before copying, run
+/// `sign` over the JNI exchange, and encode the bounded reply. Any secondary
+/// secret owned by `sign` drops and wipes automatically on early exit or error.
+pub(crate) fn jni_qualified_sign_reply<'local>(
+    env: &mut Env<'local>,
+    request: QualifiedSignRequest<'_, 'local>,
+    callback: JObject<'local>,
+    sign: impl for<'env, 'input> FnOnce(
+        JniBlockExchange<'env, 'local>,
+        QualifiedSigningAlgorithm,
+        Vec<u8>,
+        QualifiedSigningInput<'input>,
+        &'input [u8],
+    ) -> (
+        Result<QualifiedSignature, QualifiedSignFailure>,
+        JniBlockExchange<'env, 'local>,
+    ),
+) -> Result<JByteArray<'local>, jni::errors::Error> {
+    let pin = OwnedSecret(take_secret_bytes(env, request.pin)?);
+    if callback.is_null() || request.content.is_null() || request.expected_certificate.is_null() {
+        return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
+    }
+    let Some((algorithm, input_mode)) = qualified_request_from_jint(request.algorithm) else {
+        return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
+    };
+    let content_length = request.content.len(env)?;
+    let content_length_accepted = match input_mode {
+        QualifiedSigningInputMode::Message => {
+            content_length <= MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH
+        }
+        QualifiedSigningInputMode::Prehashed => content_length == SHA384_DIGEST_LENGTH,
+    };
+    if !content_length_accepted {
+        return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
+    }
+    let certificate_length = request.expected_certificate.len(env)?;
+    if certificate_length == 0 || certificate_length > MAXIMUM_EXPECTED_CERTIFICATE_LENGTH {
+        return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
+    }
+
+    let content_bytes = OwnedSecret(env.convert_byte_array(request.content)?);
+    let certificate_bytes = OwnedSecret(env.convert_byte_array(request.expected_certificate)?);
+
+    let (result, bridge_failed) = {
+        let exchange = JniBlockExchange::new(env, callback);
+        let input = match input_mode {
+            QualifiedSigningInputMode::Message => QualifiedSigningInput::Message(&content_bytes.0),
+            QualifiedSigningInputMode::Prehashed => {
+                QualifiedSigningInput::Prehashed(&content_bytes.0)
+            }
+        };
+        let (result, exchange) = sign(
+            exchange,
+            algorithm,
+            pin.into_vec(),
+            input,
+            &certificate_bytes.0,
+        );
+        (result, exchange.bridge_failed())
+    };
+    drop(content_bytes);
+    drop(certificate_bytes);
 
     let mut reply = if bridge_failed {
         vec![QUALIFIED_SIGNATURE_BRIDGE_ERROR]

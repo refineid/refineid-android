@@ -59,44 +59,6 @@ internal object NativeContactlessCore {
     }
 
     /**
-     * One PACE handshake with the transferred CAN, then the PKCS#15
-     * selection, certificate read, and counter-safe PIN1 preflight
-     * inside the same secure-messaging session. The CAN copy is cleared
-     * by the native border.
-     */
-    fun open(
-        canCopy: ByteArray,
-        exchange: NativeBlockExchange,
-    ): NativeContactlessOpenResult {
-        val startedAt = AppTrace.nativeContactlessOpenStarted()
-        val result =
-            if (!NativeCore.isLoaded) {
-                canCopy.fill(0)
-                NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR)
-            } else {
-                try {
-                    NativeContactlessOpenReply.decode(
-                        contactlessOpenNative(
-                            can = canCopy,
-                            callback = exchange,
-                        ),
-                    )
-                } catch (_: LinkageError) {
-                    NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR)
-                } catch (_: RuntimeException) {
-                    NativeContactlessOpenResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR)
-                } finally {
-                    canCopy.fill(0)
-                }
-            }
-        AppTrace.nativeContactlessOpenCompleted(
-            startedAt = startedAt,
-            result = result,
-        )
-        return result
-    }
-
-    /**
      * PACE, then the one-shot preflight, VERIFY, and signing sequence
      * inside secure messaging. The PIN transfers to exactly this call.
      */
@@ -334,12 +296,6 @@ internal object NativeContactlessCore {
     @JvmStatic
     private external fun probeCardAccessNative(
         exchangeLevel: Int,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessOpenNative(
-        can: ByteArray,
         callback: Any,
     ): ByteArray
 
