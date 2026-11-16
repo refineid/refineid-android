@@ -43,6 +43,11 @@ class SigningNetworkTlsTest {
                                 .newBuilder()
                                 .socketFactory(
                                     LoopbackSigningSocketFactory(destinations),
+                                ).proxy(
+                                    Proxy(
+                                        Proxy.Type.HTTP,
+                                        InetSocketAddress(InetAddress.getLoopbackAddress(), server.address.port),
+                                    ),
                                 ).build(),
                     )
                 assertArrayEquals(
