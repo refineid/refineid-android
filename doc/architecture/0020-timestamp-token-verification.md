@@ -40,8 +40,10 @@ following before creating the verified capability:
 
 PKIX receives only the certificates embedded in the token and the explicit
 anchors. Revocation lookup is disabled at this stage, no system roots are
-added, and no network certificate store is configured. Dynamic revocation and
-trusted-list decisions belong to the later validation-evidence stage.
+added, and no network certificate store is configured. Dynamic revocation
+decisions belong to the later validation-evidence stage.
+Configured authorities obtain independent runtime EU trusted-list timestamp
+anchors before promotion, as described in [ADR 0050](0050-trusted-list-timestamps.md).
 
 The verified token owns and clears its token and certificate encodings. Its
 string representation exposes only sizes, counts, time, and closed state.

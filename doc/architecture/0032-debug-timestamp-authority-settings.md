@@ -12,7 +12,7 @@ ADR 0031 adds Android Keystore custody for the Apple-compatible ordered
 timestamp-authority configuration, but no user surface or signing consumer.
 The debug PDF harness still constructs one fixed HTTPS authority and authenticates
 it with a bundled offline root. That no longer represents the Apple product,
-where the holder's configured authority is itself the trust decision.
+where the holder selects the service and runtime EU trusted lists authenticate its tokens.
 
 The integration must not perform SharedPreferences or Keystore work on the UI
 thread. More importantly, it must validate and decrypt authority configuration
@@ -50,11 +50,11 @@ or harness disposal.
 
 `DebugDocumentSigningSources` converts every transferred holder configuration
 to `SigningTimestampAuthority.configured`. Timestamp tokens therefore use the
-exclusive configured-authority trust policy implemented by ADR 0020 and its
-configured-trust extension. The old debug-only Sectigo root resource is
+independent runtime EU trusted-list timestamp anchors described in
+[ADR 0050](0050-trusted-list-timestamps.md). The old debug-only Sectigo root resource is
 removed. Fingerprint-pinned FINEID signer anchors remain unchanged.
 
-The shipped authority is credential-free HTTP, matching Apple. Holder
+The shipped authority is credential-free HTTPS. Holder
 credentials remain restricted to HTTPS. Multiple authorities are tried once
 in holder order; the sole authority retains the existing bounded transient
 retry. Address probing or scheme inference is not performed merely by opening

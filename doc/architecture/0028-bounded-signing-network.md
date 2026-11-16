@@ -30,18 +30,18 @@ and credential components have explicit character limits, each exchange has a
 and response bodies are accumulated only inside their caller-selected bound.
 The transport-level response ceiling is 64 MiB.
 
-Certificate-controlled hosts reject local names, alternate numeric spellings,
+All signing destination hosts reject local names, alternate numeric spellings,
 zoned IPv6 literals, and non-global IPv4 or IPv6 ranges. The classification is
 conservative relative to the current IANA
 [IPv4](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml)
 and
 [IPv6](https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml)
 special-purpose registries. A DNS name may return at most eight distinct
-addresses and every answer must pass the same public-address test. HTTP
-requests are rewritten to the first vetted numeric address while retaining the
-logical `Host` header, so the HTTP stack cannot resolve the name again. HTTPS
-retains the checked hostname for SNI and operating-system certificate
-validation.
+addresses and every answer must pass the same public-address test. HTTP and HTTPS connections use the first vetted numeric address through
+OkHttp's per-exchange DNS implementation. The request URL retains the logical
+hostname for Host, SNI, and platform TLS certificate and hostname verification.
+Proxies and automatic connection retries are disabled. See
+[ADR 0050](0050-trusted-list-timestamps.md).
 
 Certificate material may follow at most two public HTTP(S) redirects. A
 configured authority may follow one redirect only on its original origin, or
@@ -60,8 +60,9 @@ randomness into `ValidationMaterialCollector`.
 
 `Rfc3161TimestampClient` owns a copy of the requested SHA-384 digest, generates
 a fresh 32-byte nonce, sends the bounded RFC 3161 request, binds the response to
-that exact digest and nonce, and verifies the token against explicit offline
-trust certificates before returning `VerifiedTimestampToken`. Its authority
+that exact digest and nonce, and verifies the token against explicit trust
+certificates or independently authenticated runtime EU trusted-list timestamp
+anchors before returning `VerifiedTimestampToken`. Its authority
 configuration owns its trust bytes and optional credentials, and clears
 clearable working buffers when closed or after each attempt.
 

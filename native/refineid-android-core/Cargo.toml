@@ -15,6 +15,7 @@ refineid-auth = { git = "https://github.com/RefineID/refineid-core.git", branch 
 refineid-ber = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-cms = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-atr = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+refineid-doc-sign = { git = "https://github.com/RefineID/refineid-core.git", branch = "main", default-features = false }
 refineid-digest = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-pace = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-pkcs15 = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }

@@ -2,28 +2,26 @@
 
 package fi.refineid.android.network
 
+import okhttp3.ConnectionPool
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.IOException
 import java.io.InputStream
 import java.net.ConnectException
-import java.net.HttpURLConnection
 import java.net.NoRouteToHostException
+import java.net.Proxy
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.UnknownHostException
-
-internal fun interface SigningNetworkConnectionFactory {
-    fun open(uri: URI): HttpURLConnection
-}
-
-internal object SystemSigningNetworkConnectionFactory : SigningNetworkConnectionFactory {
-    override fun open(uri: URI): HttpURLConnection = uri.toURL().openConnection() as HttpURLConnection
-}
+import java.util.concurrent.TimeUnit
 
 /** Bounded, manually redirected HTTP transport for public signing services. */
 internal class HttpSigningNetwork(
     private val resolver: SigningNetworkResolver = SystemSigningNetworkResolver,
-    private val connectionFactory: SigningNetworkConnectionFactory = SystemSigningNetworkConnectionFactory,
+    private val client: OkHttpClient = signingHttpClient,
 ) : SigningNetworkTransport {
     override fun get(
         address: String,
@@ -106,92 +104,62 @@ internal class HttpSigningNetwork(
         request: SigningNetworkRequest,
         maximumResponseBytes: Int,
     ): ExchangeResult {
-        val connection = connectionFactory.open(request.connectionUri)
+        val pinnedAddress =
+            SigningNetworkAddressPolicy.numericAddress(request.connectionUri.host)
+                ?: throw SigningNetworkException(SigningNetworkFailure.UNSAFE_ADDRESS)
+        val pinnedClient =
+            client
+                .newBuilder()
+                .dns { listOf(pinnedAddress) }
+                .proxy(Proxy.NO_PROXY)
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .retryOnConnectionFailure(false)
+                .cache(null)
+                .build()
+        val body = request.copyBody()
         return try {
-            configure(connection, request)
-            writeRequestBody(connection, request)
-            val status = connection.responseCode
-            when {
-                status in SUCCESS_STATUS_FLOOR..SUCCESS_STATUS_CEILING -> {
-                    ExchangeResult.Body(readResponse(connection, maximumResponseBytes))
-                }
+            val outgoing = Request.Builder().url(request.logicalUri.toString())
+            outgoing.header(ACCEPT_HEADER, ACCEPT_ANY_MEDIA_TYPE)
+            request.contentType?.let { outgoing.header(CONTENT_TYPE_HEADER, it) }
+            request.authorizationHeader()?.let { outgoing.header(AUTHORIZATION_HEADER, it) }
+            outgoing.method(request.method.name, body?.toRequestBody())
+            pinnedClient.newCall(outgoing.build()).execute().use { response ->
+                when {
+                    response.code in SUCCESS_STATUS_FLOOR..SUCCESS_STATUS_CEILING -> {
+                        ExchangeResult.Body(readResponse(response, maximumResponseBytes))
+                    }
 
-                status in REDIRECT_STATUSES -> {
-                    val location =
-                        connection.getHeaderField(LOCATION_HEADER)
-                            ?: throw SigningNetworkException(SigningNetworkFailure.UNSAFE_REDIRECT)
-                    ExchangeResult.Redirect(
-                        location = location,
-                        preservesMethod = status in METHOD_PRESERVING_REDIRECT_STATUSES,
-                    )
-                }
+                    response.code in REDIRECT_STATUSES -> {
+                        val location =
+                            response.header(LOCATION_HEADER)
+                                ?: throw SigningNetworkException(SigningNetworkFailure.UNSAFE_REDIRECT)
+                        ExchangeResult.Redirect(
+                            location = location,
+                            preservesMethod = response.code in METHOD_PRESERVING_REDIRECT_STATUSES,
+                        )
+                    }
 
-                else -> {
-                    throw SigningNetworkException(
-                        kind = SigningNetworkFailure.HTTP_STATUS,
-                        httpStatus = status,
-                    )
+                    else -> {
+                        throw SigningNetworkException(SigningNetworkFailure.HTTP_STATUS, response.code)
+                    }
                 }
             }
         } finally {
-            closeResponseStreams(connection)
-            connection.disconnect()
-        }
-    }
-
-    private fun configure(
-        connection: HttpURLConnection,
-        request: SigningNetworkRequest,
-    ) {
-        connection.instanceFollowRedirects = false
-        connection.useCaches = false
-        connection.defaultUseCaches = false
-        connection.doInput = true
-        connection.connectTimeout = EXCHANGE_TIMEOUT_MILLISECONDS
-        connection.readTimeout = EXCHANGE_TIMEOUT_MILLISECONDS
-        connection.requestMethod = request.method.name
-        connection.setRequestProperty(ACCEPT_HEADER, ACCEPT_ANY_MEDIA_TYPE)
-        request.contentType?.let { contentType ->
-            connection.setRequestProperty(CONTENT_TYPE_HEADER, contentType)
-        }
-        request.authorizationHeader()?.let { authorization ->
-            connection.setRequestProperty(AUTHORIZATION_HEADER, authorization)
-        }
-        request.hostHeader?.let { host ->
-            connection.setRequestProperty(HOST_HEADER, host)
-        }
-    }
-
-    private fun writeRequestBody(
-        connection: HttpURLConnection,
-        request: SigningNetworkRequest,
-    ) {
-        if (request.method != SigningNetworkMethod.POST) {
-            return
-        }
-        val body = request.copyBody() ?: throw SigningNetworkException(SigningNetworkFailure.UNUSABLE_BODY)
-        try {
-            connection.doOutput = true
-            connection.setFixedLengthStreamingMode(body.size)
-            connection.outputStream.use { output ->
-                output.write(body)
-                output.flush()
-            }
-        } finally {
-            body.fill(CLEARED_BYTE)
+            body?.fill(CLEARED_BYTE)
         }
     }
 
     private fun readResponse(
-        connection: HttpURLConnection,
+        response: Response,
         maximumResponseBytes: Int,
     ): ByteArray {
-        val declaredLength = connection.contentLengthLong
-        if (declaredLength > maximumResponseBytes) {
+        val responseBody = response.body
+        if (responseBody.contentLength() > maximumResponseBytes) {
             throw SigningNetworkException(SigningNetworkFailure.UNUSABLE_BODY)
         }
         val body = SigningNetworkResponseBody(maximumResponseBytes)
-        connection.inputStream.use { input -> readBounded(input, body) }
+        responseBody.byteStream().use { input -> readBounded(input, body) }
         if (body.size == EMPTY_BODY_LENGTH) {
             throw SigningNetworkException(SigningNetworkFailure.UNUSABLE_BODY)
         }
@@ -243,14 +211,6 @@ internal class HttpSigningNetwork(
         }
     }
 
-    private fun closeResponseStreams(connection: HttpURLConnection) {
-        try {
-            connection.errorStream?.close()
-        } catch (_: IOException) {
-            // Closing the error stream is best-effort cleanup.
-        }
-    }
-
     private fun requireResponseLimit(maximumResponseBytes: Int) {
         if (maximumResponseBytes !in MINIMUM_RESPONSE_BYTES..SigningNetworkLimits.MAXIMUM_RESPONSE_BYTES) {
             throw SigningNetworkException(SigningNetworkFailure.UNUSABLE_BODY)
@@ -285,6 +245,17 @@ internal class HttpSigningNetwork(
     }
 
     internal companion object {
+        private const val NO_IDLE_CONNECTIONS = 0
+        private const val CONNECTION_KEEP_ALIVE_SECONDS = 1L
+        private val signingHttpClient =
+            OkHttpClient
+                .Builder()
+                .connectTimeout(EXCHANGE_TIMEOUT_MILLISECONDS.toLong(), TimeUnit.MILLISECONDS)
+                .readTimeout(EXCHANGE_TIMEOUT_MILLISECONDS.toLong(), TimeUnit.MILLISECONDS)
+                .callTimeout(EXCHANGE_TIMEOUT_MILLISECONDS.toLong(), TimeUnit.MILLISECONDS)
+                .connectionPool(ConnectionPool(NO_IDLE_CONNECTIONS, CONNECTION_KEEP_ALIVE_SECONDS, TimeUnit.SECONDS))
+                .build()
+
         fun isTransientAuthorityFailure(failure: Throwable): Boolean {
             if (failure !is SigningNetworkException) {
                 return false
@@ -337,7 +308,6 @@ internal class HttpSigningNetwork(
         private const val ACCEPT_HEADER = "Accept"
         private const val CONTENT_TYPE_HEADER = "Content-Type"
         private const val AUTHORIZATION_HEADER = "Authorization"
-        private const val HOST_HEADER = "Host"
         private const val ACCEPT_ANY_MEDIA_TYPE = "*/*"
         private const val EXCHANGE_TIMEOUT_MILLISECONDS = 30_000
         private const val RESPONSE_CHUNK_LENGTH_BYTES = 8_192

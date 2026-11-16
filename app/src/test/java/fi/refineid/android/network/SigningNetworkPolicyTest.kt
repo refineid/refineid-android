@@ -5,7 +5,6 @@ package fi.refineid.android.network
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -104,7 +103,6 @@ class SigningNetworkPolicyTest {
             assertTrue(owned.carriesCredentials)
             assertEquals(SYNTHETIC_AUTHORIZATION_HEADER, owned.authorizationHeader())
             assertArrayEquals(SYNTHETIC_REQUEST, owned.copyBody())
-            assertNull(owned.hostHeader)
             assertFalse(owned.toString().contains(SYNTHETIC_USERNAME))
         }
         assertThrows(IllegalStateException::class.java, request::copyBody)

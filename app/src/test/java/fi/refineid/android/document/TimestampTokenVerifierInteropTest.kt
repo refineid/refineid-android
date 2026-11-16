@@ -1,6 +1,13 @@
 package fi.refineid.android.document
 
 import fi.refineid.android.core.SHA384_DIGEST_LENGTH_BYTES
+import fi.refineid.android.network.Rfc3161TimestampClient
+import fi.refineid.android.network.SigningNetworkBasicCredentials
+import fi.refineid.android.network.SigningNetworkEndpoint
+import fi.refineid.android.network.SigningNetworkSecureRandom
+import fi.refineid.android.network.SigningNetworkTransport
+import fi.refineid.android.network.SigningTimestampAuthority
+import fi.refineid.android.network.TimestampAnchorSource
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,7 +34,8 @@ class TimestampTokenVerifierInteropTest {
         try {
             val fixture = createFixture(executable, directory)
             verifyAuthenticToken(fixture, executable, directory)
-            verifyConfiguredAuthorityTrust(fixture)
+            rejectEmbeddedAuthorityTrust(fixture)
+            verifyClientRequiresIndependentAnchors(fixture)
             verifyEssCertificateBinding(fixture)
             verifyTsaNameBinding(fixture)
             rejectWrongTrust(fixture)
@@ -163,20 +171,63 @@ class TimestampTokenVerifierInteropTest {
         assertThrows(IllegalStateException::class.java, verified::copyEncoding)
     }
 
-    private fun verifyConfiguredAuthorityTrust(fixture: TimestampFixture) {
+    private fun rejectEmbeddedAuthorityTrust(fixture: TimestampFixture) {
         val unverified = requestBoundToken(fixture.response)
-        val verified =
-            try {
-                TimestampTokenVerifier.verifyConfiguredAuthority(unverified)
-            } finally {
-                unverified.close()
-            }
         try {
-            assertArrayEquals(fixture.signerCertificate, verified.copySignerCertificate())
-            assertArrayEquals(fixture.trustedCertificate, verified.copyTrustedCertificate())
-            assertEquals(TIMESTAMP_CHAIN_CERTIFICATE_COUNT, verified.verifiedCertificateCount)
+            assertFailure(TimestampTokenVerificationFailure.UNTRUSTED_SIGNER) {
+                TimestampTokenVerifier.verify(unverified, emptyList()).close()
+            }
         } finally {
-            verified.close()
+            unverified.close()
+        }
+    }
+
+    private fun verifyClientRequiresIndependentAnchors(fixture: TimestampFixture) {
+        val transport =
+            object : SigningNetworkTransport {
+                override fun get(
+                    address: String,
+                    maximumResponseBytes: Int,
+                    endpoint: SigningNetworkEndpoint,
+                ): ByteArray = throw AssertionError("unexpected GET")
+
+                override fun post(
+                    body: ByteArray,
+                    address: String,
+                    contentType: String,
+                    credentials: SigningNetworkBasicCredentials?,
+                    maximumResponseBytes: Int,
+                    endpoint: SigningNetworkEndpoint,
+                ): ByteArray = fixture.response.copyOf()
+            }
+        val generatedAt = requestBoundToken(fixture.response).use { it.generatedAt }
+        val independentAnchor = fixture.trustedCertificate.copyOf()
+        var resolvedAt: Instant? = null
+        SigningTimestampAuthority.configured("https://timestamp.example/request").use { authority ->
+            val client =
+                Rfc3161TimestampClient(
+                    transport = transport,
+                    random = SigningNetworkSecureRandom { SYNTHETIC_NONCE.copyOf() },
+                    anchors =
+                        TimestampAnchorSource {
+                            resolvedAt = it
+                            listOf(independentAnchor)
+                        },
+                )
+            client.token(SYNTHETIC_DIGEST, authority).use { token ->
+                assertArrayEquals(fixture.signerCertificate, token.copySignerCertificate())
+            }
+            assertEquals(generatedAt, resolvedAt)
+            assertTrue(independentAnchor.all { it == ZERO_BYTE })
+            for (anchors in listOf(emptyList(), listOf(fixture.unrelatedCertificate))) {
+                assertFailure(TimestampTokenVerificationFailure.UNTRUSTED_SIGNER) {
+                    Rfc3161TimestampClient(
+                        transport = transport,
+                        random = SigningNetworkSecureRandom { SYNTHETIC_NONCE.copyOf() },
+                        anchors = TimestampAnchorSource { anchors.map(ByteArray::copyOf) },
+                    ).token(SYNTHETIC_DIGEST, authority).close()
+                }
+            }
         }
     }
 
@@ -276,9 +327,6 @@ class TimestampTokenVerifierInteropTest {
                         token = unverified,
                         trustedCertificates = listOf(fixture.trustedCertificate),
                     ).close()
-            }
-            assertFailure(TimestampTokenVerificationFailure.INVALID_SIGNATURE) {
-                TimestampTokenVerifier.verifyConfiguredAuthority(unverified).close()
             }
         } finally {
             unverified.close()
@@ -645,7 +693,8 @@ class TimestampTokenVerifierInteropTest {
         const val SYNTHETIC_DIGEST_FILL: Byte = 0x5A
         const val ZERO_BYTE: Byte = 0
         val SYNTHETIC_DIGEST = ByteArray(SHA384_DIGEST_LENGTH_BYTES) { SYNTHETIC_DIGEST_FILL }
-        val SYNTHETIC_NONCE = SYNTHETIC_NONCE_TEXT.encodeToByteArray()
+        const val NONCE_BYTE_COUNT = 32
+        val SYNTHETIC_NONCE = SYNTHETIC_NONCE_TEXT.padEnd(NONCE_BYTE_COUNT, 'n').encodeToByteArray()
         const val SYNTHETIC_NONCE_TEXT = "test-nonce"
         val OUTSIDE_CERTIFICATE_VALIDITY: Instant = Instant.EPOCH
         val TOOL_DIRECTORIES =

@@ -13,11 +13,9 @@ Android needs the same product behavior without placing reusable credentials in
 plain SharedPreferences, backups, logs, immutable password strings, tests, or
 source control.
 
-Authority configuration is also a trust decision. As established by the token
-verification boundary, a holder-configured authority authenticates a token
-against the certificates carried by that token, preferring its self-issued
-certificates as exclusive anchors. It does not silently inherit the Android
-system trust store.
+Authority configuration selects the service endpoint. Tokens authenticate to
+independent runtime EU trusted-list timestamp anchors, never certificates
+promoted from the response itself. See [ADR 0050](0050-trusted-list-timestamps.md).
 
 Android Keystore operations may block. Its keys are non-exportable, but
 hardware backing is device-dependent. Requiring StrongBox would unnecessarily
@@ -34,8 +32,8 @@ SharedPreferences file holds only the authority count, addresses, and optional
 usernames. Application backup and device-transfer extraction remain disabled
 for every app-private domain in the manifest rules.
 
-The shipped set contains the single Apple-compatible endpoint
-`http://timestamp.sectigo.com/qualified` without credentials. Saving that exact
+The shipped set contains the single HTTPS endpoint
+`https://timestamp.sectigo.com/qualified` without credentials. Saving that exact
 set removes the override so a future shipped default is not shadowed. Saving an
 empty list has the explicit meaning Restore Defaults. Duplicate addresses are
 rejected so address-keyed password ownership cannot be ambiguous.
@@ -75,8 +73,8 @@ and
 
 ## Verification
 
-Host tests cover the Apple-compatible default, owned password copies, clearing,
-redacted descriptions, configured-authority trust, empty Basic passwords, and
+Host tests cover the HTTPS default, owned password copies, clearing,
+redacted descriptions, trusted-list authority selection, empty Basic passwords, and
 refusal of credentials over plaintext HTTP.
 
 Instrumentation uses isolated synthetic preference names and a dedicated test

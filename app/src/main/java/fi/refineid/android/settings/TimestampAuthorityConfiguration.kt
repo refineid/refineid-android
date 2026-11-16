@@ -55,7 +55,7 @@ internal class TimestampAuthorityConfiguration private constructor(
     }
 
     companion object {
-        const val SHIPPED_AUTHORITY_ADDRESS = "http://timestamp.sectigo.com/qualified"
+        const val SHIPPED_AUTHORITY_ADDRESS = "https://timestamp.sectigo.com/qualified"
 
         fun shipped(): TimestampAuthorityConfiguration =
             copyOf(
