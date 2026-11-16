@@ -19,7 +19,7 @@
 use jni::objects::{JByteArray, JClass, JObject};
 use jni::sys::{jboolean, jint};
 use jni::{Env, NativeMethod};
-use refineid_auth::PinStatus;
+use refineid_auth::PinSlot;
 
 use crate::authentication_signer::{AuthenticationSignFailure, AuthenticationSigningInput};
 use crate::card_certificate::CertificateReadFailure;
@@ -32,22 +32,21 @@ use crate::jni_card_exchange::JniBlockExchange;
 use crate::organization_card::{
     ChannelRefusal, OrganizationCredential, OrganizationOpenOutcome,
     organization_authenticate_and_sign, organization_change_pin1, organization_change_pin2,
-    organization_credential_health, organization_open, organization_qualified_sign,
-    organization_reset_pin, organization_verify_pin1, pin1_preflight_of, pin2_preflight_of,
+    organization_credential_health, organization_open, organization_pin_preflight,
+    organization_qualified_sign, organization_reset_pin, organization_verify_pin1,
     read_organization_counter,
 };
-use crate::pin1_status::Pin1PreflightFailure;
-use crate::pin2_status::Pin2PreflightFailure;
+use crate::pin_status::PinPreflightFailure;
 use crate::qualified_signer::{MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH, QualifiedSigningInput};
 use crate::{
     AUTHENTICATION_SIGNATURE_BRIDGE_ERROR, AUTHENTICATION_SIGNATURE_SUCCEEDED,
     AuthenticationSigningInputMode, CERTIFICATE_BRIDGE_ERROR,
     MAXIMUM_AUTHENTICATION_MESSAGE_LENGTH, MAXIMUM_EXPECTED_CERTIFICATE_LENGTH,
-    PIN1_PREFLIGHT_BRIDGE_ERROR, PIN2_PREFLIGHT_BRIDGE_ERROR, QUALIFIED_SIGNATURE_BRIDGE_ERROR,
-    QualifiedSigningInputMode, SHA384_DIGEST_LENGTH, authentication_request_from_jint,
-    encode_authentication_signature_reply, encode_certificate_reply, encode_contactless_open_reply,
-    encode_pin1_preflight_reply, encode_pin2_preflight_reply, encode_qualified_signature_reply,
-    one_byte_reply, qualified_request_from_jint, take_secret_bytes, take_secret_pair,
+    PIN_PREFLIGHT_BRIDGE_ERROR, QUALIFIED_SIGNATURE_BRIDGE_ERROR, QualifiedSigningInputMode,
+    SHA384_DIGEST_LENGTH, authentication_request_from_jint, encode_authentication_signature_reply,
+    encode_certificate_reply, encode_contactless_open_reply, encode_pin_preflight_reply,
+    encode_qualified_signature_reply, one_byte_reply, qualified_request_from_jint,
+    take_secret_bytes, take_secret_pair,
 };
 
 const _: NativeMethod = jni::native_method! {
@@ -155,19 +154,7 @@ fn organization_pin1_counter_native<'local>(
     _class: JClass<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let (result, bridge_failed) = {
-        let exchange = JniBlockExchange::new(env, callback);
-        let mut transport = apdu_transport(exchange);
-        let result = read_organization_counter(&mut transport, OrganizationCredential::Pin1);
-        let exchange = transport.into_exchange();
-        (result, exchange.bridge_failed())
-    };
-    let bytes = if bridge_failed {
-        vec![PIN1_PREFLIGHT_BRIDGE_ERROR]
-    } else {
-        encode_pin1_preflight_reply(result.map(pin1_preflight_of).map_err(pin1_counter_failure))
-    };
-    reply(env, bytes)
+    organization_counter_reply(env, callback, OrganizationCredential::Pin1, PinSlot::Pin1)
 }
 
 fn organization_pin2_counter_native<'local>(
@@ -175,44 +162,44 @@ fn organization_pin2_counter_native<'local>(
     _class: JClass<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let (result, bridge_failed): (Result<PinStatus, ChannelRefusal>, bool) = {
+    organization_counter_reply(env, callback, OrganizationCredential::Pin2, PinSlot::Pin2)
+}
+
+fn organization_counter_reply<'local>(
+    env: &mut Env<'local>,
+    callback: JObject<'local>,
+    credential: OrganizationCredential,
+    slot: PinSlot,
+) -> Result<JByteArray<'local>, jni::errors::Error> {
+    let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let mut transport = apdu_transport(exchange);
-        let result = read_organization_counter(&mut transport, OrganizationCredential::Pin2);
+        let result = read_organization_counter(&mut transport, credential);
         let exchange = transport.into_exchange();
         (result, exchange.bridge_failed())
     };
     let bytes = if bridge_failed {
-        vec![PIN2_PREFLIGHT_BRIDGE_ERROR]
+        vec![PIN_PREFLIGHT_BRIDGE_ERROR]
     } else {
-        encode_pin2_preflight_reply(result.map(pin2_preflight_of).map_err(pin2_counter_failure))
+        encode_pin_preflight_reply(
+            result
+                .map(|status| organization_pin_preflight(slot, status))
+                .map_err(counter_failure),
+        )
     };
     reply(env, bytes)
 }
 
-const fn pin1_counter_failure(refusal: ChannelRefusal) -> Pin1PreflightFailure {
+const fn counter_failure(refusal: ChannelRefusal) -> PinPreflightFailure {
     match refusal {
-        ChannelRefusal::CardUnavailable => Pin1PreflightFailure::CardUnavailable,
-        ChannelRefusal::Bridge | ChannelRefusal::InvalidEntry => Pin1PreflightFailure::Bridge,
+        ChannelRefusal::CardUnavailable => PinPreflightFailure::CardUnavailable,
+        ChannelRefusal::Bridge | ChannelRefusal::InvalidEntry => PinPreflightFailure::Bridge,
         ChannelRefusal::BelowFloor
         | ChannelRefusal::Blocked
         | ChannelRefusal::Wrong { .. }
         | ChannelRefusal::Rejected
         | ChannelRefusal::NotOrganizationCard
-        | ChannelRefusal::Transport => Pin1PreflightFailure::Transport,
-    }
-}
-
-const fn pin2_counter_failure(refusal: ChannelRefusal) -> Pin2PreflightFailure {
-    match refusal {
-        ChannelRefusal::CardUnavailable => Pin2PreflightFailure::CardUnavailable,
-        ChannelRefusal::Bridge | ChannelRefusal::InvalidEntry => Pin2PreflightFailure::Bridge,
-        ChannelRefusal::BelowFloor
-        | ChannelRefusal::Blocked
-        | ChannelRefusal::Wrong { .. }
-        | ChannelRefusal::Rejected
-        | ChannelRefusal::NotOrganizationCard
-        | ChannelRefusal::Transport => Pin2PreflightFailure::Transport,
+        | ChannelRefusal::Transport => PinPreflightFailure::Transport,
     }
 }
 

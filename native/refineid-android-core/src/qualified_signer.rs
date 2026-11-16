@@ -28,7 +28,7 @@
 //! counter in the directory PIN2 lives in and floors on that reading itself.
 
 use refineid_apdu::{CardTransport, TransportOutcome};
-use refineid_auth::{AuthError, Pin2, UnvalidatedSecret, VerifyOutcome};
+use refineid_auth::{AuthError, Pin2, PinSlot, UnvalidatedSecret, VerifyOutcome};
 use refineid_digest::Sha384;
 use refineid_pkcs15::Pkcs15Error;
 use refineid_sign::{QualifiedUnlockError, SignError, SignOps, SignScheme, SigningKey};
@@ -37,7 +37,7 @@ use crate::card_certificate::{
     CardCertificate, CardKeyProfile, CertificateReadFailure, read_qualified_certificate,
 };
 use crate::card_transport::{AndroidCardTransport, SingleBlockExchange};
-use crate::pin2_status::{Pin2PreflightFailure, map_auth_error, probe_pin2_preflight};
+use crate::pin_status::{PinPreflightFailure, map_auth_error, probe_pin_preflight};
 
 /// Upper bound for the exact CMS signed-attribute bytes hashed here.
 pub(crate) const MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH: usize = 1_024 * 1_024;
@@ -160,7 +160,7 @@ where
     let digest = prepared_qualified_digest(input)?;
     let pin_input = UnvalidatedSecret::from_owned_bytes(pin_bytes);
     let pin = Pin2::reconstruct(pin_input).map_err(|_| QualifiedSignFailure::InvalidPin)?;
-    let preflight = probe_pin2_preflight(transport).map_err(map_preflight_failure)?;
+    let preflight = probe_pin_preflight(transport, PinSlot::Pin2).map_err(map_preflight_failure)?;
     if !preflight.retry_floor_permits {
         return Err(QualifiedSignFailure::SafetyRefused);
     }
@@ -266,11 +266,11 @@ pub(crate) fn map_directory_error<E>(error: Pkcs15Error<E>) -> QualifiedSignFail
     }
 }
 
-const fn map_preflight_failure(failure: Pin2PreflightFailure) -> QualifiedSignFailure {
+const fn map_preflight_failure(failure: PinPreflightFailure) -> QualifiedSignFailure {
     match failure {
-        Pin2PreflightFailure::CardUnavailable => QualifiedSignFailure::CardUnavailable,
-        Pin2PreflightFailure::Transport => QualifiedSignFailure::Transport,
-        Pin2PreflightFailure::Bridge => QualifiedSignFailure::Bridge,
+        PinPreflightFailure::CardUnavailable => QualifiedSignFailure::CardUnavailable,
+        PinPreflightFailure::Transport => QualifiedSignFailure::Transport,
+        PinPreflightFailure::Bridge => QualifiedSignFailure::Bridge,
     }
 }
 

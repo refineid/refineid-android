@@ -13,6 +13,7 @@ jni = "=0.22.4"
 refineid-apdu = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-auth = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-ber = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
+refineid-cms = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-atr = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-digest = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 refineid-pace = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
@@ -21,6 +22,7 @@ refineid-sign = { git = "https://github.com/RefineID/refineid-core.git", branch 
 refineid-x509 = { git = "https://github.com/RefineID/refineid-core.git", branch = "main" }
 
 [dev-dependencies]
+refineid-cms = { git = "https://github.com/RefineID/refineid-core.git", branch = "main", features = ["testkit"] }
 refineid-pace = { git = "https://github.com/RefineID/refineid-core.git", branch = "main", features = ["testkit"] }
 
 # The contactless crypto - PACE, ECDSA, RSA - lives entirely in the refineid-core

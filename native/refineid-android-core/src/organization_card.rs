@@ -28,10 +28,10 @@
 
 use refineid_apdu::{CardTransport, PinRetries, StatusWord, TransportOutcome};
 use refineid_auth::{
-    AuthError, CardPinLengths, ChannelProof, CredentialHealthReport, FlooredCredential,
-    ManageOutcome, Pin1, Pin1PaceChannel as _, Pin1PaceChannelOps as _, Pin2, Pin2ChangeError,
-    Pin2PaceChannelOps as _, PinManageOps as _, PinReferenceScheme, PinSlot, PinStatus, Puk,
-    PukPaceChannelOps as _, UnvalidatedSecret, check_retry_floor,
+    AuthError, CardPinLengths, ChannelProof, CredentialHealthReport, ManageOutcome, Pin1,
+    Pin1PaceChannel as _, Pin1PaceChannelOps as _, Pin2, Pin2ChangeError, Pin2PaceChannelOps as _,
+    PinManageOps as _, PinReferenceScheme, PinSlot, PinStatus, Puk, PukPaceChannelOps as _,
+    UnvalidatedSecret,
 };
 use refineid_ber::BerEncoder;
 use refineid_pace::commands::MseSetAt;
@@ -54,8 +54,7 @@ use crate::card_management::{CardManagementFailure, CredentialHealthAnswer};
 use crate::contactless::{
     ManagedPin, read_on_card_ca_certificates, refresh_on_card_ca_certificates,
 };
-use crate::pin1_status::{Pin1Preflight, Pin1State};
-use crate::pin2_status::{Pin2Preflight, Pin2State};
+use crate::pin_status::{PinPreflight, pin_preflight_of};
 use crate::qualified_signer::{
     QualifiedSignFailure, QualifiedSignature, QualifiedSigningAlgorithm, QualifiedSigningInput,
     map_certificate_failure, map_directory_error, prepared_qualified_digest,
@@ -387,37 +386,10 @@ fn puk_entry(bytes: Vec<u8>) -> Result<Puk, ChannelRefusal> {
         .map_err(|_shape| ChannelRefusal::InvalidEntry)
 }
 
-/// The counter-safe PIN 1 reading the session keeps, from `MSE:Set AT`'s
+/// The counter-safe PIN reading the session keeps, from `MSE:Set AT`'s
 /// answer or the channel's record of it.
-pub(crate) fn pin1_preflight_of(status: PinStatus) -> Pin1Preflight {
-    let state = match status {
-        PinStatus::Verified => Pin1State::Verified,
-        PinStatus::Remaining(retries) => Pin1State::Remaining(retries.get()),
-        PinStatus::Locked => Pin1State::Locked,
-        PinStatus::NoInfo => Pin1State::NoInformation,
-        PinStatus::Other(_) => Pin1State::Unrecognised,
-    };
-    Pin1Preflight {
-        scheme: PinReferenceScheme::Organizational,
-        state,
-        retry_floor_permits: check_retry_floor(FlooredCredential::Pin1, status).is_ok(),
-    }
-}
-
-/// The counter-safe PIN 2 reading from `MSE:Set AT`'s answer.
-pub(crate) fn pin2_preflight_of(status: PinStatus) -> Pin2Preflight {
-    let state = match status {
-        PinStatus::Verified => Pin2State::Verified,
-        PinStatus::Remaining(retries) => Pin2State::Remaining(retries.get()),
-        PinStatus::Locked => Pin2State::Locked,
-        PinStatus::NoInfo => Pin2State::NoInformation,
-        PinStatus::Other(_) => Pin2State::Unrecognised,
-    };
-    Pin2Preflight {
-        scheme: PinReferenceScheme::Organizational,
-        state,
-        retry_floor_permits: check_retry_floor(FlooredCredential::Pin2, status).is_ok(),
-    }
+pub(crate) fn organization_pin_preflight(slot: PinSlot, status: PinStatus) -> PinPreflight {
+    pin_preflight_of(PinReferenceScheme::Organizational, slot, status)
 }
 
 /// What opening an organization card with PIN 1 came to.
@@ -426,7 +398,7 @@ pub(crate) enum OrganizationOpenOutcome {
     /// PIN 1 reading the floor served.
     Ready {
         certificate: CardCertificate,
-        preflight: Pin1Preflight,
+        preflight: PinPreflight,
         qualified: Result<CardCertificate, CertificateReadFailure>,
     },
     /// The channel did not open, or the card did not answer through it.
@@ -459,7 +431,7 @@ pub(crate) fn organization_open<T: CardTransport>(
             );
         }
     };
-    let preflight = pin1_preflight_of(secure.pin1_counter());
+    let preflight = organization_pin_preflight(PinSlot::Pin1, secure.pin1_counter());
     if let Err(error) = secure.select_pkcs15_application() {
         return (
             OrganizationOpenOutcome::Refused(pkcs15_refusal(&error).into_authentication()),
