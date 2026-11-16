@@ -3,31 +3,24 @@
 package fi.refineid.android.nfc
 
 import android.nfc.tech.IsoDep
-import fi.refineid.android.core.ActivationReport
 import fi.refineid.android.core.AuthenticationSignFailure
 import fi.refineid.android.core.AuthenticationSignResult
 import fi.refineid.android.core.AuthenticationSignatureVerifier
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
-import fi.refineid.android.core.CardManagementResult
-import fi.refineid.android.core.CardManagementScheme
-import fi.refineid.android.core.CredentialHealth
-import fi.refineid.android.core.ManageOutcome
+import fi.refineid.android.core.CardManagementSessionOps
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.NativeAuthenticationSignFailure
 import fi.refineid.android.core.NativeAuthenticationSignResult
-import fi.refineid.android.core.NativeCertificateReadResult
-import fi.refineid.android.core.NativePin2PreflightResult
 import fi.refineid.android.core.NativeQualifiedCertificate
 import fi.refineid.android.core.NativeQualifiedSignFailure
 import fi.refineid.android.core.NativeQualifiedSignResult
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1Verification
-import fi.refineid.android.core.Pin2Submission
+import fi.refineid.android.core.QualifiedCardSessionOps
 import fi.refineid.android.core.QualifiedSignFailure
 import fi.refineid.android.core.QualifiedSignResult
 import fi.refineid.android.core.QualifiedSignatureVerifier
-import fi.refineid.android.core.QualifiedSigningAlgorithm
 import fi.refineid.android.core.QualifiedSigningInputMode
 import fi.refineid.android.diagnostics.AppTrace
 
@@ -38,8 +31,10 @@ import fi.refineid.android.diagnostics.AppTrace
  * opens its own with the credential it spends
  * ([OrganizationContactlessSession]).
  */
-@Suppress("TooManyFunctions")
-internal interface ContactlessCardSession : AutoCloseable {
+internal interface ContactlessCardSession :
+    CardManagementSessionOps,
+    QualifiedCardSessionOps,
+    AutoCloseable {
     /** Replace the tag handle after the stack re-polled the resting card. */
     fun adopt(freshIsoDep: IsoDep)
 
@@ -59,75 +54,6 @@ internal interface ContactlessCardSession : AutoCloseable {
         pin1: Pin1Submission,
         input: ByteArray,
     ): AuthenticationSignResult
-
-    fun readQualifiedCertificate(): NativeCertificateReadResult<NativeQualifiedCertificate>
-
-    fun probePin2Status(): NativePin2PreflightResult
-
-    fun qualifiedSignInput(
-        algorithm: QualifiedSigningAlgorithm,
-        inputMode: QualifiedSigningInputMode,
-        pin2: Pin2Submission,
-        input: ByteArray,
-        expectedCertificate: NativeQualifiedCertificate,
-    ): QualifiedSignResult
-
-    fun qualifiedSignPrehashed(
-        algorithm: QualifiedSigningAlgorithm,
-        pin2: Pin2Submission,
-        digest: ByteArray,
-        expectedCertificate: NativeQualifiedCertificate,
-    ): QualifiedSignResult =
-        qualifiedSignInput(
-            algorithm = algorithm,
-            inputMode = QualifiedSigningInputMode.PREHASHED,
-            pin2 = pin2,
-            input = digest,
-            expectedCertificate = expectedCertificate,
-        )
-
-    fun qualifiedSign(
-        algorithm: QualifiedSigningAlgorithm,
-        pin2: Pin2Submission,
-        content: ByteArray,
-        expectedCertificate: NativeQualifiedCertificate,
-    ): QualifiedSignResult =
-        qualifiedSignInput(
-            algorithm = algorithm,
-            inputMode = QualifiedSigningInputMode.MESSAGE,
-            pin2 = pin2,
-            input = content,
-            expectedCertificate = expectedCertificate,
-        )
-
-    fun probeCredentialHealth(readPinLengths: Boolean): CardManagementResult<CredentialHealth>
-
-    fun changePin1(
-        currentPin: ByteArray,
-        newPin: ByteArray,
-    ): CardManagementResult<ManageOutcome>
-
-    fun changePin2(
-        currentPin: ByteArray,
-        newPin: ByteArray,
-    ): CardManagementResult<ManageOutcome>
-
-    fun unblockPin1(
-        puk: ByteArray,
-        newPin: ByteArray,
-    ): CardManagementResult<ManageOutcome>
-
-    fun unblockPin2(
-        puk: ByteArray,
-        newPin: ByteArray,
-    ): CardManagementResult<ManageOutcome>
-
-    fun activateCard(
-        scheme: CardManagementScheme,
-        code: ByteArray,
-        newPin1: ByteArray?,
-        newPin2: ByteArray?,
-    ): CardManagementResult<ActivationReport>
 
     override fun close()
 }

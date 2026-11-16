@@ -16,6 +16,7 @@ import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.CardManagementService
 import fi.refineid.android.core.CertificateHolderName
 import fi.refineid.android.core.NativeAuthenticationCertificate
 import fi.refineid.android.core.NativeCertificateReadFailure
@@ -24,6 +25,9 @@ import fi.refineid.android.core.NativeCore
 import fi.refineid.android.core.PersonCardDetails
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1VerificationResult
+import fi.refineid.android.core.QualifiedCardService
+import fi.refineid.android.core.QueuedCardManagementService
+import fi.refineid.android.core.QueuedQualifiedCardService
 import fi.refineid.android.core.readOnOwnerThread
 import fi.refineid.android.diagnostics.AppTrace
 import fi.refineid.android.usb.ccid.CcidSessionOpenResult
@@ -143,10 +147,10 @@ internal class UsbReaderController(
     // Worker-thread confined. Main-thread state never owns a USB connection.
     private var activeSession: CcidUsbSession? = null
 
-    internal val qualifiedCardService =
-        UsbQualifiedCardService(
-            ioExecutor = ioExecutor,
-            mainHandler = mainHandler,
+    internal val qualifiedCardService: QualifiedCardService =
+        QueuedQualifiedCardService(
+            worker = ioExecutor,
+            postResult = { mainHandler.post(it) },
             isReady = {
                 isStarted &&
                     latestSnapshot.status == ReaderConnectionStatus.READY &&
@@ -159,10 +163,10 @@ internal class UsbReaderController(
             activeSession = { activeSession },
         )
 
-    internal val cardManagementService =
-        UsbCardManagementService(
-            ioExecutor = ioExecutor,
-            mainHandler = mainHandler,
+    internal val cardManagementService: CardManagementService =
+        QueuedCardManagementService(
+            worker = ioExecutor,
+            postResult = { mainHandler.post(it) },
             isReady = {
                 isStarted &&
                     (
