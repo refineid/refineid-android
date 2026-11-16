@@ -35,14 +35,13 @@ use crate::card_transport::CardExchangeLevel;
 use crate::card_transport::{AndroidCardTransport, SingleBlockExchange};
 use crate::certificate_validity::validity_start_epoch_seconds;
 use crate::organization_card::{ContactlessCardKind, contactless_card_kind};
-use crate::pin1_status::{Pin1Preflight, Pin1PreflightFailure, probe_pin1_preflight};
-use crate::pin2_status::{Pin2Preflight, Pin2PreflightFailure, probe_pin2_preflight};
+use crate::pin_status::{PinPreflight, PinPreflightFailure, probe_pin_preflight};
 use crate::qualified_signer::{
     QualifiedCertificateSource, QualifiedSignFailure, QualifiedSignature,
     QualifiedSigningAlgorithm, QualifiedSigningInput, qualified_sign,
 };
 use refineid_auth::{
-    ActivationReport, ActivationScheme, CardActivationNeeds, ManageOutcome, PinManageOps,
+    ActivationReport, ActivationScheme, CardActivationNeeds, ManageOutcome, PinManageOps, PinSlot,
 };
 
 /// Coarse failures of the secure-channel front door, before any
@@ -270,7 +269,7 @@ pub(crate) fn refresh_on_card_ca_certificates<T: CardTransport + Pkcs15Ops>(
 }
 
 pub(crate) enum ContactlessOpenOutcome {
-    Ready(CardCertificate, Pin1Preflight),
+    Ready(CardCertificate, PinPreflight),
     /// The card still awaits activation: its scheme, and which PINs. Its
     /// certificate is read for the scheme alone and is not returned.
     ActivationRequired(ActivationScheme, CardActivationNeeds),
@@ -313,7 +312,7 @@ where
         return ContactlessOpenOutcome::ActivationRequired(scheme, needs);
     }
     read_on_card_ca_certificates(secure);
-    match probe_pin1_preflight(secure) {
+    match probe_pin_preflight(secure, PinSlot::Pin1) {
         Ok(preflight) => ContactlessOpenOutcome::Ready(certificate, preflight),
         Err(failure) => ContactlessOpenOutcome::Failure(open_preflight_failure(failure)),
     }
@@ -518,16 +517,16 @@ pub(crate) fn contactless_read_qualified_certificate<Exchange: SingleBlockExchan
 pub(crate) fn contactless_probe_pin2<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
     channel: ContactlessChannel,
-) -> (Result<Pin2Preflight, Pin2PreflightFailure>, Exchange) {
+) -> (Result<PinPreflight, PinPreflightFailure>, Exchange) {
     match open_contactless_channel(transport, channel) {
         Ok(mut open) => {
-            let result = probe_pin2_preflight(&mut open.secure);
+            let result = probe_pin_preflight(&mut open.secure, PinSlot::Pin2);
             (result, close_contactless_channel(open))
         }
         Err((failure, exchange)) => {
             let failure = match failure {
                 ChannelOpenFailure::Handshake(failure) => pin2_channel_failure(failure),
-                ChannelOpenFailure::NoHeldSession => Pin2PreflightFailure::CardUnavailable,
+                ChannelOpenFailure::NoHeldSession => PinPreflightFailure::CardUnavailable,
                 ChannelOpenFailure::Selection(error) => pin2_selection_failure(error),
             };
             (Err(failure), exchange)
@@ -943,11 +942,11 @@ fn certificate_channel_failure(failure: SecureChannelFailure) -> CertificateRead
 
 /// Preflight failures inside the opened channel fold onto the open
 /// reply's shared failure vocabulary.
-fn open_preflight_failure(failure: Pin1PreflightFailure) -> CertificateReadFailure {
+fn open_preflight_failure(failure: PinPreflightFailure) -> CertificateReadFailure {
     match failure {
-        Pin1PreflightFailure::CardUnavailable => CertificateReadFailure::CardUnavailable,
-        Pin1PreflightFailure::Transport => CertificateReadFailure::Transport,
-        Pin1PreflightFailure::Bridge => CertificateReadFailure::Bridge,
+        PinPreflightFailure::CardUnavailable => CertificateReadFailure::CardUnavailable,
+        PinPreflightFailure::Transport => CertificateReadFailure::Transport,
+        PinPreflightFailure::Bridge => CertificateReadFailure::Bridge,
     }
 }
 
@@ -979,29 +978,29 @@ pub(crate) fn sign_selection_failure<E>(error: Pkcs15Error<E>) -> Authentication
 
 /// The session CAN was proven at connect, so a PACE refusal on this
 /// later probe is a transport anomaly rather than a holder-facing fault.
-fn pin2_channel_failure(failure: SecureChannelFailure) -> Pin2PreflightFailure {
+fn pin2_channel_failure(failure: SecureChannelFailure) -> PinPreflightFailure {
     match failure {
-        SecureChannelFailure::CardUnavailable => Pin2PreflightFailure::CardUnavailable,
+        SecureChannelFailure::CardUnavailable => PinPreflightFailure::CardUnavailable,
         SecureChannelFailure::PaceRejected
         | SecureChannelFailure::Transport
         | SecureChannelFailure::OrganizationCard
-        | SecureChannelFailure::UnknownCard => Pin2PreflightFailure::Transport,
-        SecureChannelFailure::Bridge => Pin2PreflightFailure::Bridge,
+        | SecureChannelFailure::UnknownCard => PinPreflightFailure::Transport,
+        SecureChannelFailure::Bridge => PinPreflightFailure::Bridge,
     }
 }
 
-fn pin2_selection_failure<E>(error: Pkcs15Error<E>) -> Pin2PreflightFailure {
+fn pin2_selection_failure<E>(error: Pkcs15Error<E>) -> PinPreflightFailure {
     match error {
         Pkcs15Error::Outcome(TransportOutcome::NoCard | TransportOutcome::ReaderRemoved) => {
-            Pin2PreflightFailure::CardUnavailable
+            PinPreflightFailure::CardUnavailable
         }
-        Pkcs15Error::Aid(_) | Pkcs15Error::Command(_) => Pin2PreflightFailure::Bridge,
+        Pkcs15Error::Aid(_) | Pkcs15Error::Command(_) => PinPreflightFailure::Bridge,
         Pkcs15Error::Status(_)
         | Pkcs15Error::Transport(_)
         | Pkcs15Error::Outcome(_)
         | Pkcs15Error::Empty
         | Pkcs15Error::TooLarge
-        | Pkcs15Error::InvalidData(_) => Pin2PreflightFailure::Transport,
+        | Pkcs15Error::InvalidData(_) => PinPreflightFailure::Transport,
     }
 }
 
@@ -1077,8 +1076,7 @@ mod tests {
     use crate::card_transport::{
         AndroidCardTransport, CardExchangeLevel, SingleBlockExchange, SingleExchangeOutcome,
     };
-    use crate::pin1_status::Pin1PreflightFailure;
-    use crate::pin2_status::Pin2PreflightFailure;
+    use crate::pin_status::PinPreflightFailure;
     use crate::qualified_signer::{
         QualifiedSignFailure, QualifiedSigningAlgorithm, QualifiedSigningInput,
     };
@@ -1326,7 +1324,7 @@ mod tests {
         assert_eq!(exchange.blocks, 0);
 
         let (pin2, exchange) = contactless_probe_pin2(transport(), ContactlessChannel::HeldSession);
-        assert!(matches!(pin2, Err(Pin2PreflightFailure::CardUnavailable)));
+        assert!(matches!(pin2, Err(PinPreflightFailure::CardUnavailable)));
         assert_eq!(exchange.blocks, 0);
 
         let (signature, exchange) = contactless_qualified_sign(
@@ -1424,15 +1422,15 @@ mod tests {
     #[test]
     fn folds_preflight_failures_onto_the_open_vocabulary() {
         assert_eq!(
-            open_preflight_failure(Pin1PreflightFailure::CardUnavailable),
+            open_preflight_failure(PinPreflightFailure::CardUnavailable),
             CertificateReadFailure::CardUnavailable
         );
         assert_eq!(
-            open_preflight_failure(Pin1PreflightFailure::Transport),
+            open_preflight_failure(PinPreflightFailure::Transport),
             CertificateReadFailure::Transport
         );
         assert_eq!(
-            open_preflight_failure(Pin1PreflightFailure::Bridge),
+            open_preflight_failure(PinPreflightFailure::Bridge),
             CertificateReadFailure::Bridge
         );
     }
@@ -1444,19 +1442,19 @@ mod tests {
     fn folds_channel_failures_onto_the_pin2_vocabulary() {
         assert_eq!(
             pin2_channel_failure(SecureChannelFailure::CardUnavailable),
-            Pin2PreflightFailure::CardUnavailable
+            PinPreflightFailure::CardUnavailable
         );
         assert_eq!(
             pin2_channel_failure(SecureChannelFailure::PaceRejected),
-            Pin2PreflightFailure::Transport
+            PinPreflightFailure::Transport
         );
         assert_eq!(
             pin2_channel_failure(SecureChannelFailure::Transport),
-            Pin2PreflightFailure::Transport
+            PinPreflightFailure::Transport
         );
         assert_eq!(
             pin2_channel_failure(SecureChannelFailure::Bridge),
-            Pin2PreflightFailure::Bridge
+            PinPreflightFailure::Bridge
         );
     }
 

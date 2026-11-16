@@ -27,11 +27,11 @@
 //! VERIFY then reads the counter once more and floors on that reading itself.
 
 use refineid_apdu::{CardTransport, StatusWord, TransportOutcome};
-use refineid_auth::{AuthError, Pin1, PinOps, UnvalidatedSecret, VerifyOutcome};
+use refineid_auth::{AuthError, Pin1, PinOps, PinSlot, UnvalidatedSecret, VerifyOutcome};
 use refineid_digest::{Sha256, Sha384, Sha512};
 use refineid_sign::{SignError, SignOps, SignScheme};
 
-use crate::pin1_status::{Pin1PreflightFailure, Pin1State, map_auth_error, probe_pin1_preflight};
+use crate::pin_status::{PinPreflightFailure, PinState, map_auth_error, probe_pin_preflight};
 
 /// Browser-facing authentication-signature algorithms supported by the
 /// reviewed card core.
@@ -145,14 +145,14 @@ where
     let pin_input = UnvalidatedSecret::from_owned_bytes(pin_bytes);
     let prepared_input = prepare_signing_input(algorithm, input)?;
     let pin = Pin1::reconstruct(pin_input).map_err(|_| AuthenticationSignFailure::InvalidPin)?;
-    let preflight = probe_pin1_preflight(transport).map_err(map_preflight_failure)?;
+    let preflight = probe_pin_preflight(transport, PinSlot::Pin1).map_err(map_preflight_failure)?;
     if !preflight.retry_floor_permits {
         return Err(AuthenticationSignFailure::SafetyRefused);
     }
 
     let scheme = SignScheme::from(preflight.scheme);
 
-    if preflight.state == Pin1State::Verified {
+    if preflight.state == PinState::Verified {
         match sign_prepared(transport, scheme, prepared_input) {
             Ok(bytes) => return Ok(AuthenticationSignature { algorithm, bytes }),
             Err(SignError::Status(_, StatusWord::SecurityNotSatisfied)) => {
@@ -338,11 +338,11 @@ fn map_verify_error<E>(error: AuthError<E>) -> AuthenticationSignFailure {
     }
 }
 
-fn map_preflight_failure(failure: Pin1PreflightFailure) -> AuthenticationSignFailure {
+fn map_preflight_failure(failure: PinPreflightFailure) -> AuthenticationSignFailure {
     match failure {
-        Pin1PreflightFailure::CardUnavailable => AuthenticationSignFailure::CardUnavailable,
-        Pin1PreflightFailure::Transport => AuthenticationSignFailure::Transport,
-        Pin1PreflightFailure::Bridge => AuthenticationSignFailure::Bridge,
+        PinPreflightFailure::CardUnavailable => AuthenticationSignFailure::CardUnavailable,
+        PinPreflightFailure::Transport => AuthenticationSignFailure::Transport,
+        PinPreflightFailure::Bridge => AuthenticationSignFailure::Bridge,
     }
 }
 

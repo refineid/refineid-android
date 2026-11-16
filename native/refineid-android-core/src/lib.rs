@@ -17,8 +17,7 @@ mod contactless;
 mod jni_card_exchange;
 mod organization_card;
 mod organization_jni;
-mod pin1_status;
-mod pin2_status;
+mod pin_status;
 mod qualified_signer;
 
 use authentication_signer::{
@@ -44,15 +43,14 @@ use jni::sys::{jboolean, jint};
 use jni::{Env, NativeMethod};
 use jni_card_exchange::JniBlockExchange;
 use organization_card::ContactlessCardKind;
-use pin1_status::{Pin1Preflight, Pin1PreflightFailure, Pin1State, probe_pin1_preflight};
-use pin2_status::{Pin2Preflight, Pin2PreflightFailure, Pin2State, probe_pin2_preflight};
+use pin_status::{PinPreflight, PinPreflightFailure, PinState, probe_pin_preflight};
 use qualified_signer::{
     MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH, QualifiedSignFailure, QualifiedSignature,
     QualifiedSigningAlgorithm, QualifiedSigningInput, qualified_sign,
 };
 use refineid_apdu::TransportOutcome;
 use refineid_atr::{Atr, Convention};
-use refineid_auth::PinReferenceScheme;
+use refineid_auth::{PinReferenceScheme, PinSlot};
 use refineid_pkcs15::{Pkcs15Error, Pkcs15Ops};
 
 const ATR_INVALID: jint = 0;
@@ -95,15 +93,10 @@ const CARD_KIND_UNKNOWN: u8 = 0;
 const CARD_KIND_PERSONAL: u8 = 1;
 const CARD_KIND_ORGANIZATION: u8 = 2;
 
-const PIN1_PREFLIGHT_BRIDGE_ERROR: u8 = 0;
-const PIN1_PREFLIGHT_SUCCEEDED: u8 = 1;
-const PIN1_PREFLIGHT_CARD_UNAVAILABLE: u8 = 2;
-const PIN1_PREFLIGHT_TRANSPORT_ERROR: u8 = 3;
-
-const PIN2_PREFLIGHT_BRIDGE_ERROR: u8 = 0;
-const PIN2_PREFLIGHT_SUCCEEDED: u8 = 1;
-const PIN2_PREFLIGHT_CARD_UNAVAILABLE: u8 = 2;
-const PIN2_PREFLIGHT_TRANSPORT_ERROR: u8 = 3;
+const PIN_PREFLIGHT_BRIDGE_ERROR: u8 = 0;
+const PIN_PREFLIGHT_SUCCEEDED: u8 = 1;
+const PIN_PREFLIGHT_CARD_UNAVAILABLE: u8 = 2;
+const PIN_PREFLIGHT_TRANSPORT_ERROR: u8 = 3;
 
 const AUTHENTICATION_SIGNATURE_BRIDGE_ERROR: u8 = 0;
 const AUTHENTICATION_SIGNATURE_SUCCEEDED: u8 = 1;
@@ -158,17 +151,11 @@ const SHA384_DIGEST_LENGTH: usize = 48;
 const PIN_REFERENCE_CITIZEN: u8 = 0;
 const PIN_REFERENCE_ORGANIZATIONAL: u8 = 1;
 
-const PIN1_STATE_VERIFIED: u8 = 0;
-const PIN1_STATE_REMAINING: u8 = 1;
-const PIN1_STATE_LOCKED: u8 = 2;
-const PIN1_STATE_NO_INFORMATION: u8 = 3;
-const PIN1_STATE_UNRECOGNISED: u8 = 4;
-
-const PIN2_STATE_VERIFIED: u8 = 0;
-const PIN2_STATE_REMAINING: u8 = 1;
-const PIN2_STATE_LOCKED: u8 = 2;
-const PIN2_STATE_NO_INFORMATION: u8 = 3;
-const PIN2_STATE_UNRECOGNISED: u8 = 4;
+const PIN_STATE_VERIFIED: u8 = 0;
+const PIN_STATE_REMAINING: u8 = 1;
+const PIN_STATE_LOCKED: u8 = 2;
+const PIN_STATE_NO_INFORMATION: u8 = 3;
+const PIN_STATE_UNRECOGNISED: u8 = 4;
 
 const POLICY_REFUSED: u8 = 0;
 const POLICY_PERMITTED: u8 = 1;
@@ -182,9 +169,8 @@ const KEY_PROFILE_ECDSA_P384: u8 = 3;
 const CERTIFICATE_REPLY_HEADER_LENGTH: usize = 2;
 const CARD_ACCESS_REPLY_LENGTH: usize = 3;
 const CONTACTLESS_OPEN_HEADER_LENGTH: usize = 2;
-const PIN1_PREFLIGHT_REPLY_LENGTH: usize = 5;
-const PIN1_PREFLIGHT_REPLY_LENGTH_BYTE: u8 = PIN1_PREFLIGHT_REPLY_LENGTH as u8;
-const PIN2_PREFLIGHT_REPLY_LENGTH: usize = 5;
+const PIN_PREFLIGHT_REPLY_LENGTH: usize = 5;
+const PIN_PREFLIGHT_REPLY_LENGTH_BYTE: u8 = PIN_PREFLIGHT_REPLY_LENGTH as u8;
 const AUTHENTICATION_SIGNATURE_REPLY_HEADER_LENGTH: usize = 2;
 const QUALIFIED_SIGNATURE_REPLY_HEADER_LENGTH: usize = 2;
 const MAXIMUM_AUTHENTICATION_MESSAGE_LENGTH: usize = 1_024 * 1_024;
@@ -1067,9 +1053,9 @@ fn contactless_pin2_reply<'local>(
     };
 
     let mut reply = if bridge_failed {
-        vec![PIN2_PREFLIGHT_BRIDGE_ERROR]
+        vec![PIN_PREFLIGHT_BRIDGE_ERROR]
     } else {
-        encode_pin2_preflight_reply(result)
+        encode_pin_preflight_reply(result)
     };
     let java_reply = env.byte_array_from_slice(&reply);
     reply.fill(0);
@@ -1224,26 +1210,7 @@ fn probe_pin1_status_native<'local>(
     exchange_level: jint,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let Some(level) = exchange_level_from_jint(exchange_level) else {
-        return env.byte_array_from_slice(&[PIN1_PREFLIGHT_BRIDGE_ERROR]);
-    };
-
-    let (result, bridge_failed) = {
-        let exchange = JniBlockExchange::new(env, callback);
-        let mut transport = AndroidCardTransport::new(exchange, level);
-        let result = probe_pin1_preflight(&mut transport);
-        let exchange = transport.into_exchange();
-        (result, exchange.bridge_failed())
-    };
-
-    let mut reply = if bridge_failed {
-        vec![PIN1_PREFLIGHT_BRIDGE_ERROR]
-    } else {
-        encode_pin1_preflight_reply(result)
-    };
-    let java_reply = env.byte_array_from_slice(&reply);
-    reply.fill(0);
-    java_reply
+    probe_pin_status_reply(env, exchange_level, callback, PinSlot::Pin1)
 }
 
 fn probe_pin2_status_native<'local>(
@@ -1252,22 +1219,31 @@ fn probe_pin2_status_native<'local>(
     exchange_level: jint,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
+    probe_pin_status_reply(env, exchange_level, callback, PinSlot::Pin2)
+}
+
+fn probe_pin_status_reply<'local>(
+    env: &mut Env<'local>,
+    exchange_level: jint,
+    callback: JObject<'local>,
+    slot: PinSlot,
+) -> Result<JByteArray<'local>, jni::errors::Error> {
     let Some(level) = exchange_level_from_jint(exchange_level) else {
-        return env.byte_array_from_slice(&[PIN2_PREFLIGHT_BRIDGE_ERROR]);
+        return env.byte_array_from_slice(&[PIN_PREFLIGHT_BRIDGE_ERROR]);
     };
 
     let (result, bridge_failed) = {
         let exchange = JniBlockExchange::new(env, callback);
         let mut transport = AndroidCardTransport::new(exchange, level);
-        let result = probe_pin2_preflight(&mut transport);
+        let result = probe_pin_preflight(&mut transport, slot);
         let exchange = transport.into_exchange();
         (result, exchange.bridge_failed())
     };
 
     let mut reply = if bridge_failed {
-        vec![PIN2_PREFLIGHT_BRIDGE_ERROR]
+        vec![PIN_PREFLIGHT_BRIDGE_ERROR]
     } else {
-        encode_pin2_preflight_reply(result)
+        encode_pin_preflight_reply(result)
     };
     let java_reply = env.byte_array_from_slice(&reply);
     reply.fill(0);
@@ -2322,13 +2298,13 @@ fn encode_certificate_reply(result: Result<CardCertificate, CertificateReadFailu
 fn encode_contactless_open_reply(outcome: ContactlessOpenOutcome) -> Vec<u8> {
     match outcome {
         ContactlessOpenOutcome::Ready(certificate, preflight) => {
-            let mut preflight_reply = encode_pin1_preflight_reply(Ok(preflight));
+            let mut preflight_reply = encode_pin_preflight_reply(Ok(preflight));
             let mut certificate_reply = encode_certificate_reply(Ok(certificate));
             let mut reply = Vec::with_capacity(
                 CONTACTLESS_OPEN_HEADER_LENGTH + preflight_reply.len() + certificate_reply.len(),
             );
             reply.push(CERTIFICATE_SUCCEEDED);
-            reply.push(PIN1_PREFLIGHT_REPLY_LENGTH_BYTE);
+            reply.push(PIN_PREFLIGHT_REPLY_LENGTH_BYTE);
             reply.append(&mut preflight_reply);
             reply.append(&mut certificate_reply);
             reply
@@ -2366,18 +2342,18 @@ fn encode_card_access_reply(result: Result<CardAccessSummary, CardAccessProbeFai
     }
 }
 
-fn encode_pin1_preflight_reply(result: Result<Pin1Preflight, Pin1PreflightFailure>) -> Vec<u8> {
+fn encode_pin_preflight_reply(result: Result<PinPreflight, PinPreflightFailure>) -> Vec<u8> {
     match result {
         Ok(preflight) => {
             let (state, retries) = match preflight.state {
-                Pin1State::Verified => (PIN1_STATE_VERIFIED, NO_RETRY_COUNT),
-                Pin1State::Remaining(retries) => (PIN1_STATE_REMAINING, retries),
-                Pin1State::Locked => (PIN1_STATE_LOCKED, NO_RETRY_COUNT),
-                Pin1State::NoInformation => (PIN1_STATE_NO_INFORMATION, NO_RETRY_COUNT),
-                Pin1State::Unrecognised => (PIN1_STATE_UNRECOGNISED, NO_RETRY_COUNT),
+                PinState::Verified => (PIN_STATE_VERIFIED, NO_RETRY_COUNT),
+                PinState::Remaining(retries) => (PIN_STATE_REMAINING, retries),
+                PinState::Locked => (PIN_STATE_LOCKED, NO_RETRY_COUNT),
+                PinState::NoInformation => (PIN_STATE_NO_INFORMATION, NO_RETRY_COUNT),
+                PinState::Unrecognised => (PIN_STATE_UNRECOGNISED, NO_RETRY_COUNT),
             };
-            let reply: [u8; PIN1_PREFLIGHT_REPLY_LENGTH] = [
-                PIN1_PREFLIGHT_SUCCEEDED,
+            let reply: [u8; PIN_PREFLIGHT_REPLY_LENGTH] = [
+                PIN_PREFLIGHT_SUCCEEDED,
                 match preflight.scheme {
                     PinReferenceScheme::Citizen => PIN_REFERENCE_CITIZEN,
                     PinReferenceScheme::Organizational => PIN_REFERENCE_ORGANIZATIONAL,
@@ -2393,43 +2369,9 @@ fn encode_pin1_preflight_reply(result: Result<Pin1Preflight, Pin1PreflightFailur
             reply.to_vec()
         }
         Err(failure) => vec![match failure {
-            Pin1PreflightFailure::CardUnavailable => PIN1_PREFLIGHT_CARD_UNAVAILABLE,
-            Pin1PreflightFailure::Transport => PIN1_PREFLIGHT_TRANSPORT_ERROR,
-            Pin1PreflightFailure::Bridge => PIN1_PREFLIGHT_BRIDGE_ERROR,
-        }],
-    }
-}
-
-fn encode_pin2_preflight_reply(result: Result<Pin2Preflight, Pin2PreflightFailure>) -> Vec<u8> {
-    match result {
-        Ok(preflight) => {
-            let (state, retries) = match preflight.state {
-                Pin2State::Verified => (PIN2_STATE_VERIFIED, NO_RETRY_COUNT),
-                Pin2State::Remaining(retries) => (PIN2_STATE_REMAINING, retries),
-                Pin2State::Locked => (PIN2_STATE_LOCKED, NO_RETRY_COUNT),
-                Pin2State::NoInformation => (PIN2_STATE_NO_INFORMATION, NO_RETRY_COUNT),
-                Pin2State::Unrecognised => (PIN2_STATE_UNRECOGNISED, NO_RETRY_COUNT),
-            };
-            let reply: [u8; PIN2_PREFLIGHT_REPLY_LENGTH] = [
-                PIN2_PREFLIGHT_SUCCEEDED,
-                match preflight.scheme {
-                    PinReferenceScheme::Citizen => PIN_REFERENCE_CITIZEN,
-                    PinReferenceScheme::Organizational => PIN_REFERENCE_ORGANIZATIONAL,
-                },
-                state,
-                retries,
-                if preflight.retry_floor_permits {
-                    POLICY_PERMITTED
-                } else {
-                    POLICY_REFUSED
-                },
-            ];
-            reply.to_vec()
-        }
-        Err(failure) => vec![match failure {
-            Pin2PreflightFailure::CardUnavailable => PIN2_PREFLIGHT_CARD_UNAVAILABLE,
-            Pin2PreflightFailure::Transport => PIN2_PREFLIGHT_TRANSPORT_ERROR,
-            Pin2PreflightFailure::Bridge => PIN2_PREFLIGHT_BRIDGE_ERROR,
+            PinPreflightFailure::CardUnavailable => PIN_PREFLIGHT_CARD_UNAVAILABLE,
+            PinPreflightFailure::Transport => PIN_PREFLIGHT_TRANSPORT_ERROR,
+            PinPreflightFailure::Bridge => PIN_PREFLIGHT_BRIDGE_ERROR,
         }],
     }
 }
@@ -2591,20 +2533,18 @@ mod tests {
         CERTIFICATE_CARD_UNAVAILABLE, CERTIFICATE_INVALID, CERTIFICATE_PACE_REJECTED,
         CERTIFICATE_REPLY_HEADER_LENGTH, CERTIFICATE_SUCCEEDED, ContactlessOpenOutcome,
         EXCHANGE_LEVEL_APDU, EXCHANGE_LEVEL_T0_TPDU, KEY_PROFILE_RSA_2048, NO_RETRY_COUNT,
-        PIN_REFERENCE_CITIZEN, PIN1_PREFLIGHT_BRIDGE_ERROR, PIN1_PREFLIGHT_CARD_UNAVAILABLE,
-        PIN1_PREFLIGHT_REPLY_LENGTH, PIN1_PREFLIGHT_REPLY_LENGTH_BYTE, PIN1_PREFLIGHT_SUCCEEDED,
-        PIN1_STATE_REMAINING, PIN2_PREFLIGHT_BRIDGE_ERROR, PIN2_PREFLIGHT_CARD_UNAVAILABLE,
-        PIN2_PREFLIGHT_REPLY_LENGTH, PIN2_PREFLIGHT_SUCCEEDED, PIN2_STATE_REMAINING,
-        POLICY_PERMITTED, QUALIFIED_ALGORITHM_ECDSA_P384_SHA384,
-        QUALIFIED_ALGORITHM_RSA_PKCS1_SHA384, QUALIFIED_PREHASHED_ECDSA_P384_SHA384,
-        QUALIFIED_PREHASHED_RSA_PKCS1_SHA384, QUALIFIED_SIGNATURE_CARD_UNAVAILABLE,
-        QUALIFIED_SIGNATURE_REPLY_HEADER_LENGTH, QUALIFIED_SIGNATURE_SUCCEEDED,
-        QUALIFIED_SIGNATURE_WRONG_PIN, authentication_algorithm_from_jint,
-        authentication_request_from_jint, encode_authentication_signature_reply,
-        encode_card_access_reply, encode_certificate_reply, encode_contactless_open_reply,
-        encode_pin1_preflight_reply, encode_pin2_preflight_reply, encode_qualified_signature_reply,
-        exchange_level_from_jint, map_pkcs15_selection_result, qualified_algorithm_from_jint,
-        qualified_request_from_jint, validate_atr_bytes,
+        PIN_PREFLIGHT_BRIDGE_ERROR, PIN_PREFLIGHT_CARD_UNAVAILABLE, PIN_PREFLIGHT_REPLY_LENGTH,
+        PIN_PREFLIGHT_REPLY_LENGTH_BYTE, PIN_PREFLIGHT_SUCCEEDED, PIN_PREFLIGHT_TRANSPORT_ERROR,
+        PIN_REFERENCE_CITIZEN, PIN_REFERENCE_ORGANIZATIONAL, PIN_STATE_REMAINING, POLICY_PERMITTED,
+        QUALIFIED_ALGORITHM_ECDSA_P384_SHA384, QUALIFIED_ALGORITHM_RSA_PKCS1_SHA384,
+        QUALIFIED_PREHASHED_ECDSA_P384_SHA384, QUALIFIED_PREHASHED_RSA_PKCS1_SHA384,
+        QUALIFIED_SIGNATURE_CARD_UNAVAILABLE, QUALIFIED_SIGNATURE_REPLY_HEADER_LENGTH,
+        QUALIFIED_SIGNATURE_SUCCEEDED, QUALIFIED_SIGNATURE_WRONG_PIN,
+        authentication_algorithm_from_jint, authentication_request_from_jint,
+        encode_authentication_signature_reply, encode_card_access_reply, encode_certificate_reply,
+        encode_contactless_open_reply, encode_pin_preflight_reply,
+        encode_qualified_signature_reply, exchange_level_from_jint, map_pkcs15_selection_result,
+        qualified_algorithm_from_jint, qualified_request_from_jint, validate_atr_bytes,
     };
     use crate::authentication_signer::{
         AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,
@@ -2614,8 +2554,7 @@ mod tests {
         CardCertificate, CardKeyProfile, CertificateDer, CertificateReadFailure,
     };
     use crate::card_transport::{AndroidTransportError, CardExchangeLevel};
-    use crate::pin1_status::{Pin1Preflight, Pin1PreflightFailure, Pin1State};
-    use crate::pin2_status::{Pin2Preflight, Pin2PreflightFailure, Pin2State};
+    use crate::pin_status::{PinPreflight, PinPreflightFailure, PinState};
     use crate::qualified_signer::{
         QualifiedSignFailure, QualifiedSignature, QualifiedSigningAlgorithm,
     };
@@ -2639,8 +2578,7 @@ mod tests {
     const SYNTHETIC_DER_SEQUENCE_TAG: u8 = 0x30;
     const SYNTHETIC_DER_EMPTY_LENGTH: u8 = 0x00;
     const SYNTHETIC_PIN_RETRY_COUNT: u8 = 3;
-    const PIN1_PREFLIGHT_RETRY_COUNT_OFFSET: usize = 3;
-    const PIN2_PREFLIGHT_RETRY_COUNT_OFFSET: usize = 3;
+    const PIN_PREFLIGHT_RETRY_COUNT_OFFSET: usize = 3;
 
     #[test]
     fn accepts_minimal_direct_atr() {
@@ -2992,9 +2930,9 @@ mod tests {
                 CardKeyProfile::Rsa2048,
                 CertificateDer::from_validated(SYNTHETIC_DER.to_vec()),
             ),
-            Pin1Preflight {
+            PinPreflight {
                 scheme: PinReferenceScheme::Citizen,
-                state: Pin1State::Remaining(SYNTHETIC_PIN_RETRY_COUNT),
+                state: PinState::Remaining(SYNTHETIC_PIN_RETRY_COUNT),
                 retry_floor_permits: true,
             },
         ));
@@ -3003,10 +2941,10 @@ mod tests {
             [
                 &[
                     CERTIFICATE_SUCCEEDED,
-                    PIN1_PREFLIGHT_REPLY_LENGTH_BYTE,
-                    PIN1_PREFLIGHT_SUCCEEDED,
+                    PIN_PREFLIGHT_REPLY_LENGTH_BYTE,
+                    PIN_PREFLIGHT_SUCCEEDED,
                     PIN_REFERENCE_CITIZEN,
-                    PIN1_STATE_REMAINING,
+                    PIN_STATE_REMAINING,
                     SYNTHETIC_PIN_RETRY_COUNT,
                     POLICY_PERMITTED,
                     CERTIFICATE_SUCCEEDED,
@@ -3047,60 +2985,50 @@ mod tests {
     }
 
     #[test]
-    fn encodes_pin1_preflight_without_raw_card_values() {
-        let success = encode_pin1_preflight_reply(Ok(Pin1Preflight {
+    fn encodes_pin_preflight_without_raw_card_values() {
+        let success = encode_pin_preflight_reply(Ok(PinPreflight {
             scheme: PinReferenceScheme::Citizen,
-            state: Pin1State::Remaining(SYNTHETIC_PIN_RETRY_COUNT),
+            state: PinState::Remaining(SYNTHETIC_PIN_RETRY_COUNT),
             retry_floor_permits: true,
         }));
         assert_eq!(
             success,
             vec![
-                PIN1_PREFLIGHT_SUCCEEDED,
+                PIN_PREFLIGHT_SUCCEEDED,
                 PIN_REFERENCE_CITIZEN,
-                PIN1_STATE_REMAINING,
+                PIN_STATE_REMAINING,
                 SYNTHETIC_PIN_RETRY_COUNT,
                 POLICY_PERMITTED,
             ]
         );
-        assert_eq!(success.len(), PIN1_PREFLIGHT_REPLY_LENGTH);
-        assert_ne!(success[PIN1_PREFLIGHT_RETRY_COUNT_OFFSET], NO_RETRY_COUNT);
-        assert_eq!(
-            encode_pin1_preflight_reply(Err(Pin1PreflightFailure::CardUnavailable)),
-            vec![PIN1_PREFLIGHT_CARD_UNAVAILABLE]
-        );
-        assert_eq!(
-            encode_pin1_preflight_reply(Err(Pin1PreflightFailure::Bridge)),
-            vec![PIN1_PREFLIGHT_BRIDGE_ERROR]
-        );
-    }
-
-    #[test]
-    fn encodes_pin2_preflight_without_raw_card_values() {
-        let success = encode_pin2_preflight_reply(Ok(Pin2Preflight {
-            scheme: PinReferenceScheme::Citizen,
-            state: Pin2State::Remaining(SYNTHETIC_PIN_RETRY_COUNT),
+        assert_eq!(success.len(), PIN_PREFLIGHT_REPLY_LENGTH);
+        assert_ne!(success[PIN_PREFLIGHT_RETRY_COUNT_OFFSET], NO_RETRY_COUNT);
+        let organizational = encode_pin_preflight_reply(Ok(PinPreflight {
+            scheme: PinReferenceScheme::Organizational,
+            state: PinState::Remaining(SYNTHETIC_PIN_RETRY_COUNT),
             retry_floor_permits: true,
         }));
         assert_eq!(
-            success,
+            organizational,
             vec![
-                PIN2_PREFLIGHT_SUCCEEDED,
-                PIN_REFERENCE_CITIZEN,
-                PIN2_STATE_REMAINING,
+                PIN_PREFLIGHT_SUCCEEDED,
+                PIN_REFERENCE_ORGANIZATIONAL,
+                PIN_STATE_REMAINING,
                 SYNTHETIC_PIN_RETRY_COUNT,
                 POLICY_PERMITTED,
             ]
         );
-        assert_eq!(success.len(), PIN2_PREFLIGHT_REPLY_LENGTH);
-        assert_ne!(success[PIN2_PREFLIGHT_RETRY_COUNT_OFFSET], NO_RETRY_COUNT);
         assert_eq!(
-            encode_pin2_preflight_reply(Err(Pin2PreflightFailure::CardUnavailable)),
-            vec![PIN2_PREFLIGHT_CARD_UNAVAILABLE]
+            encode_pin_preflight_reply(Err(PinPreflightFailure::CardUnavailable)),
+            vec![PIN_PREFLIGHT_CARD_UNAVAILABLE]
         );
         assert_eq!(
-            encode_pin2_preflight_reply(Err(Pin2PreflightFailure::Bridge)),
-            vec![PIN2_PREFLIGHT_BRIDGE_ERROR]
+            encode_pin_preflight_reply(Err(PinPreflightFailure::Transport)),
+            vec![PIN_PREFLIGHT_TRANSPORT_ERROR]
+        );
+        assert_eq!(
+            encode_pin_preflight_reply(Err(PinPreflightFailure::Bridge)),
+            vec![PIN_PREFLIGHT_BRIDGE_ERROR]
         );
     }
 
