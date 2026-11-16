@@ -2,8 +2,6 @@
 
 package fi.refineid.android.core
 
-import fi.refineid.android.diagnostics.AppTrace
-
 /**
  * How a card is activated (FINEID S4-1 section 4.6), as the native core
  * decides it from the card's credential numbering and its authentication
@@ -29,17 +27,17 @@ private const val PRESET_ACTIVATION_PIN_DIGIT_COUNT = 7
 /** The activation scheme a native reply byte names. */
 internal fun decodeActivationScheme(byte: Int): CardManagementScheme =
     when (byte) {
-        ACTIVATION_SCHEME_PUK -> CardManagementScheme.PUK
-        ACTIVATION_SCHEME_PRESET -> CardManagementScheme.PRESET_PIN
+        NativeCardManagementWire.ACTIVATION_SCHEME_PUK -> CardManagementScheme.PUK
+        NativeCardManagementWire.ACTIVATION_SCHEME_PRESET -> CardManagementScheme.PRESET_PIN
         else -> CardManagementScheme.UNKNOWN
     }
 
 /** Which PINs a native reply byte says still await activation. */
 internal fun decodeActivationNeeds(byte: Int): CardActivationNeeds =
     when (byte) {
-        ACTIVATION_NEEDS_PIN1_ONLY -> CardActivationNeeds(pin1 = true, pin2 = false)
-        ACTIVATION_NEEDS_PIN2_ONLY -> CardActivationNeeds(pin1 = false, pin2 = true)
-        ACTIVATION_NEEDS_BOTH -> CardActivationNeeds(pin1 = true, pin2 = true)
+        NativeCardManagementWire.ACTIVATION_NEEDS_PIN1_ONLY -> CardActivationNeeds(pin1 = true, pin2 = false)
+        NativeCardManagementWire.ACTIVATION_NEEDS_PIN2_ONLY -> CardActivationNeeds(pin1 = false, pin2 = true)
+        NativeCardManagementWire.ACTIVATION_NEEDS_BOTH -> CardActivationNeeds(pin1 = true, pin2 = true)
         else -> CardActivationNeeds(pin1 = false, pin2 = false)
     }
 
@@ -128,45 +126,114 @@ internal sealed interface CardManagementResult<out T> {
     ) : CardManagementResult<Nothing>
 }
 
-private const val MANAGEMENT_TAG_BRIDGE_ERROR = 0
-private const val MANAGEMENT_TAG_SUCCEEDED = 1
-private const val MANAGEMENT_TAG_CARD_UNAVAILABLE = 2
-private const val MANAGEMENT_TAG_TRANSPORT_ERROR = 3
-private const val MANAGEMENT_TAG_INVALID_CREDENTIAL = 4
-private const val MANAGEMENT_TAG_SAFETY_REFUSED = 5
-private const val MANAGEMENT_TAG_PACE_REJECTED = 6
-private const val MANAGEMENT_TAG_WRONG_CREDENTIAL = 7
-private const val MANAGEMENT_TAG_LOCKED = 8
-private const val MANAGEMENT_TAG_OTHER = 9
+/** Which card channel a management JNI entry point runs over. */
+internal enum class CardManagementChannelMode(
+    val wireValue: Int,
+) {
+    WIRED_APDU(NativeCardManagementWire.CHANNEL_MODE_WIRED_APDU),
+    WIRED_T0_TPDU(NativeCardManagementWire.CHANNEL_MODE_WIRED_T0_TPDU),
+    CONTACTLESS_PACE(NativeCardManagementWire.CHANNEL_MODE_CONTACTLESS_PACE),
+    CONTACTLESS_HELD_SESSION(NativeCardManagementWire.CHANNEL_MODE_CONTACTLESS_HELD_SESSION),
+    ;
 
-private const val PIN_STATE_VERIFIED = 1
-private const val PIN_STATE_REMAINING = 2
-private const val PIN_STATE_LOCKED = 3
-private const val PIN_STATE_NO_INFO = 4
+    companion object {
+        fun fromExchangeLevel(exchangeLevel: NativeCardExchangeLevel): CardManagementChannelMode =
+            when (exchangeLevel) {
+                NativeCardExchangeLevel.APDU -> WIRED_APDU
+                NativeCardExchangeLevel.T0_TPDU -> WIRED_T0_TPDU
+            }
+    }
+}
 
-private const val SCHEME_CITIZEN = 1
-private const val SCHEME_ORGANIZATIONAL = 2
+/** Which PIN management operation a parameterized JNI call executes. */
+internal enum class PinManageOp(
+    val wireValue: Int,
+) {
+    CHANGE_PIN1(NativeCardManagementWire.PIN_OP_CHANGE_PIN1),
+    CHANGE_PIN2(NativeCardManagementWire.PIN_OP_CHANGE_PIN2),
+    UNBLOCK_PIN1(NativeCardManagementWire.PIN_OP_UNBLOCK_PIN1),
+    UNBLOCK_PIN2(NativeCardManagementWire.PIN_OP_UNBLOCK_PIN2),
+}
 
-private const val ACTIVATION_SCHEME_UNKNOWN = 0
-private const val ACTIVATION_SCHEME_PUK = 1
-private const val ACTIVATION_SCHEME_PRESET = 2
+/** Named wire constants shared with `native/refineid-android-core/src/card_management.rs`. */
+internal object NativeCardManagementWire {
+    const val CHANNEL_MODE_WIRED_APDU = 0
+    const val CHANNEL_MODE_WIRED_T0_TPDU = 1
+    const val CHANNEL_MODE_CONTACTLESS_PACE = 2
+    const val CHANNEL_MODE_CONTACTLESS_HELD_SESSION = 3
 
-private const val ACTIVATION_NEEDS_NONE = 0
-private const val ACTIVATION_NEEDS_PIN1_ONLY = 1
-private const val ACTIVATION_NEEDS_PIN2_ONLY = 2
-private const val ACTIVATION_NEEDS_BOTH = 3
+    const val PIN_OP_CHANGE_PIN1 = 0
+    const val PIN_OP_CHANGE_PIN2 = 1
+    const val PIN_OP_UNBLOCK_PIN1 = 2
+    const val PIN_OP_UNBLOCK_PIN2 = 3
 
-private const val HEALTH_REPLY_LENGTH = 10
-private const val HEALTH_REPLY_WITH_LENGTHS_LENGTH = 16
-private const val HEALTH_PIN1_MIN_OFFSET = 10
-private const val HEALTH_PIN1_MAX_OFFSET = 11
-private const val HEALTH_PIN2_MIN_OFFSET = 12
-private const val HEALTH_PIN2_MAX_OFFSET = 13
-private const val HEALTH_PUK_MIN_OFFSET = 14
-private const val HEALTH_PUK_MAX_OFFSET = 15
-private const val OCTET_MASK = 0xFF
-private const val OUTCOME_REPLY_LENGTH = 4
-private const val ACTIVATION_REPLY_LENGTH = 6
+    const val MANAGEMENT_TAG_BRIDGE_ERROR = 0
+    const val MANAGEMENT_TAG_SUCCEEDED = 1
+    const val MANAGEMENT_TAG_CARD_UNAVAILABLE = 2
+    const val MANAGEMENT_TAG_TRANSPORT_ERROR = 3
+    const val MANAGEMENT_TAG_INVALID_CREDENTIAL = 4
+    const val MANAGEMENT_TAG_SAFETY_REFUSED = 5
+    const val MANAGEMENT_TAG_PACE_REJECTED = 6
+    const val MANAGEMENT_TAG_WRONG_CREDENTIAL = 7
+    const val MANAGEMENT_TAG_LOCKED = 8
+    const val MANAGEMENT_TAG_OTHER = 9
+
+    const val PIN_STATE_VERIFIED = 1
+    const val PIN_STATE_REMAINING = 2
+    const val PIN_STATE_LOCKED = 3
+    const val PIN_STATE_NO_INFO = 4
+    const val PIN_STATE_UNRECOGNISED = 5
+
+    const val SCHEME_CITIZEN = 1
+    const val SCHEME_ORGANIZATIONAL = 2
+
+    const val ACTIVATION_SCHEME_UNKNOWN = 0
+    const val ACTIVATION_SCHEME_PUK = 1
+    const val ACTIVATION_SCHEME_PRESET = 2
+
+    const val ACTIVATION_NEEDS_NONE = 0
+    const val ACTIVATION_NEEDS_PIN1_ONLY = 1
+    const val ACTIVATION_NEEDS_PIN2_ONLY = 2
+    const val ACTIVATION_NEEDS_BOTH = 3
+
+    const val TAG_OFFSET = 0
+
+    const val HEALTH_PIN1_STATE_OFFSET = 1
+    const val HEALTH_PIN1_RETRIES_OFFSET = 2
+    const val HEALTH_PIN2_STATE_OFFSET = 3
+    const val HEALTH_PIN2_RETRIES_OFFSET = 4
+    const val HEALTH_PUK_STATE_OFFSET = 5
+    const val HEALTH_PUK_RETRIES_OFFSET = 6
+    const val HEALTH_SCHEME_OFFSET = 7
+    const val HEALTH_ACTIVATION_SCHEME_OFFSET = 8
+    const val HEALTH_ACTIVATION_NEEDS_OFFSET = 9
+    const val HEALTH_REPLY_LENGTH = 10
+    const val HEALTH_PIN1_MIN_OFFSET = 10
+    const val HEALTH_PIN1_MAX_OFFSET = 11
+    const val HEALTH_PIN2_MIN_OFFSET = 12
+    const val HEALTH_PIN2_MAX_OFFSET = 13
+    const val HEALTH_PUK_MIN_OFFSET = 14
+    const val HEALTH_PUK_MAX_OFFSET = 15
+    const val HEALTH_REPLY_WITH_LENGTHS_LENGTH = 16
+
+    const val OUTCOME_RETRIES_OFFSET = 1
+    const val OUTCOME_MIN_RETRIES_LENGTH = 2
+    const val OUTCOME_SW1_OFFSET = 2
+    const val OUTCOME_MIN_SW1_LENGTH = 3
+    const val OUTCOME_SW2_OFFSET = 3
+    const val OUTCOME_REPLY_LENGTH = 4
+
+    const val ACTIVATION_SCHEME_OFFSET = 1
+    const val ACTIVATION_PIN1_TAG_OFFSET = 2
+    const val ACTIVATION_PIN1_RETRIES_OFFSET = 3
+    const val ACTIVATION_PIN2_TAG_OFFSET = 4
+    const val ACTIVATION_PIN2_RETRIES_OFFSET = 5
+    const val ACTIVATION_REPLY_LENGTH = 6
+
+    const val OCTET_MASK = 0xFF
+    const val ZERO_INT = 0
+    const val ZERO_BYTE: Byte = 0
+}
 
 internal object NativeCardManagement {
     /**
@@ -179,85 +246,68 @@ internal object NativeCardManagement {
         exchangeLevel: NativeCardExchangeLevel,
         readPinLengths: Boolean,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<CredentialHealth> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply = probeCredentialHealthNative(exchangeLevel.wireValue, readPinLengths, exchange)
-            decodeCredentialHealth(reply).also(ObservedCredentialHealth::record)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<CredentialHealth> =
+        executeProbeCredentialHealth(
+            target = ChannelTarget.wired(exchangeLevel),
+            readPinLengths = readPinLengths,
+            exchange = exchange,
+        )
 
     fun changePin1(
         exchangeLevel: NativeCardExchangeLevel,
         currentPin: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply = changePin1Native(exchangeLevel.wireValue, currentPin, newPin, exchange)
-            decodeManageOutcome(reply)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.wired(exchangeLevel),
+            op = PinManageOp.CHANGE_PIN1,
+            firstSecret = currentPin,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun changePin2(
         exchangeLevel: NativeCardExchangeLevel,
         currentPin: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply = changePin2Native(exchangeLevel.wireValue, currentPin, newPin, exchange)
-            decodeManageOutcome(reply)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.wired(exchangeLevel),
+            op = PinManageOp.CHANGE_PIN2,
+            firstSecret = currentPin,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun unblockPin1(
         exchangeLevel: NativeCardExchangeLevel,
         puk: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply = unblockPin1Native(exchangeLevel.wireValue, puk, newPin, exchange)
-            decodeManageOutcome(reply)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.wired(exchangeLevel),
+            op = PinManageOp.UNBLOCK_PIN1,
+            firstSecret = puk,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun unblockPin2(
         exchangeLevel: NativeCardExchangeLevel,
         puk: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply = unblockPin2Native(exchangeLevel.wireValue, puk, newPin, exchange)
-            decodeManageOutcome(reply)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.wired(exchangeLevel),
+            op = PinManageOp.UNBLOCK_PIN2,
+            firstSecret = puk,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun activateCard(
         exchangeLevel: NativeCardExchangeLevel,
@@ -266,110 +316,83 @@ internal object NativeCardManagement {
         newPin1: ByteArray?,
         newPin2: ByteArray?,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ActivationReport> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply =
-                activateCardNative(
-                    exchangeLevel.wireValue,
-                    scheme.wireValue(),
-                    code,
-                    newPin1 ?: ByteArray(0),
-                    newPin2 ?: ByteArray(0),
-                    exchange,
-                )
-            decodeActivationReport(reply)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ActivationReport> =
+        executeActivateCard(
+            target = ChannelTarget.wired(exchangeLevel),
+            scheme = scheme,
+            code = code,
+            newPin1 = newPin1,
+            newPin2 = newPin2,
+            exchange = exchange,
+        )
 
-    // Contactless operations
+    // One-shot contactless PACE operations authenticated by the card access number.
     fun contactlessProbeCredentialHealth(
         can: ByteArray,
         readPinLengths: Boolean,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<CredentialHealth> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply = contactlessProbeCredentialHealthNative(can, readPinLengths, exchange)
-            decodeCredentialHealth(reply).also(ObservedCredentialHealth::record)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<CredentialHealth> =
+        executeProbeCredentialHealth(
+            target = ChannelTarget.pace(can),
+            readPinLengths = readPinLengths,
+            exchange = exchange,
+        )
 
     fun contactlessChangePin1(
         can: ByteArray,
         currentPin: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply = contactlessChangePin1Native(can, currentPin, newPin, exchange)
-            decodeManageOutcome(reply)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.pace(can),
+            op = PinManageOp.CHANGE_PIN1,
+            firstSecret = currentPin,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun contactlessChangePin2(
         can: ByteArray,
         currentPin: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply = contactlessChangePin2Native(can, currentPin, newPin, exchange)
-            decodeManageOutcome(reply)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.pace(can),
+            op = PinManageOp.CHANGE_PIN2,
+            firstSecret = currentPin,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun contactlessUnblockPin1(
         can: ByteArray,
         puk: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply = contactlessUnblockPin1Native(can, puk, newPin, exchange)
-            decodeManageOutcome(reply)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.pace(can),
+            op = PinManageOp.UNBLOCK_PIN1,
+            firstSecret = puk,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun contactlessUnblockPin2(
         can: ByteArray,
         puk: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply = contactlessUnblockPin2Native(can, puk, newPin, exchange)
-            decodeManageOutcome(reply)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.pace(can),
+            op = PinManageOp.UNBLOCK_PIN2,
+            firstSecret = puk,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun contactlessActivateCard(
         can: ByteArray,
@@ -378,25 +401,15 @@ internal object NativeCardManagement {
         newPin1: ByteArray?,
         newPin2: ByteArray?,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ActivationReport> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply =
-                contactlessActivateCardNative(
-                    can,
-                    scheme.wireValue(),
-                    code,
-                    newPin1 ?: ByteArray(0),
-                    newPin2 ?: ByteArray(0),
-                    exchange,
-                )
-            decodeActivationReport(reply)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ActivationReport> =
+        executeActivateCard(
+            target = ChannelTarget.pace(can),
+            scheme = scheme,
+            code = code,
+            newPin1 = newPin1,
+            newPin2 = newPin2,
+            exchange = exchange,
+        )
 
     // Operations on the secure-messaging session a prior
     // NativeContactlessSession.connect left open: no access number and no
@@ -405,77 +418,64 @@ internal object NativeCardManagement {
     fun contactlessProbeCredentialHealthOnSession(
         readPinLengths: Boolean,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<CredentialHealth> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply = contactlessProbeCredentialHealthOnSessionNative(readPinLengths, exchange)
-            decodeCredentialHealth(reply).also(ObservedCredentialHealth::record)
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<CredentialHealth> =
+        executeProbeCredentialHealth(
+            target = ChannelTarget.heldSession(),
+            readPinLengths = readPinLengths,
+            exchange = exchange,
+        )
 
     fun contactlessChangePin1OnSession(
         currentPin: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            decodeManageOutcome(contactlessChangePin1OnSessionNative(currentPin, newPin, exchange))
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.heldSession(),
+            op = PinManageOp.CHANGE_PIN1,
+            firstSecret = currentPin,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun contactlessChangePin2OnSession(
         currentPin: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            decodeManageOutcome(contactlessChangePin2OnSessionNative(currentPin, newPin, exchange))
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.heldSession(),
+            op = PinManageOp.CHANGE_PIN2,
+            firstSecret = currentPin,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun contactlessUnblockPin1OnSession(
         puk: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            decodeManageOutcome(contactlessUnblockPin1OnSessionNative(puk, newPin, exchange))
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.heldSession(),
+            op = PinManageOp.UNBLOCK_PIN1,
+            firstSecret = puk,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun contactlessUnblockPin2OnSession(
         puk: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ManageOutcome> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            decodeManageOutcome(contactlessUnblockPin2OnSessionNative(puk, newPin, exchange))
-        } catch (_: Throwable) {
-            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-    }
+    ): CardManagementResult<ManageOutcome> =
+        executeManagePin(
+            target = ChannelTarget.heldSession(),
+            op = PinManageOp.UNBLOCK_PIN2,
+            firstSecret = puk,
+            secondSecret = newPin,
+            exchange = exchange,
+        )
 
     fun contactlessActivateCardOnSession(
         scheme: CardManagementScheme,
@@ -483,341 +483,447 @@ internal object NativeCardManagement {
         newPin1: ByteArray?,
         newPin2: ByteArray?,
         exchange: NativeBlockExchange,
-    ): CardManagementResult<ActivationReport> {
-        if (!NativeCore.isLoaded) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return try {
-            val reply =
-                contactlessActivateCardOnSessionNative(
-                    scheme.wireValue(),
-                    code,
-                    newPin1 ?: ByteArray(0),
-                    newPin2 ?: ByteArray(0),
-                    exchange,
-                )
-            decodeActivationReport(reply)
-        } catch (_: Throwable) {
+    ): CardManagementResult<ActivationReport> =
+        executeActivateCard(
+            target = ChannelTarget.heldSession(),
+            scheme = scheme,
+            code = code,
+            newPin1 = newPin1,
+            newPin2 = newPin2,
+            exchange = exchange,
+        )
+
+    private fun executeProbeCredentialHealth(
+        target: ChannelTarget,
+        readPinLengths: Boolean,
+        exchange: NativeBlockExchange,
+    ): CardManagementResult<CredentialHealth> =
+        try {
+            if (!NativeCore.isLoaded) {
+                CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+            } else {
+                val reply =
+                    probeCredentialHealthNative(
+                        target.mode.wireValue,
+                        target.can,
+                        readPinLengths,
+                        exchange,
+                    )
+                decodeCredentialHealth(reply).also(ObservedCredentialHealth::record)
+            }
+        } catch (_: LinkageError) {
             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        } catch (_: RuntimeException) {
+            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        } finally {
+            target.can?.fill(NativeCardManagementWire.ZERO_BYTE)
         }
-    }
+
+    private fun executeManagePin(
+        target: ChannelTarget,
+        op: PinManageOp,
+        firstSecret: ByteArray,
+        secondSecret: ByteArray,
+        exchange: NativeBlockExchange,
+    ): CardManagementResult<ManageOutcome> =
+        try {
+            if (!NativeCore.isLoaded) {
+                CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+            } else {
+                val reply =
+                    managePinNative(
+                        target.mode.wireValue,
+                        op.wireValue,
+                        target.can,
+                        firstSecret,
+                        secondSecret,
+                        exchange,
+                    )
+                decodeManageOutcome(reply)
+            }
+        } catch (_: LinkageError) {
+            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        } catch (_: RuntimeException) {
+            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        } finally {
+            target.can?.fill(NativeCardManagementWire.ZERO_BYTE)
+            firstSecret.fill(NativeCardManagementWire.ZERO_BYTE)
+            secondSecret.fill(NativeCardManagementWire.ZERO_BYTE)
+        }
+
+    private fun executeActivateCard(
+        target: ChannelTarget,
+        scheme: CardManagementScheme,
+        code: ByteArray,
+        newPin1: ByteArray?,
+        newPin2: ByteArray?,
+        exchange: NativeBlockExchange,
+    ): CardManagementResult<ActivationReport> =
+        try {
+            if (!NativeCore.isLoaded) {
+                CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+            } else {
+                val reply =
+                    activateCardNative(
+                        target.mode.wireValue,
+                        scheme.wireValue(),
+                        target.can,
+                        code,
+                        newPin1,
+                        newPin2,
+                        exchange,
+                    )
+                decodeActivationReport(reply)
+            }
+        } catch (_: LinkageError) {
+            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        } catch (_: RuntimeException) {
+            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+        } finally {
+            target.can?.fill(NativeCardManagementWire.ZERO_BYTE)
+            code.fill(NativeCardManagementWire.ZERO_BYTE)
+            newPin1?.fill(NativeCardManagementWire.ZERO_BYTE)
+            newPin2?.fill(NativeCardManagementWire.ZERO_BYTE)
+        }
 
     private fun CardManagementScheme.wireValue(): Int =
         when (this) {
-            CardManagementScheme.PUK -> ACTIVATION_SCHEME_PUK
-            CardManagementScheme.PRESET_PIN -> ACTIVATION_SCHEME_PRESET
-            CardManagementScheme.UNKNOWN -> ACTIVATION_SCHEME_UNKNOWN
+            CardManagementScheme.PUK -> NativeCardManagementWire.ACTIVATION_SCHEME_PUK
+            CardManagementScheme.PRESET_PIN -> NativeCardManagementWire.ACTIVATION_SCHEME_PRESET
+            CardManagementScheme.UNKNOWN -> NativeCardManagementWire.ACTIVATION_SCHEME_UNKNOWN
         }
 
-    internal fun decodeCredentialHealth(reply: ByteArray): CardManagementResult<CredentialHealth> {
-        if (reply.isEmpty()) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return when (val tag = reply[0].toInt()) {
-            MANAGEMENT_TAG_SUCCEEDED -> {
-                if (reply.size != HEALTH_REPLY_LENGTH && reply.size != HEALTH_REPLY_WITH_LENGTHS_LENGTH) {
-                    CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-                } else {
-                    val p1State = parsePin1State(reply[1].toInt(), reply[2].toInt())
-                    val p2State = parsePin2State(reply[3].toInt(), reply[4].toInt())
-                    val pukState = parsePin1State(reply[5].toInt(), reply[6].toInt())
-                    val scheme =
-                        if (reply[7].toInt() == SCHEME_ORGANIZATIONAL) {
-                            NativePinReferenceScheme.ORGANIZATIONAL
+    internal fun decodeCredentialHealth(reply: ByteArray): CardManagementResult<CredentialHealth> =
+        try {
+            if (reply.isEmpty()) {
+                CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+            } else {
+                when (val tag = reply[NativeCardManagementWire.TAG_OFFSET].toInt()) {
+                    NativeCardManagementWire.MANAGEMENT_TAG_SUCCEEDED -> {
+                        if (
+                            reply.size != NativeCardManagementWire.HEALTH_REPLY_LENGTH &&
+                            reply.size != NativeCardManagementWire.HEALTH_REPLY_WITH_LENGTHS_LENGTH
+                        ) {
+                            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
                         } else {
-                            NativePinReferenceScheme.CITIZEN
+                            val p1State =
+                                parsePin1State(
+                                    reply[NativeCardManagementWire.HEALTH_PIN1_STATE_OFFSET].toInt(),
+                                    reply[NativeCardManagementWire.HEALTH_PIN1_RETRIES_OFFSET].toInt(),
+                                )
+                            val p2State =
+                                parsePin2State(
+                                    reply[NativeCardManagementWire.HEALTH_PIN2_STATE_OFFSET].toInt(),
+                                    reply[NativeCardManagementWire.HEALTH_PIN2_RETRIES_OFFSET].toInt(),
+                                )
+                            val pukState =
+                                parsePin1State(
+                                    reply[NativeCardManagementWire.HEALTH_PUK_STATE_OFFSET].toInt(),
+                                    reply[NativeCardManagementWire.HEALTH_PUK_RETRIES_OFFSET].toInt(),
+                                )
+                            val scheme =
+                                if (
+                                    reply[NativeCardManagementWire.HEALTH_SCHEME_OFFSET].toInt() ==
+                                    NativeCardManagementWire.SCHEME_ORGANIZATIONAL
+                                ) {
+                                    NativePinReferenceScheme.ORGANIZATIONAL
+                                } else {
+                                    NativePinReferenceScheme.CITIZEN
+                                }
+                            val actScheme =
+                                decodeActivationScheme(
+                                    reply[NativeCardManagementWire.HEALTH_ACTIVATION_SCHEME_OFFSET].toInt(),
+                                )
+                            val needs =
+                                decodeActivationNeeds(
+                                    reply[NativeCardManagementWire.HEALTH_ACTIVATION_NEEDS_OFFSET].toInt(),
+                                )
+                            CardManagementResult.Success(
+                                CredentialHealth(
+                                    pin1State = p1State,
+                                    pin2State = p2State,
+                                    pukState = pukState,
+                                    scheme = scheme,
+                                    activationScheme = actScheme,
+                                    activationNeeds = needs,
+                                    pinLengths = decodePinLengths(reply),
+                                ),
+                            )
                         }
-                    val actScheme = decodeActivationScheme(reply[8].toInt())
-                    val needs = decodeActivationNeeds(reply[9].toInt())
-                    CardManagementResult.Success(
-                        CredentialHealth(
-                            pin1State = p1State,
-                            pin2State = p2State,
-                            pukState = pukState,
-                            scheme = scheme,
-                            activationScheme = actScheme,
-                            activationNeeds = needs,
-                            pinLengths = decodePinLengths(reply),
-                        ),
-                    )
+                    }
+
+                    else -> {
+                        CardManagementResult.Failure(mapFailureTag(tag))
+                    }
                 }
             }
-
-            else -> {
-                CardManagementResult.Failure(mapFailureTag(tag))
-            }
+        } finally {
+            reply.fill(NativeCardManagementWire.ZERO_BYTE)
         }
-    }
 
     private fun decodePinLengths(reply: ByteArray): CardPinLengths? {
-        if (reply.size != HEALTH_REPLY_WITH_LENGTHS_LENGTH) return null
+        if (reply.size != NativeCardManagementWire.HEALTH_REPLY_WITH_LENGTHS_LENGTH) return null
 
         fun range(
             minOffset: Int,
             maxOffset: Int,
         ): IntRange {
-            val min = reply[minOffset].toInt() and OCTET_MASK
-            val max = reply[maxOffset].toInt() and OCTET_MASK
-            return if (min == 0) IntRange.EMPTY else min..max
+            val min = reply[minOffset].toInt() and NativeCardManagementWire.OCTET_MASK
+            val max = reply[maxOffset].toInt() and NativeCardManagementWire.OCTET_MASK
+            return if (min == NativeCardManagementWire.ZERO_INT) IntRange.EMPTY else min..max
         }
         return CardPinLengths(
-            pin1 = range(HEALTH_PIN1_MIN_OFFSET, HEALTH_PIN1_MAX_OFFSET),
-            pin2 = range(HEALTH_PIN2_MIN_OFFSET, HEALTH_PIN2_MAX_OFFSET),
-            puk = range(HEALTH_PUK_MIN_OFFSET, HEALTH_PUK_MAX_OFFSET),
+            pin1 =
+                range(
+                    NativeCardManagementWire.HEALTH_PIN1_MIN_OFFSET,
+                    NativeCardManagementWire.HEALTH_PIN1_MAX_OFFSET,
+                ),
+            pin2 =
+                range(
+                    NativeCardManagementWire.HEALTH_PIN2_MIN_OFFSET,
+                    NativeCardManagementWire.HEALTH_PIN2_MAX_OFFSET,
+                ),
+            puk =
+                range(
+                    NativeCardManagementWire.HEALTH_PUK_MIN_OFFSET,
+                    NativeCardManagementWire.HEALTH_PUK_MAX_OFFSET,
+                ),
         )
     }
 
-    internal fun decodeManageOutcome(reply: ByteArray): CardManagementResult<ManageOutcome> {
-        if (reply.isEmpty()) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return when (val tag = reply[0].toInt()) {
-            MANAGEMENT_TAG_SUCCEEDED -> {
-                CardManagementResult.Success(ManageOutcome.Succeeded)
-            }
+    internal fun decodeManageOutcome(reply: ByteArray): CardManagementResult<ManageOutcome> =
+        try {
+            if (reply.isEmpty()) {
+                CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+            } else {
+                when (val tag = reply[NativeCardManagementWire.TAG_OFFSET].toInt()) {
+                    NativeCardManagementWire.MANAGEMENT_TAG_SUCCEEDED -> {
+                        CardManagementResult.Success(ManageOutcome.Succeeded)
+                    }
 
-            MANAGEMENT_TAG_WRONG_CREDENTIAL -> {
-                val attempts = if (reply.size >= 2) reply[1].toInt() else 0
-                CardManagementResult.Success(ManageOutcome.WrongCredential(attempts))
-            }
+                    NativeCardManagementWire.MANAGEMENT_TAG_WRONG_CREDENTIAL -> {
+                        val attempts =
+                            if (reply.size >= NativeCardManagementWire.OUTCOME_MIN_RETRIES_LENGTH) {
+                                reply[NativeCardManagementWire.OUTCOME_RETRIES_OFFSET].toInt() and
+                                    NativeCardManagementWire.OCTET_MASK
+                            } else {
+                                NativeCardManagementWire.ZERO_INT
+                            }
+                        CardManagementResult.Success(ManageOutcome.WrongCredential(attempts))
+                    }
 
-            MANAGEMENT_TAG_LOCKED -> {
-                CardManagementResult.Success(ManageOutcome.Locked)
-            }
+                    NativeCardManagementWire.MANAGEMENT_TAG_LOCKED -> {
+                        CardManagementResult.Success(ManageOutcome.Locked)
+                    }
 
-            MANAGEMENT_TAG_OTHER -> {
-                val sw1 = if (reply.size >= 3) reply[2].toInt() and 0xFF else 0
-                val sw2 = if (reply.size >= 4) reply[3].toInt() and 0xFF else 0
-                CardManagementResult.Success(ManageOutcome.Other(sw1, sw2))
-            }
+                    NativeCardManagementWire.MANAGEMENT_TAG_OTHER -> {
+                        val sw1 =
+                            if (reply.size >= NativeCardManagementWire.OUTCOME_MIN_SW1_LENGTH) {
+                                reply[NativeCardManagementWire.OUTCOME_SW1_OFFSET].toInt() and
+                                    NativeCardManagementWire.OCTET_MASK
+                            } else {
+                                NativeCardManagementWire.ZERO_INT
+                            }
+                        val sw2 =
+                            if (reply.size >= NativeCardManagementWire.OUTCOME_REPLY_LENGTH) {
+                                reply[NativeCardManagementWire.OUTCOME_SW2_OFFSET].toInt() and
+                                    NativeCardManagementWire.OCTET_MASK
+                            } else {
+                                NativeCardManagementWire.ZERO_INT
+                            }
+                        CardManagementResult.Success(ManageOutcome.Other(sw1, sw2))
+                    }
 
-            else -> {
-                CardManagementResult.Failure(mapFailureTag(tag))
-            }
-        }
-    }
-
-    private fun decodeActivationReport(reply: ByteArray): CardManagementResult<ActivationReport> {
-        if (reply.isEmpty()) {
-            return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-        }
-        return when (val tag = reply[0].toInt()) {
-            MANAGEMENT_TAG_SUCCEEDED -> {
-                if (reply.size != ACTIVATION_REPLY_LENGTH) {
-                    CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
-                } else {
-                    val scheme =
-                        when (reply[1].toInt()) {
-                            ACTIVATION_SCHEME_PUK -> CardManagementScheme.PUK
-                            ACTIVATION_SCHEME_PRESET -> CardManagementScheme.PRESET_PIN
-                            else -> CardManagementScheme.UNKNOWN
-                        }
-                    val p1Outcome = parseOutcomeTag(reply[2].toInt(), reply[3].toInt())
-                    val p2Outcome = parseOutcomeTag(reply[4].toInt(), reply[5].toInt())
-                    CardManagementResult.Success(
-                        ActivationReport(
-                            scheme = scheme,
-                            pin1Outcome = p1Outcome,
-                            pin2Outcome = p2Outcome,
-                        ),
-                    )
+                    else -> {
+                        CardManagementResult.Failure(mapFailureTag(tag))
+                    }
                 }
             }
-
-            else -> {
-                CardManagementResult.Failure(mapFailureTag(tag))
-            }
+        } finally {
+            reply.fill(NativeCardManagementWire.ZERO_BYTE)
         }
-    }
+
+    internal fun decodeActivationReport(reply: ByteArray): CardManagementResult<ActivationReport> =
+        try {
+            if (reply.isEmpty()) {
+                CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+            } else {
+                when (val tag = reply[NativeCardManagementWire.TAG_OFFSET].toInt()) {
+                    NativeCardManagementWire.MANAGEMENT_TAG_SUCCEEDED -> {
+                        if (reply.size != NativeCardManagementWire.ACTIVATION_REPLY_LENGTH) {
+                            CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
+                        } else {
+                            val scheme =
+                                decodeActivationScheme(
+                                    reply[NativeCardManagementWire.ACTIVATION_SCHEME_OFFSET].toInt(),
+                                )
+                            val p1Outcome =
+                                parseOutcomeTag(
+                                    reply[NativeCardManagementWire.ACTIVATION_PIN1_TAG_OFFSET].toInt(),
+                                    reply[NativeCardManagementWire.ACTIVATION_PIN1_RETRIES_OFFSET].toInt() and
+                                        NativeCardManagementWire.OCTET_MASK,
+                                )
+                            val p2Outcome =
+                                parseOutcomeTag(
+                                    reply[NativeCardManagementWire.ACTIVATION_PIN2_TAG_OFFSET].toInt(),
+                                    reply[NativeCardManagementWire.ACTIVATION_PIN2_RETRIES_OFFSET].toInt() and
+                                        NativeCardManagementWire.OCTET_MASK,
+                                )
+                            CardManagementResult.Success(
+                                ActivationReport(
+                                    scheme = scheme,
+                                    pin1Outcome = p1Outcome,
+                                    pin2Outcome = p2Outcome,
+                                ),
+                            )
+                        }
+                    }
+
+                    else -> {
+                        CardManagementResult.Failure(mapFailureTag(tag))
+                    }
+                }
+            }
+        } finally {
+            reply.fill(NativeCardManagementWire.ZERO_BYTE)
+        }
 
     private fun parseOutcomeTag(
         tag: Int,
         retries: Int,
-    ): ManageOutcome? {
-        return when (tag) {
-            MANAGEMENT_TAG_SUCCEEDED -> ManageOutcome.Succeeded
-            MANAGEMENT_TAG_WRONG_CREDENTIAL -> ManageOutcome.WrongCredential(retries)
-            MANAGEMENT_TAG_LOCKED -> ManageOutcome.Locked
-            MANAGEMENT_TAG_OTHER -> ManageOutcome.Other(0, 0)
-            else -> null
+    ): ManageOutcome? =
+        when (tag) {
+            NativeCardManagementWire.MANAGEMENT_TAG_SUCCEEDED -> {
+                ManageOutcome.Succeeded
+            }
+
+            NativeCardManagementWire.MANAGEMENT_TAG_WRONG_CREDENTIAL -> {
+                ManageOutcome.WrongCredential(retries)
+            }
+
+            NativeCardManagementWire.MANAGEMENT_TAG_LOCKED -> {
+                ManageOutcome.Locked
+            }
+
+            NativeCardManagementWire.MANAGEMENT_TAG_OTHER -> {
+                ManageOutcome.Other(
+                    NativeCardManagementWire.ZERO_INT,
+                    NativeCardManagementWire.ZERO_INT,
+                )
+            }
+
+            else -> {
+                null
+            }
         }
-    }
 
     private fun parsePin1State(
         stateByte: Int,
         retryByte: Int,
-    ): NativePin1State {
-        return when (stateByte) {
-            PIN_STATE_VERIFIED -> NativePin1State.Verified
-            PIN_STATE_REMAINING -> NativePin1State.Remaining(retryByte)
-            PIN_STATE_LOCKED -> NativePin1State.Locked
-            PIN_STATE_NO_INFO -> NativePin1State.NoInformation
-            else -> NativePin1State.Unrecognized
+    ): NativePin1State =
+        when (stateByte) {
+            NativeCardManagementWire.PIN_STATE_VERIFIED -> {
+                NativePin1State.Verified
+            }
+
+            NativeCardManagementWire.PIN_STATE_REMAINING -> {
+                NativePin1State.Remaining(retryByte and NativeCardManagementWire.OCTET_MASK)
+            }
+
+            NativeCardManagementWire.PIN_STATE_LOCKED -> {
+                NativePin1State.Locked
+            }
+
+            NativeCardManagementWire.PIN_STATE_NO_INFO -> {
+                NativePin1State.NoInformation
+            }
+
+            else -> {
+                NativePin1State.Unrecognized
+            }
         }
-    }
 
     private fun parsePin2State(
         stateByte: Int,
         retryByte: Int,
-    ): NativePin2State {
-        return when (stateByte) {
-            PIN_STATE_VERIFIED -> NativePin2State.Verified
-            PIN_STATE_REMAINING -> NativePin2State.Remaining(retryByte)
-            PIN_STATE_LOCKED -> NativePin2State.Locked
-            PIN_STATE_NO_INFO -> NativePin2State.NoInformation
-            else -> NativePin2State.Unrecognized
-        }
-    }
+    ): NativePin2State =
+        when (stateByte) {
+            NativeCardManagementWire.PIN_STATE_VERIFIED -> {
+                NativePin2State.Verified
+            }
 
-    private fun mapFailureTag(tag: Int): CardManagementFailure {
-        return when (tag) {
-            MANAGEMENT_TAG_CARD_UNAVAILABLE -> CardManagementFailure.CARD_UNAVAILABLE
-            MANAGEMENT_TAG_TRANSPORT_ERROR -> CardManagementFailure.TRANSPORT_ERROR
-            MANAGEMENT_TAG_INVALID_CREDENTIAL -> CardManagementFailure.INVALID_CREDENTIAL
-            MANAGEMENT_TAG_SAFETY_REFUSED -> CardManagementFailure.SAFETY_REFUSED
-            MANAGEMENT_TAG_PACE_REJECTED -> CardManagementFailure.PACE_REJECTED
+            NativeCardManagementWire.PIN_STATE_REMAINING -> {
+                NativePin2State.Remaining(retryByte and NativeCardManagementWire.OCTET_MASK)
+            }
+
+            NativeCardManagementWire.PIN_STATE_LOCKED -> {
+                NativePin2State.Locked
+            }
+
+            NativeCardManagementWire.PIN_STATE_NO_INFO -> {
+                NativePin2State.NoInformation
+            }
+
+            else -> {
+                NativePin2State.Unrecognized
+            }
+        }
+
+    private fun mapFailureTag(tag: Int): CardManagementFailure =
+        when (tag) {
+            NativeCardManagementWire.MANAGEMENT_TAG_CARD_UNAVAILABLE -> CardManagementFailure.CARD_UNAVAILABLE
+            NativeCardManagementWire.MANAGEMENT_TAG_TRANSPORT_ERROR -> CardManagementFailure.TRANSPORT_ERROR
+            NativeCardManagementWire.MANAGEMENT_TAG_INVALID_CREDENTIAL -> CardManagementFailure.INVALID_CREDENTIAL
+            NativeCardManagementWire.MANAGEMENT_TAG_SAFETY_REFUSED -> CardManagementFailure.SAFETY_REFUSED
+            NativeCardManagementWire.MANAGEMENT_TAG_PACE_REJECTED -> CardManagementFailure.PACE_REJECTED
             else -> CardManagementFailure.BRIDGE_ERROR
+        }
+
+    private class ChannelTarget(
+        val mode: CardManagementChannelMode,
+        val can: ByteArray? = null,
+    ) {
+        companion object {
+            fun wired(exchangeLevel: NativeCardExchangeLevel): ChannelTarget =
+                ChannelTarget(mode = CardManagementChannelMode.fromExchangeLevel(exchangeLevel))
+
+            fun pace(can: ByteArray): ChannelTarget =
+                ChannelTarget(
+                    mode = CardManagementChannelMode.CONTACTLESS_PACE,
+                    can = can,
+                )
+
+            fun heldSession(): ChannelTarget = ChannelTarget(mode = CardManagementChannelMode.CONTACTLESS_HELD_SESSION)
         }
     }
 
     @JvmStatic
     private external fun probeCredentialHealthNative(
-        exchangeLevel: Int,
+        channelMode: Int,
+        can: ByteArray?,
         readPinLengths: Boolean,
         callback: Any,
     ): ByteArray
 
     @JvmStatic
-    private external fun changePin1Native(
-        exchangeLevel: Int,
-        currentPin: ByteArray,
-        newPin: ByteArray,
+    private external fun managePinNative(
+        channelMode: Int,
+        op: Int,
+        can: ByteArray?,
+        firstSecret: ByteArray,
+        secondSecret: ByteArray,
         callback: Any,
     ): ByteArray
 
     @JvmStatic
-    private external fun changePin2Native(
-        exchangeLevel: Int,
-        currentPin: ByteArray,
-        newPin: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun unblockPin1Native(
-        exchangeLevel: Int,
-        puk: ByteArray,
-        newPin: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun unblockPin2Native(
-        exchangeLevel: Int,
-        puk: ByteArray,
-        newPin: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
+    @Suppress("LongParameterList")
     private external fun activateCardNative(
-        exchangeLevel: Int,
+        channelMode: Int,
         scheme: Int,
+        can: ByteArray?,
         code: ByteArray,
-        newPin1: ByteArray,
-        newPin2: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessProbeCredentialHealthNative(
-        can: ByteArray,
-        readPinLengths: Boolean,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessChangePin1Native(
-        can: ByteArray,
-        currentPin: ByteArray,
-        newPin: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessChangePin2Native(
-        can: ByteArray,
-        currentPin: ByteArray,
-        newPin: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessUnblockPin1Native(
-        can: ByteArray,
-        puk: ByteArray,
-        newPin: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessUnblockPin2Native(
-        can: ByteArray,
-        puk: ByteArray,
-        newPin: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessProbeCredentialHealthOnSessionNative(
-        readPinLengths: Boolean,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessChangePin1OnSessionNative(
-        currentPin: ByteArray,
-        newPin: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessChangePin2OnSessionNative(
-        currentPin: ByteArray,
-        newPin: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessUnblockPin1OnSessionNative(
-        puk: ByteArray,
-        newPin: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessUnblockPin2OnSessionNative(
-        puk: ByteArray,
-        newPin: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessActivateCardOnSessionNative(
-        scheme: Int,
-        code: ByteArray,
-        newPin1: ByteArray,
-        newPin2: ByteArray,
-        callback: Any,
-    ): ByteArray
-
-    @JvmStatic
-    private external fun contactlessActivateCardNative(
-        can: ByteArray,
-        scheme: Int,
-        code: ByteArray,
-        newPin1: ByteArray,
-        newPin2: ByteArray,
+        newPin1: ByteArray?,
+        newPin2: ByteArray?,
         callback: Any,
     ): ByteArray
 }

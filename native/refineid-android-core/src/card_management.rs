@@ -53,6 +53,16 @@ pub(crate) const ACTIVATION_NEEDS_PIN1_ONLY: u8 = 1;
 pub(crate) const ACTIVATION_NEEDS_PIN2_ONLY: u8 = 2;
 pub(crate) const ACTIVATION_NEEDS_BOTH: u8 = 3;
 
+pub(crate) const CHANNEL_MODE_WIRED_APDU: i32 = 0;
+pub(crate) const CHANNEL_MODE_WIRED_T0_TPDU: i32 = 1;
+pub(crate) const CHANNEL_MODE_CONTACTLESS_PACE: i32 = 2;
+pub(crate) const CHANNEL_MODE_CONTACTLESS_HELD_SESSION: i32 = 3;
+
+pub(crate) const PIN_OP_CHANGE_PIN1: i32 = 0;
+pub(crate) const PIN_OP_CHANGE_PIN2: i32 = 1;
+pub(crate) const PIN_OP_UNBLOCK_PIN1: i32 = 2;
+pub(crate) const PIN_OP_UNBLOCK_PIN2: i32 = 3;
+
 pub(crate) const NO_RETRY_COUNT: u8 = 0xFF;
 
 /// Octets of a health reply without the PIN and PUK lengths.
@@ -145,6 +155,40 @@ pub(crate) const fn activation_scheme_from_byte(byte: u8) -> Option<ActivationSc
         ACTIVATION_SCHEME_PUK => Some(ActivationScheme::ActivationCodeIsPuk),
         ACTIVATION_SCHEME_PRESET => Some(ActivationScheme::PresetActivationPin),
         _ => None,
+    }
+}
+
+/// Validate a JNI wire integer naming an activation scheme byte, including
+/// `ACTIVATION_SCHEME_UNKNOWN` so [`activate_card`] maps an unknown scheme to
+/// `SafetyRefused` while out-of-range integers fail at the JNI border.
+pub(crate) const fn validate_activation_scheme_wire(value: i32) -> Option<u8> {
+    match value {
+        value if value == ACTIVATION_SCHEME_UNKNOWN as i32 => Some(ACTIVATION_SCHEME_UNKNOWN),
+        value if value == ACTIVATION_SCHEME_PUK as i32 => Some(ACTIVATION_SCHEME_PUK),
+        value if value == ACTIVATION_SCHEME_PRESET as i32 => Some(ACTIVATION_SCHEME_PRESET),
+        _ => None,
+    }
+}
+
+/// Which PIN management operation a call executes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PinManageOp {
+    ChangePin1,
+    ChangePin2,
+    UnblockPin1,
+    UnblockPin2,
+}
+
+impl PinManageOp {
+    /// The operation a JNI wire integer names, or none.
+    pub(crate) const fn from_wire(value: i32) -> Option<Self> {
+        match value {
+            PIN_OP_CHANGE_PIN1 => Some(Self::ChangePin1),
+            PIN_OP_CHANGE_PIN2 => Some(Self::ChangePin2),
+            PIN_OP_UNBLOCK_PIN1 => Some(Self::UnblockPin1),
+            PIN_OP_UNBLOCK_PIN2 => Some(Self::UnblockPin2),
+            _ => None,
+        }
     }
 }
 
@@ -256,90 +300,60 @@ pub(crate) fn encode_credential_health_reply(
     }
 }
 
-/// Execute change PIN1.
-pub(crate) fn change_pin1<T: CardTransport>(
+/// Execute `op` on `transport`. Both secret vectors move directly into
+/// [`UnvalidatedSecret`] on entry, so every exit path zeroizes them without
+/// cloning plaintext credential bytes.
+pub(crate) fn manage_pin<T: CardTransport>(
     transport: &mut T,
-    mut current_bytes: Vec<u8>,
-    mut new_bytes: Vec<u8>,
+    op: PinManageOp,
+    first_bytes: Vec<u8>,
+    new_bytes: Vec<u8>,
 ) -> Result<ManageOutcome, CardManagementFailure> {
-    let current_sec = UnvalidatedSecret::from_owned_bytes(current_bytes.clone());
-    let new_sec = UnvalidatedSecret::from_owned_bytes(new_bytes.clone());
-    current_bytes.fill(0);
-    new_bytes.fill(0);
+    let first_sec = UnvalidatedSecret::from_owned_bytes(first_bytes);
+    let new_sec = UnvalidatedSecret::from_owned_bytes(new_bytes);
 
-    let current_pin =
-        Pin1::reconstruct(current_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
-    let new_pin =
-        Pin1::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
-
-    let lengths = read_lengths(transport)?;
-    transport
-        .change_pin1(&lengths, current_pin, new_pin)
-        .map_err(map_auth_error)
-}
-
-/// Execute change PIN2.
-pub(crate) fn change_pin2<T: CardTransport>(
-    transport: &mut T,
-    mut current_bytes: Vec<u8>,
-    mut new_bytes: Vec<u8>,
-) -> Result<ManageOutcome, CardManagementFailure> {
-    let current_sec = UnvalidatedSecret::from_owned_bytes(current_bytes.clone());
-    let new_sec = UnvalidatedSecret::from_owned_bytes(new_bytes.clone());
-    current_bytes.fill(0);
-    new_bytes.fill(0);
-
-    let current_pin =
-        Pin2::reconstruct(current_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
-    let new_pin =
-        Pin2::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
-
-    let lengths = read_lengths(transport)?;
-    transport
-        .change_pin2(&lengths, current_pin, new_pin)
-        .map_err(map_auth_error)
-}
-
-/// Execute unblock / reset PIN1.
-pub(crate) fn unblock_pin1<T: CardTransport>(
-    transport: &mut T,
-    mut puk_bytes: Vec<u8>,
-    mut new_bytes: Vec<u8>,
-) -> Result<ManageOutcome, CardManagementFailure> {
-    let puk_sec = UnvalidatedSecret::from_owned_bytes(puk_bytes.clone());
-    let new_sec = UnvalidatedSecret::from_owned_bytes(new_bytes.clone());
-    puk_bytes.fill(0);
-    new_bytes.fill(0);
-
-    let puk = Puk::reconstruct(puk_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
-    let new_pin =
-        Pin1::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
-
-    let lengths = read_lengths(transport)?;
-    transport
-        .unblock_pin1(&lengths, puk, new_pin)
-        .map_err(map_auth_error)
-}
-
-/// Execute unblock / reset PIN2.
-pub(crate) fn unblock_pin2<T: CardTransport>(
-    transport: &mut T,
-    mut puk_bytes: Vec<u8>,
-    mut new_bytes: Vec<u8>,
-) -> Result<ManageOutcome, CardManagementFailure> {
-    let puk_sec = UnvalidatedSecret::from_owned_bytes(puk_bytes.clone());
-    let new_sec = UnvalidatedSecret::from_owned_bytes(new_bytes.clone());
-    puk_bytes.fill(0);
-    new_bytes.fill(0);
-
-    let puk = Puk::reconstruct(puk_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
-    let new_pin =
-        Pin2::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
-
-    let lengths = read_lengths(transport)?;
-    transport
-        .unblock_pin2(&lengths, puk, new_pin)
-        .map_err(map_auth_error)
+    match op {
+        PinManageOp::ChangePin1 => {
+            let current_pin = Pin1::reconstruct(first_sec)
+                .map_err(|_| CardManagementFailure::InvalidCredential)?;
+            let new_pin =
+                Pin1::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
+            let lengths = read_lengths(transport)?;
+            transport
+                .change_pin1(&lengths, current_pin, new_pin)
+                .map_err(map_auth_error)
+        }
+        PinManageOp::ChangePin2 => {
+            let current_pin = Pin2::reconstruct(first_sec)
+                .map_err(|_| CardManagementFailure::InvalidCredential)?;
+            let new_pin =
+                Pin2::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
+            let lengths = read_lengths(transport)?;
+            transport
+                .change_pin2(&lengths, current_pin, new_pin)
+                .map_err(map_auth_error)
+        }
+        PinManageOp::UnblockPin1 => {
+            let puk = Puk::reconstruct(first_sec)
+                .map_err(|_| CardManagementFailure::InvalidCredential)?;
+            let new_pin =
+                Pin1::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
+            let lengths = read_lengths(transport)?;
+            transport
+                .unblock_pin1(&lengths, puk, new_pin)
+                .map_err(map_auth_error)
+        }
+        PinManageOp::UnblockPin2 => {
+            let puk = Puk::reconstruct(first_sec)
+                .map_err(|_| CardManagementFailure::InvalidCredential)?;
+            let new_pin =
+                Pin2::reconstruct(new_sec).map_err(|_| CardManagementFailure::InvalidCredential)?;
+            let lengths = read_lengths(transport)?;
+            transport
+                .unblock_pin2(&lengths, puk, new_pin)
+                .map_err(map_auth_error)
+        }
+    }
 }
 
 /// Encode `ManageOutcome` to native byte array.
@@ -626,8 +640,9 @@ mod tests {
         for status in refused_statuses() {
             let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(&[status]));
 
-            let result = change_pin1(
+            let result = manage_pin(
                 &mut transport,
+                PinManageOp::ChangePin1,
                 SYNTHETIC_PIN1.to_vec(),
                 SYNTHETIC_NEW_PIN1.to_vec(),
             );
@@ -642,8 +657,9 @@ mod tests {
         for status in refused_statuses() {
             let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(&[status]));
 
-            let result = change_pin2(
+            let result = manage_pin(
                 &mut transport,
+                PinManageOp::ChangePin2,
                 SYNTHETIC_PIN2.to_vec(),
                 SYNTHETIC_NEW_PIN2.to_vec(),
             );
@@ -658,8 +674,9 @@ mod tests {
         let mut transport =
             ScriptedTransport::new(&after_citizen_lengths_read(&[remaining(SERVED_RETRIES)]));
 
-        let result = change_pin1(
+        let result = manage_pin(
             &mut transport,
+            PinManageOp::ChangePin1,
             SYNTHETIC_PIN1.to_vec(),
             SYNTHETIC_NEW_PIN1.to_vec(),
         );
@@ -674,8 +691,9 @@ mod tests {
         let mut transport =
             ScriptedTransport::new(&after_citizen_lengths_read(&[remaining(SERVED_RETRIES)]));
 
-        let result = change_pin2(
+        let result = manage_pin(
             &mut transport,
+            PinManageOp::ChangePin2,
             SYNTHETIC_PIN2.to_vec(),
             SYNTHETIC_NEW_PIN2.to_vec(),
         );
@@ -690,8 +708,9 @@ mod tests {
         for status in blocked_statuses() {
             let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(&[status]));
             transport.credential_answer = Some(StatusWord::AuthenticationBlocked);
-            let result = change_pin1(
+            let result = manage_pin(
                 &mut transport,
+                PinManageOp::ChangePin1,
                 SYNTHETIC_PIN1.to_vec(),
                 SYNTHETIC_NEW_PIN1.to_vec(),
             );
@@ -700,8 +719,9 @@ mod tests {
 
             let mut transport = ScriptedTransport::new(&after_citizen_lengths_read(&[status]));
             transport.credential_answer = Some(StatusWord::AuthenticationBlocked);
-            let result = change_pin2(
+            let result = manage_pin(
                 &mut transport,
+                PinManageOp::ChangePin2,
                 SYNTHETIC_PIN2.to_vec(),
                 SYNTHETIC_NEW_PIN2.to_vec(),
             );
@@ -794,27 +814,22 @@ mod tests {
         transcripts
     }
 
-    type Unblock = fn(
-        &mut ScriptedTransport,
-        Vec<u8>,
-        Vec<u8>,
-    ) -> Result<ManageOutcome, CardManagementFailure>;
-
     /// Both unblock operations with a valid new PIN for the target.
-    fn unblocks() -> [(Unblock, &'static [u8]); 2] {
+    fn unblocks() -> [(PinManageOp, &'static [u8]); 2] {
         [
-            (unblock_pin1 as Unblock, SYNTHETIC_NEW_PIN1),
-            (unblock_pin2 as Unblock, SYNTHETIC_NEW_PIN2),
+            (PinManageOp::UnblockPin1, SYNTHETIC_NEW_PIN1),
+            (PinManageOp::UnblockPin2, SYNTHETIC_NEW_PIN2),
         ]
     }
 
     #[test]
     fn unblock_is_refused_below_the_puk_retry_floor_without_presenting_it() {
-        for (unblock, new_pin) in unblocks() {
+        for (op, new_pin) in unblocks() {
             for transcript in refused_puk_transcripts() {
                 let mut transport = ScriptedTransport::new(&transcript);
 
-                let result = unblock(&mut transport, SYNTHETIC_PUK.to_vec(), new_pin.to_vec());
+                let result =
+                    manage_pin(&mut transport, op, SYNTHETIC_PUK.to_vec(), new_pin.to_vec());
 
                 assert_eq!(
                     result,
@@ -829,11 +844,12 @@ mod tests {
 
     #[test]
     fn unblock_at_the_puk_floor_reaches_the_card() {
-        for (unblock, new_pin) in unblocks() {
+        for (op, new_pin) in unblocks() {
             for transcript in served_puk_transcripts() {
                 let mut transport = ScriptedTransport::new(&transcript);
 
-                let result = unblock(&mut transport, SYNTHETIC_PUK.to_vec(), new_pin.to_vec());
+                let result =
+                    manage_pin(&mut transport, op, SYNTHETIC_PUK.to_vec(), new_pin.to_vec());
 
                 assert_eq!(result, Err(CardManagementFailure::TransportError));
                 assert_eq!(transport.credential_calls, 1);
@@ -1162,5 +1178,87 @@ mod tests {
         assert_eq!(encoded[1], ACTIVATION_SCHEME_PRESET);
         assert_eq!(encoded[2], MANAGEMENT_TAG_SUCCEEDED);
         assert_eq!(encoded[4], MANAGEMENT_TAG_SUCCEEDED);
+    }
+
+    #[test]
+    fn decodes_only_stable_pin_manage_op_wire_codes() {
+        const PIN_OP_BELOW_RANGE: i32 = -1;
+        const PIN_OP_ABOVE_RANGE: i32 = PIN_OP_UNBLOCK_PIN2 + 1;
+        assert_eq!(
+            PinManageOp::from_wire(PIN_OP_CHANGE_PIN1),
+            Some(PinManageOp::ChangePin1)
+        );
+        assert_eq!(
+            PinManageOp::from_wire(PIN_OP_CHANGE_PIN2),
+            Some(PinManageOp::ChangePin2)
+        );
+        assert_eq!(
+            PinManageOp::from_wire(PIN_OP_UNBLOCK_PIN1),
+            Some(PinManageOp::UnblockPin1)
+        );
+        assert_eq!(
+            PinManageOp::from_wire(PIN_OP_UNBLOCK_PIN2),
+            Some(PinManageOp::UnblockPin2)
+        );
+        assert_eq!(PinManageOp::from_wire(PIN_OP_BELOW_RANGE), None);
+        assert_eq!(PinManageOp::from_wire(PIN_OP_ABOVE_RANGE), None);
+    }
+
+    #[test]
+    fn validates_only_stable_activation_scheme_wire_codes() {
+        const SCHEME_BELOW_RANGE: i32 = -1;
+        const SCHEME_ABOVE_RANGE: i32 = ACTIVATION_SCHEME_PRESET as i32 + 1;
+        const SCHEME_HIGH_BITS_SET: i32 = 0x0100 | (ACTIVATION_SCHEME_PUK as i32);
+        assert_eq!(
+            validate_activation_scheme_wire(i32::from(ACTIVATION_SCHEME_UNKNOWN)),
+            Some(ACTIVATION_SCHEME_UNKNOWN)
+        );
+        assert_eq!(
+            validate_activation_scheme_wire(i32::from(ACTIVATION_SCHEME_PUK)),
+            Some(ACTIVATION_SCHEME_PUK)
+        );
+        assert_eq!(
+            validate_activation_scheme_wire(i32::from(ACTIVATION_SCHEME_PRESET)),
+            Some(ACTIVATION_SCHEME_PRESET)
+        );
+        assert_eq!(validate_activation_scheme_wire(SCHEME_BELOW_RANGE), None);
+        assert_eq!(validate_activation_scheme_wire(SCHEME_ABOVE_RANGE), None);
+        assert_eq!(validate_activation_scheme_wire(SCHEME_HIGH_BITS_SET), None);
+    }
+
+    #[test]
+    fn manage_pin_rejects_non_digit_entries_without_touching_transport() {
+        const NON_DIGIT_MARKER: u8 = b'a';
+        let non_digit_pin1 = vec![NON_DIGIT_MARKER; FINEID_PIN1_MIN_LENGTH];
+        let non_digit_puk = vec![NON_DIGIT_MARKER; PUK_MIN_LENGTH];
+        for (op, valid_first, valid_second) in [
+            (PinManageOp::ChangePin1, SYNTHETIC_PIN1, SYNTHETIC_NEW_PIN1),
+            (PinManageOp::ChangePin2, SYNTHETIC_PIN2, SYNTHETIC_NEW_PIN2),
+            (PinManageOp::UnblockPin1, SYNTHETIC_PUK, SYNTHETIC_NEW_PIN1),
+            (PinManageOp::UnblockPin2, SYNTHETIC_PUK, SYNTHETIC_NEW_PIN2),
+        ] {
+            let invalid_first = match op {
+                PinManageOp::ChangePin1 | PinManageOp::ChangePin2 => non_digit_pin1.clone(),
+                PinManageOp::UnblockPin1 | PinManageOp::UnblockPin2 => non_digit_puk.clone(),
+            };
+            let mut transport = ScriptedTransport::new(&[]);
+            assert_eq!(
+                manage_pin(&mut transport, op, invalid_first, valid_second.to_vec()),
+                Err(CardManagementFailure::InvalidCredential)
+            );
+            assert_eq!(transport.credential_calls, 0);
+
+            let mut transport = ScriptedTransport::new(&[]);
+            assert_eq!(
+                manage_pin(
+                    &mut transport,
+                    op,
+                    valid_first.to_vec(),
+                    non_digit_pin1.clone()
+                ),
+                Err(CardManagementFailure::InvalidCredential)
+            );
+            assert_eq!(transport.credential_calls, 0);
+        }
     }
 }

@@ -28,8 +28,8 @@ use crate::card_certificate::{
     map_pkcs15_error, read_authentication_certificate, read_qualified_certificate,
 };
 use crate::card_management::{
-    CardManagementFailure, CredentialHealthAnswer, PinLengthsRead, activate_card, change_pin1,
-    change_pin2, decided_activation_scheme, probe_credential_health, unblock_pin1, unblock_pin2,
+    CardManagementFailure, CredentialHealthAnswer, PinLengthsRead, PinManageOp, activate_card,
+    decided_activation_scheme, manage_pin, probe_credential_health,
 };
 use crate::card_transport::CardExchangeLevel;
 use crate::card_transport::{AndroidCardTransport, SingleBlockExchange};
@@ -697,48 +697,22 @@ pub(crate) fn contactless_probe_credential_health<Exchange: SingleBlockExchange>
     }
 }
 
-/// Change `pin` inside `channel`, presenting the current value.
-pub(crate) fn contactless_change_pin<Exchange: SingleBlockExchange>(
+/// Run `op` inside `channel`, presenting `first_bytes` and setting
+/// `new_bytes`.
+pub(crate) fn contactless_manage_pin<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
     channel: ContactlessChannel,
-    pin: ManagedPin,
-    mut current_bytes: Vec<u8>,
+    op: PinManageOp,
+    mut first_bytes: Vec<u8>,
     mut new_bytes: Vec<u8>,
 ) -> (Result<ManageOutcome, CardManagementFailure>, Exchange) {
     match open_contactless_channel(transport, channel) {
         Ok(mut open) => {
-            let result = match pin {
-                ManagedPin::Pin1 => change_pin1(&mut open.secure, current_bytes, new_bytes),
-                ManagedPin::Pin2 => change_pin2(&mut open.secure, current_bytes, new_bytes),
-            };
+            let result = manage_pin(&mut open.secure, op, first_bytes, new_bytes);
             (result, close_contactless_channel(open))
         }
         Err((failure, exchange)) => {
-            current_bytes.fill(0);
-            new_bytes.fill(0);
-            (Err(management_open_failure(failure)), exchange)
-        }
-    }
-}
-
-/// Unblock `pin` with the PUK inside `channel`, setting a new value.
-pub(crate) fn contactless_unblock_pin<Exchange: SingleBlockExchange>(
-    transport: AndroidCardTransport<Exchange>,
-    channel: ContactlessChannel,
-    pin: ManagedPin,
-    mut puk_bytes: Vec<u8>,
-    mut new_bytes: Vec<u8>,
-) -> (Result<ManageOutcome, CardManagementFailure>, Exchange) {
-    match open_contactless_channel(transport, channel) {
-        Ok(mut open) => {
-            let result = match pin {
-                ManagedPin::Pin1 => unblock_pin1(&mut open.secure, puk_bytes, new_bytes),
-                ManagedPin::Pin2 => unblock_pin2(&mut open.secure, puk_bytes, new_bytes),
-            };
-            (result, close_contactless_channel(open))
-        }
-        Err((failure, exchange)) => {
-            puk_bytes.fill(0);
+            first_bytes.fill(0);
             new_bytes.fill(0);
             (Err(management_open_failure(failure)), exchange)
         }
@@ -1065,14 +1039,16 @@ mod tests {
     use refineid_pkcs15::Pkcs15Error;
 
     use super::{
-        ContactlessChannel, ContactlessOpenOutcome, ManagedPin, SecureChannelFailure,
-        contactless_activate_card, contactless_change_pin, contactless_close, contactless_connect,
+        ContactlessChannel, ContactlessOpenOutcome, SecureChannelFailure,
+        contactless_activate_card, contactless_close, contactless_connect, contactless_manage_pin,
         contactless_probe_credential_health, contactless_probe_pin2, contactless_qualified_sign,
-        contactless_read_qualified_certificate, contactless_unblock_pin, map_pace_error,
-        open_preflight_failure, pin2_channel_failure, qualified_channel_failure, reconstruct_can,
+        contactless_read_qualified_certificate, map_pace_error, open_preflight_failure,
+        pin2_channel_failure, qualified_channel_failure, reconstruct_can,
     };
     use crate::card_certificate::CertificateReadFailure;
-    use crate::card_management::{ACTIVATION_SCHEME_PUK, CardManagementFailure, PinLengthsRead};
+    use crate::card_management::{
+        ACTIVATION_SCHEME_PUK, CardManagementFailure, PinLengthsRead, PinManageOp,
+    };
     use crate::card_transport::{
         AndroidCardTransport, CardExchangeLevel, SingleBlockExchange, SingleExchangeOutcome,
     };
@@ -1129,20 +1105,20 @@ mod tests {
         ));
         assert_eq!(exchange.blocks, 0);
 
-        let (change, exchange) = contactless_change_pin(
+        let (change, exchange) = contactless_manage_pin(
             transport(),
             ContactlessChannel::HeldSession,
-            ManagedPin::Pin1,
+            PinManageOp::ChangePin1,
             SYNTHETIC_PIN1.to_vec(),
             SYNTHETIC_NEW_PIN1.to_vec(),
         );
         assert_eq!(change, unavailable);
         assert_eq!(exchange.blocks, 0);
 
-        let (unblock, exchange) = contactless_unblock_pin(
+        let (unblock, exchange) = contactless_manage_pin(
             transport(),
             ContactlessChannel::HeldSession,
-            ManagedPin::Pin1,
+            PinManageOp::UnblockPin1,
             SYNTHETIC_PUK.to_vec(),
             SYNTHETIC_NEW_PIN1.to_vec(),
         );
