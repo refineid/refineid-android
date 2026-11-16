@@ -14,6 +14,7 @@ import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
 import fi.refineid.android.core.CardManagementResult
 import fi.refineid.android.core.CardManagementScheme
+import fi.refineid.android.core.CardManagementSessionOps
 import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativeAuthenticationCertificate
@@ -38,6 +39,7 @@ import fi.refineid.android.core.NativeQualifiedSignFailure
 import fi.refineid.android.core.NativeQualifiedSignResult
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin2Submission
+import fi.refineid.android.core.QualifiedCardSessionOps
 import fi.refineid.android.core.QualifiedSignFailure
 import fi.refineid.android.core.QualifiedSignResult
 import fi.refineid.android.core.QualifiedSignatureVerifier
@@ -86,7 +88,9 @@ internal class CcidUsbSession(
     private val exchange: CcidCommandExchange,
     private val sequenceCounter: CcidSequenceCounter,
     private val interruptIn: UsbEndpoint? = null,
-) : AutoCloseable {
+) : CardManagementSessionOps,
+    QualifiedCardSessionOps,
+    AutoCloseable {
     private val ownerThread = Thread.currentThread()
     private val exchangeLevel =
         when (descriptor.exchangeLevel) {
@@ -268,7 +272,7 @@ internal class CcidUsbSession(
      * context restored; under a held PACE session the read runs inside the
      * secure channel, and the next operation there re-selects itself.
      */
-    fun readQualifiedCertificate(): NativeCertificateReadResult<NativeQualifiedCertificate> {
+    override fun readQualifiedCertificate(): NativeCertificateReadResult<NativeQualifiedCertificate> {
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
@@ -352,7 +356,7 @@ internal class CcidUsbSession(
         return result
     }
 
-    fun probePin2Status(): NativePin2PreflightResult {
+    override fun probePin2Status(): NativePin2PreflightResult {
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
@@ -572,35 +576,7 @@ internal class CcidUsbSession(
         }
     }
 
-    fun qualifiedSignPrehashed(
-        algorithm: QualifiedSigningAlgorithm,
-        pin2: Pin2Submission,
-        digest: ByteArray,
-        expectedCertificate: NativeQualifiedCertificate,
-    ): QualifiedSignResult =
-        qualifiedSignInput(
-            algorithm = algorithm,
-            inputMode = QualifiedSigningInputMode.PREHASHED,
-            pin2 = pin2,
-            input = digest,
-            expectedCertificate = expectedCertificate,
-        )
-
-    fun qualifiedSign(
-        algorithm: QualifiedSigningAlgorithm,
-        pin2: Pin2Submission,
-        content: ByteArray,
-        expectedCertificate: NativeQualifiedCertificate,
-    ): QualifiedSignResult =
-        qualifiedSignInput(
-            algorithm = algorithm,
-            inputMode = QualifiedSigningInputMode.MESSAGE,
-            pin2 = pin2,
-            input = content,
-            expectedCertificate = expectedCertificate,
-        )
-
-    fun qualifiedSignInput(
+    override fun qualifiedSignInput(
         algorithm: QualifiedSigningAlgorithm,
         inputMode: QualifiedSigningInputMode,
         pin2: Pin2Submission,
@@ -779,7 +755,7 @@ internal class CcidUsbSession(
     // leaves the open's PIN 1 count unknown.
 
     /** The credential health, with the card's PIN and PUK lengths when [readPinLengths] asks for them. */
-    fun probeCredentialHealth(readPinLengths: Boolean): CardManagementResult<CredentialHealth> {
+    override fun probeCredentialHealth(readPinLengths: Boolean): CardManagementResult<CredentialHealth> {
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
@@ -791,7 +767,7 @@ internal class CcidUsbSession(
         }
     }
 
-    fun changePin1(
+    override fun changePin1(
         currentPin: ByteArray,
         newPin: ByteArray,
     ): CardManagementResult<ManageOutcome> {
@@ -807,7 +783,7 @@ internal class CcidUsbSession(
         }
     }
 
-    fun changePin2(
+    override fun changePin2(
         currentPin: ByteArray,
         newPin: ByteArray,
     ): CardManagementResult<ManageOutcome> {
@@ -823,7 +799,7 @@ internal class CcidUsbSession(
         }
     }
 
-    fun unblockPin1(
+    override fun unblockPin1(
         puk: ByteArray,
         newPin: ByteArray,
     ): CardManagementResult<ManageOutcome> {
@@ -839,7 +815,7 @@ internal class CcidUsbSession(
         }
     }
 
-    fun unblockPin2(
+    override fun unblockPin2(
         puk: ByteArray,
         newPin: ByteArray,
     ): CardManagementResult<ManageOutcome> {
@@ -855,7 +831,7 @@ internal class CcidUsbSession(
         }
     }
 
-    fun activateCard(
+    override fun activateCard(
         scheme: CardManagementScheme,
         code: ByteArray,
         newPin1: ByteArray?,

@@ -17,6 +17,7 @@ import fi.refineid.android.core.AuthenticationCardIdentity
 import fi.refineid.android.core.AuthenticationPinCache
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.CardManagementService
 import fi.refineid.android.core.CertificateHolderName
 import fi.refineid.android.core.NativeCardAccessResult
 import fi.refineid.android.core.NativeCardCa
@@ -36,6 +37,9 @@ import fi.refineid.android.core.Pin1Retention
 import fi.refineid.android.core.Pin1Submission
 import fi.refineid.android.core.Pin1Verification
 import fi.refineid.android.core.Pin1VerificationResult
+import fi.refineid.android.core.QualifiedCardService
+import fi.refineid.android.core.QueuedCardManagementService
+import fi.refineid.android.core.QueuedQualifiedCardService
 import fi.refineid.android.core.attemptsLeft
 import fi.refineid.android.core.organizationPin1Refused
 import fi.refineid.android.core.primedAuthenticationCertificate
@@ -196,21 +200,22 @@ internal class NfcReaderController(
             },
         )
 
-    internal val qualifiedCardService =
-        NfcQualifiedCardService(
-            probeExecutor = probeExecutor,
-            mainHandler = mainHandler,
+    internal val qualifiedCardService: QualifiedCardService =
+        QueuedQualifiedCardService(
+            worker = probeExecutor,
+            postResult = { mainHandler.post(it) },
             isReady = {
                 latestSnapshot.status == NfcReaderStatus.CARD_READY || tapToSign.inProgress
             },
             currentGeneration = { probeGeneration },
             activeSession = { activeSession },
+            onCertificatePaceRejected = CanSessionStore::drop,
         )
 
-    internal val cardManagementService =
-        NfcCardManagementService(
-            probeExecutor = probeExecutor,
-            mainHandler = mainHandler,
+    internal val cardManagementService: CardManagementService =
+        QueuedCardManagementService(
+            worker = probeExecutor,
+            postResult = { mainHandler.post(it) },
             isReady = {
                 latestSnapshot.status == NfcReaderStatus.CARD_READY ||
                     latestSnapshot.status == NfcReaderStatus.ACTIVATION_REQUIRED
