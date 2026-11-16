@@ -78,30 +78,50 @@ class DocumentValidatorTest {
     }
 
     @Test
-    fun acceptsMultiRevisionPadesWithDocumentTimeStamp() {
+    fun doesNotTrustATimestampedRevisionWithoutJudgingIt() {
         val fixture = SignedPdfFixture.buildTimestamped()
-        val validator = DocumentValidator(trustAnchors = listOf(fixture.certificate), checkRevocation = false)
+        val validator =
+            DocumentValidator(
+                trustAnchors = listOf(fixture.certificate, requireNotNull(fixture.timestampCertificate)),
+                checkRevocation = false,
+            )
 
         val result = validator.validate(fixture.pdf) as DocumentValidationResult.Completed
 
-        assertTrue(result.isValid)
+        // The revision after the signature is authenticated by a trusted
+        // timestamp, but nothing here judges what that revision changed,
+        // so the signature does not cover the file and the document is
+        // refused.
+        assertFalse(result.isValid)
         assertEquals(2, result.signatures.size)
 
         val signerVerdict = result.signatures[0]
-        assertTrue(signerVerdict.isValid)
+        assertFalse(signerVerdict.coversWholeDocument)
         assertTrue(signerVerdict.digestMatches)
         assertTrue(signerVerdict.signatureValid)
         assertTrue(signerVerdict.chainTrusted)
-        assertTrue(signerVerdict.coversWholeDocument)
         assertFalse(signerVerdict.isDocumentTimestamp)
         assertEquals(SIGNER_COMMON_NAME, signerVerdict.signerCommonName)
 
         val timestampVerdict = result.signatures[1]
-        assertTrue(timestampVerdict.isValid)
         assertTrue(timestampVerdict.digestMatches)
         assertTrue(timestampVerdict.signatureValid)
         assertTrue(timestampVerdict.coversWholeDocument)
         assertTrue(timestampVerdict.isDocumentTimestamp)
+    }
+
+    @Test
+    fun rejectsASplicedTimestampToken() {
+        val fixture = SignedPdfFixture.buildTimestamped(spliceTstInfo = true)
+        val validator =
+            DocumentValidator(
+                trustAnchors = listOf(fixture.certificate, requireNotNull(fixture.timestampCertificate)),
+                checkRevocation = false,
+            )
+
+        // The signed attributes cover one TSTInfo while the encapsulated
+        // content holds another: the token must not parse as a timestamp.
+        assertEquals(DocumentValidationResult.Malformed, validator.validate(fixture.pdf))
     }
 
     @Test
@@ -110,13 +130,29 @@ class DocumentValidatorTest {
         val tampered = fixture.pdf.copyOf()
         // Tamper with the byte range of the PDF
         tampered[TAMPER_OFFSET] = (tampered[TAMPER_OFFSET] + 1).toByte()
-        val validator = DocumentValidator(trustAnchors = listOf(fixture.certificate), checkRevocation = false)
+        val validator =
+            DocumentValidator(
+                trustAnchors = listOf(fixture.certificate, requireNotNull(fixture.timestampCertificate)),
+                checkRevocation = false,
+            )
 
         val result = validator.validate(tampered) as DocumentValidationResult.Completed
 
         assertFalse(result.isValid)
         assertFalse(result.signatures[0].digestMatches)
         assertFalse(result.signatures[1].digestMatches)
+    }
+
+    @Test
+    fun rejectsADocumentTimestampTheAnchorsDoNotTrust() {
+        val fixture = SignedPdfFixture.buildTimestamped()
+        val validator = DocumentValidator(trustAnchors = listOf(fixture.certificate), checkRevocation = false)
+
+        val result = validator.validate(fixture.pdf) as DocumentValidationResult.Completed
+
+        assertFalse(result.isValid)
+        assertFalse(result.signatures[1].chainTrusted)
+        assertFalse(result.signatures[0].coversWholeDocument)
     }
 
     @Test
@@ -253,6 +289,7 @@ private class SignedPdfFixture private constructor(
         private const val SERIAL = 4919
         private const val PLACEHOLDER_WIDTH = 10
         private const val FIXED_HEX_LENGTH = 4096
+        private const val SHA384_DIGEST_BYTES = 48
 
         fun build(
             commonName: String = COMMON_NAME,
@@ -296,7 +333,7 @@ private class SignedPdfFixture private constructor(
             return SignedPdfFixture(pdf, certificate)
         }
 
-        fun buildTimestamped(): SignedPdfFixture {
+        fun buildTimestamped(spliceTstInfo: Boolean = false): SignedPdfFixture {
             val base = build()
             val keyPair = generateKeyPair()
             val tsaCert =
@@ -330,7 +367,7 @@ private class SignedPdfFixture private constructor(
             check(prefix.size == prefixLength) { "prefix length shifted" }
 
             val messageDigest = MessageDigest.getInstance("SHA-384").digest(prefix + tail)
-            val cms = buildTimeStampCms(keyPair, tsaCert, messageDigest)
+            val cms = buildTimeStampCms(keyPair, tsaCert, messageDigest, spliceTstInfo)
             val hex = cms.joinToString("") { "%02x".format(it) }
             check(hex.length <= FIXED_HEX_LENGTH) { "CMS larger than the placeholder" }
             val paddedHex = hex.padEnd(FIXED_HEX_LENGTH, '0')
@@ -479,8 +516,11 @@ private class SignedPdfFixture private constructor(
             keyPair: KeyPair,
             certificate: X509Certificate,
             byteRangeDigest: ByteArray,
+            spliceTstInfo: Boolean = false,
         ): ByteArray {
             val tstInfo = buildTstInfo(byteRangeDigest)
+            val encapsulatedTstInfo =
+                if (spliceTstInfo) buildTstInfo(ByteArray(SHA384_DIGEST_BYTES)) else tstInfo
             val tstInfoDigest = MessageDigest.getInstance("SHA-384").digest(tstInfo)
             val sha384Algorithm = DerEncoder.sequence(listOf(DerEncoder.objectIdentifier(SHA384_OID)))
             val signedAttributes =
@@ -512,7 +552,7 @@ private class SignedPdfFixture private constructor(
                 DerEncoder.sequence(
                     listOf(
                         DerEncoder.objectIdentifier(ID_CT_TST_INFO_OID),
-                        DerEncoder.tlv(EXPLICIT_0_TAG, DerEncoder.octetString(tstInfo)),
+                        DerEncoder.tlv(EXPLICIT_0_TAG, DerEncoder.octetString(encapsulatedTstInfo)),
                     ),
                 )
             val signedData =

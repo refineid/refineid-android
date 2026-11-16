@@ -39,7 +39,7 @@ internal data class DocumentSignatureVerdict(
     /** The cryptographic core: intact bytes, a valid signature, a trusted signer, and not revoked. */
     val isValid: Boolean
         get() =
-            digestMatches && signatureValid && (chainTrusted || isDocumentTimestamp) &&
+            digestMatches && signatureValid && chainTrusted && coversWholeDocument &&
                 revocationStatus != RevocationStatus.REVOKED
 
     val isRevoked: Boolean
@@ -54,7 +54,20 @@ internal sealed interface DocumentValidationResult {
         val signatures: List<DocumentSignatureVerdict>,
     ) : DocumentValidationResult {
         val isValid: Boolean
-            get() = signatures.isNotEmpty() && signatures.all { it.isValid }
+            get() {
+                val authorSigs = signatures.filter { !it.isDocumentTimestamp }
+                // Only the last approval has to reach the end of the file;
+                // earlier ones cover the revisions they signed. Until the
+                // structural revision judge of the core is wired in, a
+                // signature followed by any revision is not valid: a
+                // trusted timestamp there would authenticate whatever the
+                // later revision changed.
+                return authorSigs.isNotEmpty() &&
+                    authorSigs.last().coversWholeDocument &&
+                    authorSigs.all {
+                        it.digestMatches && it.signatureValid && it.chainTrusted && !it.isRevoked
+                    }
+            }
 
         val isRevoked: Boolean
             get() = signatures.any { it.isRevoked }
@@ -104,12 +117,13 @@ internal class DocumentValidator(
         if (signatures.isEmpty()) {
             return DocumentValidationResult.Unsigned
         }
-        val lastCoversEof = signatures.lastOrNull()?.coversWholeDocument(bytes.size) == true
+        // A signature is judged only over the bytes it signs. A later
+        // revision is not covered by a document timestamp: the timestamp
+        // authenticates the revision, not what the revision changed, and
+        // this validator has no structural revision judge yet.
         val verdicts =
-            signatures.mapIndexed { index, signature ->
-                val coversWholeDocument =
-                    signature.coversWholeDocument(bytes.size) ||
-                        (lastCoversEof && isFollowedOnlyByDocumentTimestamps(index, signatures))
+            signatures.map { signature ->
+                val coversWholeDocument = signature.coversWholeDocument(bytes.size)
                 verifySignature(bytes, signature, coversWholeDocument) ?: return DocumentValidationResult.Malformed
             }
         return DocumentValidationResult.Completed(verdicts)
@@ -139,19 +153,6 @@ internal class DocumentValidator(
         return RevocationStatus.UNCHECKED
     }
 
-    private fun isFollowedOnlyByDocumentTimestamps(
-        fromIndex: Int,
-        signatures: List<PdfSignatureLocation>,
-    ): Boolean {
-        for (i in (fromIndex + 1) until signatures.size) {
-            val cms = CmsSignedData.parse(signatures[i].cms) ?: return false
-            if (!cms.isDocumentTimestamp) {
-                return false
-            }
-        }
-        return true
-    }
-
     private fun verifySignature(
         pdf: ByteArray,
         signature: PdfSignatureLocation,
@@ -166,9 +167,11 @@ internal class DocumentValidator(
                 MessageDigest.getInstance(cms.digestJcaName).digest(signedBytes).contentEquals(cms.messageDigest)
 
         val signatureValid = verifyCmsSignature(cms, signerCertificate)
-        val chainTrusted = if (cms.isDocumentTimestamp) true else isChainTrusted(signerCertificate)
+        val chainTrusted = isChainTrusted(signerCertificate)
         val revocationStatus =
-            if (checkRevocation && isChainTrusted(signerCertificate)) {
+            if (checkRevocation && chainTrusted) {
+                // Never fetch status for an untrusted signer: its
+                // certificate names the responders.
                 checkRevocation(signerCertificate, cms)
             } else {
                 RevocationStatus.UNCHECKED
