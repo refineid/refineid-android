@@ -301,11 +301,12 @@ internal fun CardManagementScreen(
 
     // Nothing goes to a readable card before it has answered with its
     // counters, so the retry floor above judges what the card said.
+    val composedTask = selectedTask
     val awaitingAnswer = isCardReady && health == null
     val canExecute =
         !awaitingAnswer &&
             !isRefusedByPolicy &&
-            when (selectedTask) {
+            when (composedTask) {
                 ManagementTask.CHANGE_PIN1, ManagementTask.CHANGE_PIN2 -> {
                     currentPinValid && newPinValid && confirmationValid &&
                         pinsDiffer
@@ -316,7 +317,8 @@ internal fun CardManagementScreen(
                 }
 
                 ManagementTask.ACTIVATE_CARD -> {
-                    activationCodeValid &&
+                    executableActivationScheme(health) != null &&
+                        activationCodeValid &&
                         (!needsPin1 || newPin1ConfirmValid) &&
                         (!needsPin2 || newPin2ConfirmValid) &&
                         (needsPin1 || needsPin2)
@@ -327,16 +329,17 @@ internal fun CardManagementScreen(
     val pin2Name = stringResource(R.string.pin2)
 
     fun executeOperation() {
-        if (!canExecute || cardManagementService == null) return
-        isOperating = true
-        outcomeNotice = null
+        if (!canExecute || isOperating || cardManagementService == null) return
+        val currentHealth = reading.health
+        if (selectedTask != composedTask || currentHealth != health) return
 
-        when (selectedTask) {
+        when (composedTask) {
             ManagementTask.CHANGE_PIN1, ManagementTask.CHANGE_PIN2 -> {
+                isOperating = true
+                outcomeNotice = null
                 val curBytes = currentPin.toByteArray(Charsets.US_ASCII)
                 val newBytes = newPin.toByteArray(Charsets.US_ASCII)
-                val task = selectedTask
-                val isPin1 = task == ManagementTask.CHANGE_PIN1
+                val isPin1 = composedTask == ManagementTask.CHANGE_PIN1
                 val pinName = if (isPin1) pin1Name else pin2Name
                 if (isPin1) {
                     pinCache?.clear()
@@ -355,7 +358,7 @@ internal fun CardManagementScreen(
                                     onPin1Changed?.invoke()
                                 }
                             } else {
-                                outcomeNotice = OutcomeNotice(changeRefusalNotice(result.value, task))
+                                outcomeNotice = OutcomeNotice(changeRefusalNotice(result.value, composedTask))
                                 outcomeIsError = true
                             }
                             probe()
@@ -382,9 +385,11 @@ internal fun CardManagementScreen(
             }
 
             ManagementTask.RESET_PIN1, ManagementTask.RESET_PIN2 -> {
+                isOperating = true
+                outcomeNotice = null
                 val pukBytes = puk.toByteArray(Charsets.US_ASCII)
                 val newBytes = newPin.toByteArray(Charsets.US_ASCII)
-                val isPin1 = selectedTask == ManagementTask.RESET_PIN1
+                val isPin1 = composedTask == ManagementTask.RESET_PIN1
                 val pinName = if (isPin1) pin1Name else pin2Name
                 if (isPin1) {
                     pinCache?.clear()
@@ -430,21 +435,24 @@ internal fun CardManagementScreen(
             }
 
             ManagementTask.ACTIVATE_CARD -> {
+                val scheme = executableActivationScheme(currentHealth) ?: return
+                isOperating = true
+                outcomeNotice = null
+                val requestedPin1 = needsPin1
+                val requestedPin2 = needsPin2
                 val codeBytes = activationCode.toByteArray(Charsets.US_ASCII)
                 val new1Bytes =
-                    if (needsPin1) {
+                    if (requestedPin1) {
                         newPin.toByteArray(Charsets.US_ASCII)
                     } else {
                         null
                     }
                 val new2Bytes =
-                    if (needsPin2) {
+                    if (requestedPin2) {
                         newPin2.toByteArray(Charsets.US_ASCII)
                     } else {
                         null
                     }
-                val scheme = health?.activationScheme ?: return
-                if (scheme == CardManagementScheme.UNKNOWN) return
                 pinCache?.clear()
                 onPin1Changed?.invoke()
                 cardManagementService.activateCard(scheme, codeBytes, new1Bytes, new2Bytes) { result ->
@@ -453,9 +461,9 @@ internal fun CardManagementScreen(
                     when (result) {
                         is CardManagementResult.Success -> {
                             val actReport = result.value
-                            val pin1Ok = new1Bytes == null || actReport.pin1Outcome is ManageOutcome.Succeeded
-                            val pin2Ok = new2Bytes == null || actReport.pin2Outcome is ManageOutcome.Succeeded
-                            if (pin1Ok && pin2Ok && (new1Bytes != null || new2Bytes != null)) {
+                            val pin1Ok = !requestedPin1 || actReport.pin1Outcome is ManageOutcome.Succeeded
+                            val pin2Ok = !requestedPin2 || actReport.pin2Outcome is ManageOutcome.Succeeded
+                            if (pin1Ok && pin2Ok && (requestedPin1 || requestedPin2)) {
                                 outcomeNotice = OutcomeNotice(R.string.card_activated_success)
                                 outcomeIsError = false
                                 pinCache?.clear()

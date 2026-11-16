@@ -11,6 +11,7 @@ import fi.refineid.android.core.NativePin1State
 import fi.refineid.android.core.NativePin2State
 import fi.refineid.android.core.NativePinReferenceScheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PinChangeTaskTest {
@@ -52,13 +53,29 @@ class PinChangeTaskTest {
         )
     }
 
-    private fun organisationCard(pin2State: NativePin2State = NativePin2State.Remaining(FINEID_PIN_TRY_LIMIT)) =
-        CredentialHealth(
-            pin1State = NativePin1State.Remaining(FINEID_PIN_TRY_LIMIT),
-            pin2State = pin2State,
-            pukState = NativePin1State.Remaining(FINEID_PIN_TRY_LIMIT),
-            scheme = NativePinReferenceScheme.ORGANIZATIONAL,
-            activationScheme = CardManagementScheme.PUK,
-            activationNeeds = CardActivationNeeds(pin1 = false, pin2 = false),
+    @Test
+    fun executableActivationSchemeRejectsUnansweredAndUnknownSchemes() {
+        assertNull(executableActivationScheme(null))
+        assertNull(executableActivationScheme(organisationCard(activationScheme = CardManagementScheme.UNKNOWN)))
+        assertEquals(
+            CardManagementScheme.PUK,
+            executableActivationScheme(organisationCard(activationScheme = CardManagementScheme.PUK)),
         )
+        assertEquals(
+            CardManagementScheme.PRESET_PIN,
+            executableActivationScheme(organisationCard(activationScheme = CardManagementScheme.PRESET_PIN)),
+        )
+    }
+
+    private fun organisationCard(
+        pin2State: NativePin2State = NativePin2State.Remaining(FINEID_PIN_TRY_LIMIT),
+        activationScheme: CardManagementScheme = CardManagementScheme.PUK,
+    ) = CredentialHealth(
+        pin1State = NativePin1State.Remaining(FINEID_PIN_TRY_LIMIT),
+        pin2State = pin2State,
+        pukState = NativePin1State.Remaining(FINEID_PIN_TRY_LIMIT),
+        scheme = NativePinReferenceScheme.ORGANIZATIONAL,
+        activationScheme = activationScheme,
+        activationNeeds = CardActivationNeeds(pin1 = false, pin2 = false),
+    )
 }
