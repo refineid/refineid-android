@@ -2,6 +2,7 @@
 package fi.refineid.android.ui
 
 import fi.refineid.android.R
+import fi.refineid.android.core.CardManagementScheme
 import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativePin1State
@@ -14,6 +15,16 @@ internal enum class ManagementTask {
     RESET_PIN2,
     ACTIVATE_CARD,
 }
+
+/**
+ * The activation scheme a card's answer permits executing, or `null` when the
+ * card has not answered or its activation scheme is unknown.
+ */
+internal fun executableActivationScheme(health: CredentialHealth?): CardManagementScheme? =
+    when (val scheme = health?.activationScheme) {
+        CardManagementScheme.PUK, CardManagementScheme.PRESET_PIN -> scheme
+        CardManagementScheme.UNKNOWN, null -> null
+    }
 
 /**
  * The notice a PIN change the card answered but did not take shows: a blocked

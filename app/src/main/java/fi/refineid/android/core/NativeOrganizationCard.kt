@@ -3,6 +3,7 @@
 package fi.refineid.android.core
 
 import fi.refineid.android.diagnostics.AppTrace
+import kotlin.coroutines.cancellation.CancellationException
 
 /** What opens a card on the contactless interface, as its EF.CardAccess tells before any password is sent. */
 internal enum class NfcCardKind {
@@ -235,52 +236,79 @@ internal object NativeOrganizationCard {
         return result
     }
 
-    /** PIN 1 changed on the channel the current PIN opens. */
+    /** PIN 1 changed on the channel the current PIN opens. Consumes [currentPin] and [newPin]. */
     fun changePin1(
         currentPin: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
     ): CardManagementResult<ManageOutcome> =
-        managed {
+        managedPinOp(currentPin, newPin) {
             NativeCardManagement.decodeManageOutcome(organizationChangePin1Native(currentPin, newPin, exchange))
         }
 
-    /** PIN 2 changed on the channel the current PIN opens; core makes DF.ESIGN current. */
+    /**
+     * PIN 2 changed on the channel the current PIN opens; core makes DF.ESIGN
+     * current. Consumes [currentPin] and [newPin].
+     */
     fun changePin2(
         currentPin: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
     ): CardManagementResult<ManageOutcome> =
-        managed {
+        managedPinOp(currentPin, newPin) {
             NativeCardManagement.decodeManageOutcome(organizationChangePin2Native(currentPin, newPin, exchange))
         }
 
-    /** PIN 1 set on the channel the PUK opens, spending no PUK try after the handshake. */
+    /**
+     * PIN 1 set on the channel the PUK opens, spending no PUK try after the
+     * handshake. Consumes [puk] and [newPin].
+     */
     fun resetPin1(
         puk: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
     ): CardManagementResult<ManageOutcome> =
-        managed {
+        managedPinOp(puk, newPin) {
             NativeCardManagement.decodeManageOutcome(organizationResetPin1Native(puk, newPin, exchange))
         }
 
-    /** PIN 2 set on the channel the PUK opens, spending no PUK try after the handshake. */
+    /**
+     * PIN 2 set on the channel the PUK opens, spending no PUK try after the
+     * handshake. Consumes [puk] and [newPin].
+     */
     fun resetPin2(
         puk: ByteArray,
         newPin: ByteArray,
         exchange: NativeBlockExchange,
     ): CardManagementResult<ManageOutcome> =
-        managed {
+        managedPinOp(puk, newPin) {
             NativeCardManagement.decodeManageOutcome(organizationResetPin2Native(puk, newPin, exchange))
         }
 
-    private fun <Value> managed(operation: () -> CardManagementResult<Value>): CardManagementResult<Value> {
-        if (!NativeCore.isLoaded) {
+    internal fun managedPinOp(
+        firstSecret: ByteArray,
+        secondSecret: ByteArray,
+        isLoaded: Boolean = NativeCore.isLoaded,
+        operation: () -> CardManagementResult<ManageOutcome>,
+    ): CardManagementResult<ManageOutcome> =
+        try {
+            managed(isLoaded = isLoaded, operation = operation)
+        } finally {
+            firstSecret.fill(NativeCardManagementWire.ZERO_BYTE)
+            secondSecret.fill(NativeCardManagementWire.ZERO_BYTE)
+        }
+
+    private fun <Value> managed(
+        isLoaded: Boolean = NativeCore.isLoaded,
+        operation: () -> CardManagementResult<Value>,
+    ): CardManagementResult<Value> {
+        if (!isLoaded) {
             return CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         }
         return try {
             operation()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: LinkageError) {
             CardManagementResult.Failure(CardManagementFailure.BRIDGE_ERROR)
         } catch (_: RuntimeException) {
