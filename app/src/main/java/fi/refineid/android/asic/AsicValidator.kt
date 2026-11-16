@@ -3,11 +3,13 @@
 @file:Suppress(
     "MagicNumber",
     "ComplexMethod",
+    "CyclomaticComplexMethod",
     "LongMethod",
     "NestedBlockDepth",
     "ReturnCount",
     "LoopWithTooManyJumpStatements",
     "TooGenericExceptionCaught",
+    "TooManyFunctions",
 )
 
 package fi.refineid.android.asic
@@ -16,8 +18,10 @@ import fi.refineid.android.document.DocumentSignatureVerdict
 import fi.refineid.android.document.DocumentValidationResult
 import fi.refineid.android.document.RevocationStatus
 import org.w3c.dom.Element
+import org.w3c.dom.Node
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.math.BigInteger
 import java.net.URLDecoder
 import java.security.MessageDigest
@@ -30,6 +34,31 @@ import java.util.zip.ZipInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 
 internal object AsicValidator {
+    /**
+     * Maximum decompressed size of any single ZIP entry (64 MiB).
+     * Prevents zip bombs from exhausting memory.
+     */
+    private const val MAX_ENTRY_BYTES = 64L * 1024 * 1024
+
+    /**
+     * Maximum number of ZIP entries in a container.
+     * A legitimate ASiC-E has a handful; this prevents DoS via
+     * archives with millions of empty entries.
+     */
+    private const val MAX_ENTRY_COUNT = 1_024
+
+    /** Namespace URI for XML Digital Signatures. */
+    private const val NAMESPACE_DSIG = "http://www.w3.org/2000/09/xmldsig#"
+
+    /** Namespace URI for XAdES 1.3.2 Qualifying Properties. */
+    private const val NAMESPACE_XADES = "http://uri.etsi.org/01903/v1.3.2#"
+
+    /** The fixed Type value that marks a Reference as pointing to SignedProperties. */
+    private const val SIGNED_PROPERTIES_TYPE = "http://uri.etsi.org/01903#SignedProperties"
+
+    /** Permitted META-INF file names (lowercase, without the META-INF/ prefix). */
+    private val ALLOWED_META_INF_PATTERNS = listOf("manifest.xml", "container.xml")
+
     fun isAsic(bytes: ByteArray): Boolean = bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte()
 
     fun validate(
@@ -38,18 +67,37 @@ internal object AsicValidator {
         checkRevocation: (X509Certificate) -> RevocationStatus = { RevocationStatus.UNCHECKED },
     ): DocumentValidationResult {
         val entries = mutableMapOf<String, ByteArray>()
+        var entryCount = 0
         try {
             ZipInputStream(ByteArrayInputStream(archiveBytes)).use { zip ->
                 while (true) {
                     val entry = zip.nextEntry ?: break
+                    entryCount++
+                    if (entryCount > MAX_ENTRY_COUNT) {
+                        return DocumentValidationResult.Malformed
+                    }
                     if (!entry.isDirectory) {
-                        entries[entry.name] = zip.readBytes()
+                        // Validate entry name: refuse path traversal and control characters
+                        if (!isEntryNameSafe(entry.name)) {
+                            return DocumentValidationResult.Malformed
+                        }
+                        val content =
+                            readBounded(zip, MAX_ENTRY_BYTES)
+                                ?: return DocumentValidationResult.Malformed
+                        entries[entry.name] = content
                     }
                     zip.closeEntry()
                 }
             }
         } catch (_: Exception) {
             return DocumentValidationResult.Malformed
+        }
+
+        // Validate that all META-INF entries are recognized roles
+        for (name in entries.keys) {
+            if (!isMetaInfEntryAllowed(name)) {
+                return DocumentValidationResult.Malformed
+            }
         }
 
         val signatureXmlEntries =
@@ -62,10 +110,17 @@ internal object AsicValidator {
             return DocumentValidationResult.Unsigned
         }
 
+        // Collect all data entries (non-META-INF, non-mimetype)
+        val dataEntryNames =
+            entries.keys
+                .filter { name ->
+                    !name.startsWith("META-INF/") && !name.equals("mimetype", ignoreCase = true)
+                }.toSet()
+
         val verdicts = mutableListOf<DocumentSignatureVerdict>()
         for ((_, xmlBytes) in signatureXmlEntries) {
             val sigVerdicts =
-                parseAndVerifyXml(xmlBytes, entries, trustAnchors, checkRevocation)
+                parseAndVerifyXml(xmlBytes, entries, dataEntryNames, trustAnchors, checkRevocation)
                     ?: return DocumentValidationResult.Malformed
             verdicts.addAll(sigVerdicts)
         }
@@ -77,13 +132,92 @@ internal object AsicValidator {
         }
     }
 
+    /**
+     * Reads up to [limit] bytes from [input]. Returns null if the stream
+     * exceeds the limit, preventing OOM from decompression bombs.
+     */
+    private fun readBounded(
+        input: InputStream,
+        limit: Long,
+    ): ByteArray? {
+        val buffer = ByteArrayOutputStream()
+        val chunk = ByteArray(8192)
+        var total = 0L
+        while (true) {
+            val read = input.read(chunk)
+            if (read == -1) break
+            total += read
+            if (total > limit) return null
+            buffer.write(chunk, 0, read)
+        }
+        return buffer.toByteArray()
+    }
+
+    /**
+     * Validates a ZIP entry name: refuses empty names, absolute paths,
+     * parent-directory traversals, backslashes, and control characters.
+     */
+    private fun isEntryNameSafe(name: String): Boolean {
+        if (name.isEmpty()) return false
+        if (name.startsWith("/")) return false
+        if (name.contains('\\')) return false
+        if (name.any { it.isISOControl() }) return false
+        val segments = name.split("/")
+        for (segment in segments) {
+            if (segment == "..") return false
+            if (segment == "." && segments.size > 1) return false
+        }
+        // Reject duplicate slashes (empty segments in the middle)
+        for (i in 0 until segments.size - 1) {
+            if (segments[i].isEmpty()) return false
+        }
+        return true
+    }
+
+    /**
+     * Validates that META-INF entries are recognized container metadata.
+     * Rejects unknown files inside META-INF/ to prevent unsigned payload injection.
+     */
+    private fun isMetaInfEntryAllowed(name: String): Boolean {
+        if (!name.startsWith("META-INF/")) return true
+        val inside = name.removePrefix("META-INF/")
+        // Reject nested directories inside META-INF
+        if (inside.contains("/")) return false
+        if (inside.isEmpty()) return false
+        val foldedInside = inside.lowercase()
+        // Allow signature XML files
+        if (foldedInside.endsWith(".xml") &&
+            (foldedInside.contains("signature") || foldedInside.contains("signatures"))
+        ) {
+            return true
+        }
+        // Allow known passive metadata
+        if (foldedInside in ALLOWED_META_INF_PATTERNS) return true
+        // Allow ASiC manifest files
+        if (foldedInside.endsWith(".xml") &&
+            (foldedInside.contains("asicmanifest") || foldedInside.contains("asicarchivemanifest"))
+        ) {
+            return true
+        }
+        // Allow CAdES signature entries
+        if (foldedInside.contains("signature") &&
+            (foldedInside.endsWith(".p7s") || foldedInside.endsWith(".p7m") || foldedInside.endsWith(".p7c"))
+        ) {
+            return true
+        }
+        // Allow timestamp token entries
+        if (foldedInside.contains("timestamp") && foldedInside.endsWith(".tst")) return true
+        // Everything else is refused
+        return false
+    }
+
     private fun parseAndVerifyXml(
         xmlBytes: ByteArray,
         archiveEntries: Map<String, ByteArray>,
+        dataEntryNames: Set<String>,
         trustAnchors: List<X509Certificate>,
         checkRevocation: (X509Certificate) -> RevocationStatus,
     ): List<DocumentSignatureVerdict>? {
-        val xmlString = String(xmlBytes, Charsets.UTF_8)
         val factory =
             DocumentBuilderFactory.newInstance().apply {
                 isNamespaceAware = true
@@ -102,15 +236,20 @@ internal object AsicValidator {
             }
 
         val signatures = doc.getElementsByTagNameNS("*", "Signature")
-        if (signatures.length == 0) {
-            return emptyList()
+        val totalSignatures = signatures.length
+        val totalSignedInfo = doc.getElementsByTagNameNS("*", "SignedInfo").length
+        if (totalSignatures == 0) {
+            return if (totalSignedInfo > 0) null else emptyList()
+        }
+        if (totalSignedInfo != totalSignatures) {
+            return null
         }
 
         val results = mutableListOf<DocumentSignatureVerdict>()
         for (i in 0 until signatures.length) {
             val sigElement = signatures.item(i) as? Element ?: continue
             val verdict =
-                verifySingleSignature(sigElement, xmlString, archiveEntries, trustAnchors, checkRevocation)
+                verifySingleSignature(sigElement, archiveEntries, dataEntryNames, trustAnchors, checkRevocation)
                     ?: return null
             results.add(verdict)
         }
@@ -119,11 +258,21 @@ internal object AsicValidator {
 
     private fun verifySingleSignature(
         sigElement: Element,
-        xmlString: String,
         archiveEntries: Map<String, ByteArray>,
+        dataEntryNames: Set<String>,
         trustAnchors: List<X509Certificate>,
         checkRevocation: (X509Certificate) -> RevocationStatus,
     ): DocumentSignatureVerdict? {
+        // --- XSW hardening: require exactly one ds:SignedInfo as a direct child of ds:Signature ---
+        // Check this BEFORE certificate parsing so a forged document with duplicate
+        // SignedInfo elements is rejected even if its certificate is unparseable.
+        val signedInfoElem = findUniqueDirectChild(sigElement, NAMESPACE_DSIG, "SignedInfo") ?: return null
+
+        // --- XSW hardening: reject documents with duplicate SignedInfo elements anywhere ---
+        if (hasMultipleSignedInfoElements(sigElement)) {
+            return null
+        }
+
         val certNodes = sigElement.getElementsByTagNameNS("*", "X509Certificate")
         if (certNodes.length == 0) return null
         val certBase64 = certNodes.item(0).textContent.replace("\\s+".toRegex(), "")
@@ -145,10 +294,6 @@ internal object AsicValidator {
         val timeNodes = sigElement.getElementsByTagNameNS("*", "SigningTime")
         val signingTime = if (timeNodes.length > 0) timeNodes.item(0).textContent.trim() else null
 
-        val signedInfoNodes = sigElement.getElementsByTagNameNS("*", "SignedInfo")
-        if (signedInfoNodes.length == 0) return null
-        val signedInfoElem = signedInfoNodes.item(0) as Element
-
         val sigMethodElem = signedInfoElem.getElementsByTagNameNS("*", "SignatureMethod").item(0) as? Element
         val sigMethodUri = sigMethodElem?.getAttribute("Algorithm") ?: ""
         val (sigAlgorithm, digestAlgorithm) = mapAlgorithm(sigMethodUri)
@@ -156,6 +301,8 @@ internal object AsicValidator {
         val refNodes = signedInfoElem.getElementsByTagNameNS("*", "Reference")
         var allDigestsMatch = true
         var hasFileReferences = false
+        var hasSignedPropertiesRef = false
+        val referencedFileNames = mutableSetOf<String>()
 
         for (j in 0 until refNodes.length) {
             val refElem = refNodes.item(j) as? Element ?: continue
@@ -171,7 +318,37 @@ internal object AsicValidator {
             val digestMethodElem = refElem.getElementsByTagNameNS("*", "DigestMethod").item(0) as? Element
             val refDigestAlg = mapDigestAlgorithm(digestMethodElem?.getAttribute("Algorithm"))
 
-            if (!uri.startsWith("#")) {
+            if (uri.startsWith("#")) {
+                // --- Fix: validate #SignedProperties reference ---
+                val refType = refElem.getAttribute("Type") ?: ""
+                if (refType == SIGNED_PROPERTIES_TYPE) {
+                    hasSignedPropertiesRef = true
+                    val targetId = uri.removePrefix("#")
+                    val signedPropsElem = findElementById(sigElement, targetId)
+                    if (signedPropsElem == null) {
+                        allDigestsMatch = false
+                    } else {
+                        // Verify that this element is in the correct namespace
+                        if (signedPropsElem.namespaceURI != NAMESPACE_XADES ||
+                            signedPropsElem.localName != "SignedProperties"
+                        ) {
+                            allDigestsMatch = false
+                        } else {
+                            // Verify that SignedProperties is a descendant of this Signature
+                            if (!isDescendant(signedPropsElem, sigElement)) {
+                                allDigestsMatch = false
+                            } else {
+                                val canonicalBytes = XmlCanonicalizer.canonicalize(signedPropsElem)
+                                val computedDigest = MessageDigest.getInstance(refDigestAlg).digest(canonicalBytes)
+                                if (!computedDigest.contentEquals(expectedDigest)) {
+                                    allDigestsMatch = false
+                                }
+                            }
+                        }
+                    }
+                }
+                // Other # references (e.g. timestamp) are accepted but not separately verified here
+            } else {
                 hasFileReferences = true
                 val decodedName =
                     try {
@@ -179,6 +356,7 @@ internal object AsicValidator {
                     } catch (_: Exception) {
                         uri
                     }
+                referencedFileNames.add(decodedName)
                 val fileContent = archiveEntries[decodedName] ?: archiveEntries[uri]
                 if (fileContent == null) {
                     allDigestsMatch = false
@@ -191,6 +369,38 @@ internal object AsicValidator {
             }
         }
 
+        // --- Fix: require that #SignedProperties was present and verified ---
+        if (!hasSignedPropertiesRef) {
+            allDigestsMatch = false
+        }
+
+        // --- Fix: reject unsigned data entries not covered by any reference ---
+        if (hasFileReferences) {
+            val uncoveredEntries = dataEntryNames - referencedFileNames
+            if (uncoveredEntries.isNotEmpty()) {
+                allDigestsMatch = false
+            }
+        }
+
+        // --- XSW hardening: reject documents with duplicate SignedInfo elements anywhere ---
+        if (hasMultipleSignedInfoElements(sigElement)) {
+            return DocumentSignatureVerdict(
+                signerCommonName = commonNameOf(signerCert.subjectX500Principal.getName("RFC2253")),
+                signerIssuer = commonNameOf(signerCert.issuerX500Principal.getName("RFC2253")),
+                signerSerialNumber = serialNumberOf(signerCert),
+                signingTime = signingTime,
+                digestAlgorithm = digestAlgorithm,
+                signatureAlgorithm = sigAlgorithm,
+                coversWholeDocument = false,
+                digestMatches = false,
+                signatureValid = false,
+                chainTrusted = false,
+                hasSignatureTimestamp = false,
+                isDocumentTimestamp = false,
+                revocationStatus = RevocationStatus.UNCHECKED,
+            )
+        }
+
         val sigValNodes = sigElement.getElementsByTagNameNS("*", "SignatureValue")
         if (sigValNodes.length == 0) return null
         val sigValBase64 = sigValNodes.item(0).textContent.replace("\\s+".toRegex(), "")
@@ -201,12 +411,13 @@ internal object AsicValidator {
                 return null
             }
 
-        val signedInfoSubstring = extractSignedInfoXml(xmlString)
+        // --- XSW fix: canonicalize parsed SignedInfo element via Exclusive XML Canonicalization ---
+        val signedInfoCanonical = XmlCanonicalizer.canonicalize(signedInfoElem)
         val signatureValid =
             verifySignatureBytes(
                 algorithm = sigAlgorithm,
                 publicKey = signerCert.publicKey,
-                data = signedInfoSubstring.encodeToByteArray(),
+                data = signedInfoCanonical,
                 signatureBytes = sigValBytes,
             )
 
@@ -230,20 +441,81 @@ internal object AsicValidator {
         )
     }
 
-    private fun extractSignedInfoXml(xml: String): String {
-        val start = xml.indexOf("<ds:SignedInfo")
-        val end = xml.indexOf("</ds:SignedInfo>")
-        return if (start != -1 && end != -1) {
-            xml.substring(start, end + "</ds:SignedInfo>".length)
-        } else {
-            val altStart = xml.indexOf("<SignedInfo")
-            val altEnd = xml.indexOf("</SignedInfo>")
-            if (altStart != -1 && altEnd != -1) {
-                xml.substring(altStart, altEnd + "</SignedInfo>".length)
-            } else {
-                xml
+    /**
+     * Find a unique direct child element in the given namespace with the given local name.
+     * Returns null if there are zero or more than one such child (XSW hardening).
+     */
+    private fun findUniqueDirectChild(
+        parent: Element,
+        namespaceUri: String,
+        localName: String,
+    ): Element? {
+        var found: Element? = null
+        val children = parent.childNodes
+        for (i in 0 until children.length) {
+            val child = children.item(i)
+            if (child is Element && child.namespaceURI == namespaceUri && child.localName == localName) {
+                if (found != null) return null // Duplicate — refuse
+                found = child
             }
         }
+        return found
+    }
+
+    /**
+     * Checks whether a Signature element contains multiple SignedInfo elements
+     * anywhere in its subtree (even under different namespaces), which is a
+     * hallmark of an XSW attack.
+     */
+    private fun hasMultipleSignedInfoElements(sigElement: Element): Boolean {
+        val allSignedInfo = sigElement.getElementsByTagNameNS("*", "SignedInfo")
+        return allSignedInfo.length > 1
+    }
+
+    /**
+     * Checks whether [descendant] is a descendant of [ancestor] in the DOM tree.
+     */
+    private fun isDescendant(
+        descendant: Node,
+        ancestor: Node,
+    ): Boolean {
+        var current: Node? = descendant.parentNode
+        while (current != null) {
+            if (current === ancestor) return true
+            current = current.parentNode
+        }
+        return false
+    }
+
+    /**
+     * Find an element by its Id attribute within the subtree of [root].
+     * Searches both `Id` and `id` attributes.
+     */
+    private fun findElementById(
+        root: Element,
+        id: String,
+    ): Element? {
+        // First try the standard getElementById (requires DTD/schema)
+        // Fall back to manual traversal
+        return findElementByIdRecursive(root, id)
+    }
+
+    private fun findElementByIdRecursive(
+        element: Element,
+        id: String,
+    ): Element? {
+        val idAttr = element.getAttribute("Id")
+        val idAttrLower = element.getAttribute("id")
+        if (idAttr == id || idAttrLower == id) return element
+        val children = element.childNodes
+        for (i in 0 until children.length) {
+            val child = children.item(i)
+            if (child is Element) {
+                val found = findElementByIdRecursive(child, id)
+                if (found != null) return found
+            }
+        }
+        return null
     }
 
     private fun mapAlgorithm(uri: String): Pair<String, String> =
