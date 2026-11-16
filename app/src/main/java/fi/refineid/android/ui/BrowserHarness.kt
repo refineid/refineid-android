@@ -54,6 +54,7 @@ import fi.refineid.android.R
 import fi.refineid.android.browser.BrowserClientCertificateMatcher
 import fi.refineid.android.browser.BrowserClientCertificateOutcome
 import fi.refineid.android.browser.BrowserClientIdentity
+import fi.refineid.android.browser.BrowserOriginAuthority
 import fi.refineid.android.browser.BrowserPinCoordinator
 import fi.refineid.android.browser.BrowserPinRequest
 import fi.refineid.android.browser.BrowserSignatureStatus
@@ -139,6 +140,96 @@ private data class NfcCardAnswer(
     val problem: NfcCardProblem?,
 )
 
+@Composable
+private fun rememberBrowserCoordinator(
+    cardService: AuthenticationCardService,
+    pinCache: fi.refineid.android.core.AuthenticationPinCache?,
+    isActive: AtomicBoolean,
+    mainHandler: Handler,
+    onPromptChanged: (BrowserPinRequest?) -> Unit,
+    onStatusChanged: (BrowserSignatureStatus) -> Unit,
+): BrowserPinCoordinator =
+    remember(cardService) {
+        BrowserPinCoordinator(
+            cardService = cardService,
+            pinCache = pinCache,
+            dispatchToUi = { action ->
+                if (Looper.myLooper() == Looper.getMainLooper()) {
+                    action()
+                } else {
+                    mainHandler.post { if (isActive.get()) action() }
+                }
+            },
+            onPromptChanged = onPromptChanged,
+            onStatusChanged = onStatusChanged,
+        )
+    }
+
+@Composable
+private fun rememberBrowserWebViewClient(
+    cardService: AuthenticationCardService,
+    coordinator: BrowserPinCoordinator,
+    originAuthority: BrowserOriginAuthority,
+    page: BrowserPageState,
+    isActive: AtomicBoolean,
+    mainHandler: Handler,
+    nfcStatus: NfcReaderStatus?,
+    onPrepareAuthentication: ((() -> Unit, () -> Unit) -> Unit)?,
+    onUnlockNeeded: (BrowserCardUnlockRequest) -> Unit,
+    onConsentNeeded: (BrowserCertConsentRequest) -> Unit,
+): RefineIdWebViewClient? {
+    val context = LocalContext.current
+    val issuerCandidates =
+        remember(context) {
+            runCatching { BundledIssuerCertificates.load(context) }.getOrNull()
+        }
+    val providerReady = remember { RefineIdCardProviderRegistration.install() }
+    LaunchedEffect(providerReady, issuerCandidates) {
+        AppTrace.browserInitialized(
+            providerReady = providerReady,
+            issuerCount = issuerCandidates?.size ?: NO_ISSUER_CERTIFICATES,
+        )
+    }
+    return remember(cardService, coordinator, issuerCandidates, providerReady, nfcStatus != null) {
+        if (issuerCandidates == null || !providerReady) {
+            null
+        } else {
+            RefineIdWebViewClient(
+                cardService = cardService,
+                issuerCandidates = issuerCandidates,
+                signatureOperation = coordinator,
+                originAuthority = originAuthority,
+                onPageChanged = page::pageChanged,
+                onCardNeeded =
+                    if (nfcStatus == null) {
+                        null
+                    } else {
+                        { request ->
+                            if (!isActive.get()) {
+                                request.giveUp()
+                            } else if (onPrepareAuthentication != null) {
+                                onPrepareAuthentication({ request.retry() }, { request.giveUp() })
+                            } else {
+                                onUnlockNeeded(request)
+                            }
+                        }
+                    },
+                onConsentNeeded = { request ->
+                    if (!isActive.get()) {
+                        request.cancel()
+                    } else if (Looper.myLooper() == Looper.getMainLooper()) {
+                        onConsentNeeded(request)
+                    } else {
+                        mainHandler.post {
+                            if (isActive.get()) onConsentNeeded(request) else request.cancel()
+                        }
+                    }
+                },
+            )
+        }
+    }
+}
+
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
 // General sites need JavaScript; every signature stays behind the
@@ -155,12 +246,13 @@ private fun BrowserDialog(
     onWrongPin: (() -> Unit)? = null,
     onClose: () -> Unit,
 ) {
-    val context = LocalContext.current
     val page = remember { BrowserPageState() }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val isActive = remember { AtomicBoolean(true) }
+    val originAuthority = remember { BrowserOriginAuthority() }
     var pinRequest by remember { mutableStateOf<BrowserPinRequest?>(null) }
     var unlockRequest by remember { mutableStateOf<BrowserCardUnlockRequest?>(null) }
+    var consentRequest by remember { mutableStateOf<BrowserCertConsentRequest?>(null) }
     var unlockWaiting by remember { mutableStateOf(false) }
     var signatureStatus by remember { mutableStateOf(BrowserSignatureStatus.IDLE) }
     LaunchedEffect(signatureStatus) {
@@ -176,69 +268,38 @@ private fun BrowserDialog(
         unlockWaiting = false
     }
     val coordinator =
-        remember(cardService) {
-            BrowserPinCoordinator(
-                cardService = cardService,
-                pinCache = pinCache,
-                dispatchToUi = { action ->
-                    if (Looper.myLooper() == Looper.getMainLooper()) {
-                        action()
-                    } else {
-                        mainHandler.post { if (isActive.get()) action() }
-                    }
-                },
-                onPromptChanged = { request -> pinRequest = request },
-                onStatusChanged = { status ->
-                    signatureStatus = status
-                    AppTrace.browserSignatureStatus(status)
-                },
-            )
-        }
-    val issuerCandidates =
-        remember(context) {
-            runCatching { BundledIssuerCertificates.load(context) }.getOrNull()
-        }
-    val providerReady = remember { RefineIdCardProviderRegistration.install() }
-    LaunchedEffect(providerReady, issuerCandidates) {
-        AppTrace.browserInitialized(
-            providerReady = providerReady,
-            issuerCount = issuerCandidates?.size ?: NO_ISSUER_CERTIFICATES,
+        rememberBrowserCoordinator(
+            cardService = cardService,
+            pinCache = pinCache,
+            isActive = isActive,
+            mainHandler = mainHandler,
+            onPromptChanged = { pinRequest = it },
+            onStatusChanged = {
+                signatureStatus = it
+                AppTrace.browserSignatureStatus(it)
+            },
         )
-    }
     val webViewClient =
-        remember(cardService, coordinator, issuerCandidates, providerReady, nfcStatus != null) {
-            if (issuerCandidates == null || !providerReady) {
-                null
-            } else {
-                RefineIdWebViewClient(
-                    cardService = cardService,
-                    issuerCandidates = issuerCandidates,
-                    signatureOperation = coordinator,
-                    onPageChanged = page::pageChanged,
-                    onCardNeeded =
-                        if (nfcStatus == null) {
-                            null
-                        } else {
-                            { request ->
-                                if (isActive.get()) {
-                                    if (onPrepareAuthentication != null) {
-                                        onPrepareAuthentication({ request.retry() }, { request.giveUp() })
-                                    } else {
-                                        unlockRequest = request
-                                        unlockWaiting = false
-                                    }
-                                } else {
-                                    request.giveUp()
-                                }
-                            }
-                        },
-                )
-            }
-        }
+        rememberBrowserWebViewClient(
+            cardService = cardService,
+            coordinator = coordinator,
+            originAuthority = originAuthority,
+            page = page,
+            isActive = isActive,
+            mainHandler = mainHandler,
+            nfcStatus = nfcStatus,
+            onPrepareAuthentication = onPrepareAuthentication,
+            onUnlockNeeded = {
+                unlockRequest = it
+                unlockWaiting = false
+            },
+            onConsentNeeded = { consentRequest = it },
+        )
 
     DisposableEffect(coordinator, webViewClient) {
         onDispose {
             isActive.set(false)
+            originAuthority.clear()
             webViewClient?.close()
             coordinator.close()
         }
@@ -262,23 +323,66 @@ private fun BrowserDialog(
             onClose = onClose,
         )
     }
-    pinRequest?.let { request ->
-        BrowserPinDialog(request)
-    }
+    BrowserPrompts(
+        pinRequest = pinRequest,
+        unlockRequest = unlockRequest,
+        consentRequest = consentRequest,
+        nfcStatus = nfcStatus,
+        nfcPrimed = nfcPrimed,
+        nfcCard = nfcCard,
+        unlockWaiting = unlockWaiting,
+        onUnlock = { can, pin1 ->
+            unlockWaiting = true
+            onNfcConnect(can, pin1)
+        },
+        onDismissUnlock = {
+            unlockRequest = null
+            unlockWaiting = false
+        },
+        onDismissConsent = { consentRequest = null },
+        onConfirmConsent = { consentRequest = null },
+    )
+}
+
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Composable
+private fun BrowserPrompts(
+    pinRequest: BrowserPinRequest?,
+    unlockRequest: BrowserCardUnlockRequest?,
+    consentRequest: BrowserCertConsentRequest?,
+    nfcStatus: NfcReaderStatus?,
+    nfcPrimed: Boolean,
+    nfcCard: NfcCardAnswer,
+    unlockWaiting: Boolean,
+    onUnlock: (CanSubmission?, Pin1Submission) -> Unit,
+    onDismissUnlock: () -> Unit,
+    onDismissConsent: () -> Unit,
+    onConfirmConsent: () -> Unit,
+) {
+    pinRequest?.let { BrowserPinDialog(it) }
     unlockRequest?.let { request ->
         BrowserCardUnlockDialog(
             status = nfcStatus,
             primed = nfcPrimed,
             card = nfcCard,
             isWaiting = unlockWaiting,
-            onUnlock = { can, pin1 ->
-                unlockWaiting = true
-                onNfcConnect(can, pin1)
-            },
+            onUnlock = onUnlock,
             onCancel = {
-                unlockRequest = null
-                unlockWaiting = false
+                onDismissUnlock()
                 request.giveUp()
+            },
+        )
+    }
+    consentRequest?.let { request ->
+        BrowserCertConsentDialog(
+            request = request,
+            onDismiss = {
+                onDismissConsent()
+                request.cancel()
+            },
+            onConfirm = {
+                onConfirmConsent()
+                request.proceed()
             },
         )
     }
@@ -605,6 +709,67 @@ private fun BrowserPinDialog(request: BrowserPinRequest) {
 
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 @Composable
+private fun BrowserCertConsentDialog(
+    request: BrowserCertConsentRequest,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties =
+            DialogProperties(
+                dismissOnClickOutside = false,
+                securePolicy = SecureFlagPolicy.SecureOn,
+            ),
+    ) {
+        Surface(
+            modifier = Modifier.semantics { testTagsAsResourceId = true },
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(
+                modifier = Modifier.padding(PIN_DIALOG_PADDING),
+                verticalArrangement = Arrangement.spacedBy(PIN_DIALOG_ITEM_SPACING),
+            ) {
+                Text(
+                    text = stringResource(R.string.browser_client_cert_title),
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                Text(
+                    text = stringResource(R.string.browser_client_cert_prompt, request.host),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(UNLOCK_DIALOG_SPACING),
+                ) {
+                    Button(
+                        onClick = onDismiss,
+                        modifier =
+                            Modifier
+                                .weight(UNLOCK_BUTTON_WEIGHT)
+                                .testTag(UiAutomationIds.BROWSER_CERT_CANCEL_ACTION),
+                    ) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                    Button(
+                        onClick = onConfirm,
+                        modifier =
+                            Modifier
+                                .weight(UNLOCK_BUTTON_WEIGHT)
+                                .testTag(UiAutomationIds.BROWSER_CERT_CONFIRM_ACTION),
+                    ) {
+                        Text(stringResource(R.string.allow))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+@Composable
 internal fun BrowserStatus(status: BrowserSignatureStatus) {
     // The page is its own success feedback; only surface a failure that
     // explains why a login did not happen.
@@ -642,12 +807,21 @@ internal class BrowserCardUnlockRequest(
     val giveUp: () -> Unit,
 )
 
+/** One held client-certificate request waiting for the holder to confirm presenting their certificate. */
+internal class BrowserCertConsentRequest(
+    val host: String,
+    val proceed: () -> Unit,
+    val cancel: () -> Unit,
+)
+
 private class RefineIdWebViewClient(
     private val cardService: AuthenticationCardService,
     private val issuerCandidates: List<X509Certificate>,
     private val signatureOperation: BrowserPinCoordinator,
+    private val originAuthority: BrowserOriginAuthority,
     private val onPageChanged: (WebView, String) -> Unit,
     private val onCardNeeded: ((BrowserCardUnlockRequest) -> Unit)? = null,
+    private val onConsentNeeded: ((BrowserCertConsentRequest) -> Unit)? = null,
 ) : WebViewClient(),
     AutoCloseable {
     private val isClosed = AtomicBoolean(false)
@@ -699,17 +873,66 @@ private class RefineIdWebViewClient(
         error: WebResourceError,
     ) = Unit
 
-    // Any HTTPS origin may ask; the holder's PIN gates every signature.
+    // An HTTPS origin may ask; the holder must confirm presenting their certificate
+    // for each origin during the browser session.
     override fun onReceivedClientCertRequest(
         view: WebView,
         request: ClientCertRequest,
     ) {
+        val host = request.host
+        if (host.isNullOrBlank() || isClosed.get()) {
+            AppTrace.browserClientCertificateRequested(
+                originAllowed = false,
+                keyTypeCount = request.keyTypes?.size ?: NO_KEY_TYPES,
+                issuerCount = request.principals?.size ?: NO_ISSUER_HINTS,
+            )
+            AppTrace.browserClientCertificateCompleted(BrowserClientCertificateOutcome.ORIGIN_REJECTED)
+            request.cancel()
+            return
+        }
+
+        if (originAuthority.isApproved(host)) {
+            AppTrace.browserClientCertificateRequested(
+                originAllowed = true,
+                keyTypeCount = request.keyTypes?.size ?: NO_KEY_TYPES,
+                issuerCount = request.principals?.size ?: NO_ISSUER_HINTS,
+            )
+            resolveClientCertificate(request, allowUnlock = true)
+            return
+        }
+
         AppTrace.browserClientCertificateRequested(
-            originAllowed = true,
+            originAllowed = false,
             keyTypeCount = request.keyTypes?.size ?: NO_KEY_TYPES,
             issuerCount = request.principals?.size ?: NO_ISSUER_HINTS,
         )
-        resolveClientCertificate(request, allowUnlock = true)
+
+        val isFirst =
+            originAuthority.enqueue(
+                host = host,
+                onProceed = { resolveClientCertificate(request, allowUnlock = true) },
+                onCancel = {
+                    AppTrace.browserClientCertificateCompleted(
+                        BrowserClientCertificateOutcome.ORIGIN_REJECTED,
+                    )
+                    request.cancel()
+                },
+            )
+
+        if (isFirst) {
+            val consentPath = onConsentNeeded
+            if (consentPath != null && !isClosed.get()) {
+                consentPath(
+                    BrowserCertConsentRequest(
+                        host = host,
+                        proceed = { originAuthority.complete(host, approved = true) },
+                        cancel = { originAuthority.complete(host, approved = false) },
+                    ),
+                )
+            } else {
+                originAuthority.complete(host, approved = false)
+            }
+        }
     }
 
     private fun resolveClientCertificate(
@@ -793,6 +1016,7 @@ private class RefineIdWebViewClient(
 
     override fun close() {
         isClosed.set(true)
+        originAuthority.cancelAll()
     }
 }
 

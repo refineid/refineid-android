@@ -141,4 +141,6 @@ Myöntäjältä saatua koodia voi silti yrittää: kortti päättää eikä kulu
     <string name="browser_share">Jaa</string>
     <string name="browser_open_external">Avaa selaimessa</string>
     <string name="browser_link">Linkki</string>
+    <string name="browser_client_cert_title">Esitetäänkö varmenne?</string>
+    <string name="browser_client_cert_prompt">%1$s pyytää henkilövarmennettasi.</string>
 </resources>
