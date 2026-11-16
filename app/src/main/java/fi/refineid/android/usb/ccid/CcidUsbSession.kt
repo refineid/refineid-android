@@ -9,7 +9,6 @@ import fi.refineid.android.core.ActivationReport
 import fi.refineid.android.core.AtrValidation
 import fi.refineid.android.core.AuthenticationSignFailure
 import fi.refineid.android.core.AuthenticationSignResult
-import fi.refineid.android.core.AuthenticationSignatureVerifier
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
 import fi.refineid.android.core.CardManagementResult
@@ -18,7 +17,6 @@ import fi.refineid.android.core.CardManagementSessionOps
 import fi.refineid.android.core.CredentialHealth
 import fi.refineid.android.core.ManageOutcome
 import fi.refineid.android.core.NativeAuthenticationCertificate
-import fi.refineid.android.core.NativeAuthenticationSignFailure
 import fi.refineid.android.core.NativeAuthenticationSignResult
 import fi.refineid.android.core.NativeCardExchangeLevel
 import fi.refineid.android.core.NativeCardKeyProfile
@@ -42,10 +40,11 @@ import fi.refineid.android.core.Pin2Submission
 import fi.refineid.android.core.QualifiedCardSessionOps
 import fi.refineid.android.core.QualifiedSignFailure
 import fi.refineid.android.core.QualifiedSignResult
-import fi.refineid.android.core.QualifiedSignatureVerifier
 import fi.refineid.android.core.QualifiedSigningAlgorithm
 import fi.refineid.android.core.QualifiedSigningInputMode
 import fi.refineid.android.core.attemptsLeft
+import fi.refineid.android.core.verifiedAuthenticationResult
+import fi.refineid.android.core.verifiedQualifiedResult
 import fi.refineid.android.diagnostics.AppTrace
 import kotlin.concurrent.thread
 
@@ -536,44 +535,13 @@ internal class CcidUsbSession(
         if (contactlessSessionActive && nativeResult is NativeAuthenticationSignResult.Success) {
             sessionMaterial.pin1Accepted()
         }
-        return when (val result = nativeResult) {
-            is NativeAuthenticationSignResult.Success -> {
-                val isVerified =
-                    when (inputMode) {
-                        AuthenticationSigningInputMode.MESSAGE -> {
-                            AuthenticationSignatureVerifier.verify(
-                                certificate = certificate,
-                                message = input,
-                                signature = result.signature,
-                            )
-                        }
-
-                        AuthenticationSigningInputMode.PREHASHED -> {
-                            AuthenticationSignatureVerifier.verifyPrehashed(
-                                certificate = certificate,
-                                digest = input,
-                                signature = result.signature,
-                            )
-                        }
-                    }
-                AppTrace.authenticationSignatureVerificationCompleted(
-                    inputMode = inputMode,
-                    isVerified = isVerified,
-                )
-                if (isVerified) {
-                    AuthenticationSignResult.Success(result.signature)
-                } else {
-                    result.signature.close()
-                    AuthenticationSignResult.Failure(
-                        AuthenticationSignFailure.LOCAL_VERIFICATION_FAILED,
-                    )
-                }
-            }
-
-            is NativeAuthenticationSignResult.Failure -> {
-                AuthenticationSignResult.Failure(result.kind.toAuthenticationFailure(), result.remainingRetries)
-            }
-        }
+        return verifiedAuthenticationResult(
+            certificate = certificate,
+            inputMode = inputMode,
+            input = input,
+            nativeResult = nativeResult,
+            paceRejectedFailure = AuthenticationSignFailure.BRIDGE_ERROR,
+        )
     }
 
     override fun qualifiedSignInput(
@@ -617,44 +585,12 @@ internal class CcidUsbSession(
                 )
             }
         val verifiedResult =
-            when (nativeResult) {
-                is NativeQualifiedSignResult.Success -> {
-                    val isVerified =
-                        when (inputMode) {
-                            QualifiedSigningInputMode.MESSAGE -> {
-                                QualifiedSignatureVerifier.verify(
-                                    certificate = expectedCertificate,
-                                    content = input,
-                                    signature = nativeResult.signature,
-                                )
-                            }
-
-                            QualifiedSigningInputMode.PREHASHED -> {
-                                QualifiedSignatureVerifier.verifyPrehashed(
-                                    certificate = expectedCertificate,
-                                    digest = input,
-                                    signature = nativeResult.signature,
-                                )
-                            }
-                        }
-                    AppTrace.qualifiedSignatureVerificationCompleted(isVerified)
-                    if (isVerified) {
-                        QualifiedSignResult.Success(nativeResult.signature)
-                    } else {
-                        nativeResult.signature.close()
-                        QualifiedSignResult.Failure(
-                            QualifiedSignFailure.LOCAL_VERIFICATION_FAILED,
-                        )
-                    }
-                }
-
-                is NativeQualifiedSignResult.Failure -> {
-                    QualifiedSignResult.Failure(
-                        nativeResult.kind.toQualifiedFailure(),
-                        nativeResult.remainingRetries,
-                    )
-                }
-            }
+            verifiedQualifiedResult(
+                expectedCertificate = expectedCertificate,
+                inputMode = inputMode,
+                input = input,
+                nativeResult = nativeResult,
+            )
         if (contactlessSessionActive || !nativeResult.allowsQualifiedContextRestore()) {
             return verifiedResult
         }
@@ -881,49 +817,6 @@ private fun NativeCertificateReadResult<NativeQualifiedCertificate>.closeCertifi
     }
 }
 
-private fun NativeAuthenticationSignFailure.toAuthenticationFailure(): AuthenticationSignFailure =
-    when (this) {
-        NativeAuthenticationSignFailure.CARD_UNAVAILABLE -> {
-            AuthenticationSignFailure.CARD_UNAVAILABLE
-        }
-
-        NativeAuthenticationSignFailure.TRANSPORT_ERROR -> {
-            AuthenticationSignFailure.TRANSPORT_ERROR
-        }
-
-        NativeAuthenticationSignFailure.INVALID_PIN -> {
-            AuthenticationSignFailure.INVALID_PIN
-        }
-
-        NativeAuthenticationSignFailure.SAFETY_REFUSED -> {
-            AuthenticationSignFailure.SAFETY_REFUSED
-        }
-
-        NativeAuthenticationSignFailure.PIN_LOCKED -> {
-            AuthenticationSignFailure.PIN_LOCKED
-        }
-
-        NativeAuthenticationSignFailure.WRONG_PIN -> {
-            AuthenticationSignFailure.WRONG_PIN
-        }
-
-        NativeAuthenticationSignFailure.VERIFICATION_REJECTED -> {
-            AuthenticationSignFailure.VERIFICATION_REJECTED
-        }
-
-        NativeAuthenticationSignFailure.SIGNING_REJECTED -> {
-            AuthenticationSignFailure.SIGNING_REJECTED
-        }
-
-        // The USB path opens no PACE channel; a channel refusal reaching
-        // it is a local impossibility.
-        NativeAuthenticationSignFailure.PACE_REJECTED,
-        NativeAuthenticationSignFailure.BRIDGE_ERROR,
-        -> {
-            AuthenticationSignFailure.BRIDGE_ERROR
-        }
-    }
-
 private fun NativeQualifiedSignResult.allowsQualifiedContextRestore(): Boolean =
     when (this) {
         is NativeQualifiedSignResult.Success -> {
@@ -957,61 +850,6 @@ private fun QualifiedSignResult.closeSignature() {
         signature.close()
     }
 }
-
-private fun NativeQualifiedSignFailure.toQualifiedFailure(): QualifiedSignFailure =
-    when (this) {
-        NativeQualifiedSignFailure.CARD_UNAVAILABLE -> {
-            QualifiedSignFailure.CARD_UNAVAILABLE
-        }
-
-        NativeQualifiedSignFailure.TRANSPORT_ERROR -> {
-            QualifiedSignFailure.TRANSPORT_ERROR
-        }
-
-        NativeQualifiedSignFailure.INVALID_PIN -> {
-            QualifiedSignFailure.INVALID_PIN
-        }
-
-        NativeQualifiedSignFailure.SAFETY_REFUSED -> {
-            QualifiedSignFailure.SAFETY_REFUSED
-        }
-
-        NativeQualifiedSignFailure.PIN_LOCKED -> {
-            QualifiedSignFailure.PIN_LOCKED
-        }
-
-        NativeQualifiedSignFailure.WRONG_PIN -> {
-            QualifiedSignFailure.WRONG_PIN
-        }
-
-        NativeQualifiedSignFailure.VERIFICATION_REJECTED -> {
-            QualifiedSignFailure.VERIFICATION_REJECTED
-        }
-
-        NativeQualifiedSignFailure.CERTIFICATE_REJECTED -> {
-            QualifiedSignFailure.CERTIFICATE_REJECTED
-        }
-
-        NativeQualifiedSignFailure.INVALID_CERTIFICATE -> {
-            QualifiedSignFailure.INVALID_CERTIFICATE
-        }
-
-        NativeQualifiedSignFailure.CERTIFICATE_MISMATCH -> {
-            QualifiedSignFailure.CERTIFICATE_MISMATCH
-        }
-
-        NativeQualifiedSignFailure.KEY_PROFILE_MISMATCH -> {
-            QualifiedSignFailure.KEY_PROFILE_MISMATCH
-        }
-
-        NativeQualifiedSignFailure.SIGNING_REJECTED -> {
-            QualifiedSignFailure.SIGNING_REJECTED
-        }
-
-        NativeQualifiedSignFailure.BRIDGE_ERROR -> {
-            QualifiedSignFailure.BRIDGE_ERROR
-        }
-    }
 
 internal class CcidUsbSessionOpener(
     private val usbManager: UsbManager,

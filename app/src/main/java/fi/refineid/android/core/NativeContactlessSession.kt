@@ -14,8 +14,9 @@ import fi.refineid.android.diagnostics.AppTrace
  */
 internal object NativeContactlessSession {
     /**
-     * Like [NativeContactlessCore.open], but retains the live
-     * secure-messaging session on full success so a following
+     * Runs one PACE handshake with the transferred CAN, reads the PKCS#15
+     * authentication certificate and counter-safe PIN1 preflight inside secure
+     * messaging, and retains the live session on full success so a following
      * [authenticateAndSignOnSession] reuses this channel instead of running
      * PACE again. The CAN copy is cleared by the native border.
      */

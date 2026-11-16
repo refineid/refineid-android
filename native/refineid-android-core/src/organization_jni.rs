@@ -21,7 +21,7 @@ use jni::sys::{jboolean, jint};
 use jni::{Env, NativeMethod};
 use refineid_auth::PinSlot;
 
-use crate::authentication_signer::{AuthenticationSignFailure, AuthenticationSigningInput};
+use crate::authentication_signer::AuthenticationSignFailure;
 use crate::card_certificate::CertificateReadFailure;
 use crate::card_management::{
     MANAGEMENT_TAG_BRIDGE_ERROR, encode_credential_health_reply, encode_manage_outcome_reply,
@@ -37,15 +37,11 @@ use crate::organization_card::{
     read_organization_counter,
 };
 use crate::pin_status::PinPreflightFailure;
-use crate::qualified_signer::{MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH, QualifiedSigningInput};
 use crate::{
     AUTHENTICATION_SIGNATURE_BRIDGE_ERROR, AUTHENTICATION_SIGNATURE_SUCCEEDED,
-    AuthenticationSigningInputMode, CERTIFICATE_BRIDGE_ERROR,
-    MAXIMUM_AUTHENTICATION_MESSAGE_LENGTH, MAXIMUM_EXPECTED_CERTIFICATE_LENGTH,
-    PIN_PREFLIGHT_BRIDGE_ERROR, QUALIFIED_SIGNATURE_BRIDGE_ERROR, QualifiedSigningInputMode,
-    SHA384_DIGEST_LENGTH, authentication_request_from_jint, encode_authentication_signature_reply,
-    encode_certificate_reply, encode_contactless_open_reply, encode_pin_preflight_reply,
-    encode_qualified_signature_reply, one_byte_reply, qualified_request_from_jint,
+    CERTIFICATE_BRIDGE_ERROR, PIN_PREFLIGHT_BRIDGE_ERROR, QualifiedSignRequest,
+    encode_authentication_signature_reply, encode_certificate_reply, encode_contactless_open_reply,
+    encode_pin_preflight_reply, jni_authentication_sign_reply, jni_qualified_sign_reply,
     take_secret_bytes, take_secret_pair,
 };
 
@@ -315,58 +311,28 @@ fn organization_authenticate_and_sign_native<'local>(
     message: JByteArray<'local>,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let mut pin_bytes = take_secret_bytes(env, &pin)?;
-    let Some((algorithm, input_mode)) = authentication_request_from_jint(request) else {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
-    };
-    let message_length = match message.len(env) {
-        Ok(length) => length,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    if message_length > MAXIMUM_AUTHENTICATION_MESSAGE_LENGTH {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, AUTHENTICATION_SIGNATURE_BRIDGE_ERROR);
-    }
-    let mut message_bytes = match env.convert_byte_array(&message) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    let (result, bridge_failed) = {
-        let exchange = JniBlockExchange::new(env, callback);
-        let input = match input_mode {
-            AuthenticationSigningInputMode::Message => {
-                AuthenticationSigningInput::Message(&message_bytes)
-            }
-            AuthenticationSigningInputMode::Prehashed => {
-                AuthenticationSigningInput::Prehashed(&message_bytes)
-            }
-        };
-        let (result, transport) = organization_authenticate_and_sign(
-            apdu_transport(exchange),
-            algorithm,
-            pin_bytes,
-            input,
-        );
-        let exchange = transport.into_exchange();
-        (result, exchange.bridge_failed())
-    };
-    message_bytes.fill(0);
-    let bytes = if bridge_failed {
-        vec![AUTHENTICATION_SIGNATURE_BRIDGE_ERROR]
-    } else {
-        encode_authentication_signature_reply(result)
-    };
-    reply(env, bytes)
+    jni_authentication_sign_reply(
+        env,
+        request,
+        &pin,
+        &message,
+        callback,
+        |exchange, algorithm, pin_bytes, input| {
+            let (result, transport) = organization_authenticate_and_sign(
+                apdu_transport(exchange),
+                algorithm,
+                pin_bytes,
+                input,
+            );
+            (result, transport.into_exchange())
+        },
+    )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the static JNI ABI carries five explicit request fields plus its environment, class, and callback"
+)]
 fn organization_qualified_sign_native<'local>(
     env: &mut Env<'local>,
     _class: JClass<'local>,
@@ -377,70 +343,28 @@ fn organization_qualified_sign_native<'local>(
     read_ca_certificates: jboolean,
     callback: JObject<'local>,
 ) -> Result<JByteArray<'local>, jni::errors::Error> {
-    let mut pin_bytes = take_secret_bytes(env, &pin)?;
-    let Some((algorithm, input_mode)) = qualified_request_from_jint(algorithm) else {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
+    let request = QualifiedSignRequest {
+        algorithm,
+        pin: &pin,
+        content: &content,
+        expected_certificate: &expected_certificate,
     };
-    let lengths = content.len(env).and_then(|content_length| {
-        expected_certificate
-            .len(env)
-            .map(|certificate_length| (content_length, certificate_length))
-    });
-    let (content_length, certificate_length) = match lengths {
-        Ok(lengths) => lengths,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    let content_length_accepted = match input_mode {
-        QualifiedSigningInputMode::Message => {
-            content_length <= MAXIMUM_QUALIFIED_SIGNING_CONTENT_LENGTH
-        }
-        QualifiedSigningInputMode::Prehashed => content_length == SHA384_DIGEST_LENGTH,
-    };
-    if !content_length_accepted || certificate_length > MAXIMUM_EXPECTED_CERTIFICATE_LENGTH {
-        pin_bytes.fill(0);
-        return one_byte_reply(env, QUALIFIED_SIGNATURE_BRIDGE_ERROR);
-    }
-    let arrays = env.convert_byte_array(&content).and_then(|content_bytes| {
-        env.convert_byte_array(&expected_certificate)
-            .map(|expected| (content_bytes, expected))
-    });
-    let (mut content_bytes, expected) = match arrays {
-        Ok(arrays) => arrays,
-        Err(error) => {
-            pin_bytes.fill(0);
-            return Err(error);
-        }
-    };
-    let (result, bridge_failed) = {
-        let exchange = JniBlockExchange::new(env, callback);
-        let input = match input_mode {
-            QualifiedSigningInputMode::Message => QualifiedSigningInput::Message(&content_bytes),
-            QualifiedSigningInputMode::Prehashed => {
-                QualifiedSigningInput::Prehashed(&content_bytes)
-            }
-        };
-        let (result, transport) = organization_qualified_sign(
-            apdu_transport(exchange),
-            algorithm,
-            pin_bytes,
-            input,
-            &expected,
-            read_ca_certificates,
-        );
-        let exchange = transport.into_exchange();
-        (result, exchange.bridge_failed())
-    };
-    content_bytes.fill(0);
-    let bytes = if bridge_failed {
-        vec![QUALIFIED_SIGNATURE_BRIDGE_ERROR]
-    } else {
-        encode_qualified_signature_reply(result)
-    };
-    reply(env, bytes)
+    jni_qualified_sign_reply(
+        env,
+        request,
+        callback,
+        |exchange, algorithm, pin_bytes, input, expected| {
+            let (result, transport) = organization_qualified_sign(
+                apdu_transport(exchange),
+                algorithm,
+                pin_bytes,
+                input,
+                expected,
+                read_ca_certificates,
+            );
+            (result, transport.into_exchange())
+        },
+    )
 }
 
 /// The change of `pin` on the channel its current value opens.

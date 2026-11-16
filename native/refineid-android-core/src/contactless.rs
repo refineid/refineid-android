@@ -318,68 +318,13 @@ where
     }
 }
 
-/// One PACE handshake, then the PKCS#15 selection, authentication
-/// certificate read, and counter-safe PIN1 preflight inside the same
-/// secure-messaging session. This is the contactless session opener:
-/// everything the browser path caches arrives under one handshake.
-pub(crate) fn contactless_open<Exchange: SingleBlockExchange>(
-    transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
-) -> (ContactlessOpenOutcome, Exchange) {
-    let (outcome, transport) = match open_secure_channel(transport, can_bytes) {
-        Ok(mut secure) => {
-            let outcome = match secure.select_pkcs15_application().map_err(map_pkcs15_error) {
-                Err(failure) => ContactlessOpenOutcome::Failure(failure),
-                Ok(()) => open_selected(&mut secure),
-            };
-            (outcome, secure.into_inner())
-        }
-        Err((exchange, failure)) => (
-            ContactlessOpenOutcome::Failure(certificate_channel_failure(failure)),
-            AndroidCardTransport::new(exchange, CardExchangeLevel::Apdu),
-        ),
-    };
-    (outcome, transport.into_exchange())
-}
-
-/// PACE, then secure messaging, then the one-shot preflight, VERIFY,
-/// and signing sequence. The PIN is zeroized on every path that stops
-/// before the reviewed signer consumes it.
-pub(crate) fn contactless_authenticate_and_sign<Exchange: SingleBlockExchange>(
-    transport: AndroidCardTransport<Exchange>,
-    can_bytes: Vec<u8>,
-    algorithm: AuthenticationSigningAlgorithm,
-    mut pin_bytes: Vec<u8>,
-    input: AuthenticationSigningInput<'_>,
-) -> (
-    Result<AuthenticationSignature, AuthenticationSignFailure>,
-    Exchange,
-) {
-    let mut secure = match open_secure_channel(transport, can_bytes) {
-        Ok(secure) => secure,
-        Err((exchange, failure)) => {
-            pin_bytes.fill(0);
-            return (Err(sign_channel_failure(failure)), exchange);
-        }
-    };
-    if let Err(error) = secure.select_pkcs15_application() {
-        pin_bytes.fill(0);
-        return (
-            Err(sign_selection_failure(error)),
-            secure.into_inner().into_exchange(),
-        );
-    }
-    let result = authenticate_and_sign(&mut secure, algorithm, pin_bytes, input);
-    (result, secure.into_inner().into_exchange())
-}
-
 /// The persistent-session opener. One PACE handshake, then the PKCS#15
 /// selection, authentication-certificate read, and counter-safe PIN1
-/// preflight -- byte for byte the one-shot [`contactless_open`] sequence.
-/// The one difference is the ending: on full success the live
-/// secure-messaging session (keys and send-sequence counter) is retained,
-/// so the sign that follows reuses this channel instead of running PACE a
-/// second time. A failed open retains nothing and the holder reconnects.
+/// preflight inside the same secure-messaging session. On full success the
+/// live secure-messaging session (keys and send-sequence counter) is
+/// retained, so the operation that follows reuses this channel instead of
+/// running PACE a second time. A failed open retains nothing and the holder
+/// reconnects.
 pub(crate) fn contactless_connect<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
     can_bytes: Vec<u8>,
@@ -412,15 +357,11 @@ pub(crate) fn contactless_connect<Exchange: SingleBlockExchange>(
     (outcome, transport.into_exchange())
 }
 
-/// The authentication signature on an already-open session: no PACE, only
-/// a cheap PKCS#15 re-select before VERIFY and signing on the retained
-/// channel. The PIN is zeroized on every path that stops before the
-/// reviewed signer consumes it. On completion the advanced session is
-/// retained for any further operation under the same field. A missing
-/// session -- never connected, or the field dropped between calls -- is a
-/// bridge fault: the holder connects again to prove a fresh CAN.
-pub(crate) fn contactless_authenticate_and_sign_on_session<Exchange: SingleBlockExchange>(
+/// One authentication signature inside `channel`. The PIN1 is zeroized on
+/// every path that stops before the reviewed signer consumes it.
+pub(crate) fn contactless_authenticate_and_sign<Exchange: SingleBlockExchange>(
     transport: AndroidCardTransport<Exchange>,
+    channel: ContactlessChannel,
     algorithm: AuthenticationSigningAlgorithm,
     mut pin_bytes: Vec<u8>,
     input: AuthenticationSigningInput<'_>,
@@ -428,27 +369,21 @@ pub(crate) fn contactless_authenticate_and_sign_on_session<Exchange: SingleBlock
     Result<AuthenticationSignature, AuthenticationSignFailure>,
     Exchange,
 ) {
-    let Some(session) = take_held_session() else {
-        pin_bytes.fill(0);
-        return (
-            Err(AuthenticationSignFailure::CardUnavailable),
-            transport.into_exchange(),
-        );
-    };
-    let mut secure = SmTransport::new(transport, session);
-    if let Err(error) = secure.select_pkcs15_application() {
-        pin_bytes.fill(0);
-        // The channel is troubled; drop the session and require a reconnect.
-        return (
-            Err(sign_selection_failure(error)),
-            secure.into_inner().into_exchange(),
-        );
+    match open_contactless_channel(transport, channel) {
+        Ok(mut open) => {
+            let result = authenticate_and_sign(&mut open.secure, algorithm, pin_bytes, input);
+            (result, close_contactless_channel(open))
+        }
+        Err((failure, exchange)) => {
+            pin_bytes.fill(0);
+            let failure = match failure {
+                ChannelOpenFailure::Handshake(failure) => sign_channel_failure(failure),
+                ChannelOpenFailure::NoHeldSession => AuthenticationSignFailure::CardUnavailable,
+                ChannelOpenFailure::Selection(error) => sign_selection_failure(error),
+            };
+            (Err(failure), exchange)
+        }
     }
-    let result = authenticate_and_sign(&mut secure, algorithm, pin_bytes, input);
-    // Keep the advanced session alive for any further operation this field.
-    let (transport, session) = secure.into_parts();
-    store_held_session(session);
-    (result, transport.into_exchange())
 }
 
 /// Verify PIN1 on the retained secure channel and preserve its advanced state.
@@ -1040,10 +975,14 @@ mod tests {
 
     use super::{
         ContactlessChannel, ContactlessOpenOutcome, SecureChannelFailure,
-        contactless_activate_card, contactless_close, contactless_connect, contactless_manage_pin,
-        contactless_probe_credential_health, contactless_probe_pin2, contactless_qualified_sign,
-        contactless_read_qualified_certificate, map_pace_error, open_preflight_failure,
-        pin2_channel_failure, qualified_channel_failure, reconstruct_can,
+        contactless_activate_card, contactless_authenticate_and_sign, contactless_close,
+        contactless_connect, contactless_manage_pin, contactless_probe_credential_health,
+        contactless_probe_pin2, contactless_qualified_sign, contactless_read_qualified_certificate,
+        map_pace_error, open_preflight_failure, pin2_channel_failure, qualified_channel_failure,
+        reconstruct_can, sign_channel_failure, sign_selection_failure,
+    };
+    use crate::authentication_signer::{
+        AuthenticationSignFailure, AuthenticationSigningAlgorithm, AuthenticationSigningInput,
     };
     use crate::card_certificate::CertificateReadFailure;
     use crate::card_management::{
@@ -1286,6 +1225,88 @@ mod tests {
     const SYNTHETIC_PIN2: &[u8] = b"135790";
     const SYNTHETIC_MESSAGE: &[u8] = b"synthetic message";
     const SYNTHETIC_CERTIFICATE: &[u8] = b"synthetic certificate";
+
+    #[test]
+    fn authentication_sign_through_contactless_channel_preserves_failure_mappings() {
+        const SYNTHETIC_AUTH_PIN: &[u8] = b"aaaa";
+        contactless_close();
+
+        let (missing_session, exchange) = contactless_authenticate_and_sign(
+            transport(),
+            ContactlessChannel::HeldSession,
+            AuthenticationSigningAlgorithm::EcdsaP384Sha256,
+            SYNTHETIC_AUTH_PIN.to_vec(),
+            AuthenticationSigningInput::Message(SYNTHETIC_MESSAGE),
+        );
+        assert_eq!(
+            missing_session.err(),
+            Some(AuthenticationSignFailure::CardUnavailable)
+        );
+        assert_eq!(exchange.blocks, 0);
+
+        let (invalid_can, exchange) = contactless_authenticate_and_sign(
+            transport(),
+            ContactlessChannel::Pace(NON_DIGIT_CAN.to_vec()),
+            AuthenticationSigningAlgorithm::EcdsaP384Sha256,
+            SYNTHETIC_AUTH_PIN.to_vec(),
+            AuthenticationSigningInput::Message(SYNTHETIC_MESSAGE),
+        );
+        assert_eq!(invalid_can.err(), Some(AuthenticationSignFailure::Bridge));
+        assert_eq!(exchange.blocks, 0);
+
+        let (pace_rejected, exchange) = contactless_authenticate_and_sign(
+            AndroidCardTransport::new(
+                card_access_exchange(refineid_pace::PaceDomain::BrainpoolP384r1),
+                CardExchangeLevel::Apdu,
+            ),
+            ContactlessChannel::Pace(SYNTHETIC_CAN_DIGITS.to_vec()),
+            AuthenticationSigningAlgorithm::EcdsaP384Sha256,
+            SYNTHETIC_AUTH_PIN.to_vec(),
+            AuthenticationSigningInput::Message(SYNTHETIC_MESSAGE),
+        );
+        assert_eq!(
+            pace_rejected.err(),
+            Some(AuthenticationSignFailure::PaceRejected)
+        );
+        assert_eq!(sent_mse(&exchange).len(), 1);
+
+        let (organization_card, exchange) = contactless_authenticate_and_sign(
+            AndroidCardTransport::new(
+                card_access_exchange(refineid_pace::PaceDomain::NistP384),
+                CardExchangeLevel::Apdu,
+            ),
+            ContactlessChannel::Pace(SYNTHETIC_CAN_DIGITS.to_vec()),
+            AuthenticationSigningAlgorithm::EcdsaP384Sha256,
+            SYNTHETIC_AUTH_PIN.to_vec(),
+            AuthenticationSigningInput::Message(SYNTHETIC_MESSAGE),
+        );
+        assert_eq!(
+            organization_card.err(),
+            Some(AuthenticationSignFailure::Transport)
+        );
+        assert!(sent_mse(&exchange).is_empty());
+
+        assert_eq!(
+            sign_channel_failure(SecureChannelFailure::CardUnavailable),
+            AuthenticationSignFailure::CardUnavailable
+        );
+        assert_eq!(
+            sign_channel_failure(SecureChannelFailure::PaceRejected),
+            AuthenticationSignFailure::PaceRejected
+        );
+        assert_eq!(
+            sign_channel_failure(SecureChannelFailure::UnknownCard),
+            AuthenticationSignFailure::Transport
+        );
+        assert_eq!(
+            sign_selection_failure::<&str>(Pkcs15Error::Outcome(TransportOutcome::NoCard)),
+            AuthenticationSignFailure::CardUnavailable
+        );
+        assert_eq!(
+            sign_selection_failure::<&str>(Pkcs15Error::Empty),
+            AuthenticationSignFailure::Transport
+        );
+    }
 
     #[test]
     fn qualified_operations_without_a_held_session_send_nothing() {

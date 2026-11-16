@@ -32,6 +32,8 @@ import fi.refineid.android.core.QualifiedSignResult
 import fi.refineid.android.core.QualifiedSigningAlgorithm
 import fi.refineid.android.core.QualifiedSigningInputMode
 import fi.refineid.android.core.attemptsLeft
+import fi.refineid.android.core.verifiedAuthenticationResult
+import fi.refineid.android.core.verifiedQualifiedResult
 import fi.refineid.android.core.verifyPin1OnHeldChannel
 import fi.refineid.android.diagnostics.AppTrace
 import java.io.IOException
@@ -250,7 +252,13 @@ internal class ContactlessSession(
                 }
                 result
             }
-        return verifiedAuthenticationResult(certificate, inputMode, input, nativeResult)
+        return verifiedAuthenticationResult(
+            certificate = certificate,
+            inputMode = inputMode,
+            input = input,
+            nativeResult = nativeResult,
+            paceRejectedFailure = AuthenticationSignFailure.TRANSPORT_ERROR,
+        )
     }
 
     /**
