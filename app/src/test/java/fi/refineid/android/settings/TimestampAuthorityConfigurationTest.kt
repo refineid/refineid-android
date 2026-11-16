@@ -13,7 +13,7 @@ import java.util.Base64
 
 class TimestampAuthorityConfigurationTest {
     @Test
-    fun shippedConfigurationMatchesAppleWithoutCredentials() {
+    fun shippedConfigurationUsesHttpsWithoutCredentials() {
         val configuration = TimestampAuthorityConfiguration.shipped()
         try {
             assertEquals(SHIPPED_AUTHORITY_ADDRESS, configuration.address)
@@ -40,7 +40,7 @@ class TimestampAuthorityConfigurationTest {
         val authority = configuration.copySigningAuthority()
         try {
             assertTrue(copiedPassword.contentEquals(SYNTHETIC_PASSWORD))
-            assertEquals(SigningTimestampTrust.CONFIGURED_AUTHORITY, authority.trust)
+            assertEquals(SigningTimestampTrust.TRUSTED_LISTS, authority.trust)
             assertEquals(SYNTHETIC_AUTHORIZATION_HEADER, authority.credentials()?.authorizationHeader())
             assertFalse(configuration.toString().contains(PROTECTED_AUTHORITY_ADDRESS))
             assertFalse(configuration.toString().contains(SYNTHETIC_USERNAME))
@@ -81,7 +81,7 @@ class TimestampAuthorityConfigurationTest {
     }
 
     private companion object {
-        const val SHIPPED_AUTHORITY_ADDRESS = "http://timestamp.sectigo.com/qualified"
+        const val SHIPPED_AUTHORITY_ADDRESS = "https://timestamp.sectigo.com/qualified"
         const val PROTECTED_AUTHORITY_ADDRESS = "https://timestamp.example/request"
         const val PLAIN_AUTHORITY_ADDRESS = "http://timestamp.example/request"
         const val SYNTHETIC_USERNAME = "synthetic-account"

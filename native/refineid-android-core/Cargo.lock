@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "adler2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+
+[[package]]
 name = "aes"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -300,6 +306,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "hkdf"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -416,6 +428,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "miniz_oxide"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
+dependencies = [
+ "adler2",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -517,6 +538,7 @@ dependencies = [
  "refineid-ber",
  "refineid-cms",
  "refineid-digest",
+ "refineid-doc-sign",
  "refineid-pace",
  "refineid-pkcs15",
  "refineid-sign",
@@ -592,6 +614,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "refineid-doc-sign"
+version = "26.11.16"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#01c9d8da334a5cddfe8fc0c8a7ff139df837c0a3"
+dependencies = [
+ "base64ct",
+ "const-oid",
+ "crypto-bigint",
+ "getrandom",
+ "hex",
+ "miniz_oxide",
+ "refineid-ber",
+ "refineid-cms",
+ "refineid-digest",
+ "refineid-remote",
+ "sha1",
+ "sha2",
+ "spki",
+ "x509-cert",
+ "zeroize",
+]
+
+[[package]]
 name = "refineid-pace"
 version = "26.11.16"
 source = "git+https://github.com/RefineID/refineid-core.git?branch=main#01c9d8da334a5cddfe8fc0c8a7ff139df837c0a3"
@@ -621,6 +665,14 @@ dependencies = [
  "refineid-apdu",
  "refineid-ber",
  "refineid-x509",
+]
+
+[[package]]
+name = "refineid-remote"
+version = "26.11.16"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#01c9d8da334a5cddfe8fc0c8a7ff139df837c0a3"
+dependencies = [
+ "refineid-digest",
 ]
 
 [[package]]

@@ -102,7 +102,7 @@ class Rfc3161TimestampClientTest {
     }
 
     @Test
-    fun configuredAuthorityOwnsCredentialsWithoutPretendingToHavePinnedTrust() {
+    fun configuredAuthorityOwnsCredentialsAndRequiresTrustedLists() {
         val password = SYNTHETIC_PASSWORD.copyOf()
         val authority =
             SigningTimestampAuthority.configured(
@@ -112,7 +112,7 @@ class Rfc3161TimestampClientTest {
             )
         password[FIRST_CHARACTER_INDEX] = CHANGED_CHARACTER
 
-        assertEquals(SigningTimestampTrust.CONFIGURED_AUTHORITY, authority.trust)
+        assertEquals(SigningTimestampTrust.TRUSTED_LISTS, authority.trust)
         assertEquals(NO_TRUST_CERTIFICATES, authority.trustedCertificateCount)
         assertTrue(authority.copyTrustedCertificates().isEmpty())
         assertEquals(

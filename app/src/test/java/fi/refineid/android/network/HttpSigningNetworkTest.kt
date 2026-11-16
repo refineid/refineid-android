@@ -4,6 +4,7 @@ package fi.refineid.android.network
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -13,12 +14,9 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.io.ByteArrayInputStream
-import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
-import java.net.URL
 import java.util.concurrent.atomic.AtomicReference
 
 class HttpSigningNetworkTest {
@@ -75,7 +73,7 @@ class HttpSigningNetworkTest {
             exchange.close()
         }
         server.start()
-        authorityRoot = "http://localhost:${server.address.port}"
+        authorityRoot = "http://timestamp.example:${server.address.port}"
     }
 
     @After
@@ -86,7 +84,7 @@ class HttpSigningNetworkTest {
     @Test
     fun returnsOneBoundedSuccessfulBody() {
         val response =
-            HttpSigningNetwork().get(
+            network().get(
                 address = authorityRoot + SUCCESS_PATH,
                 maximumResponseBytes = SYNTHETIC_RESPONSE.size,
                 endpoint = SigningNetworkEndpoint.AUTHORITY,
@@ -98,7 +96,7 @@ class HttpSigningNetworkTest {
     @Test
     fun preservesPostBodyAndContentTypeAcrossTheOneSafeRedirect() {
         val response =
-            HttpSigningNetwork().post(
+            network().post(
                 body = SYNTHETIC_REQUEST,
                 address = authorityRoot + REDIRECT_PATH,
                 contentType = SYNTHETIC_CONTENT_TYPE,
@@ -116,7 +114,7 @@ class HttpSigningNetworkTest {
     @Test
     fun followsSeeOtherAsABodylessGet() {
         val response =
-            HttpSigningNetwork().post(
+            network().post(
                 body = SYNTHETIC_REQUEST,
                 address = authorityRoot + SEE_OTHER_PATH,
                 contentType = SYNTHETIC_CONTENT_TYPE,
@@ -134,14 +132,14 @@ class HttpSigningNetworkTest {
     @Test
     fun refusesDeclaredOverflowAndAnEmptySuccessBody() {
         assertFailure(SigningNetworkFailure.UNUSABLE_BODY) {
-            HttpSigningNetwork().get(
+            network().get(
                 address = authorityRoot + OVERSIZED_PATH,
                 maximumResponseBytes = MAXIMUM_ACCEPTED_TEST_BODY_BYTES,
                 endpoint = SigningNetworkEndpoint.AUTHORITY,
             )
         }
         assertFailure(SigningNetworkFailure.UNUSABLE_BODY) {
-            HttpSigningNetwork().get(
+            network().get(
                 address = authorityRoot + EMPTY_PATH,
                 maximumResponseBytes = MAXIMUM_ACCEPTED_TEST_BODY_BYTES,
                 endpoint = SigningNetworkEndpoint.AUTHORITY,
@@ -153,7 +151,7 @@ class HttpSigningNetworkTest {
     fun retainsTheStatusWithoutReadingOrReturningItsBody() {
         val failure =
             assertFailure(SigningNetworkFailure.HTTP_STATUS) {
-                HttpSigningNetwork().get(
+                network().get(
                     address = authorityRoot + UNAVAILABLE_PATH,
                     maximumResponseBytes = MAXIMUM_ACCEPTED_TEST_BODY_BYTES,
                     endpoint = SigningNetworkEndpoint.AUTHORITY,
@@ -175,7 +173,7 @@ class HttpSigningNetworkTest {
     @Test
     fun stopsAtTheAuthorityRedirectBudget() {
         assertFailure(SigningNetworkFailure.REDIRECT_LIMIT_EXCEEDED) {
-            HttpSigningNetwork().get(
+            network().get(
                 address = authorityRoot + REDIRECT_LOOP_PATH,
                 maximumResponseBytes = MAXIMUM_ACCEPTED_TEST_BODY_BYTES,
                 endpoint = SigningNetworkEndpoint.AUTHORITY,
@@ -186,7 +184,7 @@ class HttpSigningNetworkTest {
     @Test
     fun refusesAnEmptyRedirectLocation() {
         assertFailure(SigningNetworkFailure.UNSAFE_REDIRECT) {
-            HttpSigningNetwork().get(
+            network().get(
                 address = authorityRoot + EMPTY_REDIRECT_PATH,
                 maximumResponseBytes = MAXIMUM_ACCEPTED_TEST_BODY_BYTES,
                 endpoint = SigningNetworkEndpoint.AUTHORITY,
@@ -204,13 +202,19 @@ class HttpSigningNetworkTest {
     }
 
     @Test
-    fun classifiesSocketTimeoutAsTransientAndDisconnects() {
-        val connection = TimeoutHttpConnection(URL(AUTHORITY_TIMEOUT_ADDRESS))
+    fun classifiesSocketTimeoutAsTransient() {
         val network =
             HttpSigningNetwork(
-                connectionFactory = SigningNetworkConnectionFactory { connection },
+                resolver = SigningNetworkResolver { listOf(LoopbackSigningSocketFactory.PUBLIC_ADDRESS) },
+                client =
+                    OkHttpClient
+                        .Builder()
+                        .addInterceptor {
+                            throw SocketTimeoutException(
+                                "synthetic timeout",
+                            )
+                        }.build(),
             )
-
         val failure =
             assertFailure(SigningNetworkFailure.TRANSIENT_TRANSPORT) {
                 network.get(
@@ -219,10 +223,14 @@ class HttpSigningNetworkTest {
                     endpoint = SigningNetworkEndpoint.AUTHORITY,
                 )
             }
-
         assertTrue(HttpSigningNetwork.isTransientAuthorityFailure(failure))
-        assertTrue(connection.wasDisconnected)
     }
+
+    private fun network(): HttpSigningNetwork =
+        HttpSigningNetwork(
+            resolver = SigningNetworkResolver { listOf(LoopbackSigningSocketFactory.PUBLIC_ADDRESS) },
+            client = OkHttpClient.Builder().socketFactory(LoopbackSigningSocketFactory()).build(),
+        )
 
     private fun HttpExchange.respond(
         status: Int,
@@ -240,32 +248,6 @@ class HttpSigningNetworkTest {
         val failure = assertThrows(SigningNetworkException::class.java, operation)
         assertEquals(expected, failure.kind)
         return failure
-    }
-
-    private open class SyntheticHttpConnection(
-        url: URL,
-    ) : HttpURLConnection(url) {
-        var wasDisconnected = false
-
-        override fun connect() = Unit
-
-        override fun disconnect() {
-            wasDisconnected = true
-        }
-
-        override fun usingProxy(): Boolean = false
-
-        override fun getResponseCode(): Int = SUCCESS_STATUS
-
-        override fun getContentLengthLong(): Long = SYNTHETIC_RESPONSE.size.toLong()
-
-        override fun getInputStream() = ByteArrayInputStream(SYNTHETIC_RESPONSE)
-    }
-
-    private class TimeoutHttpConnection(
-        url: URL,
-    ) : SyntheticHttpConnection(url) {
-        override fun getResponseCode(): Int = throw SocketTimeoutException("synthetic timeout")
     }
 
     private companion object {

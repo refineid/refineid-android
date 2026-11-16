@@ -130,7 +130,6 @@ internal class SigningNetworkRequest internal constructor(
     val method: SigningNetworkMethod,
     val endpoint: SigningNetworkEndpoint,
     val contentType: String?,
-    val hostHeader: String?,
     private val ownedBody: ByteArray?,
     private val authorization: String?,
 ) : AutoCloseable {
@@ -158,7 +157,6 @@ internal class SigningNetworkRequest internal constructor(
         connectionUri: URI = this.connectionUri,
         method: SigningNetworkMethod = this.method,
         contentType: String? = this.contentType,
-        hostHeader: String? = this.hostHeader,
     ): SigningNetworkRequest {
         requireOpen()
         return SigningNetworkRequest(
@@ -168,7 +166,6 @@ internal class SigningNetworkRequest internal constructor(
             method = method,
             endpoint = endpoint,
             contentType = contentType,
-            hostHeader = hostHeader,
             ownedBody = if (method == SigningNetworkMethod.POST) ownedBody?.copyOf() else null,
             authorization = authorization,
         )

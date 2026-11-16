@@ -18,7 +18,7 @@ internal class TimestampAcquisitionException(
 
 internal enum class SigningTimestampTrust {
     EXPLICIT_CERTIFICATES,
-    CONFIGURED_AUTHORITY,
+    TRUSTED_LISTS,
 }
 
 /** Owned timestamp-authority trust and optional Basic credentials. */
@@ -86,7 +86,7 @@ internal class SigningTimestampAuthority private constructor(
             )
         }
 
-        /** The holder-configured endpoint defines the exclusive token trust set. */
+        /** A holder-configured endpoint whose tokens require EU trusted-list anchors. */
         fun configured(
             address: String,
             username: String? = null,
@@ -100,7 +100,7 @@ internal class SigningTimestampAuthority private constructor(
             }
             return SigningTimestampAuthority(
                 address = address,
-                trust = SigningTimestampTrust.CONFIGURED_AUTHORITY,
+                trust = SigningTimestampTrust.TRUSTED_LISTS,
                 ownedTrustedCertificates = emptyList(),
                 credentials = credentials(username, password),
             )
@@ -149,6 +149,7 @@ internal class SigningTimestampAuthority private constructor(
 internal class Rfc3161TimestampClient(
     private val transport: SigningNetworkTransport,
     private val random: SigningNetworkSecureRandom = SystemSigningNetworkSecureRandom(),
+    private val anchors: TimestampAnchorSource = TrustedListTimestampAnchors(transport),
 ) {
     fun token(
         digest: ByteArray,
@@ -179,19 +180,15 @@ internal class Rfc3161TimestampClient(
                     nonce = generatedNonce,
                 )
             return unverified.use {
-                when (authority.trust) {
-                    SigningTimestampTrust.EXPLICIT_CERTIFICATES -> {
-                        trustedCertificates = authority.copyTrustedCertificates()
-                        TimestampTokenVerifier.verify(
-                            token = unverified,
-                            trustedCertificates = checkNotNull(trustedCertificates),
-                        )
+                trustedCertificates =
+                    when (authority.trust) {
+                        SigningTimestampTrust.EXPLICIT_CERTIFICATES -> authority.copyTrustedCertificates()
+                        SigningTimestampTrust.TRUSTED_LISTS -> anchors.copyAnchorsAt(unverified.generatedAt)
                     }
-
-                    SigningTimestampTrust.CONFIGURED_AUTHORITY -> {
-                        TimestampTokenVerifier.verifyConfiguredAuthority(unverified)
-                    }
-                }
+                TimestampTokenVerifier.verify(
+                    token = unverified,
+                    trustedCertificates = checkNotNull(trustedCertificates),
+                )
             }
         } finally {
             ownedDigest.fill(CLEARED_BYTE)

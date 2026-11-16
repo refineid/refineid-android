@@ -19,6 +19,7 @@ mod organization_card;
 mod organization_jni;
 mod pin_status;
 mod qualified_signer;
+mod timestamp_trust;
 
 use authentication_signer::{
     AuthenticationSignFailure, AuthenticationSignature, AuthenticationSigningAlgorithm,

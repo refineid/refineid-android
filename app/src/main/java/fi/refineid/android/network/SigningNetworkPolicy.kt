@@ -29,7 +29,6 @@ internal object SigningNetworkPolicy {
             method = SigningNetworkMethod.POST,
             endpoint = endpoint,
             contentType = contentType,
-            hostHeader = null,
             ownedBody = body.copyOf(),
             authorization = credentials?.authorizationHeader(),
         )
@@ -47,7 +46,6 @@ internal object SigningNetworkPolicy {
             method = SigningNetworkMethod.GET,
             endpoint = endpoint,
             contentType = null,
-            hostHeader = null,
             ownedBody = null,
             authorization = null,
         )
@@ -57,9 +55,6 @@ internal object SigningNetworkPolicy {
         request: SigningNetworkRequest,
         resolver: SigningNetworkResolver,
     ): SigningNetworkRequest {
-        if (request.endpoint == SigningNetworkEndpoint.AUTHORITY) {
-            return request.copy()
-        }
         val host = request.logicalUri.host ?: throw unsafeAddress()
         if (!certificateMaterialUriIsAllowed(request.logicalUri)) {
             throw unsafeAddress()
@@ -68,13 +63,9 @@ internal object SigningNetworkPolicy {
             return request.copy()
         }
         val addresses = SigningNetworkAddressPolicy.publicResolvedAddresses(host, resolver)
-        if (request.logicalUri.scheme.lowercase() == HTTPS_SCHEME) {
-            return request.copy()
-        }
         val pinned = pinnedUri(request.logicalUri, addresses.first())
         return request.copy(
             connectionUri = pinned,
-            hostHeader = hostHeader(request.logicalUri),
         )
     }
 
@@ -112,7 +103,6 @@ internal object SigningNetworkPolicy {
                 connectionUri = target,
                 method = redirectedMethod,
                 contentType = if (redirectedMethod == SigningNetworkMethod.POST) current.contentType else null,
-                hostHeader = null,
             )
         return try {
             protect(redirected, resolver)
@@ -229,17 +219,6 @@ internal object SigningNetworkPolicy {
             URI(encoded)
         } catch (_: URISyntaxException) {
             throw unsafeAddress()
-        }
-    }
-
-    private fun hostHeader(uri: URI): String {
-        val host = uri.host ?: throw unsafeAddress()
-        val renderedHost = if (host.contains(IPV6_COMPONENT_SEPARATOR)) "[$host]" else host
-        val defaultPort = if (uri.scheme.lowercase() == HTTPS_SCHEME) DEFAULT_HTTPS_PORT else DEFAULT_HTTP_PORT
-        return if (uri.port == URI_PORT_UNSPECIFIED || uri.port == defaultPort) {
-            renderedHost
-        } else {
-            renderedHost + PORT_SEPARATOR + uri.port
         }
     }
 

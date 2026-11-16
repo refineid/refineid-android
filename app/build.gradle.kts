@@ -431,6 +431,8 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
 
+    implementation(libs.okhttp)
+    testImplementation(libs.okhttp.tls)
     testImplementation(libs.junit)
     testImplementation(libs.json)
     testImplementation(libs.jna)
