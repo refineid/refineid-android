@@ -1,6 +1,7 @@
 package fi.refineid.android.document
 
 import java.math.BigInteger
+import java.security.MessageDigest
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import javax.security.auth.x500.X500Principal
@@ -57,6 +58,7 @@ internal class CmsSignedData private constructor(
             var isDocumentTimestamp = false
             var tstMessageDigest: ByteArray? = null
             var tstDigestJcaName: String? = null
+            var tstInfoBytes: ByteArray? = null
             if (encapContentInfo != null) {
                 val eci = sd.children(encapContentInfo)
                 val contentTypeElem = eci.next()
@@ -76,6 +78,7 @@ internal class CmsSignedData private constructor(
                         val (digest, jca) = parseTstMessageImprint(tstBytes)
                         tstMessageDigest = digest
                         tstDigestJcaName = jca
+                        tstInfoBytes = tstBytes
                     }
                 }
             }
@@ -98,6 +101,7 @@ internal class CmsSignedData private constructor(
                 isDocumentTimestamp = isDocumentTimestamp,
                 tstMessageDigest = tstMessageDigest,
                 tstDigestJcaName = tstDigestJcaName,
+                tstInfoBytes = tstInfoBytes,
             )
         }
 
@@ -144,6 +148,7 @@ internal class CmsSignedData private constructor(
             isDocumentTimestamp: Boolean,
             tstMessageDigest: ByteArray?,
             tstDigestJcaName: String?,
+            tstInfoBytes: ByteArray?,
         ): CmsSignedData? {
             si.next() ?: return null // version
             val sid = si.next() ?: return null // issuerAndSerialNumber
@@ -162,6 +167,22 @@ internal class CmsSignedData private constructor(
             val signatureOid = firstOid(si.children(signatureAlgorithm)) ?: return null
 
             val attributes = parseSignedAttributes(si.children(signedAttributes))
+            if (isDocumentTimestamp) {
+                val contentDigest =
+                    attributes.messageDigest
+                        ?: return null
+                if (attributes.contentType != ID_CT_TST_INFO) {
+                    return null
+                }
+                val authenticated = tstInfoBytes ?: return null
+                val contentDigestMatches =
+                    MessageDigest.getInstance(standardDigestJcaName).digest(authenticated).contentEquals(contentDigest)
+                if (!contentDigestMatches) {
+                    return null
+                }
+            } else if (attributes.contentType != null && attributes.contentType != ID_DATA) {
+                return null
+            }
             val effectiveMessageDigest =
                 if (isDocumentTimestamp && tstMessageDigest != null) {
                     tstMessageDigest
@@ -210,11 +231,13 @@ internal class CmsSignedData private constructor(
         private data class SignedAttributeFacts(
             val messageDigest: ByteArray?,
             val signingTime: String?,
+            val contentType: String?,
         )
 
         private fun parseSignedAttributes(reader: DerReader): SignedAttributeFacts {
             var messageDigest: ByteArray? = null
             var signingTime: String? = null
+            var contentType: String? = null
             generateSequence { reader.next() }.forEach { attribute ->
                 val attributeReader = reader.children(attribute)
                 val typeElement = attributeReader.next() ?: return@forEach
@@ -230,12 +253,17 @@ internal class CmsSignedData private constructor(
                         valueReader.next()?.let { signingTime = attributeReader.content(it).decodeToString() }
                     }
 
+                    CONTENT_TYPE -> {
+                        val valueReader = attributeReader.children(values)
+                        valueReader.next()?.let { contentType = oidOf(attributeReader.content(it)) }
+                    }
+
                     else -> {
                         // Other signed attributes are not read here.
                     }
                 }
             }
-            return SignedAttributeFacts(messageDigest, signingTime)
+            return SignedAttributeFacts(messageDigest, signingTime, contentType)
         }
 
         private fun containsSignatureTimestamp(reader: DerReader): Boolean =
@@ -311,6 +339,8 @@ internal class CmsSignedData private constructor(
         }
 
         private const val SIGNING_TIME = "1.2.840.113549.1.9.5"
+        private const val CONTENT_TYPE = "1.2.840.113549.1.9.3"
+        private const val ID_DATA = "1.2.840.113549.1.7.1"
         private const val SHA256 = "2.16.840.1.101.3.4.2.1"
         private const val RSA_ENCRYPTION = "1.2.840.113549.1.1.1"
         private const val ID_CT_TST_INFO = "1.2.840.113549.1.9.16.1.4"
