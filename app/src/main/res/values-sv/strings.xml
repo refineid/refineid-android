@@ -141,4 +141,6 @@ En kod från utfärdaren kan ändå prövas: kortet avgör och förbrukar inget.
     <string name="browser_share">Dela</string>
     <string name="browser_open_external">Öppna i webbläsare</string>
     <string name="browser_link">Länk</string>
+    <string name="browser_client_cert_title">Visa certifikat?</string>
+    <string name="browser_client_cert_prompt">%1$s begär ditt identitetscertifikat.</string>
 </resources>

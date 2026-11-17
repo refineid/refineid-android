@@ -72,6 +72,8 @@ internal object UiAutomationIds {
     const val BROWSER_UNLOCK_ACTION = "browserUnlockAction"
     const val BROWSER_UNLOCK_CANCEL_ACTION = "browserUnlockCancelAction"
     const val BROWSER_SIGN_ACTION = "browserSignAction"
+    const val BROWSER_CERT_CONFIRM_ACTION = "browserCertConfirmAction"
+    const val BROWSER_CERT_CANCEL_ACTION = "browserCertCancelAction"
     const val DIAGNOSTICS_BUTTON = "diagnosticsButton"
     const val DIAGNOSTICS_SCREEN = "diagnosticsScreen"
     const val COPY_REPORT_ACTION = "copyReportAction"
