@@ -1,95 +1,97 @@
 // Copyright 2026 Petri Koistinen. Licensed under the Apache License, Version 2.0.
 package fi.refineid.android.browser
 
-import java.util.Collections
-
 /**
  * Origin-scoped authorization for client-certificate presentation during a browser session.
- * Tracks hosts the holder has explicitly permitted to receive their authentication certificate,
- * and serializes concurrent certificate requests for the same host.
+ * Tracks the origins the holder has explicitly permitted to receive their authentication
+ * certificate, and serializes concurrent certificate requests for one origin behind that
+ * origin's single prompt. Every approval covers one origin, never a host name alone.
  */
 internal class BrowserOriginAuthority(
-    initialApprovedHosts: Set<String> = emptySet(),
+    initialApprovedOrigins: Set<BrowserOrigin> = emptySet(),
 ) {
-    private val approvedHosts = Collections.synchronizedSet(initialApprovedHosts.toMutableSet())
     private val lock = Any()
-    private val pendingByHost = mutableMapOf<String, MutableList<PendingCertRequest>>()
+    private val approvedOrigins: MutableSet<BrowserOrigin> = initialApprovedOrigins.toMutableSet()
+    private val pendingByOrigin = mutableMapOf<BrowserOrigin, MutableList<PendingCertRequest>>()
 
     private class PendingCertRequest(
         val onProceed: () -> Unit,
         val onCancel: () -> Unit,
     )
 
-    fun isApproved(host: String?): Boolean {
-        if (host.isNullOrBlank()) return false
-        return approvedHosts.contains(host)
-    }
+    fun isApproved(origin: BrowserOrigin): Boolean = synchronized(lock) { approvedOrigins.contains(origin) }
 
-    fun approve(host: String) {
-        if (host.isNotBlank()) {
-            approvedHosts.add(host)
-        }
+    fun approve(origin: BrowserOrigin) {
+        synchronized(lock) { approvedOrigins.add(origin) }
     }
 
     /**
-     * Enqueues a request waiting for consent for [host].
-     * Returns true if this is the first request for [host] (meaning UI prompt should be shown).
-     * Returns false if a prompt for [host] is already active.
+     * Enqueues a request waiting for consent for [origin].
+     * Returns true if this is the first request for [origin] (meaning UI prompt should be shown).
+     * Returns false if a prompt for [origin] is already active.
      */
     fun enqueue(
-        host: String,
+        origin: BrowserOrigin,
         onProceed: () -> Unit,
         onCancel: () -> Unit,
-    ): Boolean {
+    ): Boolean =
         synchronized(lock) {
-            val list = pendingByHost.getOrPut(host) { mutableListOf() }
-            val isFirst = list.isEmpty()
-            list.add(PendingCertRequest(onProceed, onCancel))
-            return isFirst
+            val pending = pendingByOrigin.getOrPut(origin) { mutableListOf() }
+            val isFirst = pending.isEmpty()
+            pending.add(PendingCertRequest(onProceed, onCancel))
+            isFirst
         }
-    }
 
     /**
-     * Completes all pending requests for [host] with either approval or cancellation.
+     * Completes all pending requests for [origin] with either approval or cancellation.
+     * Approval is recorded before any callback runs, so a request arriving for the approved
+     * origin meanwhile finds it approved instead of queueing a second prompt behind it.
      */
     fun complete(
-        host: String,
+        origin: BrowserOrigin,
         approved: Boolean,
     ) {
         val requests =
             synchronized(lock) {
-                pendingByHost.remove(host)
-            } ?: return
+                val pending = pendingByOrigin.remove(origin) ?: return
+                if (approved) {
+                    approvedOrigins.add(origin)
+                }
+                pending
+            }
 
-        if (approved) {
-            approve(host)
-            for (req in requests) {
-                req.onProceed()
-            }
-        } else {
-            for (req in requests) {
-                req.onCancel()
-            }
+        for (request in requests) {
+            if (approved) request.onProceed() else request.onCancel()
         }
     }
 
     /**
-     * Cancels all pending requests across all hosts (e.g. on close).
+     * Cancels all pending requests across all origins (e.g. on close).
      */
     fun cancelAll() {
-        val allRequests =
+        val requests =
             synchronized(lock) {
-                val copy = pendingByHost.values.flatten()
-                pendingByHost.clear()
-                copy
+                val pending = pendingByOrigin.values.flatten()
+                pendingByOrigin.clear()
+                pending
             }
-        for (req in allRequests) {
-            req.onCancel()
+
+        for (request in requests) {
+            request.onCancel()
         }
     }
 
     fun clear() {
-        cancelAll()
-        approvedHosts.clear()
+        val requests =
+            synchronized(lock) {
+                val pending = pendingByOrigin.values.flatten()
+                pendingByOrigin.clear()
+                approvedOrigins.clear()
+                pending
+            }
+
+        for (request in requests) {
+            request.onCancel()
+        }
     }
 }

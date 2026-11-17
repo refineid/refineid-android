@@ -54,6 +54,7 @@ import fi.refineid.android.R
 import fi.refineid.android.browser.BrowserClientCertificateMatcher
 import fi.refineid.android.browser.BrowserClientCertificateOutcome
 import fi.refineid.android.browser.BrowserClientIdentity
+import fi.refineid.android.browser.BrowserOrigin
 import fi.refineid.android.browser.BrowserOriginAuthority
 import fi.refineid.android.browser.BrowserPinCoordinator
 import fi.refineid.android.browser.BrowserPinRequest
@@ -253,6 +254,8 @@ private fun BrowserDialog(
     var pinRequest by remember { mutableStateOf<BrowserPinRequest?>(null) }
     var unlockRequest by remember { mutableStateOf<BrowserCardUnlockRequest?>(null) }
     var consentRequest by remember { mutableStateOf<BrowserCertConsentRequest?>(null) }
+    val pendingConsents = remember { ArrayDeque<BrowserCertConsentRequest>() }
+    val showNextConsent = { consentRequest = pendingConsents.removeFirstOrNull() }
     var unlockWaiting by remember { mutableStateOf(false) }
     var signatureStatus by remember { mutableStateOf(BrowserSignatureStatus.IDLE) }
     LaunchedEffect(signatureStatus) {
@@ -293,12 +296,16 @@ private fun BrowserDialog(
                 unlockRequest = it
                 unlockWaiting = false
             },
-            onConsentNeeded = { consentRequest = it },
+            onConsentNeeded = { request ->
+                pendingConsents.addLast(request)
+                if (consentRequest == null) showNextConsent()
+            },
         )
 
     DisposableEffect(coordinator, webViewClient) {
         onDispose {
             isActive.set(false)
+            pendingConsents.clear()
             originAuthority.clear()
             webViewClient?.close()
             coordinator.close()
@@ -339,8 +346,14 @@ private fun BrowserDialog(
             unlockRequest = null
             unlockWaiting = false
         },
-        onDismissConsent = { consentRequest = null },
-        onConfirmConsent = { consentRequest = null },
+        onDismissConsent = {
+            consentRequest = null
+            showNextConsent()
+        },
+        onConfirmConsent = {
+            consentRequest = null
+            showNextConsent()
+        },
     )
 }
 
@@ -736,7 +749,7 @@ private fun BrowserCertConsentDialog(
                     style = MaterialTheme.typography.titleLarge,
                 )
                 Text(
-                    text = stringResource(R.string.browser_client_cert_prompt, request.host),
+                    text = stringResource(R.string.browser_client_cert_prompt, request.origin.displayName),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -809,7 +822,7 @@ internal class BrowserCardUnlockRequest(
 
 /** One held client-certificate request waiting for the holder to confirm presenting their certificate. */
 internal class BrowserCertConsentRequest(
-    val host: String,
+    val origin: BrowserOrigin,
     val proceed: () -> Unit,
     val cancel: () -> Unit,
 )
@@ -879,8 +892,8 @@ private class RefineIdWebViewClient(
         view: WebView,
         request: ClientCertRequest,
     ) {
-        val host = request.host
-        if (host.isNullOrBlank() || isClosed.get()) {
+        val origin = BrowserOrigin.of(request.host, request.port)
+        if (origin == null || isClosed.get()) {
             AppTrace.browserClientCertificateRequested(
                 originAllowed = false,
                 keyTypeCount = request.keyTypes?.size ?: NO_KEY_TYPES,
@@ -891,7 +904,7 @@ private class RefineIdWebViewClient(
             return
         }
 
-        if (originAuthority.isApproved(host)) {
+        if (originAuthority.isApproved(origin)) {
             AppTrace.browserClientCertificateRequested(
                 originAllowed = true,
                 keyTypeCount = request.keyTypes?.size ?: NO_KEY_TYPES,
@@ -909,7 +922,7 @@ private class RefineIdWebViewClient(
 
         val isFirst =
             originAuthority.enqueue(
-                host = host,
+                origin = origin,
                 onProceed = { resolveClientCertificate(request, allowUnlock = true) },
                 onCancel = {
                     AppTrace.browserClientCertificateCompleted(
@@ -924,13 +937,13 @@ private class RefineIdWebViewClient(
             if (consentPath != null && !isClosed.get()) {
                 consentPath(
                     BrowserCertConsentRequest(
-                        host = host,
-                        proceed = { originAuthority.complete(host, approved = true) },
-                        cancel = { originAuthority.complete(host, approved = false) },
+                        origin = origin,
+                        proceed = { originAuthority.complete(origin, approved = true) },
+                        cancel = { originAuthority.complete(origin, approved = false) },
                     ),
                 )
             } else {
-                originAuthority.complete(host, approved = false)
+                originAuthority.complete(origin, approved = false)
             }
         }
     }
