@@ -48,11 +48,9 @@ The configured sources stay bound to that one attempt across the asynchronous
 card callback and are closed after failure, cancellation, archival completion,
 or harness disposal.
 
-`DebugDocumentSigningSources` converts every transferred holder configuration
-to `SigningTimestampAuthority.configured`. Timestamp tokens therefore use the
-independent runtime EU trusted-list timestamp anchors described in
-[ADR 0050](0050-trusted-list-timestamps.md). The old debug-only Sectigo root resource is
-removed. Fingerprint-pinned FINEID signer anchors remain unchanged.
+Each signing hands every stored configuration to the core as its timestamp
+authorities (ADR 0046); the core trusts a configured authority as
+configured.
 
 The shipped authority is credential-free HTTPS. Holder
 credentials remain restricted to HTTPS. Multiple authorities are tried once

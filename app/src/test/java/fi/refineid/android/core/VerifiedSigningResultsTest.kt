@@ -14,8 +14,8 @@
 
 package fi.refineid.android.core
 
-import fi.refineid.android.document.DerEncoder
-import fi.refineid.android.document.DerValues
+import fi.refineid.android.testutil.TestDerEncoder
+import fi.refineid.android.testutil.TestDerValues
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -461,22 +461,22 @@ class VerifiedSigningResultsTest {
 
         fun selfSignedRsaCertificateDer(keyPair: KeyPair): ByteArray {
             val algorithm =
-                DerEncoder.sequence(
+                TestDerEncoder.sequence(
                     listOf(
-                        DerEncoder.objectIdentifier(SHA256_WITH_RSA_OID),
-                        DerEncoder.nullValue(),
+                        TestDerEncoder.objectIdentifier(SHA256_WITH_RSA_OID),
+                        TestDerEncoder.nullValue(),
                     ),
                 )
             val distinguishedName =
-                DerEncoder.sequence(
+                TestDerEncoder.sequence(
                     listOf(
-                        DerEncoder.setOf(
+                        TestDerEncoder.setOf(
                             listOf(
-                                DerEncoder.sequence(
+                                TestDerEncoder.sequence(
                                     listOf(
-                                        DerEncoder.objectIdentifier(COMMON_NAME_OID),
-                                        DerEncoder.tlv(
-                                            DerValues.TAG_UTF8_STRING,
+                                        TestDerEncoder.objectIdentifier(COMMON_NAME_OID),
+                                        TestDerEncoder.tlv(
+                                            TestDerValues.TAG_UTF8_STRING,
                                             CERTIFICATE_COMMON_NAME.encodeToByteArray(),
                                         ),
                                     ),
@@ -486,26 +486,26 @@ class VerifiedSigningResultsTest {
                     ),
                 )
             val validity =
-                DerEncoder.sequence(
+                TestDerEncoder.sequence(
                     listOf(
-                        DerEncoder.tlv(
-                            DerValues.TAG_GENERALIZED_TIME,
+                        TestDerEncoder.tlv(
+                            TestDerValues.TAG_GENERALIZED_TIME,
                             CERTIFICATE_NOT_BEFORE.encodeToByteArray(),
                         ),
-                        DerEncoder.tlv(
-                            DerValues.TAG_GENERALIZED_TIME,
+                        TestDerEncoder.tlv(
+                            TestDerValues.TAG_GENERALIZED_TIME,
                             CERTIFICATE_NOT_AFTER.encodeToByteArray(),
                         ),
                     ),
                 )
             val tbsCertificate =
-                DerEncoder.sequence(
+                TestDerEncoder.sequence(
                     listOf(
-                        DerEncoder.tlv(
-                            DerValues.TAG_CONTEXT_0_CONSTRUCTED,
-                            DerEncoder.integer(X509_VERSION_THREE),
+                        TestDerEncoder.tlv(
+                            TestDerValues.TAG_CONTEXT_0_CONSTRUCTED,
+                            TestDerEncoder.integer(X509_VERSION_THREE),
                         ),
-                        DerEncoder.integer(CERTIFICATE_SERIAL_NUMBER),
+                        TestDerEncoder.integer(CERTIFICATE_SERIAL_NUMBER),
                         algorithm,
                         distinguishedName,
                         validity,
@@ -514,12 +514,12 @@ class VerifiedSigningResultsTest {
                     ),
                 )
             val signatureBytes = signRsa(JCA_SHA256_WITH_RSA, keyPair, tbsCertificate)
-            return DerEncoder.sequence(
+            return TestDerEncoder.sequence(
                 listOf(
                     tbsCertificate,
                     algorithm,
-                    DerEncoder.tlv(
-                        DerValues.TAG_BIT_STRING,
+                    TestDerEncoder.tlv(
+                        TestDerValues.TAG_BIT_STRING,
                         byteArrayOf(NO_UNUSED_BITS) + signatureBytes,
                     ),
                 ),

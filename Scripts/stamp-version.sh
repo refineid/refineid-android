@@ -50,7 +50,7 @@ awk -v version="$version" -v build="$build" '
 mv "$temporary" "$properties"
 trap - EXIT
 
-for manifest in native/refineid-android-core/Cargo.toml native/refineid-rapp-android/Cargo.toml; do
+for manifest in native/refineid-android-core/Cargo.toml native/refineid-rapp-android/Cargo.toml native/refineid-doc-sign-android/Cargo.toml; do
   if [ -f "$manifest" ]; then
     sed -i.bak "s|^version = \".*\"|version = \"${version}\"|" "$manifest"
     rm -f "$manifest.bak"

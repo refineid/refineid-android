@@ -19,11 +19,6 @@ import fi.refineid.android.core.NativePin2PreflightResult
 import fi.refineid.android.core.NativeQualifiedCertificate
 import fi.refineid.android.core.NativeQualifiedSignResult
 import fi.refineid.android.core.QualifiedSigningAlgorithm
-import fi.refineid.android.document.QualifiedPdfArchivalResult
-import fi.refineid.android.document.QualifiedPdfArchivalStage
-import fi.refineid.android.document.QualifiedPdfPreparationResult
-import fi.refineid.android.document.QualifiedPdfSigningResult
-import fi.refineid.android.network.SigningTimestampAttemptOutcome
 import fi.refineid.android.nfc.NfcReaderStatus
 import fi.refineid.android.nfc.SignTapClaim
 import fi.refineid.android.nfc.SignTapFailure
@@ -141,40 +136,9 @@ internal object AppTrace {
 
     fun cardCaReadAnswered(answers: List<CardCaReadAnswer>) = Unit
 
-    fun qualifiedPdfSigningStarted(documentLength: Int): Long = 0L
+    fun documentSigningFailed(failure: String) = Unit
 
-    fun qualifiedPdfSigningCompleted(
-        startedAt: Long,
-        result: QualifiedPdfSigningResult,
-    ) = Unit
-
-    fun qualifiedPdfPreparationStarted(documentLength: Int): Long = 0L
-
-    fun qualifiedPdfPreparationCompleted(
-        startedAt: Long,
-        result: QualifiedPdfPreparationResult,
-    ) = Unit
-
-    fun qualifiedPdfArchivalStarted(): Long = 0L
-
-    fun qualifiedPdfArchivalStage(stage: QualifiedPdfArchivalStage) = Unit
-
-    fun qualifiedPdfArchivalCompleted(
-        startedAt: Long,
-        result: QualifiedPdfArchivalResult,
-    ) = Unit
-
-    fun signingTimestampAttemptStarted(
-        authorityOrdinal: Int,
-        authorityCount: Int,
-    ) = Unit
-
-    fun signingTimestampAttemptCompleted(
-        authorityOrdinal: Int,
-        outcome: SigningTimestampAttemptOutcome,
-    ) = Unit
-
-    fun signingTimestampRetryScheduled(delaySeconds: Long) = Unit
+    fun documentVerificationFailed(failure: String) = Unit
 
     fun authenticationSignatureVerificationCompleted(
         inputMode: AuthenticationSigningInputMode,

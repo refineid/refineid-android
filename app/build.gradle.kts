@@ -19,6 +19,12 @@ val rappCrateDirectory =
     rootProject.layout.projectDirectory.dir("native/refineid-rapp-android")
 val rappHostLibrary =
     rappCrateDirectory.file("target/debug/" + System.mapLibraryName("refineid_rapp"))
+val docSignDebugJniLibs = layout.buildDirectory.dir("docSign/jniLibs/debug")
+val docSignReleaseJniLibs = layout.buildDirectory.dir("docSign/jniLibs/release")
+val docSignCrateDirectory =
+    rootProject.layout.projectDirectory.dir("native/refineid-doc-sign-android")
+val docSignHostLibrary =
+    docSignCrateDirectory.file("target/debug/" + System.mapLibraryName("refineid_doc_sign_android"))
 val minimumAndroidApi = 33
 val currentAndroidApi = 37
 val androidAbis = listOf("arm64-v8a", "x86_64")
@@ -388,6 +394,14 @@ android {
         getByName("release").jniLibs.directories.add(
             rappReleaseJniLibs.get().asFile.absolutePath,
         )
+        // Document signing and verification: the core's doc-sign crate
+        // behind this repository's UniFFI surface, built the same way.
+        getByName("debug").jniLibs.directories.add(
+            docSignDebugJniLibs.get().asFile.absolutePath,
+        )
+        getByName("release").jniLibs.directories.add(
+            docSignReleaseJniLibs.get().asFile.absolutePath,
+        )
     }
 
     testOptions {
@@ -395,7 +409,9 @@ android {
         unitTests.all { testTask ->
             testTask.systemProperty(
                 "jna.library.path",
-                rappCrateDirectory.dir("target/debug").asFile.absolutePath,
+                listOf(rappCrateDirectory, docSignCrateDirectory)
+                    .map { crate -> crate.dir("target/debug").asFile.absolutePath }
+                    .joinToString(File.pathSeparator),
             )
         }
     }
@@ -459,6 +475,7 @@ val androidNdkDirectory = androidComponents.sdkComponents.ndkDirectory
 // of each build task, so a core change rebuilds the shared objects.
 val refreshAndroidCoreRevision = ":refreshAndroidCoreRevision"
 val refreshRappCoreRevision = ":refreshRappCoreRevision"
+val refreshDocSignCoreRevision = ":refreshDocSignCoreRevision"
 
 // --- RAPP -----------------------------------------------------------------
 //
@@ -468,18 +485,20 @@ val refreshRappCoreRevision = ":refreshRappCoreRevision"
 // library, so a Kotlin peer and a Swift peer cannot drift apart in framing,
 // transitions, or failure policy. Nothing in Kotlin decides protocol.
 
-fun registerRappBuild(
+fun registerCoreCrateBuild(
     taskName: String,
+    crateDirectory: Directory,
+    refreshTask: String,
     output: Provider<Directory>,
     release: Boolean,
 ) = tasks.register<Exec>(taskName) {
     group = "build"
-    description = "Build the shared RAPP core for Android ABIs."
-    dependsOn(refreshRappCoreRevision)
-    workingDir(rappCrateDirectory)
-    inputs.file(rappCrateDirectory.file("Cargo.toml"))
-    inputs.file(rappCrateDirectory.file("Cargo.lock"))
-    inputs.dir(rappCrateDirectory.dir("src"))
+    description = "Build a shared-core native crate for Android ABIs."
+    dependsOn(refreshTask)
+    workingDir(crateDirectory)
+    inputs.file(crateDirectory.file("Cargo.toml"))
+    inputs.file(crateDirectory.file("Cargo.lock"))
+    inputs.dir(crateDirectory.dir("src"))
     outputs.dir(output)
     environment("ANDROID_NDK_HOME", androidNdkDirectory.get().asFile.absolutePath)
     val arguments =
@@ -500,8 +519,26 @@ fun registerRappBuild(
     commandLine(arguments)
 }
 
-val buildRappDebug = registerRappBuild("buildRappDebug", rappDebugJniLibs, false)
-val buildRappRelease = registerRappBuild("buildRappRelease", rappReleaseJniLibs, true)
+val buildRappDebug =
+    registerCoreCrateBuild("buildRappDebug", rappCrateDirectory, refreshRappCoreRevision, rappDebugJniLibs, false)
+val buildRappRelease =
+    registerCoreCrateBuild("buildRappRelease", rappCrateDirectory, refreshRappCoreRevision, rappReleaseJniLibs, true)
+val buildDocSignDebug =
+    registerCoreCrateBuild(
+        "buildDocSignDebug",
+        docSignCrateDirectory,
+        refreshDocSignCoreRevision,
+        docSignDebugJniLibs,
+        false,
+    )
+val buildDocSignRelease =
+    registerCoreCrateBuild(
+        "buildDocSignRelease",
+        docSignCrateDirectory,
+        refreshDocSignCoreRevision,
+        docSignReleaseJniLibs,
+        true,
+    )
 
 val buildRustDebug =
     tasks.register<Exec>("buildRustDebug") {
@@ -558,72 +595,107 @@ val buildRustRelease =
         )
     }
 
-val buildRappHostDebug =
-    tasks.register<Exec>("buildRappHostDebug") {
-        group = "build"
-        description = "Build the host RAPP library for the binding generator and JVM unit tests."
-        dependsOn(refreshRappCoreRevision)
-        workingDir(rappCrateDirectory)
-        inputs.file(rappCrateDirectory.file("Cargo.toml"))
-        inputs.file(rappCrateDirectory.file("Cargo.lock"))
-        inputs.dir(rappCrateDirectory.dir("src"))
-        outputs.file(rappHostLibrary)
-        commandLine("cargo", "build", "--locked")
-    }
+fun registerHostBuild(
+    taskName: String,
+    crateDirectory: Directory,
+    refreshTask: String,
+    hostLibrary: RegularFile,
+) = tasks.register<Exec>(taskName) {
+    group = "build"
+    description = "Build a shared-core host library for the binding generator and JVM unit tests."
+    dependsOn(refreshTask)
+    workingDir(crateDirectory)
+    inputs.file(crateDirectory.file("Cargo.toml"))
+    inputs.file(crateDirectory.file("Cargo.lock"))
+    inputs.dir(crateDirectory.dir("src"))
+    outputs.file(hostLibrary)
+    commandLine("cargo", "build", "--locked")
+}
 
-// The Kotlin binding is generated from the host library built from the same
+val buildRappHostDebug =
+    registerHostBuild("buildRappHostDebug", rappCrateDirectory, refreshRappCoreRevision, rappHostLibrary)
+val buildDocSignHostDebug =
+    registerHostBuild("buildDocSignHostDebug", docSignCrateDirectory, refreshDocSignCoreRevision, docSignHostLibrary)
+
+// A Kotlin binding is generated from the host library built from the same
 // Cargo.lock as the device libraries, so it always matches the core revision
 // they link.
-abstract class GenerateRappBinding : Exec() {
+abstract class GenerateBinding : Exec() {
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
 }
 
+fun registerBindingGeneration(
+    taskName: String,
+    crateDirectory: Directory,
+    hostBuild: TaskProvider<Exec>,
+    hostLibrary: RegularFile,
+    generator: String,
+) = tasks.register<GenerateBinding>(taskName) {
+    group = "build"
+    description = "Generate a Kotlin binding from a shared-core host library."
+    dependsOn(hostBuild)
+    workingDir(crateDirectory)
+    inputs.file(hostLibrary)
+    inputs.file(crateDirectory.file("Cargo.lock"))
+    inputs.dir(crateDirectory.dir("src"))
+    val bindingDirectory = outputDirectory
+    doFirst { bindingDirectory.get().asFile.deleteRecursively() }
+    commandLine(
+        "cargo",
+        "run",
+        "--locked",
+        "--bin",
+        generator,
+        "--",
+        "generate",
+        "--library",
+        hostLibrary.asFile.absolutePath,
+        "--language",
+        "kotlin",
+        "--no-format",
+        "--out-dir",
+    )
+    argumentProviders.add(
+        CommandLineArgumentProvider { listOf(bindingDirectory.get().asFile.absolutePath) },
+    )
+}
+
 val generateRappBinding =
-    tasks.register<GenerateRappBinding>("generateRappBinding") {
-        group = "build"
-        description = "Generate the Kotlin RAPP binding from the host library."
-        dependsOn(buildRappHostDebug)
-        workingDir(rappCrateDirectory)
-        inputs.file(rappHostLibrary)
-        inputs.file(rappCrateDirectory.file("Cargo.lock"))
-        inputs.dir(rappCrateDirectory.dir("src"))
-        val bindingDirectory = outputDirectory
-        doFirst { bindingDirectory.get().asFile.deleteRecursively() }
-        commandLine(
-            "cargo",
-            "run",
-            "--locked",
-            "--bin",
-            "refineid-uniffi-bindgen-kotlin",
-            "--",
-            "generate",
-            "--library",
-            rappHostLibrary.asFile.absolutePath,
-            "--language",
-            "kotlin",
-            "--no-format",
-            "--out-dir",
-        )
-        argumentProviders.add(
-            CommandLineArgumentProvider { listOf(bindingDirectory.get().asFile.absolutePath) },
-        )
-    }
+    registerBindingGeneration(
+        "generateRappBinding",
+        rappCrateDirectory,
+        buildRappHostDebug,
+        rappHostLibrary,
+        "refineid-uniffi-bindgen-kotlin",
+    )
+val generateDocSignBinding =
+    registerBindingGeneration(
+        "generateDocSignBinding",
+        docSignCrateDirectory,
+        buildDocSignHostDebug,
+        docSignHostLibrary,
+        "refineid-doc-sign-bindgen-kotlin",
+    )
 
 androidComponents {
     onVariants { variant ->
         variant.sources.kotlin?.addGeneratedSourceDirectory(
             generateRappBinding,
-            GenerateRappBinding::outputDirectory,
+            GenerateBinding::outputDirectory,
+        )
+        variant.sources.kotlin?.addGeneratedSourceDirectory(
+            generateDocSignBinding,
+            GenerateBinding::outputDirectory,
         )
     }
 }
 
 tasks.configureEach {
     when (name) {
-        "mergeDebugJniLibFolders" -> dependsOn(buildRustDebug, buildRappDebug)
-        "mergeReleaseJniLibFolders" -> dependsOn(buildRustRelease, buildRappRelease)
-        "testDebugUnitTest" -> dependsOn(buildRappHostDebug)
+        "mergeDebugJniLibFolders" -> dependsOn(buildRustDebug, buildRappDebug, buildDocSignDebug)
+        "mergeReleaseJniLibFolders" -> dependsOn(buildRustRelease, buildRappRelease, buildDocSignRelease)
+        "testDebugUnitTest" -> dependsOn(buildRappHostDebug, buildDocSignHostDebug)
     }
 }
 

@@ -21,5 +21,5 @@ if [[ -n "$whatsup_files" ]]; then
   exit 1
 fi
 
-./gradlew --quiet spotlessCheck detekt :app:detekt rustFormatCheck shellCheck lintDebug
+./gradlew --quiet spotlessCheck detekt :app:detekt rustFormatCheck docSignRustFormatCheck shellCheck lintDebug
 echo "pre-commit gates passed"

@@ -3,12 +3,10 @@
     <string name="choose_documents">Valitse asiakirjat</string>
     <string name="add_file">Lisää tiedosto</string>
     <string name="signing_progress">Allekirjoitetaan %1$d/%2$d…</string>
-    <string name="finalizing_progress">Viimeistellään %1$d/%2$d…</string>
     <string name="saving_progress">Tallennetaan %1$d/%2$d…</string>
     <string name="sign_pdf_single">Allekirjoita asiakirja (PDF)</string>
     <string name="sign_pdf_multiple">Allekirjoita asiakirjat (PDF)</string>
     <string name="sign_container">Allekirjoita salkku (ASiC-E)</string>
-    <string name="default_container_name">salkku</string>
     <string name="saving">Tallennetaan</string>
     <string name="hold_card">Pidä henkilökorttia puhelimen lukijaa vasten</string>
     <string name="finalizing_signature">Viimeistellään allekirjoitusta…</string>
@@ -16,21 +14,17 @@
     <string name="card_left_before_read">Kortti poistui ennen kuin se ehdittiin lukea</string>
     <string name="organization_card_read_first">Lue organisaatiokortti ensin perustunnusluvulla&#160;1</string>
     <string name="signed_cert_revoked">Allekirjoitusvarmenne peruutettu — ei kelvollista allekirjoitusta</string>
-    <string name="signed_at">allekirjoitettu %1$s</string>
     <string name="document_valid">Asiakirja ehjä — sulkulistaa ei tarkastettu</string>
     <string name="document_valid_revocation_checked">Asiakirja ehjä — sulkulista tarkastettu</string>
     <string name="document_invalid">Virheellinen allekirjoitus</string>
     <string name="document_unsigned">Allekirjoitusta ei löytynyt</string>
     <string name="document_malformed">Lukukelvoton allekirjoitus</string>
+    <string name="document_anchors_unavailable">Luottamuslistat eivät ole saatavilla</string>
     <string name="document_signature_ordinal">Allekirjoitus %1$d</string>
-    <string name="document_timestamp_ordinal">Aikaleima %1$d</string>
     <string name="document_partial_coverage">Kattaa vain osan asiakirjasta</string>
     <string name="signature_details_signer">Allekirjoittaja</string>
-    <string name="signature_details_issuer">Myöntäjä</string>
     <string name="signature_details_time">Aika</string>
     <string name="signature_status_valid">Pätevä</string>
     <string name="signature_status_invalid">Virheellinen</string>
     <string name="signature_status_trusted">Luotettu</string>
-    <string name="check_revocation_online">Tarkasta sulkulista verkosta</string>
-    <string name="checking_revocation_online">Tarkastetaan sulkulistaa verkosta…</string>
 </resources>

@@ -41,10 +41,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import fi.refineid.android.R
-import fi.refineid.android.network.MAXIMUM_SIGNING_TIMESTAMP_AUTHORITY_COUNT
-import fi.refineid.android.network.MINIMUM_SIGNING_TIMESTAMP_AUTHORITY_COUNT
-import fi.refineid.android.network.SigningNetworkLimits
+import fi.refineid.android.settings.MAXIMUM_SIGNING_TIMESTAMP_AUTHORITY_COUNT
+import fi.refineid.android.settings.MINIMUM_SIGNING_TIMESTAMP_AUTHORITY_COUNT
 import fi.refineid.android.settings.TimestampAuthorityConfiguration
+import fi.refineid.android.settings.TimestampAuthorityLimits
 import fi.refineid.android.settings.TimestampAuthorityRepository
 import fi.refineid.android.settings.TimestampAuthorityStoreException
 import kotlinx.coroutines.CancellationException
@@ -514,7 +514,7 @@ private fun closeConfigurations(configurations: Iterable<TimestampAuthorityConfi
 
 private fun addressInputTransformation(onAcceptedEdit: () -> Unit) =
     InputTransformation {
-        if (length > SigningNetworkLimits.MAXIMUM_ADDRESS_CHARACTERS) {
+        if (length > TimestampAuthorityLimits.MAXIMUM_ADDRESS_CHARACTERS) {
             revertAllChanges()
         } else {
             onAcceptedEdit()
@@ -524,7 +524,7 @@ private fun addressInputTransformation(onAcceptedEdit: () -> Unit) =
 private fun usernameInputTransformation(onAcceptedEdit: () -> Unit) =
     InputTransformation {
         if (
-            length > SigningNetworkLimits.MAXIMUM_USERNAME_CHARACTERS ||
+            length > TimestampAuthorityLimits.MAXIMUM_USERNAME_CHARACTERS ||
             asCharSequence().any(::isForbiddenUsernameCharacter)
         ) {
             revertAllChanges()
@@ -536,7 +536,7 @@ private fun usernameInputTransformation(onAcceptedEdit: () -> Unit) =
 private fun passwordInputTransformation(onAcceptedEdit: () -> Unit) =
     InputTransformation {
         if (
-            length > SigningNetworkLimits.MAXIMUM_PASSWORD_CHARACTERS ||
+            length > TimestampAuthorityLimits.MAXIMUM_PASSWORD_CHARACTERS ||
             asCharSequence().any(::isForbiddenCredentialCharacter)
         ) {
             revertAllChanges()

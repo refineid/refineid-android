@@ -3,8 +3,6 @@
 package fi.refineid.android.settings
 
 import android.content.Context
-import fi.refineid.android.network.MAXIMUM_SIGNING_TIMESTAMP_AUTHORITY_COUNT
-import fi.refineid.android.network.MINIMUM_SIGNING_TIMESTAMP_AUTHORITY_COUNT
 
 internal enum class TimestampAuthorityStoreFailure {
     MALFORMED,

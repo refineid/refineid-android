@@ -1,6 +1,6 @@
 # ADR 0017: Qualified PDF orchestration
 
-Status: Accepted
+Status: Superseded by [ADR 0046](0046-document-signing-on-core.md)
 
 Date: 2026-08-15
 

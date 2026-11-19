@@ -76,6 +76,7 @@ jobs:
           workspaces: |
             refineid-android/native/refineid-android-core
             refineid-android/native/refineid-rapp-android
+            refineid-android/native/refineid-doc-sign-android
 
       - name: Run the full quality floor
         working-directory: refineid-android
