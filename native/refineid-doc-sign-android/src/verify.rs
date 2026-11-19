@@ -286,6 +286,7 @@ pub fn verify_document(
 }
 
 /// [`verify_document`] on `bytes` under `anchors` at `now`.
+#[cfg(test)]
 fn verify_bytes(
     bytes: Vec<u8>,
     anchors: &TrustAnchors,
