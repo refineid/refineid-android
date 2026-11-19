@@ -14,10 +14,11 @@
 
 //! Verifying a signed document.
 //!
-//! [`verify_document`] judges every signature of a file under the
-//! core's pinned anchors at this clock, and asks the responders about a
-//! signer whose file says nothing about its status. The report is the
-//! core's, field for field, in the app's vocabulary.
+//! [`verify_document`] judges every signature of a file under the EU
+//! trusted lists' anchors at this clock ([`crate::lists`]), and asks
+//! the responders about a signer whose file says nothing about its
+//! status. The report is the core's, field for field, in the app's
+//! vocabulary.
 
 use core::fmt;
 
@@ -27,6 +28,8 @@ use refineid_doc_sign::verification::{
     SignatureReport, SignatureRow, TrustAnchors, verify,
 };
 use refineid_doc_sign::x509::DateTime;
+
+use crate::lists::ListsFailure;
 
 /// Why a file yielded no report. A negative verdict is a report.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
@@ -47,6 +50,9 @@ pub enum VerifyFailure {
         /// The core's account.
         detail: String,
     },
+    /// The trusted lists could neither be fetched nor read from the
+    /// cache, so nothing anchors a chain.
+    AnchorsUnavailable,
 }
 
 impl fmt::Display for VerifyFailure {
@@ -254,35 +260,74 @@ fn count(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
 
-/// Verify every signature of the file at `path` under the core's pinned
-/// anchors at this clock, asking the responders about each judged
-/// signer the file leaves unavailable on a verified chain.
+/// Verify every signature of the file at `path` under the EU trusted
+/// lists' anchors at this clock, asking the responders about each
+/// judged signer the file leaves unavailable on a verified chain.
+/// `cache_directory` holds the lists' cache ([`crate::lists`]).
 ///
 /// # Errors
-/// [`VerifyFailure`] when there is nothing to judge.
+/// [`VerifyFailure`] when there is nothing to judge, or no anchors to
+/// judge it under.
 #[uniffi::export]
-pub fn verify_document(path: String) -> Result<DocumentVerdict, VerifyFailure> {
+pub fn verify_document(
+    path: String,
+    cache_directory: String,
+) -> Result<DocumentVerdict, VerifyFailure> {
     let bytes = std::fs::read(path).map_err(|_error| VerifyFailure::FileRead)?;
     let now = refineid_doc_sign::now_date_time();
-    Ok(verify_bytes(bytes, now)?)
+    let file = DocumentFile::from_file(bytes)?;
+    let anchors =
+        crate::lists::anchors(std::path::Path::new(&cache_directory), now).map_err(|error| {
+            match error {
+                ListsFailure::Unavailable => VerifyFailure::AnchorsUnavailable,
+            }
+        })?;
+    Ok(judge(&file, &anchors, now)?)
 }
 
-/// [`verify_document`] on `bytes` at `now`.
-fn verify_bytes(bytes: Vec<u8>, now: DateTime) -> Result<DocumentVerdict, DocumentFailure> {
+/// [`verify_document`] on `bytes` under `anchors` at `now`.
+fn verify_bytes(
+    bytes: Vec<u8>,
+    anchors: &TrustAnchors,
+    now: DateTime,
+) -> Result<DocumentVerdict, DocumentFailure> {
     let file = DocumentFile::from_file(bytes)?;
-    let anchors = TrustAnchors::pinned();
-    let report = verify(&file, &anchors, now)?
-        .with_live_revocation(|signature| live_revocation(signature, &anchors, now));
+    judge(&file, anchors, now)
+}
+
+/// Judge the signatures of the parsed `file` under `anchors` at `now`.
+fn judge(
+    file: &DocumentFile,
+    anchors: &TrustAnchors,
+    now: DateTime,
+) -> Result<DocumentVerdict, DocumentFailure> {
+    let report = verify(file, anchors, now)?
+        .with_live_revocation(|signature| live_revocation(signature, anchors, now));
     Ok(DocumentVerdict::from(&report))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RevocationStatus, SignatureVerdict, VerifyFailure, verify_document};
+    use super::{RevocationStatus, SignatureVerdict, VerifyFailure, verify_bytes, verify_document};
     use crate::sign::DocumentFormat;
     use crate::sign::DocumentOutcome;
     use crate::sign::tests::{ScriptedCard, WorkDir, sign_offline};
     use refineid_doc_sign::testkit::minimal_pdf;
+    use refineid_doc_sign::verification::TrustAnchors;
+
+    /// [`verify_bytes`] under no anchors: unit tests stay offline, and
+    /// the lists' fetching is [`crate::lists`]' to test.
+    fn verify_offline(
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<super::DocumentVerdict, VerifyFailure> {
+        let bytes = std::fs::read(path).map_err(|_error| VerifyFailure::FileRead)?;
+        let anchors = TrustAnchors::new(Vec::new());
+        Ok(verify_bytes(
+            bytes,
+            &anchors,
+            refineid_doc_sign::now_date_time(),
+        )?)
+    }
 
     #[test]
     fn a_document_the_card_signed_is_judged_intact_and_valid_but_unanchored() {
@@ -294,7 +339,7 @@ mod tests {
         let DocumentOutcome::Signed { document } = &outcomes[0] else {
             panic!("not signed");
         };
-        let verdict = verify_document(document.path.clone()).expect("a report");
+        let verdict = verify_offline(&document.path).expect("a report");
         assert_eq!(verdict.signatures.len(), 1);
         assert_eq!(verdict.document_timestamps, 0);
         let SignatureVerdict::Judged { signature } = &verdict.signatures[0].verdict else {
@@ -315,19 +360,41 @@ mod tests {
         let dir = WorkDir::new("verify-none");
         let text = dir.write("note.txt", b"plain text");
         assert_eq!(
-            verify_document(text),
+            verify_offline(&text),
             Err(VerifyFailure::NotASignedDocument)
         );
         let unsigned = dir.write("blank.pdf", &minimal_pdf());
-        assert_eq!(verify_document(unsigned), Err(VerifyFailure::NoSignatures));
+        assert_eq!(verify_offline(&unsigned), Err(VerifyFailure::NoSignatures));
+        assert_eq!(
+            verify_offline(dir.path().join("missing.pdf")),
+            Err(VerifyFailure::FileRead)
+        );
+    }
+
+    #[test]
+    fn verify_without_lists_or_cache_reports_no_anchors() {
+        let dir = WorkDir::new("verify-no-lists");
+        let unsigned = dir.write("blank.pdf", &minimal_pdf());
+        // No transport is registered in a unit test and the cache is
+        // empty, so the lists cannot load. A file that parses but
+        // carries no signature would report first; sign one offline so
+        // the anchors are what is missing.
+        let out = dir.outputs();
+        let card = ScriptedCard::signing();
+        let outcomes =
+            sign_offline(card, vec![unsigned], &out, DocumentFormat::Pades).expect("signed");
+        let DocumentOutcome::Signed { document } = &outcomes[0] else {
+            panic!("not signed");
+        };
         assert_eq!(
             verify_document(
+                document.path.clone(),
                 dir.path()
-                    .join("missing.pdf")
+                    .join("trusted-lists")
                     .to_string_lossy()
                     .into_owned()
             ),
-            Err(VerifyFailure::FileRead)
+            Err(VerifyFailure::AnchorsUnavailable)
         );
     }
 }

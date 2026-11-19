@@ -65,6 +65,8 @@ private sealed interface DocumentValidationUiState {
     data object Malformed : DocumentValidationUiState
 
     data object ReadFailed : DocumentValidationUiState
+
+    data object AnchorsUnavailable : DocumentValidationUiState
 }
 
 /**
@@ -121,9 +123,10 @@ private fun verifyChosen(
             resolver.openInputStream(uri) ?: throw IOException("document could not be opened")
         }
     val workDirectory = File(context.cacheDir, VERIFY_DIRECTORY).apply { mkdirs() }
+    val cacheDirectory = File(context.cacheDir, TRUSTED_LISTS_DIRECTORY).apply { mkdirs() }
     return try {
         CoreDocuments.installHttpClient()
-        DocumentValidationUiState.Done(CoreDocuments.verify(input, workDirectory))
+        DocumentValidationUiState.Done(CoreDocuments.verify(input, workDirectory, cacheDirectory))
     } catch (failure: VerifyFailure) {
         AppTrace.documentVerificationFailed(failure.javaClass.simpleName)
         when (failure) {
@@ -135,6 +138,8 @@ private fun verifyChosen(
             -> DocumentValidationUiState.Malformed
 
             is VerifyFailure.FileRead -> DocumentValidationUiState.ReadFailed
+
+            is VerifyFailure.AnchorsUnavailable -> DocumentValidationUiState.AnchorsUnavailable
         }
     } catch (failure: IOException) {
         AppTrace.documentVerificationFailed(failure.javaClass.simpleName)
@@ -167,6 +172,10 @@ private fun DocumentValidationStatus(state: DocumentValidationUiState) {
 
         DocumentValidationUiState.Malformed -> {
             Text(stringResource(R.string.document_malformed), color = MaterialTheme.colorScheme.error)
+        }
+
+        DocumentValidationUiState.AnchorsUnavailable -> {
+            Text(stringResource(R.string.document_anchors_unavailable), color = MaterialTheme.colorScheme.error)
         }
 
         is DocumentValidationUiState.Done -> {
@@ -388,6 +397,7 @@ private fun displayName(
 private val DISPLAY_TIME: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'").withZone(ZoneOffset.UTC)
 private const val VERIFY_DIRECTORY = "verify"
+private const val TRUSTED_LISTS_DIRECTORY = "trusted-lists"
 private const val DEFAULT_DOCUMENT_NAME = "document"
 private val VALIDATION_CARD_PADDING = 20.dp
 private val VALIDATION_CARD_SPACING = 12.dp

@@ -45,9 +45,6 @@ internal enum class DocumentSigningStatus {
     FINALIZING,
     SAVING,
     SIGNED,
-
-    /** Development build only: saved below B-LTA, see [BelowLongTermNotice]. */
-    SIGNED_BELOW_LONG_TERM,
     NO_CARD,
     CARD_LEFT,
     ACCESS_NUMBER_REQUIRED,
@@ -93,7 +90,6 @@ internal fun DocumentSigningCard(
     canSign: Boolean,
     status: DocumentSigningStatus,
     failure: DocumentSigningFailure? = null,
-    belowLongTerm: BelowLongTermNotice? = null,
     onChooseDocuments: () -> Unit,
     onAddDocument: () -> Unit,
     onSign: (SignatureFormat, Pin2Submission, CanSubmission?) -> Unit,
@@ -242,7 +238,6 @@ internal fun DocumentSigningCard(
             DocumentSigningStatusText(
                 status = status,
                 failure = failure,
-                belowLongTerm = belowLongTerm,
                 progressText = progressText,
             )
         }
@@ -261,7 +256,6 @@ internal val Pin2InputTransformation =
 private fun DocumentSigningStatusText(
     status: DocumentSigningStatus,
     failure: DocumentSigningFailure?,
-    belowLongTerm: BelowLongTermNotice?,
     progressText: String? = null,
 ) {
     val resources = LocalResources.current
@@ -302,12 +296,6 @@ private fun DocumentSigningStatusText(
 
                 DocumentSigningStatus.SIGNED -> {
                     stringResource(R.string.signed)
-                }
-
-                DocumentSigningStatus.SIGNED_BELOW_LONG_TERM -> {
-                    belowLongTerm?.text(resources::getString) { id, arguments ->
-                        resources.getString(id, *arguments.toTypedArray())
-                    }
                 }
 
                 DocumentSigningStatus.NO_CARD,

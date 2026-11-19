@@ -3,17 +3,8 @@
 package fi.refineid.android.ui
 
 import fi.refineid.android.R
-import fi.refineid.android.asic.AsicSigningFailure
 import fi.refineid.android.core.NativeCertificateReadFailure
 import fi.refineid.android.core.QualifiedSignFailure
-import fi.refineid.android.document.BaselineLevel
-import fi.refineid.android.document.PdfSigningFailure
-import fi.refineid.android.document.QualifiedDocumentCmsFailure
-import fi.refineid.android.document.QualifiedPdfArchivalFailure
-import fi.refineid.android.document.QualifiedPdfSigningFailure
-import fi.refineid.android.document.QualifiedPdfTimestampPhase
-import fi.refineid.android.document.ValidationMaterialCollectionFailure
-import fi.refineid.android.document.ValidationPathRole
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -24,149 +15,16 @@ import javax.xml.parsers.DocumentBuilderFactory
 
 class DocumentSigningFailureTest {
     @Test
-    fun anIssuerThatCannotBeFoundReadsAsTheHolderSentenceInEveryLanguage() {
-        val failure =
-            QualifiedPdfArchivalFailure
-                .Validation(ValidationMaterialCollectionFailure.ISSUER_UNAVAILABLE, pathRole = null)
-                .signingFailure()
-
-        assertEquals(
-            "The signature was made, but the material for long-term validation could not be collected: " +
-                "the issuer of the certificate could not be found. " +
-                "No signed document was made and nothing was saved. " +
-                "Check the network connection and sign again.",
-            ENGLISH.text(failure),
-        )
-        assertEquals(
-            "Allekirjoitus tehtiin, mutta pitkäaikaisen validoinnin aineistoa ei saatu kerättyä: " +
-                "varmenteen myöntäjää ei löytynyt. " +
-                "Allekirjoitettua asiakirjaa ei syntynyt, eikä mitään tallennettu. " +
-                "Tarkista verkkoyhteys ja allekirjoita uudelleen.",
-            FINNISH.text(failure),
-        )
-        assertEquals(
-            "Signaturen skapades, men materialet för långtidsvalidering kunde inte samlas in: " +
-                "certifikatets utfärdare hittades inte. " +
-                "Inget signerat dokument skapades och ingenting sparades. " +
-                "Kontrollera nätverksanslutningen och signera igen.",
-            SWEDISH.text(failure),
-        )
-    }
-
-    @Test
-    fun aDevelopmentDocumentBelowLongTermNamesItsLevelMarkAndCause() {
-        val notice =
-            BelowLongTermNotice(
-                standard = SignatureStandard.PADES,
-                level = BaselineLevel.B_T,
-                failure =
-                    QualifiedPdfArchivalFailure
-                        .Validation(ValidationMaterialCollectionFailure.ISSUER_UNAVAILABLE, pathRole = null)
-                        .signingFailure(),
-            )
-
-        assertEquals(
-            "Development build: saved as PAdES-B-T, below the long-term archival level B-LTA; " +
-                "the file name ends in -dev-B-T. Reason: the material for long-term validation " +
-                "could not be collected: the issuer of the certificate could not be found.",
-            notice.text(ENGLISH::string, ENGLISH::formatList),
-        )
-    }
-
-    @Test
-    fun aDevelopmentContainerWithoutArchiveTimestampNamesXadesBltAndCause() {
-        val notice =
-            BelowLongTermNotice(
-                standard = SignatureStandard.XADES,
-                level = BaselineLevel.B_LT,
-                failure = AsicSigningFailure.Timestamp(QualifiedPdfTimestampPhase.ARCHIVE).archivalFailure(),
-            )
-
-        assertEquals(
-            "Development build: saved as XAdES-B-LT, below the long-term archival level B-LTA; " +
-                "the file name ends in -dev-B-LT. Reason: no valid archive timestamp was obtained.",
-            notice.text(ENGLISH::string, ENGLISH::formatList),
-        )
-        listOf(FINNISH, SWEDISH).forEach { language ->
-            assertTrue(notice.text(language::string, language::formatList).contains("-dev-B-LT"))
-        }
-    }
-
-    @Test
-    fun everyValidationKindAndPathHasItsOwnCauseAndDiscardsTheSignature() {
-        val failures = validationCases().map { (kind, role) -> validationFailure(kind, role) }
-
-        failures.forEach { failure ->
-            assertEquals(SigningFailureOutcome.SIGNATURE_DISCARDED, failure.outcome)
-            assertEquals(R.string.signing_frame_validation_material, failure.frame)
-        }
-        val revoked = ValidationMaterialCollectionFailure.REVOKED
-        val causes = failures.map { it.cause }
-        val expectedDistinct =
-            ValidationMaterialCollectionFailure.entries.size - 1 + ValidationPathRole.entries.size + 1
-        assertEquals(expectedDistinct, causes.toSet().size)
-        assertEquals(
-            R.string.signing_cause_signer_revoked,
-            validationFailure(revoked, ValidationPathRole.DOCUMENT_SIGNER).cause,
-        )
-        assertEquals(
-            R.string.signing_cause_timestamp_authority_revoked,
-            validationFailure(revoked, ValidationPathRole.TIMESTAMP_AUTHORITY).cause,
-        )
-    }
-
-    @Test
-    fun everyArchivalFailureSaysTheSignatureWasMadeAndDiscarded() {
-        val pdf = pdfArchivalFailures().map { it.signingFailure() }
-        val container =
-            listOf(
-                AsicSigningFailure.Timestamp(QualifiedPdfTimestampPhase.SIGNATURE),
-                AsicSigningFailure.Timestamp(QualifiedPdfTimestampPhase.ARCHIVE),
-                AsicSigningFailure.ArchiveTimestampPathUncovered,
-                AsicSigningFailure.ValidationUnavailable,
-                AsicSigningFailure.ContainerOverflow,
-                AsicSigningFailure.InternalError,
-            ) +
-                validationCases().map { (kind, role) -> AsicSigningFailure.Validation(kind, role) }
-
-        pdf.forEach { failure ->
-            assertEquals(SigningFailureOutcome.SIGNATURE_DISCARDED, failure.outcome)
-            assertReadableEverywhere(failure)
-        }
-        container.forEach { reason ->
-            val failure = (reason.signingStop() as DocumentSigningStop.Failed).failure
-            assertEquals(reason.toString(), SigningFailureOutcome.SIGNATURE_DISCARDED, failure.outcome)
-            assertReadableEverywhere(failure)
-        }
-        assertEquals(
-            R.string.signing_cause_signature_timestamp_failed,
-            QualifiedPdfArchivalFailure.Timestamp(QualifiedPdfTimestampPhase.SIGNATURE).signingFailure().cause,
-        )
-        assertEquals(
-            R.string.signing_cause_archive_timestamp_failed,
-            QualifiedPdfArchivalFailure.Timestamp(QualifiedPdfTimestampPhase.ARCHIVE).signingFailure().cause,
-        )
-    }
-
-    @Test
     fun aFailureBeforeTheSignatureSaysNoSignedDocumentWasMade() {
-        val stops =
-            QualifiedSignFailure.entries.map { QualifiedPdfSigningFailure.Card(it).signingStop() } +
-                NativeCertificateReadFailure.entries.map { QualifiedPdfSigningFailure.Certificate(it).signingStop() } +
-                PdfSigningFailure.entries.map { QualifiedPdfSigningFailure.Document(it).signingStop() } +
-                QualifiedDocumentCmsFailure.entries.map { QualifiedPdfSigningFailure.Cms(it).signingStop() } +
-                listOf(
-                    QualifiedPdfSigningFailure.KeyProfileUnsupported.signingStop(),
-                    QualifiedPdfSigningFailure.InternalError.signingStop(),
-                    AsicSigningFailure.UnusableNames.signingStop(),
-                    AsicSigningFailure.KeyProfileUnsupported.signingStop(),
-                ) +
-                QualifiedSignFailure.entries.map { AsicSigningFailure.Card(it).signingStop() } +
-                NativeCertificateReadFailure.entries.map { AsicSigningFailure.Certificate(it).signingStop() }
+        val stops = QualifiedSignFailure.entries.map { it.signingStop() }
 
         stops.filterIsInstance<DocumentSigningStop.Failed>().forEach { stop ->
             assertEquals(SigningFailureOutcome.NOT_SIGNED, stop.failure.outcome)
             assertReadableEverywhere(stop.failure)
+        }
+        NativeCertificateReadFailure.entries.map { it.signingFailure() }.forEach { failure ->
+            assertEquals(SigningFailureOutcome.NOT_SIGNED, failure.outcome)
+            assertReadableEverywhere(failure)
         }
         assertEquals(
             DocumentSigningStop.Status(DocumentSigningStatus.WRONG_PIN),
@@ -177,7 +35,7 @@ class DocumentSigningFailureTest {
             QualifiedSignFailure.PIN_LOCKED.signingStop(),
         )
         val statusStops = stops.filterIsInstance<DocumentSigningStop.Status>()
-        assertEquals(WRONG_AND_LOCKED_PER_FAILURE_SOURCE, statusStops.size)
+        assertEquals(WRONG_PIN_AND_PIN_LOCKED_KEEP_STATUS, statusStops.size)
     }
 
     @Test
@@ -214,25 +72,6 @@ class DocumentSigningFailureTest {
             assertTrue(locale.directory + ": " + text, text.endsWith(SENTENCE_END))
         }
     }
-
-    private fun validationCases(): List<Pair<ValidationMaterialCollectionFailure, ValidationPathRole?>> =
-        ValidationMaterialCollectionFailure.entries.flatMap { kind ->
-            if (kind == ValidationMaterialCollectionFailure.REVOKED) {
-                (ValidationPathRole.entries + listOf(null)).map { role -> kind to role }
-            } else {
-                listOf(kind to null)
-            }
-        }
-
-    private fun pdfArchivalFailures(): List<QualifiedPdfArchivalFailure> =
-        QualifiedPdfTimestampPhase.entries.map { QualifiedPdfArchivalFailure.Timestamp(it) } +
-            validationCases().map { (kind, role) -> QualifiedPdfArchivalFailure.Validation(kind, role) } +
-            QualifiedDocumentCmsFailure.entries.map { QualifiedPdfArchivalFailure.Cms(it) } +
-            PdfSigningFailure.entries.map { QualifiedPdfArchivalFailure.Document(it) } +
-            listOf(
-                QualifiedPdfArchivalFailure.ValidationUnavailable,
-                QualifiedPdfArchivalFailure.InternalError,
-            )
 
     /** One resource directory's strings, resolved the way Android resolves them. */
     private class Locale(
@@ -272,8 +111,8 @@ class DocumentSigningFailureTest {
         const val SENTENCE_END = "."
         const val NO_BREAK_SPACE = " "
 
-        /** WRONG_PIN and PIN_LOCKED keep their status, once for PDF and once for ASiC card failures. */
-        const val WRONG_AND_LOCKED_PER_FAILURE_SOURCE = 4
+        /** WRONG_PIN and PIN_LOCKED keep their status instead of failing. */
+        const val WRONG_PIN_AND_PIN_LOCKED_KEEP_STATUS = 2
         val SPLIT_PIN_NAME = Regex("(PIN|kod|tunnuslu\\p{L}*) [12](?!\\d)")
         val STRING_NAMES: Map<Int, String> =
             R.string::class.java.fields.associate { field -> field.getInt(null) to field.name }

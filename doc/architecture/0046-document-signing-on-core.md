@@ -21,14 +21,17 @@ deleted.
 - Signing: the core builds each document, asks the card in this phone to
   sign the digests through `CardDigestSigner`, timestamps them with the
   holder's configured authorities (the core's default when none is
-  stored), collects the long-term material, and writes each signed file
-  under its signed-document name. PDFs are PAdES at LTA with the core's
+  stored), collects the long-term material against the card's CA
+  certificates the app passes in, and writes each signed file under its
+  signed-document name. PDFs are PAdES at LTA with the core's
   verification seal in the app's language; several files are one ASiC-E
-  container with an XAdES signature at LT. The app offers the written file
-  in the platform save panel.
+  container with an XAdES signature at LTA. The app offers the written
+  file in the platform save panel.
 - Verifying: the core judges every signature of the chosen file against
-  its pinned anchors and asks the responders about a signer the file
-  leaves unchecked. The screen shows the core's verdict.
+  the EU trusted lists' anchors (the list of the lists and the Finnish
+  list, fetched over the app's transport and cached on disk) and asks
+  the responders about a signer the file leaves unchecked. The screen
+  shows the core's verdict.
 - Network: `CoreHttpClient` is the core's transport. A
   certificate-published host is vetted by the core (`vet_destination`);
   the request connects to exactly the vetted addresses and never resolves

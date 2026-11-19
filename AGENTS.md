@@ -36,6 +36,12 @@
   serial, network address, APDU capture, or reader/card dump.
 - Committed tests use synthetic identities and protocol fixtures. Real-card
   evidence stays local and contains no identifying values.
+- Test keys and certificates are generated ephemerally at test time
+  (fi.refineid.android.testutil.TestCertificates) and never committed:
+  no private key, no CA or leaf certificate bytes, no key identifier.
+  Static CA-looking bytes invite confusion with real trust material: a
+  persisted test CA whose key later leaks would mint certificates for
+  any store that ever trusted it.
 - Shipped code collects PIN and CAN on device, holds them only as mutable
   short-lived memory, and zeroizes them after use.
 - The CAN is a secret like the PINs: never displayed back, never logged, never
@@ -55,7 +61,8 @@
   Network access (android.permission.INTERNET) in release builds is strictly reserved
   for RAPP (local-network TCP stream relay to paired requesters), the user-directed
   in-app browser authentication harness, and, for signing and verifying documents,
-  the timestamp authority and the OCSP and CRL addresses certificates name. Keep
+  the timestamp authority, the OCSP and CRL addresses certificates name, and the
+  EU list of the lists with the Finnish trusted list it points at. Keep
   tracing sinks in variant source sets and inspect release artifacts for trace literals.
 - Debug builds make every error visible: every failure path (refusal, transport
   close, card or NFC error, failed operation) reports through one debug-only error

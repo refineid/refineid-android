@@ -19,6 +19,7 @@
     <string name="document_invalid">Invalid signature</string>
     <string name="document_unsigned">No signature found</string>
     <string name="document_malformed">Unreadable signature</string>
+    <string name="document_anchors_unavailable">Trust lists unavailable</string>
     <string name="document_signature_ordinal">Signature %1$d</string>
     <string name="document_partial_coverage">Covers only part of the document</string>
     <string name="signature_details_signer">Signer</string>

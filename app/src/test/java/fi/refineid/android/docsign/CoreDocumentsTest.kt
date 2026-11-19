@@ -23,7 +23,11 @@ class CoreDocumentsTest {
         val work = Files.createTempDirectory(WORK_PREFIX).toFile()
         try {
             assertThrows(VerifyFailure.NotASignedDocument::class.java) {
-                CoreDocuments.verify(NamedInput(PLAIN_NAME) { PLAIN_TEXT.byteInputStream() }, work)
+                CoreDocuments.verify(
+                    NamedInput(PLAIN_NAME) { PLAIN_TEXT.byteInputStream() },
+                    work,
+                    work,
+                )
             }
             assertTrue(checkNotNull(work.listFiles()).isEmpty())
         } finally {

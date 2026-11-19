@@ -19,6 +19,7 @@
     <string name="document_invalid">Virheellinen allekirjoitus</string>
     <string name="document_unsigned">Allekirjoitusta ei löytynyt</string>
     <string name="document_malformed">Lukukelvoton allekirjoitus</string>
+    <string name="document_anchors_unavailable">Luottamuslistat eivät ole saatavilla</string>
     <string name="document_signature_ordinal">Allekirjoitus %1$d</string>
     <string name="document_partial_coverage">Kattaa vain osan asiakirjasta</string>
     <string name="signature_details_signer">Allekirjoittaja</string>

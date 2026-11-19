@@ -4,18 +4,10 @@ package fi.refineid.android.ui
 
 import androidx.annotation.StringRes
 import fi.refineid.android.R
-import fi.refineid.android.asic.AsicSigningFailure
 import fi.refineid.android.core.NativeCertificateReadFailure
 import fi.refineid.android.core.QualifiedSignFailure
-import fi.refineid.android.document.BaselineLevel
-import fi.refineid.android.document.PdfSigningFailure
-import fi.refineid.android.document.QualifiedDocumentCmsFailure
-import fi.refineid.android.document.QualifiedPdfArchivalFailure
-import fi.refineid.android.document.QualifiedPdfSigningFailure
-import fi.refineid.android.document.QualifiedPdfTimestampPhase
-import fi.refineid.android.document.SignedDocumentName
-import fi.refineid.android.document.ValidationMaterialCollectionFailure
-import fi.refineid.android.document.ValidationPathRole
+import uniffi.refineid_doc_sign_android.CardSignRefusal
+import uniffi.refineid_doc_sign_android.SignFailure
 
 /** What became of the signature when signing stopped; each names its lead and consequence sentences. */
 internal enum class SigningFailureOutcome(
@@ -71,42 +63,6 @@ internal data class DocumentSigningFailure(
     }
 }
 
-/** The signature standard a signed file follows, by the name it gives its signatures. */
-internal enum class SignatureStandard(
-    val label: String,
-) {
-    /** A PDF signed in place (ETSI EN 319 142-1). */
-    PADES("PAdES"),
-
-    /** The signature of an ASiC-E container (ETSI EN 319 132-1). */
-    XADES("XAdES"),
-}
-
-/**
- * A development file saved below B-LTA: its [standard], the [level] it
- * reached and why it went no further.
- */
-internal data class BelowLongTermNotice(
-    val standard: SignatureStandard,
-    val level: BaselineLevel,
-    val failure: DocumentSigningFailure,
-) {
-    /** The status line naming the standard and level, the file-name mark and the cause. */
-    fun text(
-        string: (Int) -> String,
-        format: (Int, List<String>) -> String,
-    ): String =
-        format(
-            R.string.signed_below_long_term,
-            listOf(
-                standard.label,
-                level.label,
-                SignedDocumentName.developmentSuffix(level),
-                failure.problem(string) { id, argument -> format(id, listOf(argument)) },
-            ),
-        )
-}
-
 /** A stop that keeps its own status line, or a failure with its cause. */
 internal sealed interface DocumentSigningStop {
     data class Status(
@@ -154,119 +110,118 @@ internal fun saveFailure(partly: Boolean): DocumentSigningFailure =
         R.string.signing_action_choose_other_location,
     )
 
-internal fun QualifiedPdfArchivalFailure.signingFailure(): DocumentSigningFailure {
-    val outcome = SigningFailureOutcome.SIGNATURE_DISCARDED
-    return when (this) {
-        is QualifiedPdfArchivalFailure.Timestamp -> {
-            timestampFailure(phase)
+/**
+ * Where a core signing failure stops: its own status line for a PIN the
+ * holder re-enters or declines, else the failure that names its cause.
+ * [wrongPin] when the card already refused one PIN 2 entry, so a
+ * declined re-entry reads as the wrong PIN.
+ */
+internal fun SignFailure.signingStop(wrongPin: Boolean): DocumentSigningStop =
+    when (this) {
+        is SignFailure.Card -> {
+            when (refusal) {
+                is CardSignRefusal.Declined -> {
+                    if (wrongPin) {
+                        DocumentSigningStop.Status(DocumentSigningStatus.WRONG_PIN)
+                    } else {
+                        DocumentSigningStop.Status(DocumentSigningStatus.IDLE)
+                    }
+                }
+
+                is CardSignRefusal.RetryFloor -> {
+                    DocumentSigningStop.Status(DocumentSigningStatus.PIN_LOCKED)
+                }
+
+                is CardSignRefusal.CardUnavailable,
+                is CardSignRefusal.Expired,
+                -> {
+                    DocumentSigningStop.Failed(
+                        DocumentSigningFailure(
+                            SigningFailureOutcome.NOT_SIGNED,
+                            R.string.signing_cause_card_unreachable,
+                            R.string.signing_action_hold_card,
+                        ),
+                    )
+                }
+
+                is CardSignRefusal.Unsupported -> {
+                    DocumentSigningStop.Failed(
+                        DocumentSigningFailure(
+                            SigningFailureOutcome.NOT_SIGNED,
+                            R.string.signing_cause_key_unsupported,
+                            R.string.signing_action_other_card,
+                        ),
+                    )
+                }
+
+                is CardSignRefusal.CardFailed -> {
+                    DocumentSigningStop.Failed(internalFailure(SigningFailureOutcome.NOT_SIGNED))
+                }
+            }
         }
 
-        is QualifiedPdfArchivalFailure.Validation -> {
-            validationFailure(kind, pathRole)
-        }
-
-        QualifiedPdfArchivalFailure.ValidationUnavailable -> {
-            validationUnavailableFailure()
-        }
-
-        is QualifiedPdfArchivalFailure.Cms -> {
-            kind.signingFailure(outcome)
-        }
-
-        is QualifiedPdfArchivalFailure.Document -> {
-            kind.signingFailure(outcome)
-        }
-
-        QualifiedPdfArchivalFailure.InternalError -> {
-            internalFailure(outcome)
-        }
-    }
-}
-
-internal fun QualifiedPdfSigningFailure.signingStop(): DocumentSigningStop {
-    val outcome = SigningFailureOutcome.NOT_SIGNED
-    return when (this) {
-        is QualifiedPdfSigningFailure.Card -> kind.signingStop()
-        is QualifiedPdfSigningFailure.Certificate -> DocumentSigningStop.Failed(kind.signingFailure())
-        QualifiedPdfSigningFailure.KeyProfileUnsupported -> DocumentSigningStop.Failed(KeyUnsupportedFailure)
-        is QualifiedPdfSigningFailure.Cms -> DocumentSigningStop.Failed(kind.signingFailure(outcome))
-        is QualifiedPdfSigningFailure.Document -> DocumentSigningStop.Failed(kind.signingFailure(outcome))
-        QualifiedPdfSigningFailure.InternalError -> DocumentSigningStop.Failed(internalFailure(outcome))
-    }
-}
-
-internal fun AsicSigningFailure.signingStop(): DocumentSigningStop {
-    val discarded = SigningFailureOutcome.SIGNATURE_DISCARDED
-    return when (this) {
-        is AsicSigningFailure.Card -> {
-            kind.signingStop()
-        }
-
-        is AsicSigningFailure.Certificate -> {
-            DocumentSigningStop.Failed(kind.signingFailure())
-        }
-
-        AsicSigningFailure.KeyProfileUnsupported -> {
-            DocumentSigningStop.Failed(KeyUnsupportedFailure)
-        }
-
-        AsicSigningFailure.UnusableNames -> {
+        is SignFailure.Certificate -> {
             DocumentSigningStop.Failed(
                 DocumentSigningFailure(
                     SigningFailureOutcome.NOT_SIGNED,
-                    R.string.signing_cause_unusable_names,
-                    R.string.signing_action_rename_file,
+                    R.string.signing_cause_key_unsupported,
+                    R.string.signing_action_other_card,
                 ),
             )
         }
 
-        AsicSigningFailure.ContainerOverflow -> {
+        is SignFailure.Revoked -> {
             DocumentSigningStop.Failed(
                 DocumentSigningFailure(
-                    discarded,
-                    R.string.signing_cause_container_too_large,
-                    R.string.signing_action_fewer_files,
+                    SigningFailureOutcome.SIGNATURE_DISCARDED,
+                    R.string.signing_cause_signer_revoked,
+                    R.string.signing_action_card_issuer,
                 ),
             )
         }
 
-        is AsicSigningFailure.Timestamp -> {
-            DocumentSigningStop.Failed(timestampFailure(phase))
-        }
-
-        AsicSigningFailure.ArchiveTimestampPathUncovered -> {
+        is SignFailure.Timestamp -> {
             DocumentSigningStop.Failed(
                 DocumentSigningFailure(
-                    discarded,
-                    R.string.signing_cause_archive_timestamp_path_uncovered,
+                    SigningFailureOutcome.SIGNATURE_DISCARDED,
+                    R.string.signing_cause_signature_timestamp_failed,
                     R.string.signing_action_timestamp_authority,
                 ),
             )
         }
 
-        is AsicSigningFailure.Validation -> {
-            DocumentSigningStop.Failed(validationFailure(kind, pathRole))
+        is SignFailure.Material -> {
+            DocumentSigningStop.Failed(
+                DocumentSigningFailure(
+                    SigningFailureOutcome.SIGNATURE_DISCARDED,
+                    R.string.signing_cause_validation_services_unreachable,
+                    R.string.signing_action_network,
+                    frame = R.string.signing_frame_validation_material,
+                ),
+            )
         }
 
-        AsicSigningFailure.ValidationUnavailable -> {
-            DocumentSigningStop.Failed(validationUnavailableFailure())
+        is SignFailure.InputRead -> {
+            DocumentSigningStop.Failed(FileUnreadableFailure)
         }
 
-        AsicSigningFailure.InternalError -> {
-            DocumentSigningStop.Failed(internalFailure(discarded))
+        is SignFailure.OutputWrite -> {
+            DocumentSigningStop.Failed(saveFailure(partly = false))
         }
-    }
-}
 
-/**
- * The failure a completion-stage reason reports, as a development
- * container below B-LTA names it. Every such reason stops as
- * [DocumentSigningStop.Failed]; a card status cannot arise there.
- */
-internal fun AsicSigningFailure.archivalFailure(): DocumentSigningFailure =
-    when (val stop = signingStop()) {
-        is DocumentSigningStop.Failed -> stop.failure
-        is DocumentSigningStop.Status -> internalFailure(SigningFailureOutcome.SIGNATURE_DISCARDED)
+        is SignFailure.SignatureInvalid -> {
+            DocumentSigningStop.Failed(
+                DocumentSigningFailure(
+                    SigningFailureOutcome.SIGNATURE_DISCARDED,
+                    R.string.signing_cause_signature_not_verified,
+                    R.string.signing_action_report,
+                ),
+            )
+        }
+
+        is SignFailure.Document -> {
+            DocumentSigningStop.Failed(internalFailure(SigningFailureOutcome.NOT_SIGNED))
+        }
     }
 
 internal fun QualifiedSignFailure.signingStop(): DocumentSigningStop =
@@ -371,154 +326,4 @@ internal fun NativeCertificateReadFailure.signingFailure(): DocumentSigningFailu
             }
         }
     return DocumentSigningFailure(SigningFailureOutcome.NOT_SIGNED, cause, action)
-}
-
-private val KeyUnsupportedFailure =
-    DocumentSigningFailure(
-        SigningFailureOutcome.NOT_SIGNED,
-        R.string.signing_cause_key_unsupported,
-        R.string.signing_action_other_card,
-    )
-
-private fun PdfSigningFailure.signingFailure(outcome: SigningFailureOutcome): DocumentSigningFailure {
-    val (cause, action) =
-        when (this) {
-            PdfSigningFailure.ENCRYPTED -> {
-                R.string.signing_cause_document_encrypted to R.string.signing_action_other_document
-            }
-
-            PdfSigningFailure.NOT_A_PDF -> {
-                R.string.signing_cause_not_a_pdf to R.string.signing_action_other_document
-            }
-
-            PdfSigningFailure.STREAM_ENCODING_UNSUPPORTED,
-            PdfSigningFailure.STRUCTURE_UNREADABLE,
-            -> {
-                R.string.signing_cause_pdf_unsupported to R.string.signing_action_other_document
-            }
-
-            PdfSigningFailure.PLACEHOLDER_MALFORMED,
-            PdfSigningFailure.SIGNATURE_CLAIM_MALFORMED,
-            PdfSigningFailure.SIGNATURE_TOO_LARGE,
-            PdfSigningFailure.VALIDATION_MATERIAL_MALFORMED,
-            PdfSigningFailure.VALIDATION_MATERIAL_UNAVAILABLE,
-            -> {
-                R.string.signing_cause_document_assembly_failed to R.string.signing_action_report
-            }
-        }
-    return DocumentSigningFailure(outcome, cause, action)
-}
-
-private fun QualifiedDocumentCmsFailure.signingFailure(outcome: SigningFailureOutcome): DocumentSigningFailure {
-    val (cause, action) =
-        when (this) {
-            QualifiedDocumentCmsFailure.CERTIFICATE_UNPARSEABLE -> {
-                R.string.signing_cause_certificate_unreadable to R.string.signing_action_card_issuer
-            }
-
-            QualifiedDocumentCmsFailure.CERTIFICATE_PROFILE_MISMATCH -> {
-                R.string.signing_cause_certificate_mismatch to R.string.signing_action_card_issuer
-            }
-
-            QualifiedDocumentCmsFailure.TIMESTAMP_MISSING,
-            QualifiedDocumentCmsFailure.TIMESTAMP_IMPRINT_MISMATCH,
-            QualifiedDocumentCmsFailure.TIMESTAMP_TOKEN_UNAVAILABLE,
-            -> {
-                R.string.signing_cause_signature_timestamp_failed to R.string.signing_action_timestamp_authority
-            }
-
-            QualifiedDocumentCmsFailure.DOCUMENT_DIGEST_MALFORMED,
-            QualifiedDocumentCmsFailure.SIGNATURE_MALFORMED,
-            QualifiedDocumentCmsFailure.SIGNED_ATTRIBUTES_MALFORMED,
-            -> {
-                R.string.signing_cause_document_assembly_failed to R.string.signing_action_report
-            }
-        }
-    return DocumentSigningFailure(outcome, cause, action)
-}
-
-private fun timestampFailure(phase: QualifiedPdfTimestampPhase): DocumentSigningFailure =
-    DocumentSigningFailure(
-        SigningFailureOutcome.SIGNATURE_DISCARDED,
-        when (phase) {
-            QualifiedPdfTimestampPhase.SIGNATURE -> R.string.signing_cause_signature_timestamp_failed
-            QualifiedPdfTimestampPhase.ARCHIVE -> R.string.signing_cause_archive_timestamp_failed
-        },
-        R.string.signing_action_timestamp_authority,
-    )
-
-private fun validationUnavailableFailure(): DocumentSigningFailure =
-    DocumentSigningFailure(
-        SigningFailureOutcome.SIGNATURE_DISCARDED,
-        R.string.signing_cause_validation_services_unreachable,
-        R.string.signing_action_network,
-        frame = R.string.signing_frame_validation_material,
-    )
-
-/** A long-term validation material failure, named by its kind and, for a revocation, by its path. */
-internal fun validationFailure(
-    kind: ValidationMaterialCollectionFailure,
-    pathRole: ValidationPathRole?,
-): DocumentSigningFailure {
-    val (cause, action) =
-        when (kind) {
-            ValidationMaterialCollectionFailure.ISSUER_UNAVAILABLE -> {
-                R.string.signing_cause_issuer_unavailable to R.string.signing_action_network
-            }
-
-            ValidationMaterialCollectionFailure.REVOCATION_UNAVAILABLE -> {
-                R.string.signing_cause_revocation_unavailable to R.string.signing_action_network
-            }
-
-            ValidationMaterialCollectionFailure.TRUST_ANCHOR_UNAVAILABLE -> {
-                R.string.signing_cause_trust_anchor_unavailable to R.string.signing_action_network
-            }
-
-            ValidationMaterialCollectionFailure.RANDOM_UNAVAILABLE -> {
-                R.string.signing_cause_random_unavailable to R.string.signing_action_sign_again
-            }
-
-            ValidationMaterialCollectionFailure.REVOKED -> {
-                when (pathRole) {
-                    ValidationPathRole.DOCUMENT_SIGNER -> {
-                        R.string.signing_cause_signer_revoked to R.string.signing_action_card_issuer
-                    }
-
-                    ValidationPathRole.TIMESTAMP_AUTHORITY -> {
-                        R.string.signing_cause_timestamp_authority_revoked to
-                            R.string.signing_action_timestamp_authority
-                    }
-
-                    null -> {
-                        R.string.signing_cause_chain_certificate_revoked to R.string.signing_action_card_issuer
-                    }
-                }
-            }
-
-            ValidationMaterialCollectionFailure.CERTIFICATE_MALFORMED -> {
-                R.string.signing_cause_chain_certificate_malformed to R.string.signing_action_report
-            }
-
-            ValidationMaterialCollectionFailure.CHAIN_CYCLE -> {
-                R.string.signing_cause_chain_cycle to R.string.signing_action_report
-            }
-
-            ValidationMaterialCollectionFailure.CHAIN_TOO_DEEP -> {
-                R.string.signing_cause_chain_too_deep to R.string.signing_action_report
-            }
-
-            ValidationMaterialCollectionFailure.CANDIDATE_LIMIT_EXCEEDED -> {
-                R.string.signing_cause_candidate_limit_exceeded to R.string.signing_action_report
-            }
-
-            ValidationMaterialCollectionFailure.PATH_LIMIT_EXCEEDED -> {
-                R.string.signing_cause_path_limit_exceeded to R.string.signing_action_report
-            }
-        }
-    return DocumentSigningFailure(
-        SigningFailureOutcome.SIGNATURE_DISCARDED,
-        cause,
-        action,
-        frame = R.string.signing_frame_validation_material,
-    )
 }

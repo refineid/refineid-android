@@ -47,7 +47,9 @@ internal object CoreDocuments {
      * each PDF on its own as [DocumentFormat.PADES], or every file as one
      * [DocumentFormat.ASIC_E] container. The PDF seal is in [locale]'s
      * language; [timestampAuthorities] are the holder's, none meaning the
-     * core's default. One outcome per input for PDFs, one for the container.
+     * core's default. [signerAnchors] are the DER CA certificates the
+     * signer's long-term material may end at. One outcome per input for
+     * PDFs, one for the container.
      *
      * @throws uniffi.refineid_doc_sign_android.SignFailure when nothing was written.
      */
@@ -59,6 +61,7 @@ internal object CoreDocuments {
         format: DocumentFormat,
         locale: Locale,
         timestampAuthorities: List<TimestampAuthority>,
+        signerAnchors: List<ByteArray>,
     ): List<DocumentOutcome> =
         staged(workDirectory, inputs) { files ->
             signDocuments(
@@ -68,20 +71,23 @@ internal object CoreDocuments {
                 format = format,
                 language = locale.language,
                 timestampAuthorities = timestampAuthorities,
+                signerAnchors = signerAnchors,
             )
         }
 
     /**
-     * Verify every signature of [input].
+     * Verify every signature of [input], caching the trusted lists under
+     * [cacheDirectory].
      *
      * @throws VerifyFailure when there is nothing to judge.
      */
     fun verify(
         input: NamedInput,
         workDirectory: File,
+        cacheDirectory: File,
     ): DocumentVerdict =
         staged(workDirectory, listOf(input)) { files ->
-            verifyDocument(files.single().absolutePath)
+            verifyDocument(files.single().absolutePath, cacheDirectory.absolutePath)
         }
 
     /** [inputs] written under their names into a fresh directory for the span of [operation]. */

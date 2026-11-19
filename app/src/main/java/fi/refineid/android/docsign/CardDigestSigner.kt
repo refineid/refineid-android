@@ -202,6 +202,8 @@ internal class CardDigestSigner(
             when (kind) {
                 NativeCertificateReadFailure.CARD_UNAVAILABLE -> CardSignRefusal.CardUnavailable()
 
+                NativeCertificateReadFailure.ORGANIZATION_CARD -> CardSignRefusal.Unsupported()
+
                 NativeCertificateReadFailure.REJECTED,
                 NativeCertificateReadFailure.TRANSPORT_ERROR,
                 NativeCertificateReadFailure.INVALID_CERTIFICATE,
@@ -215,9 +217,16 @@ internal class CardDigestSigner(
         fun refusal(failure: RappCardFailure): CardSignRefusal =
             when (failure) {
                 RappCardFailure.USER_CANCELLED -> CardSignRefusal.Declined()
-                RappCardFailure.RETRY_FLOOR -> CardSignRefusal.RetryFloor()
+
+                RappCardFailure.RETRY_FLOOR,
+                RappCardFailure.PIN1_BLOCKED,
+                RappCardFailure.PIN2_BLOCKED,
+                -> CardSignRefusal.RetryFloor()
+
                 RappCardFailure.CARD_ERROR -> CardSignRefusal.CardUnavailable()
+
                 RappCardFailure.UNSUPPORTED -> CardSignRefusal.Unsupported()
+
                 RappCardFailure.OPERATION_FAILED -> CardSignRefusal.CardFailed()
             }
     }

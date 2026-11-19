@@ -58,11 +58,11 @@ pub enum SignatureAlgorithm {
     EcdsaSha384,
 }
 
-/// One document the card signs: the name shown to the holder and the
+/// One document the card signs: the name the core gives it and the
 /// digest of exactly what the document's format signs.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct DocumentDigest {
-    /// The file's name, or the names of a container's files.
+    /// The file's name, or the container's signed name.
     pub name: String,
     /// The digest, of [`DigestBatch::algorithm`]'s length.
     pub digest: Vec<u8>,

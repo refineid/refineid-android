@@ -29,6 +29,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod lists;
 pub mod network;
 pub mod sign;
 pub mod signer;

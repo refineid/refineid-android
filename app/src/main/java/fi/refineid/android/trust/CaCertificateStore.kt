@@ -4,7 +4,6 @@ package fi.refineid.android.trust
 
 import android.content.Context
 import fi.refineid.android.core.AuthenticationIssuerCertificateSource
-import fi.refineid.android.document.SignerAnchorSource
 import java.io.File
 import java.io.FileOutputStream
 import java.security.GeneralSecurityException
@@ -18,16 +17,13 @@ import java.util.Locale
 /**
  * Persistent on-disk and in-memory cache for root and intermediate CA
  * certificates discovered on smart cards (refineid-core
- * doc/security/certificate-custody.md). The cached chain of a signer's
- * certificate also anchors the collection of its long-term validation
- * material; verification does not use it.
+ * doc/security/certificate-custody.md).
  */
 @Suppress("TooManyFunctions")
 internal class CaCertificateStore(
     private val context: Context? = null,
     baseDirectory: File? = null,
-) : AuthenticationIssuerCertificateSource,
-    SignerAnchorSource {
+) : AuthenticationIssuerCertificateSource {
     private val lock = Any()
     private val directory = File(baseDirectory ?: context?.filesDir ?: File("."), CA_CERTIFICATES_DIRECTORY_NAME)
     private val certificates = mutableListOf<X509Certificate>()
@@ -120,20 +116,6 @@ internal class CaCertificateStore(
     fun hasChainFor(leafDer: ByteArray): Boolean {
         val leaf = parseCertificate(leafDer) ?: return false
         return chainOf(leaf).lastOrNull()?.isSelfSigned() == true
-    }
-
-    /** The cached chain of [signerCertificate], issuer first, each copy owned by the caller. */
-    override fun copyAnchorsFor(signerCertificate: ByteArray): List<ByteArray> {
-        val leaf = parseCertificate(signerCertificate) ?: return emptyList()
-        return chainOf(leaf).mapNotNull { certificate ->
-            try {
-                certificate.encoded
-            } catch (_: GeneralSecurityException) {
-                null
-            } catch (_: RuntimeException) {
-                null
-            }
-        }
     }
 
     private fun chainOf(leaf: X509Certificate): List<X509Certificate> {

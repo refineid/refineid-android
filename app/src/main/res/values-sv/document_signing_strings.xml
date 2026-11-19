@@ -19,6 +19,7 @@
     <string name="document_invalid">Ogiltig signatur</string>
     <string name="document_unsigned">Ingen signatur hittades</string>
     <string name="document_malformed">Oläsbar signatur</string>
+    <string name="document_anchors_unavailable">Tillitslistorna är inte tillgängliga</string>
     <string name="document_signature_ordinal">Signatur %1$d</string>
     <string name="document_partial_coverage">Täcker endast en del av dokumentet</string>
     <string name="signature_details_signer">Undertecknare</string>

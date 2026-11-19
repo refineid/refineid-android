@@ -19,8 +19,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import fi.refineid.android.R
+import fi.refineid.android.RefineIdApplication
 import fi.refineid.android.core.CanSessionStore
 import fi.refineid.android.core.CanSubmission
+import fi.refineid.android.core.NativeCardCa
 import fi.refineid.android.core.Pin2Submission
 import fi.refineid.android.core.QualifiedCardService
 import fi.refineid.android.diagnostics.AppTrace
@@ -183,7 +185,6 @@ internal fun DocumentSigningHarness(
         canSign = signingAvailable,
         status = session.status,
         failure = session.failure,
-        belowLongTerm = session.belowLongTerm,
         onChooseDocuments = { chooseFilesLauncher.launch(arrayOf(ANY_MEDIA_TYPE)) },
         onAddDocument = { addFilesLauncher.launch(arrayOf(ANY_MEDIA_TYPE)) },
         onSign = session::sign,
@@ -204,15 +205,15 @@ private data class SelectedItem(
 
 /**
  * What the core wrote and where it waits in [directory] until saved:
- * the signed files, whether they are one container, and the status the
- * signing ends with once they are saved ([DocumentSigningStatus.SIGNED]
+ * the signed files, whether they are one container, and where the
+ * signing stops once they are saved ([DocumentSigningStatus.SIGNED]
  * unless some document's finish failed).
  */
 private class SignedOutputs(
     val directory: File,
     val files: List<File>,
     val isContainer: Boolean,
-    val savedStatus: DocumentSigningStatus,
+    val savedStop: DocumentSigningStop,
 ) {
     fun discard() {
         directory.deleteRecursively()
@@ -251,10 +252,6 @@ internal class DocumentSigningHarnessSession(
 
     /** Why signing stopped; read while [status] is [DocumentSigningStatus.FAILED]. */
     var failure by mutableStateOf<DocumentSigningFailure?>(null)
-        private set
-
-    /** What the saved development document lacks; read while [status] is SIGNED_BELOW_LONG_TERM. */
-    var belowLongTerm by mutableStateOf<BelowLongTermNotice?>(null)
         private set
 
     var saveRequest by mutableStateOf<DocumentSaveRequest?>(null)
@@ -395,16 +392,16 @@ internal class DocumentSigningHarnessSession(
                     throw cancelled
                 } catch (failure: SignFailure) {
                     AppTrace.documentSigningFailed(failureName(failure))
-                    finish(signingStatusOf(failure, entry.wrongPin))
+                    stop(failure.signingStop(entry.wrongPin))
                 } catch (_: TimestampAuthorityStoreException) {
                     AppTrace.documentSigningFailed(TIMESTAMP_SETTINGS_FAILURE)
-                    finish(DocumentSigningStatus.UNAVAILABLE)
+                    fail(TimestampSettingsFailure)
                 } catch (failure: IOException) {
                     AppTrace.documentSigningFailed(failure.javaClass.simpleName)
-                    finish(DocumentSigningStatus.ERROR)
+                    fail(FileUnreadableFailure)
                 } catch (_: RuntimeException) {
                     AppTrace.documentSigningFailed(RUNTIME_FAILURE)
-                    finish(DocumentSigningStatus.ERROR)
+                    fail(internalFailure(SigningFailureOutcome.NOT_SIGNED))
                 } finally {
                     entry.close()
                     tap()?.end?.invoke()
@@ -465,6 +462,7 @@ internal class DocumentSigningHarnessSession(
                         format = format,
                         locale = context.resources.configuration.locales[0],
                         timestampAuthorities = authorities,
+                        signerAnchors = signerAnchors(),
                     )
                 }
             val files = outcomes.filterIsInstance<DocumentOutcome.Signed>().map { File(it.document.path) }
@@ -477,7 +475,9 @@ internal class DocumentSigningHarnessSession(
                 directory = outputDirectory,
                 files = files,
                 isContainer = format == DocumentFormat.ASIC_E,
-                savedStatus = failure?.let { signingStatusOf(it, wrongPin = false) } ?: DocumentSigningStatus.SIGNED,
+                savedStop =
+                    failure?.signingStop(wrongPin = false)
+                        ?: DocumentSigningStop.Status(DocumentSigningStatus.SIGNED),
             ).also { kept = true }
         } finally {
             if (!kept) {
@@ -485,6 +485,28 @@ internal class DocumentSigningHarnessSession(
             }
             authorities.forEach { authority -> authority.login?.password?.fill(CLEARED_BYTE) }
         }
+    }
+
+    /**
+     * The CA certificates the signer's long-term material may end at,
+     * each once: the card's issuing CA and root from this session and
+     * every CA admitted before. Without one the core refuses a release
+     * signing before the card signs.
+     */
+    private fun signerAnchors(): List<ByteArray> {
+        val session =
+            listOfNotNull(
+                NativeCardCa.readRootCaCertificate(),
+                NativeCardCa.readIntermediateCaCertificate(),
+            )
+        val admitted =
+            (context as? RefineIdApplication)
+                ?.takeIf { app -> app.hasCaCertificateStore }
+                ?.caCertificateStore
+                ?.allCertificates()
+                .orEmpty()
+                .mapNotNull { certificate -> runCatching { certificate.encoded }.getOrNull() }
+        return (session + admitted).distinctBy { anchor -> anchor.toList() }
     }
 
     /** The holder's configured authorities as the core takes them; the shipped one when none is stored. */
@@ -530,7 +552,7 @@ internal class DocumentSigningHarnessSession(
             val saved = withContext(Dispatchers.IO) { deliver(file, destination) }
             outputs.discard()
             AppTrace.documentOutputCompleted(isSuccessful = saved, documentLength = length.toInt())
-            finishSaving(saved, outputs.savedStatus)
+            finishSaving(saved, outputs.savedStop)
         }
     }
 
@@ -573,7 +595,7 @@ internal class DocumentSigningHarnessSession(
                     }
                 }
             outputs.discard()
-            finishSaving(saved, outputs.savedStatus)
+            finishSaving(saved, outputs.savedStop)
         }
     }
 
@@ -598,7 +620,7 @@ internal class DocumentSigningHarnessSession(
 
     private fun finishSaving(
         saved: Boolean,
-        savedStatus: DocumentSigningStatus,
+        savedStop: DocumentSigningStop,
     ) {
         if (isClosed) {
             return
@@ -606,16 +628,26 @@ internal class DocumentSigningHarnessSession(
         progressText = null
         if (saved) {
             selectedItems = emptyList()
-            status = savedStatus
+            // A stop that failed beside saved siblings: some were saved
+            // and the rest were discarded, whatever stopped them.
+            when (savedStop) {
+                is DocumentSigningStop.Failed -> {
+                    fail(savedStop.failure.copy(outcome = SigningFailureOutcome.PARTLY_SAVED))
+                }
+
+                is DocumentSigningStop.Status -> {
+                    stop(savedStop)
+                }
+            }
         } else {
-            status = DocumentSigningStatus.ERROR
+            fail(saveFailure(partly = false))
         }
     }
 
-    private fun finish(failed: DocumentSigningStatus) {
-        if (!isClosed) {
-            progressText = null
-            status = failed
+    private fun stop(stop: DocumentSigningStop) {
+        when (stop) {
+            is DocumentSigningStop.Failed -> fail(stop.failure)
+            is DocumentSigningStop.Status -> if (!isClosed) status = stop.status
         }
     }
 
@@ -753,52 +785,3 @@ internal fun SignTapFailure.signingStatus(): DocumentSigningStatus =
 private const val PDF_MEDIA_TYPE = "application/pdf"
 private const val ASIC_E_MEDIA_TYPE = "application/vnd.etsi.asic-e+zip"
 private const val ANY_MEDIA_TYPE = "*/*"
-
-/** The status a refused signing ends in; a declined re-entry after a wrong PIN reads as the wrong PIN. */
-internal fun signingStatusOf(
-    failure: SignFailure,
-    wrongPin: Boolean,
-): DocumentSigningStatus =
-    when (failure) {
-        is SignFailure.Card -> {
-            when (failure.refusal) {
-                is CardSignRefusal.Declined -> {
-                    if (wrongPin) DocumentSigningStatus.WRONG_PIN else DocumentSigningStatus.ERROR
-                }
-
-                is CardSignRefusal.RetryFloor -> {
-                    DocumentSigningStatus.PIN_LOCKED
-                }
-
-                is CardSignRefusal.CardUnavailable,
-                is CardSignRefusal.Expired,
-                is CardSignRefusal.Unsupported,
-                -> {
-                    DocumentSigningStatus.UNAVAILABLE
-                }
-
-                is CardSignRefusal.CardFailed -> {
-                    DocumentSigningStatus.ERROR
-                }
-            }
-        }
-
-        is SignFailure.Revoked -> {
-            DocumentSigningStatus.CERT_REVOKED
-        }
-
-        is SignFailure.Certificate,
-        is SignFailure.Timestamp,
-        is SignFailure.Material,
-        -> {
-            DocumentSigningStatus.UNAVAILABLE
-        }
-
-        is SignFailure.Document,
-        is SignFailure.InputRead,
-        is SignFailure.OutputWrite,
-        is SignFailure.SignatureInvalid,
-        -> {
-            DocumentSigningStatus.ERROR
-        }
-    }

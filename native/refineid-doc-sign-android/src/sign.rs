@@ -15,13 +15,12 @@
 //! Signing documents with the card in this phone.
 //!
 //! [`sign_documents`] signs the files the app staged: each PDF as its
-//! own `PAdES` document, or every file as one `ASiC-E` container. The
-//! levels are the first-party clients': `PAdES` at LTA, the container
-//! at LT, timestamped by the authorities the holder configured, or the
-//! default authority when none is configured. A PDF carries the
-//! verification seal in the language of the app's locale. Each signed
-//! document lands in the app's output directory under the core's
-//! signed-document name.
+//! own `PAdES` document, or every file as one `ASiC-E` container, both
+//! at LTA like the first-party clients, timestamped by the authorities
+//! the holder configured, or the default authority when none is
+//! configured. A PDF carries the verification seal in the language of
+//! the app's locale. Each signed document lands in the app's output
+//! directory under the core's signed-document name.
 
 use core::fmt;
 use std::path::{Path, PathBuf};
@@ -34,7 +33,7 @@ use refineid_doc_sign::pades::{SignatureMetadata, StampLanguage, VisibleSignatur
 use refineid_doc_sign::remote::{PhoneSignOptions, sign_on_phone};
 use refineid_doc_sign::service::{
     DEFAULT_TIMESTAMP_AUTHORITY, DocumentRequest, SignErrorKind, SignOutput, SignReport,
-    TimestampCredentials,
+    SigningBuild, TimestampCredentials,
 };
 use refineid_doc_sign::signed_name::PendingSignedName;
 
@@ -56,13 +55,6 @@ impl DocumentFormat {
             Self::Pades => Format::Pades,
             Self::AsicE => Format::AsicEXades,
         }
-    }
-
-    /// Whether the format collects long-term material and adds an
-    /// archive timestamp: LTA for `PAdES`, LT for the container, as the
-    /// first-party clients sign.
-    const fn archive(self) -> bool {
-        matches!(self, Self::Pades)
     }
 }
 
@@ -231,6 +223,8 @@ impl From<SignErrorKind> for SignFailure {
             | SignErrorKind::VisibleSignatureFormat
             | SignErrorKind::UnsupportedDocumentKey(_)
             | SignErrorKind::DocumentNameLength
+            | SignErrorKind::PackageInBatch
+            | SignErrorKind::BelowArchivalLevel { .. }
             | SignErrorKind::NoDocuments => Self::Document {
                 detail: error.to_string(),
             },
@@ -297,7 +291,10 @@ pub enum DocumentOutcome {
 /// each signed document into `output_directory` under the core's
 /// signed-document name. `language` is the app's locale name; a PDF's
 /// verification seal is in its language. `timestamp_authorities` are
-/// the holder's; none means the default authority.
+/// the holder's; none means the default authority. `signer_anchors`
+/// are the DER certificates the signer's long-term material may end
+/// at: the card's issuing CA and root, which the app read from the
+/// card. A release build without one is refused before the card signs.
 ///
 /// # Errors
 /// [`SignFailure`] when nothing was written: no input, a refused
@@ -306,6 +303,7 @@ pub enum DocumentOutcome {
 /// that do not verify. Once every signature has verified, each document
 /// finishes on its own, and its outcome is at its input's position.
 #[uniffi::export]
+#[allow(clippy::too_many_arguments)]
 pub fn sign_documents(
     signer: Arc<dyn LocalCardSigner>,
     inputs: Vec<String>,
@@ -313,6 +311,7 @@ pub fn sign_documents(
     format: DocumentFormat,
     language: String,
     timestamp_authorities: Vec<TimestampAuthority>,
+    signer_anchors: Vec<Vec<u8>>,
 ) -> Result<Vec<DocumentOutcome>, SignFailure> {
     let timestamping = Timestamping::of(timestamp_authorities)?;
     let inputs: Vec<PathBuf> = inputs.into_iter().map(PathBuf::from).collect();
@@ -332,6 +331,7 @@ pub fn sign_documents(
                     clock,
                     Some(&language),
                     timestamping.clone(),
+                    signer_anchors.clone(),
                 )
             })
             .collect(),
@@ -345,6 +345,7 @@ pub fn sign_documents(
                 clock,
                 None,
                 timestamping,
+                signer_anchors,
             )],
             None => Vec::new(),
         },
@@ -377,6 +378,7 @@ fn options(
     clock: refineid_doc_sign::x509::DateTime,
     language: Option<&str>,
     timestamping: Timestamping,
+    signer_anchors: Vec<Vec<u8>>,
 ) -> PhoneSignOptions {
     let named = core::iter::once(input)
         .chain(additional.iter().map(PathBuf::as_path))
@@ -394,10 +396,12 @@ fn options(
                     .map(|name| VisibleSignature::verification(StampLanguage::for_locale(name))),
                 ..SignatureMetadata::default()
             },
-            archive: format.archive(),
+            archive: true,
             long_term: true,
+            signer_anchors,
             timestamp_authorities: timestamping.urls,
             timestamp_credentials: timestamping.credentials,
+            build: SigningBuild::THIS,
         },
     }
 }
@@ -594,6 +598,7 @@ pub(crate) mod tests {
             refineid_doc_sign::now_date_time(),
             (format == DocumentFormat::Pades).then_some(LOCALE),
             default_timestamping(),
+            Vec::new(),
         );
         options.document.archive = false;
         options.document.long_term = false;
@@ -660,7 +665,7 @@ pub(crate) mod tests {
         assert!(name.ends_with(".asice"));
         let batches = card.batches.lock().expect("batches");
         assert_eq!(batches[0].documents.len(), 1);
-        assert_eq!(batches[0].documents[0].name, "letter.txt, annex.txt");
+        assert_eq!(batches[0].documents[0].name, "portfolio-signed.asice");
     }
 
     #[test]
@@ -689,6 +694,7 @@ pub(crate) mod tests {
             String::new(),
             DocumentFormat::AsicE,
             LOCALE.to_owned(),
+            Vec::new(),
             Vec::new(),
         )
         .expect_err("nothing to sign");
@@ -758,6 +764,7 @@ pub(crate) mod tests {
             refineid_doc_sign::now_date_time(),
             None,
             timestamping,
+            Vec::new(),
         );
         assert_eq!(
             pades.document.timestamp_authorities,
@@ -793,6 +800,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_levels_are_the_first_party_clients() {
+        let anchors = vec![vec![1, 2, 3]];
         let pades = options(
             Path::new("in/letter.pdf"),
             Vec::new(),
@@ -802,9 +810,15 @@ pub(crate) mod tests {
             refineid_doc_sign::now_date_time(),
             Some(OTHER_LOCALE),
             default_timestamping(),
+            anchors.clone(),
         );
         assert_eq!(pades.document.format, Format::Pades);
         assert!(pades.document.archive && pades.document.long_term);
+        assert_eq!(pades.document.signer_anchors, anchors);
+        assert_eq!(
+            pades.document.build,
+            refineid_doc_sign::service::SigningBuild::THIS
+        );
         assert_eq!(
             pades.document.timestamp_authorities,
             vec![refineid_doc_sign::service::DEFAULT_TIMESTAMP_AUTHORITY.to_owned()]
@@ -821,9 +835,10 @@ pub(crate) mod tests {
             refineid_doc_sign::now_date_time(),
             None,
             default_timestamping(),
+            Vec::new(),
         );
         assert_eq!(container.document.format, Format::AsicEXades);
-        assert!(!container.document.archive && container.document.long_term);
+        assert!(container.document.archive && container.document.long_term);
         assert!(container.document.metadata.visible_signature.is_none());
         assert_eq!(
             container.document.additional_inputs,
@@ -855,6 +870,17 @@ pub(crate) mod tests {
         );
         assert!(matches!(
             SignFailure::from(SignErrorKind::NoDocuments),
+            SignFailure::Document { .. }
+        ));
+        assert!(matches!(
+            SignFailure::from(SignErrorKind::PackageInBatch),
+            SignFailure::Document { .. }
+        ));
+        assert!(matches!(
+            SignFailure::from(SignErrorKind::BelowArchivalLevel {
+                format: Format::Pades,
+                requested: refineid_doc_sign::service::BaselineLevel::Lt,
+            }),
             SignFailure::Document { .. }
         ));
     }
