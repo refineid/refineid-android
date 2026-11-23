@@ -5,6 +5,7 @@ package fi.refineid.android.rapp
 import android.content.ContextWrapper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
@@ -90,6 +91,10 @@ class RappPairingSearchLoopbackTest {
     private class Peer(
         private val socket: Socket,
     ) : AutoCloseable {
+        init {
+            socket.soTimeout = SEARCH_TIMEOUT_MS.toInt()
+        }
+
         private val input = DataInputStream(socket.getInputStream())
         private val output = DataOutputStream(socket.getOutputStream())
 
@@ -282,8 +287,8 @@ class RappPairingSearchLoopbackTest {
                     withTimeout(SEARCH_TIMEOUT_MS) {
                         search(server.localPort, requesterVault).search(wrong)
                     }
-                withTimeout(SEARCH_TIMEOUT_MS) { peerDone.join() }
                 assertEquals(RappPairingSearch.Outcome.NotAccepted, outcome)
+                withTimeout(SEARCH_TIMEOUT_MS) { peerDone.join() }
             } finally {
                 server.close()
             }
@@ -296,8 +301,9 @@ class RappPairingSearchLoopbackTest {
             val requesterVault = RappMemoryVault()
             val custodianVault = RappMemoryVault()
             val server = ServerSocket(0)
+            var peerDone: Job? = null
             try {
-                val peerDone =
+                peerDone =
                     scope.launch {
                         Peer(server.accept()).use { busy ->
                             busy.serveBusy()
@@ -310,10 +316,13 @@ class RappPairingSearchLoopbackTest {
                     withTimeout(SEARCH_TIMEOUT_MS) {
                         search(server.localPort, requesterVault).search(code)
                     }
-                withTimeout(SEARCH_TIMEOUT_MS) { peerDone.join() }
-                assertTrue(outcome is RappPairingSearch.Outcome.Paired)
+                assertTrue("outcome was $outcome", outcome is RappPairingSearch.Outcome.Paired)
+                (outcome as RappPairingSearch.Outcome.Paired).record.use {
+                    withTimeout(SEARCH_TIMEOUT_MS) { peerDone.join() }
+                }
             } finally {
                 server.close()
+                peerDone?.cancel()
             }
         }
 
@@ -346,8 +355,9 @@ class RappPairingSearchLoopbackTest {
                         search(server.localPort, requesterVault, instances).search(code)
                     }
                 assertTrue("outcome was $outcome", outcome is RappPairingSearch.Outcome.Paired)
-                (outcome as RappPairingSearch.Outcome.Paired).record.close()
-                withTimeout(SEARCH_TIMEOUT_MS) { peerDone.join() }
+                (outcome as RappPairingSearch.Outcome.Paired).record.use {
+                    withTimeout(SEARCH_TIMEOUT_MS) { peerDone.join() }
+                }
             } finally {
                 server.close()
             }
