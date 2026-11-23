@@ -1,7 +1,9 @@
 # RefineID for Android
 
-Native Android support for Finnish identity cards: in-app and system browser
-authentication, qualified PDF signing, and contactless NFC operation.
+Native Android support for Finnish identity cards: in-app browser
+authentication on stock Android (with system-browser KeyChain integration as an
+AOSP platform goal; see [AOSP integration](#aosp-integration)), qualified PDF
+signing, and contactless NFC operation.
 
 ## Requirements
 
@@ -88,8 +90,11 @@ app-side provider the patched KeyChain binds to are parked in
 ## Quality gates
 
 `./gradlew check` enforces: Kotlin compiler warnings-as-errors, Android Lint,
-Detekt, ktlint, rustfmt, Clippy, ShellCheck, release
-bytecode logging prohibition, and no Internet permission in the release manifest.
+Detekt, ktlint, rustfmt, Clippy, ShellCheck, debug trace parameter hygiene
+(`verifyDebugTraceParameters`), release bytecode logging prohibition
+(`verifyReleaseNoLogging`), release cleartext-traffic prohibition
+(`verifyReleaseNetworkIsolation`, requiring `android:usesCleartextTraffic="false"`),
+and release native ABI parity (`verifyReleaseAbis`).
 
 ## Versioning
 
