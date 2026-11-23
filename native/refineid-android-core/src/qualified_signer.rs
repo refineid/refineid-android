@@ -241,6 +241,7 @@ fn map_unlock_error<E>(error: QualifiedUnlockError<E>) -> QualifiedSignFailure {
         }
         QualifiedUnlockError::Verify(error) => map_preflight_failure(map_auth_error(error)),
         QualifiedUnlockError::Directory(error) => map_directory_error(error),
+        QualifiedUnlockError::UnsupportedScheme(_) => QualifiedSignFailure::SigningRejected,
     }
 }
 
@@ -302,9 +303,9 @@ fn map_sign_error<E>(error: SignError<E>) -> QualifiedSignFailure {
             | TransportOutcome::CardReset
             | TransportOutcome::ProtocolDesync,
         ) => QualifiedSignFailure::Transport,
-        SignError::Status(_, _) | SignError::UnexpectedSignatureLength { .. } => {
-            QualifiedSignFailure::SigningRejected
-        }
+        SignError::Status(_, _)
+        | SignError::UnexpectedSignatureLength { .. }
+        | SignError::UnsupportedKey { .. } => QualifiedSignFailure::SigningRejected,
         SignError::Outcome(TransportOutcome::Response(_)) | SignError::Command(_) => {
             QualifiedSignFailure::Bridge
         }
@@ -801,5 +802,24 @@ mod tests {
         ));
         assert_eq!(bad_digest.public_calls, 0);
         assert_eq!(bad_digest.credential_calls, 0);
+    }
+
+    #[test]
+    fn unsupported_scheme_and_key_map_to_signing_rejected() {
+        assert_eq!(
+            super::map_unlock_error::<&str>(
+                refineid_sign::QualifiedUnlockError::UnsupportedScheme(
+                    refineid_sign::SignScheme::Estonian
+                )
+            ),
+            QualifiedSignFailure::SigningRejected
+        );
+        assert_eq!(
+            super::map_sign_error::<&str>(refineid_sign::SignError::UnsupportedKey {
+                scheme: refineid_sign::SignScheme::Estonian,
+                key: refineid_sign::KeyRef::Sign,
+            }),
+            QualifiedSignFailure::SigningRejected
+        );
     }
 }

@@ -124,7 +124,8 @@ pub(crate) fn map_auth_error<E>(error: AuthError<E>) -> PinPreflightFailure {
         AuthError::Outcome(TransportOutcome::Response(_))
         | AuthError::Command(_)
         | AuthError::RetryFloor(_)
-        | AuthError::PinLength(_) => PinPreflightFailure::Bridge,
+        | AuthError::PinLength(_)
+        | AuthError::UnsupportedSlot { .. } => PinPreflightFailure::Bridge,
     }
 }
 
@@ -147,12 +148,15 @@ mod tests {
     const P2_OFFSET: usize = 3;
     const CITIZEN_PIN1_COMMAND_COUNT: usize = 1;
     const ORGANIZATIONAL_PIN1_COMMAND_COUNT: usize = 2;
+    const ALL_SCHEMES_PIN1_COMMAND_COUNT: usize = 3;
     const CITIZEN_PIN2_COMMAND_COUNT: usize = 2;
     const ORGANIZATIONAL_PIN2_COMMAND_COUNT: usize = 3;
+    const ALL_SCHEMES_PIN2_COMMAND_COUNT: usize = 4;
     const CITIZEN_PROBE_COMMAND_INDEX: usize = 0;
     const ORGANIZATIONAL_PROBE_COMMAND_INDEX: usize = 1;
     const CITIZEN_PIN2_COMMAND_INDEX: usize = 1;
     const ORGANIZATIONAL_PIN2_COMMAND_INDEX: usize = 2;
+    const FALLBACK_PIN2_COMMAND_INDEX: usize = 3;
     const SAFE_RETRIES: u8 = 3;
     const PRISTINE_RETRIES: u8 = 5;
     const ONE_SPENT_RETRIES: u8 = 4;
@@ -365,7 +369,15 @@ mod tests {
                 (StatusWord::FileNotFound, PinState::Unrecognised),
             ]);
         for (status, expected_state) in refused {
-            let mut pin1_transport = ScriptedTransport::new(&[status]);
+            let pin1_responses: Vec<StatusWord> =
+                if matches!(expected_state, PinState::Unrecognised) {
+                    // An unrecognised status on Citizen causes core's scheme probe
+                    // to try Organizational and Estonian before falling back.
+                    vec![status; ALL_SCHEMES_PIN1_COMMAND_COUNT]
+                } else {
+                    vec![status]
+                };
+            let mut pin1_transport = ScriptedTransport::new(&pin1_responses);
             let pin1 =
                 probe_pin_preflight(&mut pin1_transport, PinSlot::Pin1).expect("PIN1 preflight");
             assert_eq!(pin1.state, expected_state);
@@ -383,20 +395,24 @@ mod tests {
 
     #[test]
     fn unrecognized_organizational_fallback_keeps_citizen_scheme_for_both_slots() {
-        let mut pin1_transport =
-            ScriptedTransport::new(&[StatusWord::ReferenceDataNotFound, StatusWord::WrongLength]);
+        let mut pin1_transport = ScriptedTransport::new(&[
+            StatusWord::ReferenceDataNotFound,
+            StatusWord::WrongLength,
+            StatusWord::WrongLength,
+        ]);
         let pin1 = probe_pin_preflight(&mut pin1_transport, PinSlot::Pin1).expect("PIN1 preflight");
         assert_eq!(pin1.scheme, PinReferenceScheme::Citizen);
         assert_eq!(pin1.state, PinState::Unrecognised);
         assert!(!pin1.retry_floor_permits);
         assert_eq!(
             pin1_transport.public_commands.len(),
-            ORGANIZATIONAL_PIN1_COMMAND_COUNT
+            ALL_SCHEMES_PIN1_COMMAND_COUNT
         );
         assert_eq!(pin1_transport.credential_calls, 0);
 
         let mut pin2_transport = ScriptedTransport::new(&[
             StatusWord::ReferenceDataNotFound,
+            StatusWord::WrongLength,
             StatusWord::WrongLength,
             StatusWord::WrongLength,
         ]);
@@ -406,10 +422,10 @@ mod tests {
         assert!(!pin2.retry_floor_permits);
         assert_eq!(
             pin2_transport.public_commands.len(),
-            ORGANIZATIONAL_PIN2_COMMAND_COUNT
+            ALL_SCHEMES_PIN2_COMMAND_COUNT
         );
         assert_eq!(
-            p2(&pin2_transport.public_commands[ORGANIZATIONAL_PIN2_COMMAND_INDEX]),
+            p2(&pin2_transport.public_commands[FALLBACK_PIN2_COMMAND_INDEX]),
             PIN2_REFERENCE
         );
         assert_eq!(pin2_transport.credential_calls, 0);
@@ -441,6 +457,13 @@ mod tests {
             map_auth_error::<&str>(refineid_auth::AuthError::Command(
                 refineid_apdu::CredentialBodyError::Empty
             )),
+            PinPreflightFailure::Bridge
+        );
+        assert_eq!(
+            map_auth_error::<&str>(refineid_auth::AuthError::UnsupportedSlot {
+                scheme: PinReferenceScheme::Estonian,
+                slot: PinSlot::Pin2,
+            }),
             PinPreflightFailure::Bridge
         );
     }

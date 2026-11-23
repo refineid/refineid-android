@@ -357,9 +357,9 @@ fn map_sign_error<E>(error: SignError<E>) -> AuthenticationSignFailure {
             | TransportOutcome::CardReset
             | TransportOutcome::ProtocolDesync,
         ) => AuthenticationSignFailure::Transport,
-        SignError::Status(_, _) | SignError::UnexpectedSignatureLength { .. } => {
-            AuthenticationSignFailure::SigningRejected
-        }
+        SignError::Status(_, _)
+        | SignError::UnexpectedSignatureLength { .. }
+        | SignError::UnsupportedKey { .. } => AuthenticationSignFailure::SigningRejected,
         SignError::Outcome(TransportOutcome::Response(_)) | SignError::Command(_) => {
             AuthenticationSignFailure::Bridge
         }
@@ -827,5 +827,16 @@ mod tests {
         assert_eq!(transport.credential_calls, 1);
         assert_eq!(transport.public_calls, FULL_RSA_PUBLIC_CALLS + 1);
         assert!(transport.public_responses.is_empty());
+    }
+
+    #[test]
+    fn unsupported_key_maps_to_signing_rejected() {
+        assert_eq!(
+            super::map_sign_error::<&str>(refineid_sign::SignError::UnsupportedKey {
+                scheme: refineid_sign::SignScheme::Estonian,
+                key: refineid_sign::KeyRef::Sign,
+            }),
+            AuthenticationSignFailure::SigningRejected
+        );
     }
 }
