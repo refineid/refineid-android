@@ -11,6 +11,7 @@ import fi.refineid.android.core.AuthenticationSignFailure
 import fi.refineid.android.core.AuthenticationSignResult
 import fi.refineid.android.core.AuthenticationSigningAlgorithm
 import fi.refineid.android.core.AuthenticationSigningInputMode
+import fi.refineid.android.core.CardManagementFailure
 import fi.refineid.android.core.CardManagementResult
 import fi.refineid.android.core.CardManagementScheme
 import fi.refineid.android.core.CardManagementSessionOps
@@ -123,11 +124,33 @@ internal class CcidUsbSession(
     val hasInterruptEndpoint: Boolean
         get() = interruptIn != null
 
-    // True once openContactless has run PACE and a live secure-messaging
-    // session is held natively. It routes signing and card management over
-    // the retained channel (no second PACE) and asks the native side to drop
-    // the session at close.
-    private var contactlessSessionActive = false
+    // Retains the contactless CAN copy and live PACE session flag once
+    // openContactless succeeds. A failed authentication signature releases the
+    // held channel so the next operation opens a fresh PACE handshake instead
+    // of reusing an uncertain channel or falling back to plain contact APDUs.
+    private val contactlessChannel =
+        UsbContactlessChannel(
+            object : UsbContactlessOps {
+                override fun connect(canCopy: ByteArray): NativeContactlessOpenResult =
+                    NativeContactlessSession.connect(canCopy, nativeExchange)
+
+                override fun authenticateAndSignOnSession(
+                    algorithm: AuthenticationSigningAlgorithm,
+                    inputMode: AuthenticationSigningInputMode,
+                    pin1: Pin1Submission,
+                    input: ByteArray,
+                ): NativeAuthenticationSignResult =
+                    NativeContactlessSession.authenticateAndSignOnSession(
+                        algorithm = algorithm,
+                        inputMode = inputMode,
+                        pin1 = pin1,
+                        input = input,
+                        exchange = nativeExchange,
+                    )
+
+                override fun closeHeldSession() = NativeContactlessSession.close()
+            },
+        )
     private val sessionMaterial = NativeCardSessionMaterial()
 
     fun startRemovalListener(onCardRemoved: () -> Unit) {
@@ -207,7 +230,7 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        if (contactlessSessionActive) {
+        if (contactlessChannel.isContactless) {
             return NativeCardOperationResult.BRIDGE_ERROR
         }
         return NativeCore.selectPkcs15Application(
@@ -224,20 +247,18 @@ internal class CcidUsbSession(
      *
      * The reader holds the RF field for the session's whole lifetime, so on
      * success the live secure-messaging session is retained natively: signing
-     * reuses this channel and never runs PACE a second time.
+     * reuses this channel and never runs PACE a second time unless a failure
+     * tears it down and requires a fresh handshake.
      */
     fun openContactless(canBytes: ByteArray): NativeContactlessOpenResult {
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
         }
-        val result = NativeContactlessSession.connect(canBytes, nativeExchange)
+        val result = contactlessChannel.open(canBytes)
         if (result is NativeContactlessOpenResult.Success) {
-            contactlessSessionActive = true
             sessionMaterial.cacheAuthenticationCertificate(result.certificate)
             sessionMaterial.cachePin1Preflight(result.preflight)
-        } else if (result is NativeContactlessOpenResult.ActivationRequired) {
-            contactlessSessionActive = true
         }
         return result
     }
@@ -252,7 +273,7 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        if (contactlessSessionActive) {
+        if (contactlessChannel.isContactless) {
             return NativeCertificateReadResult.Failure(NativeCertificateReadFailure.BRIDGE_ERROR)
         }
         val result =
@@ -268,15 +289,19 @@ internal class CcidUsbSession(
 
     /**
      * Reads EF.4332. A contact card then has its PKCS#15 authentication
-     * context restored; under a held PACE session the read runs inside the
-     * secure channel, and the next operation there re-selects itself.
+     * context restored; under a contactless session the read runs inside the
+     * secure channel (reopening PACE if a prior failure tore it down), and the
+     * next operation there re-selects itself.
      */
     override fun readQualifiedCertificate(): NativeCertificateReadResult<NativeQualifiedCertificate> {
         checkOwnerThread()
         check(!isClosed) {
             "CCID session is closed"
         }
-        if (contactlessSessionActive) {
+        if (contactlessChannel.isContactless) {
+            contactlessChannel.ensureHeldSession(sessionMaterial::cachePin1Preflight)?.let { failure ->
+                return NativeCertificateReadResult.Failure(failure)
+            }
             return NativeContactlessSession.readQualifiedCertificateOnSession(nativeExchange)
         }
         val result =
@@ -335,7 +360,7 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        if (contactlessSessionActive) {
+        if (contactlessChannel.isContactless) {
             val opened = sessionMaterial.cachedPin1Preflight()
             AppTrace.usbPin1PreflightFromHeldSession(known = opened?.state?.attemptsLeft() != null)
             return if (opened == null) {
@@ -360,7 +385,10 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        if (contactlessSessionActive) {
+        if (contactlessChannel.isContactless) {
+            contactlessChannel.ensureHeldSession(sessionMaterial::cachePin1Preflight)?.let { failure ->
+                return NativePin2PreflightResult.Failure(failure.toPin2PreflightFailure())
+            }
             return NativeContactlessSession.probePin2OnSession(nativeExchange)
         }
         return NativeQualifiedCore.probePin2Status(
@@ -437,15 +465,22 @@ internal class CcidUsbSession(
                 fi.refineid.android.core.Pin1VerificationResult.CARD_UNAVAILABLE,
             )
         }
-        if (contactlessSessionActive) sessionMaterial.pin1CountUnknown()
+        if (contactlessChannel.isContactless) {
+            contactlessChannel.ensureHeldSession(sessionMaterial::cachePin1Preflight)?.let { failure ->
+                pin1.close()
+                return fi.refineid.android.core
+                    .Pin1Verification(failure.toPin1VerificationResult())
+            }
+            sessionMaterial.pin1CountUnknown()
+        }
         val verification =
             fi.refineid.android.core.NativePin1Verification.verify(
                 pin1 = pin1,
                 exchange = nativeExchange,
                 exchangeLevel = exchangeLevel,
-                heldSession = contactlessSessionActive,
+                heldSession = contactlessChannel.isContactless,
             )
-        if (contactlessSessionActive &&
+        if (contactlessChannel.isContactless &&
             verification.result == fi.refineid.android.core.Pin1VerificationResult.VERIFIED
         ) {
             sessionMaterial.pin1Accepted()
@@ -495,18 +530,18 @@ internal class CcidUsbSession(
             )
         }
 
-        if (contactlessSessionActive) sessionMaterial.pin1CountUnknown()
         val nativeResult =
-            if (contactlessSessionActive) {
-                // The PICC card requires secure messaging; the session was
-                // already proven under PACE at connect, so signing rebuilds
-                // that channel and skips the handshake.
-                NativeContactlessSession.authenticateAndSignOnSession(
+            if (contactlessChannel.isContactless) {
+                // The PICC card requires secure messaging; reuse the held PACE
+                // channel when live or reopen one after a prior failure.
+                contactlessChannel.authenticateAndSign(
                     algorithm = algorithm,
                     inputMode = inputMode,
                     pin1 = pin1,
                     input = input,
-                    exchange = nativeExchange,
+                    onBeforePinCommand = sessionMaterial::pin1CountUnknown,
+                    onPin1Accepted = sessionMaterial::pin1Accepted,
+                    onPreflightRefreshed = sessionMaterial::cachePin1Preflight,
                 )
             } else {
                 when (inputMode) {
@@ -531,16 +566,12 @@ internal class CcidUsbSession(
                     }
                 }
             }
-        // A signature proves the card accepted the VERIFY that preceded it.
-        if (contactlessSessionActive && nativeResult is NativeAuthenticationSignResult.Success) {
-            sessionMaterial.pin1Accepted()
-        }
         return verifiedAuthenticationResult(
             certificate = certificate,
             inputMode = inputMode,
             input = input,
             nativeResult = nativeResult,
-            paceRejectedFailure = AuthenticationSignFailure.BRIDGE_ERROR,
+            paceRejectedFailure = AuthenticationSignFailure.TRANSPORT_ERROR,
         )
     }
 
@@ -561,18 +592,33 @@ internal class CcidUsbSession(
         }
 
         val nativeResult =
-            if (contactlessSessionActive) {
+            if (contactlessChannel.isContactless) {
                 // The PICC card requires secure messaging; the qualified
-                // signature runs inside the channel proven at connect.
+                // signature runs inside the channel proven at connect (or a
+                // fresh one if a prior authentication failure tore it down).
+                contactlessChannel.ensureHeldSession(sessionMaterial::cachePin1Preflight)?.let { failure ->
+                    pin2.close()
+                    return verifiedQualifiedResult(
+                        expectedCertificate = expectedCertificate,
+                        inputMode = inputMode,
+                        input = input,
+                        nativeResult = NativeQualifiedSignResult.Failure(failure.toQualifiedSignFailure()),
+                    )
+                }
                 sessionMaterial.pin1CountUnknown()
-                NativeContactlessSession.qualifiedSignInputOnSession(
-                    algorithm = algorithm,
-                    inputMode = inputMode,
-                    pin2 = pin2,
-                    input = input,
-                    expectedCertificate = expectedCertificate,
-                    exchange = nativeExchange,
-                )
+                val result =
+                    NativeContactlessSession.qualifiedSignInputOnSession(
+                        algorithm = algorithm,
+                        inputMode = inputMode,
+                        pin2 = pin2,
+                        input = input,
+                        expectedCertificate = expectedCertificate,
+                        exchange = nativeExchange,
+                    )
+                if (result is NativeQualifiedSignResult.Failure) {
+                    contactlessChannel.releaseHeld()
+                }
+                result
             } else {
                 NativeQualifiedCore.qualifiedSignInput(
                     exchangeLevel = exchangeLevel,
@@ -591,7 +637,7 @@ internal class CcidUsbSession(
                 input = input,
                 nativeResult = nativeResult,
             )
-        if (contactlessSessionActive || !nativeResult.allowsQualifiedContextRestore()) {
+        if (contactlessChannel.isContactless || !nativeResult.allowsQualifiedContextRestore()) {
             return verifiedResult
         }
         return when (selectPkcs15Application()) {
@@ -664,12 +710,11 @@ internal class CcidUsbSession(
         cardRemovalListener = null
         interruptThread?.interrupt()
         interruptThread = null
-        if (contactlessSessionActive) {
-            // The card's half dies with the field; drop the host's keys too.
-            NativeContactlessSession.close()
-            contactlessSessionActive = false
+        try {
+            contactlessChannel.close()
+        } finally {
+            sessionMaterial.close()
         }
-        sessionMaterial.close()
 
         val interfaceReleased =
             try {
@@ -685,9 +730,9 @@ internal class CcidUsbSession(
     }
 
     // Card management. A card opened under PACE refuses a plain command and
-    // ends its secure-messaging channel, so while that session is held every
-    // management operation runs inside it, as signing does; a contact card
-    // takes the plain exchange. A PIN-bearing command on the held channel
+    // ends its secure-messaging channel, so while that session is contactless
+    // every management operation runs inside it, as signing does; a contact
+    // card takes the plain exchange. A PIN-bearing command on the held channel
     // leaves the open's PIN 1 count unknown.
 
     /** The credential health, with the card's PIN and PUK lengths when [readPinLengths] asks for them. */
@@ -696,7 +741,10 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return if (contactlessSessionActive) {
+        return if (contactlessChannel.isContactless) {
+            contactlessChannel.ensureHeldSession(sessionMaterial::cachePin1Preflight)?.let { failure ->
+                return CardManagementResult.Failure(failure.toCardManagementFailure())
+            }
             NativeCardManagement.contactlessProbeCredentialHealthOnSession(readPinLengths, nativeExchange)
         } else {
             NativeCardManagement.probeCredentialHealth(exchangeLevel, readPinLengths, nativeExchange)
@@ -711,7 +759,12 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return if (contactlessSessionActive) {
+        return if (contactlessChannel.isContactless) {
+            contactlessChannel.ensureHeldSession(sessionMaterial::cachePin1Preflight)?.let { failure ->
+                currentPin.fill(0)
+                newPin.fill(0)
+                return CardManagementResult.Failure(failure.toCardManagementFailure())
+            }
             sessionMaterial.pin1CountUnknown()
             NativeCardManagement.contactlessChangePin1OnSession(currentPin, newPin, nativeExchange)
         } else {
@@ -727,7 +780,12 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return if (contactlessSessionActive) {
+        return if (contactlessChannel.isContactless) {
+            contactlessChannel.ensureHeldSession(sessionMaterial::cachePin1Preflight)?.let { failure ->
+                currentPin.fill(0)
+                newPin.fill(0)
+                return CardManagementResult.Failure(failure.toCardManagementFailure())
+            }
             sessionMaterial.pin1CountUnknown()
             NativeCardManagement.contactlessChangePin2OnSession(currentPin, newPin, nativeExchange)
         } else {
@@ -743,7 +801,12 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return if (contactlessSessionActive) {
+        return if (contactlessChannel.isContactless) {
+            contactlessChannel.ensureHeldSession(sessionMaterial::cachePin1Preflight)?.let { failure ->
+                puk.fill(0)
+                newPin.fill(0)
+                return CardManagementResult.Failure(failure.toCardManagementFailure())
+            }
             sessionMaterial.pin1CountUnknown()
             NativeCardManagement.contactlessUnblockPin1OnSession(puk, newPin, nativeExchange)
         } else {
@@ -759,7 +822,12 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return if (contactlessSessionActive) {
+        return if (contactlessChannel.isContactless) {
+            contactlessChannel.ensureHeldSession(sessionMaterial::cachePin1Preflight)?.let { failure ->
+                puk.fill(0)
+                newPin.fill(0)
+                return CardManagementResult.Failure(failure.toCardManagementFailure())
+            }
             sessionMaterial.pin1CountUnknown()
             NativeCardManagement.contactlessUnblockPin2OnSession(puk, newPin, nativeExchange)
         } else {
@@ -777,7 +845,13 @@ internal class CcidUsbSession(
         check(!isClosed) {
             "CCID session is closed"
         }
-        return if (contactlessSessionActive) {
+        return if (contactlessChannel.isContactless) {
+            contactlessChannel.ensureHeldSession(sessionMaterial::cachePin1Preflight)?.let { failure ->
+                code.fill(0)
+                newPin1?.fill(0)
+                newPin2?.fill(0)
+                return CardManagementResult.Failure(failure.toCardManagementFailure())
+            }
             sessionMaterial.pin1CountUnknown()
             NativeCardManagement.contactlessActivateCardOnSession(scheme, code, newPin1, newPin2, nativeExchange)
         } else {
