@@ -39,6 +39,7 @@ jobs:
         run: |
           (cd native/refineid-android-core && cargo update --package refineid-apdu)
           (cd native/refineid-rapp-android && cargo update --package refineid-rapp)
+          (cd native/refineid-doc-sign-android && cargo update --package refineid-doc-sign)
       - name: Stop when every lock file already names the head
         id: moved
         run: |
@@ -54,6 +55,7 @@ jobs:
         run: |
           (cd native/refineid-android-core && cargo check --all-targets --locked)
           (cd native/refineid-rapp-android && cargo check --all-targets --locked)
+          (cd native/refineid-doc-sign-android && cargo check --all-targets --locked)
       - name: Merge the move
         if: steps.moved.outputs.moved == 'yes'
         env:
