@@ -474,6 +474,7 @@ class RappPairingOfferTest {
         while (model.phase !is PairingPhase.Offering && System.currentTimeMillis() < deadline) {
             Thread.sleep(SETTLE_STEP_MS)
         }
+        assertTrue("expected PairingPhase.Offering, got ${model.phase}", model.phase is PairingPhase.Offering)
     }
 
     /** A requester's stream connection to the custodian on [port] (RAPP v26.11.2 section 2.1). */

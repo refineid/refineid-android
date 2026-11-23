@@ -41,8 +41,14 @@ internal class StreamRelayBrowser(
         }
 
     private var discoveryListener: NsdManager.DiscoveryListener? = null
+
+    @Volatile
     private var socket: Socket? = null
+
+    @Volatile
     private var outputStream: DataOutputStream? = null
+
+    @Volatile
     private var readJob: Job? = null
     private var refreshJob: Job? = null
     private val isClosed = AtomicBoolean(false)
@@ -317,39 +323,46 @@ internal class StreamRelayBrowser(
         if (BuildConfig.DEBUG) {
             android.util.Log.i("STREAM_BROWSER", "Connecting to endpoint")
         }
-        scope.launch(Dispatchers.IO) {
-            try {
-                // nosemgrep: kotlin.lang.security.unencrypted-socket.unencrypted-socket
-                val s = Socket()
-                s.connect(InetSocketAddress(host, port), 5000)
-                socket = s
-                outputStream = DataOutputStream(s.getOutputStream())
-                if (BuildConfig.DEBUG) {
-                    android.util.Log.i("STREAM_BROWSER", "Connected")
-                }
-                onEvent(StreamRelayEvent.Connected)
-
-                val input = DataInputStream(s.getInputStream())
-                while (scope.isActive && !isClosed.get() && !s.isClosed) {
-                    val length = input.readUnsignedShort()
-                    val buffer = ByteArray(length)
-                    input.readFully(buffer)
+        readJob?.cancel()
+        val job =
+            scope.launch(Dispatchers.IO) {
+                try {
+                    // nosemgrep: kotlin.lang.security.unencrypted-socket.unencrypted-socket
+                    val s = Socket()
+                    s.connect(
+                        InetSocketAddress(host, port),
+                        RappPairingSearch.CONNECT_TIMEOUT_MS.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                    )
+                    socket = s
+                    outputStream = DataOutputStream(s.getOutputStream())
                     if (BuildConfig.DEBUG) {
-                        android.util.Log.d("STREAM_BROWSER", "Received frame length=$length")
+                        android.util.Log.i("STREAM_BROWSER", "Connected")
                     }
-                    onEvent(StreamRelayEvent.Frame(buffer))
-                }
-            } catch (e: IOException) {
-                isConnected.set(false)
-                isResolving.set(false)
-                if (BuildConfig.DEBUG) {
-                    android.util.Log.w("STREAM_BROWSER", "Socket loop disconnected: ${e.javaClass.simpleName}")
-                }
-                if (!isClosed.get()) {
-                    onEvent(StreamRelayEvent.Disconnected)
+                    onEvent(StreamRelayEvent.Connected)
+
+                    val input = DataInputStream(s.getInputStream())
+                    while (scope.isActive && !isClosed.get() && !s.isClosed) {
+                        val length = input.readUnsignedShort()
+                        val buffer = ByteArray(length)
+                        input.readFully(buffer)
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.d("STREAM_BROWSER", "Received frame length=$length")
+                        }
+                        onEvent(StreamRelayEvent.Frame(buffer))
+                    }
+                } catch (e: IOException) {
+                    isConnected.set(false)
+                    isResolving.set(false)
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.w("STREAM_BROWSER", "Socket loop disconnected: ${e.javaClass.simpleName}")
+                    }
+                    if (!isClosed.get()) {
+                        onEvent(StreamRelayEvent.Disconnected)
+                    }
                 }
             }
-        }
+        readJob = job
+        if (isClosed.get()) job.cancel()
     }
 
     fun send(frame: ByteArray) {

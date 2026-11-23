@@ -116,10 +116,17 @@ internal class RappPairingModel(
     /** The connection's CPace start was refused, so its step 1 is answered busy. */
     private var refusingStepOne = false
     private val preAuthenticationLimiter = RappPreAuthenticationLimiter()
+    private val phaseLock = Any()
     private val app = context.applicationContext as? RefineIdApplication
 
     var phase by mutableStateOf<PairingPhase>(PairingPhase.Idle)
         private set
+
+    private fun updatePhase(next: PairingPhase) {
+        synchronized(phaseLock) {
+            phase = next
+        }
+    }
 
     var pairedDevices by mutableStateOf<List<PairedPeer>>(catalog.listPairs())
         private set
@@ -194,7 +201,7 @@ internal class RappPairingModel(
         // the page says so where the code would be, and the retry asks again.
         if (!LocalNetworkPermission.isGranted(context)) {
             AppTrace.rappOfferFailed(LOCAL_NETWORK_CLOSED_FAILURE)
-            phase = PairingPhase.Failed(LOCAL_NETWORK_CLOSED_REASON)
+            updatePhase(PairingPhase.Failed(LOCAL_NETWORK_CLOSED_REASON))
             return
         }
         val code = RappPairingCode.generate()
@@ -234,11 +241,11 @@ internal class RappPairingModel(
                 StreamRendezvousName.attributes(StreamRendezvousName.MODE_PAIRING),
             )
 
-            phase = PairingPhase.Offering(code = code, secondsRemaining = offerSeconds)
+            updatePhase(PairingPhase.Offering(code = code, secondsRemaining = offerSeconds))
             startCountdown()
         } catch (e: Throwable) {
             AppTrace.rappOfferFailed(e.javaClass.simpleName)
-            phase = PairingPhase.Failed("Failed to initialize remote pairing offer")
+            updatePhase(PairingPhase.Failed("Failed to initialize remote pairing offer"))
         } finally {
             offerId.fill(0)
         }
@@ -284,7 +291,7 @@ internal class RappPairingModel(
                 handshakeDeadlineJob?.cancel()
                 handshakeDeadlineJob = null
                 AppTrace.rappPairingFailed("connection-error " + event.cause.javaClass.simpleName)
-                phase = PairingPhase.Failed("Connection error")
+                updatePhase(PairingPhase.Failed("Connection error"))
             }
         }
     }
@@ -325,7 +332,6 @@ internal class RappPairingModel(
                 else -> return refuse(connection, answer)
             }
         val candidateId = bridge.offerCandidates().first { it.profile == rappStreamProfileName() }.candidateId
-        connection.send(offer)
         val random64 = ByteArray(CPACE_RANDOM_BYTES).apply { java.security.SecureRandom().nextBytes(this) }
         try {
             bridge.beginCpace(
@@ -336,9 +342,11 @@ internal class RappPairingModel(
             )
         } catch (_: RappBindingException.RateLimited) {
             refusingStepOne = true
+            connection.send(offer)
             return
         } catch (_: RappBindingException.WrongPhase) {
             refusingStepOne = true
+            connection.send(offer)
             return
         } finally {
             random64.fill(0)
@@ -354,7 +362,11 @@ internal class RappPairingModel(
                 wallMs = RappClock::wallMs,
                 persistUnconfirmed = { record -> record.persistDeviceOnly(vault) },
             )
-        phase = PairingPhase.Connecting("Connected! Starting security handshake...")
+        // Publish Connecting before writing the offer so a peer that receives
+        // the offer and disconnects immediately cannot observe a stale Offering
+        // phase before the transition commits.
+        updatePhase(PairingPhase.Connecting("Connected! Starting security handshake..."))
+        connection.send(offer)
     }
 
     /**
@@ -385,6 +397,7 @@ internal class RappPairingModel(
         handshakeDeadlineJob = null
         candidate = null
         awaitingPreamble = false
+        refusingStepOne = false
         if (phase is PairingPhase.Connecting) {
             candidateEnded(bridge)
         }
@@ -402,7 +415,7 @@ internal class RappPairingModel(
         ceremony = null
         if (pastOffer) {
             AppTrace.rappPairingFailed("peer-disconnected")
-            phase = PairingPhase.Failed("Peer disconnected")
+            updatePhase(PairingPhase.Failed("Peer disconnected"))
             nextOffer()
             return
         }
@@ -456,7 +469,7 @@ internal class RappPairingModel(
                 revokeUnconfirmedRecord()
                 ceremony = null
                 AppTrace.rappPairingFailed("ceremony " + e.javaClass.simpleName)
-                phase = PairingPhase.Failed("Pairing error: ${e.javaClass.simpleName}")
+                updatePhase(PairingPhase.Failed("Pairing error: ${e.javaClass.simpleName}"))
                 nextOffer()
             } else {
                 AppTrace.rappPairingFailed("attempt " + e.javaClass.simpleName)
@@ -504,7 +517,7 @@ internal class RappPairingModel(
             certificateDerBase64 = null,
         )
         pairedDevices = catalog.listPairs()
-        phase = PairingPhase.Idle
+        updatePhase(PairingPhase.Idle)
 
         // The paired connection's last frames drain before its listener
         // closes; the listener's later events are dropped.
@@ -540,9 +553,9 @@ internal class RappPairingModel(
     private fun restoreOfferingOrWaiting() {
         val code = activeOfferingCode
         if (code != null) {
-            phase = PairingPhase.Offering(code = code, secondsRemaining = secondsRemaining)
+            updatePhase(PairingPhase.Offering(code = code, secondsRemaining = secondsRemaining))
         } else {
-            phase = PairingPhase.Connecting("Waiting for peer...")
+            updatePhase(PairingPhase.Connecting("Waiting for peer..."))
         }
         ceremony = null
     }
@@ -553,9 +566,11 @@ internal class RappPairingModel(
             scope.launch(mainDispatcher) {
                 for (sec in offerSeconds downTo NO_SECONDS_REMAINING) {
                     secondsRemaining = sec
-                    val current = phase
-                    if (current is PairingPhase.Offering) {
-                        phase = current.copy(secondsRemaining = sec)
+                    synchronized(phaseLock) {
+                        val current = phase
+                        if (current is PairingPhase.Offering) {
+                            phase = current.copy(secondsRemaining = sec)
+                        }
                     }
                     delay(1000L)
                 }
@@ -640,7 +655,7 @@ internal class RappPairingModel(
         candidate = null
         awaitingPreamble = false
         refusingStepOne = false
-        phase = PairingPhase.Idle
+        updatePhase(PairingPhase.Idle)
         pairedDevices = catalog.listPairs()
     }
 

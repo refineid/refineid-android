@@ -38,6 +38,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bitflags"
+version = "2.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
+
+[[package]]
 name = "block-buffer"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -262,6 +268,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "errno"
+version = "0.3.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e35d6e78f4cebb90e51d543db8fe41528851d6deeef6ef21ebd4bfdc1e784776"
+dependencies = [
+ "libc",
+ "windows-sys",
+]
+
+[[package]]
 name = "ff"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -406,6 +422,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
+name = "linux-raw-sys"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+
+[[package]]
 name = "log"
 version = "0.4.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -548,7 +570,7 @@ dependencies = [
 [[package]]
 name = "refineid-apdu"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 dependencies = [
  "refineid-build-number",
  "zeroize",
@@ -557,12 +579,12 @@ dependencies = [
 [[package]]
 name = "refineid-atr"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 
 [[package]]
 name = "refineid-auth"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 dependencies = [
  "getrandom",
  "hmac",
@@ -577,17 +599,17 @@ dependencies = [
 [[package]]
 name = "refineid-ber"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 
 [[package]]
 name = "refineid-build-number"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 
 [[package]]
 name = "refineid-cms"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 dependencies = [
  "base64ct",
  "const-oid",
@@ -606,7 +628,7 @@ dependencies = [
 [[package]]
 name = "refineid-digest"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 dependencies = [
  "md-5",
  "sha1",
@@ -616,7 +638,7 @@ dependencies = [
 [[package]]
 name = "refineid-doc-sign"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 dependencies = [
  "base64ct",
  "const-oid",
@@ -628,6 +650,7 @@ dependencies = [
  "refineid-cms",
  "refineid-digest",
  "refineid-remote",
+ "rustix",
  "sha1",
  "sha2",
  "spki",
@@ -638,7 +661,7 @@ dependencies = [
 [[package]]
 name = "refineid-pace"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 dependencies = [
  "aes",
  "bp384",
@@ -660,7 +683,7 @@ dependencies = [
 [[package]]
 name = "refineid-pkcs15"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 dependencies = [
  "refineid-apdu",
  "refineid-ber",
@@ -670,7 +693,7 @@ dependencies = [
 [[package]]
 name = "refineid-remote"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 dependencies = [
  "refineid-digest",
 ]
@@ -678,7 +701,7 @@ dependencies = [
 [[package]]
 name = "refineid-sign"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 dependencies = [
  "refineid-apdu",
  "refineid-auth",
@@ -690,7 +713,7 @@ dependencies = [
 [[package]]
 name = "refineid-x509"
 version = "26.11.23"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#4588b4830afb3e1750d0ed71b6637792fc9e47fa"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#dbead2797726676ab534d907319096c68ba3dc90"
 dependencies = [
  "refineid-ber",
 ]
@@ -712,6 +735,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver",
+]
+
+[[package]]
+name = "rustix"
+version = "1.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
+dependencies = [
+ "bitflags",
+ "errno",
+ "libc",
+ "linux-raw-sys",
+ "windows-sys",
 ]
 
 [[package]]
