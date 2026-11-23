@@ -93,9 +93,9 @@ pub(crate) fn map_auth_error<E>(error: AuthError<E>) -> CardManagementFailure {
         ) => CardManagementFailure::TransportError,
         AuthError::RetryFloor(_) => CardManagementFailure::SafetyRefused,
         AuthError::PinLength(_) => CardManagementFailure::InvalidCredential,
-        AuthError::Outcome(TransportOutcome::Response(_)) | AuthError::Command(_) => {
-            CardManagementFailure::BridgeError
-        }
+        AuthError::Outcome(TransportOutcome::Response(_))
+        | AuthError::Command(_)
+        | AuthError::UnsupportedSlot { .. } => CardManagementFailure::BridgeError,
     }
 }
 
@@ -265,6 +265,7 @@ pub(crate) fn encode_credential_health_reply(
             let scheme_byte = match report.pin_reference_scheme {
                 PinReferenceScheme::Citizen => SCHEME_CITIZEN,
                 PinReferenceScheme::Organizational => SCHEME_ORGANIZATIONAL,
+                PinReferenceScheme::Estonian => return vec![MANAGEMENT_TAG_BRIDGE_ERROR],
             };
             let act_scheme_byte = report
                 .activation_scheme
@@ -1139,6 +1140,22 @@ mod tests {
                 PUK_MAX_LENGTH,
             ]
             .map(|length| u8::try_from(length).expect("a FINEID bound fits one octet"))
+        );
+        let mut estonian_report = report;
+        estonian_report.pin_reference_scheme = PinReferenceScheme::Estonian;
+        assert_eq!(
+            encode_credential_health_reply(Ok(CredentialHealthAnswer {
+                report: estonian_report,
+                lengths: None,
+            })),
+            vec![MANAGEMENT_TAG_BRIDGE_ERROR]
+        );
+        assert_eq!(
+            map_auth_error::<&str>(AuthError::UnsupportedSlot {
+                scheme: PinReferenceScheme::Estonian,
+                slot: refineid_auth::PinSlot::Pin2,
+            }),
+            CardManagementFailure::BridgeError
         );
     }
 

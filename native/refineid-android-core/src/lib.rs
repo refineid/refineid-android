@@ -1794,12 +1794,14 @@ fn encode_pin_preflight_reply(result: Result<PinPreflight, PinPreflightFailure>)
                 PinState::NoInformation => (PIN_STATE_NO_INFORMATION, NO_RETRY_COUNT),
                 PinState::Unrecognised => (PIN_STATE_UNRECOGNISED, NO_RETRY_COUNT),
             };
+            let scheme_byte = match preflight.scheme {
+                PinReferenceScheme::Citizen => PIN_REFERENCE_CITIZEN,
+                PinReferenceScheme::Organizational => PIN_REFERENCE_ORGANIZATIONAL,
+                PinReferenceScheme::Estonian => return vec![PIN_PREFLIGHT_BRIDGE_ERROR],
+            };
             let reply: [u8; PIN_PREFLIGHT_REPLY_LENGTH] = [
                 PIN_PREFLIGHT_SUCCEEDED,
-                match preflight.scheme {
-                    PinReferenceScheme::Citizen => PIN_REFERENCE_CITIZEN,
-                    PinReferenceScheme::Organizational => PIN_REFERENCE_ORGANIZATIONAL,
-                },
+                scheme_byte,
                 state,
                 retries,
                 if preflight.retry_floor_permits {
@@ -2460,6 +2462,12 @@ mod tests {
                 POLICY_PERMITTED,
             ]
         );
+        let estonian = encode_pin_preflight_reply(Ok(PinPreflight {
+            scheme: PinReferenceScheme::Estonian,
+            state: PinState::Remaining(SYNTHETIC_PIN_RETRY_COUNT),
+            retry_floor_permits: true,
+        }));
+        assert_eq!(estonian, vec![PIN_PREFLIGHT_BRIDGE_ERROR]);
         assert_eq!(
             encode_pin_preflight_reply(Err(PinPreflightFailure::CardUnavailable)),
             vec![PIN_PREFLIGHT_CARD_UNAVAILABLE]
