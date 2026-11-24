@@ -26,34 +26,34 @@ For architectural context, see [ADR 0042: Autonomous Multimodal Testing with ART
 
 ---
 
-## CLI Usage (`Scripts/test-artemis.sh`)
+## CLI Usage (`Scripts/test-artemis.py`)
 
-RefineID provides a mainline runner script at `Scripts/test-artemis.sh` that wraps ARTEMIS tasks for RefineID:
+RefineID provides a mainline runner script at `Scripts/test-artemis.py` that wraps ARTEMIS tasks for RefineID:
 
 ```bash
 # Verify system readiness and attached device connectivity
-./Scripts/test-artemis.sh doctor
+./Scripts/test-artemis.py doctor
 
 # Run the primary smoke test (app launch, main screen, diagnostics reader check)
-./Scripts/test-artemis.sh smoke
+./Scripts/test-artemis.py smoke
 
 # Test the in-app browser harness and authentication controls
-./Scripts/test-artemis.sh browser
+./Scripts/test-artemis.py browser
 
 # Test the Document Signing UI and container format toggles
-./Scripts/test-artemis.sh signing
+./Scripts/test-artemis.py signing
 
 # Test Card Management views, attempt counters, and task selectors
-./Scripts/test-artemis.sh management
+./Scripts/test-artemis.py management
 
 # Test RAPP remote pairing switch and countdown timers
-./Scripts/test-artemis.sh rapp
+./Scripts/test-artemis.py rapp
 
 # Launch the interactive Artemis Web Console
-./Scripts/test-artemis.sh ui
+./Scripts/test-artemis.py ui
 
 # Execute an arbitrary custom natural-language goal
-./Scripts/test-artemis.sh custom "Open RefineID, go to Settings, and check Timestamp Authority servers"
+./Scripts/test-artemis.py custom "Open RefineID, go to Settings, and check Timestamp Authority servers"
 ```
 
 ### Options

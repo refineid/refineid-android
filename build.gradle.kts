@@ -104,6 +104,7 @@ val repositoryShellScripts =
         "Scripts/bootstrap-macos.sh",
         "Scripts/build-release-apk.sh",
         "Scripts/gradle-environment.sh",
+        "Scripts/install-device.sh",
         "Scripts/install-hooks.sh",
         "Scripts/release-play-store.sh",
         "Scripts/stamp-version.sh",

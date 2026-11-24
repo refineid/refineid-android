@@ -258,7 +258,7 @@ local core checkout is never required.
 - **Pairing Ceremony**: Mutual Noise XXpsk3 pairing completed over mDNS local
   TCP stream using a 6-digit numeric pairing code (verified at the time with an
   early pairing script since retired; the maintained automated pairing harness
-  is `Scripts/rapp-tablet-pair.sh`, see `doc/process/tablet-emulator.md`).
+  is `Scripts/rapp-tablet-pair.py`, see `doc/process/tablet-emulator.md`).
 - **Connection Management**: Persistent storage in `RappPairCatalog` and
   `AndroidRappVault`. Paired computers can be removed individually from the UI;
   when all pairs are deleted, the background stream listener stops.

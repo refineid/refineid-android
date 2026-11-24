@@ -17,13 +17,17 @@ serial hangs on "waiting for device" the moment a reader is plugged in.
 - A debug build can be captured with `adb exec-out screencap`; a release
   build sets the secure window flag and captures black. A black capture
   of a debug build means the screen was off or locked.
-- Every connected-test invocation adds
-  `-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true`:
-  without it Gradle uninstalls the app at the end of the run and the
-  phone is left empty. Tell the owner before the first connected run
-  that Gradle installs its own build over the one from main, and
-  reinstall from main with `Scripts/install-device.sh` when live testing
-  ends. The live NFC signing test picks a PDF whose name contains
+- Run instrumented tests through `Scripts/connected-test.py` (for example
+  `Scripts/connected-test.py --wifi-phone --class <test class>` or
+  `Scripts/connected-test.py --serial <address>:5555`). Do not run
+  `./gradlew :app:connectedDebugAndroidTest` while multiple devices are
+  attached: Gradle's daemon can ignore `ANDROID_SERIAL` and install onto every
+  connected device. The wrapper builds with Gradle, installs over `adb -s`
+  onto only the selected device, keeps the app installed after the run, and
+  fails immediately if an install fails. Tell the owner before the first
+  connected run on the custodian phone that the test build replaces the one
+  from main, and reinstall from main with `Scripts/install-device.sh` when
+  live testing ends. The live NFC signing test picks a PDF whose name contains
   `refineid-test` from Downloads.
 
 A tablet emulator bridged onto the local network stands in for a RAPP
