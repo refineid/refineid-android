@@ -3,8 +3,9 @@
 """Usage: python3 -B -W error Scripts/TestAndroidTestScripts.py.
 
 Hermetic tests for the Python Android test scripts (`adb_ui.py`,
-`connected-test.py`, `rapp-tablet-pair.py`, `rapp-tablet-browser-login.py`,
-`start-tablet-emulator.py`, `stop-tablet-emulator.py`, `test-artemis.py`)
+`connected-test.py`, `dump-phone-diagnostics.py`, `rapp-tablet-pair.py`,
+`rapp-tablet-browser-login.py`, `start-tablet-emulator.py`,
+`stop-tablet-emulator.py`, `test-artemis.py`)
 and `Scripts/install-device.sh`, using fake adb/Gradle/sudo/pgrep/uv binaries
 so targeting, secret hygiene, XML parsing, install checks, and result parsing
 are verified without attached hardware.
@@ -215,6 +216,25 @@ if len(args) >= 3 and args[0] == '-s':
             if os.environ.get('FAKE_ADB_FAIL_AM_START') == '1':
                 sys.exit(1)
             sys.exit(0)
+        if cmd.startswith('am broadcast'):
+            if os.environ.get('FAKE_ADB_FAIL_BROADCAST') == '1':
+                sys.exit(1)
+            default_broadcast = (
+                'Broadcasting: Intent { act=fi.refineid.android.CLEAR_LOGS pkg=fi.refineid.android }\\n'
+                'Broadcast completed: result=0, data="LOGS_CLEARED"\\n'
+                if 'fi.refineid.android.CLEAR_LOGS' in cmd
+                else 'Broadcasting: Intent { act=fi.refineid.android.DUMP_DIAGNOSTICS pkg=fi.refineid.android }\\n'
+                'Broadcast completed: result=0, data="DUMP_OK: 3 trace lines written to files/diagnostics.txt"\\n'
+            )
+            sys.stdout.write(os.environ.get('FAKE_ADB_BROADCAST_OUT', default_broadcast))
+            sys.exit(0)
+        if cmd == 'run-as fi.refineid.android cat files/diagnostics.txt':
+            if os.environ.get('FAKE_ADB_FAIL_RUN_AS') == '1':
+                sys.exit(1)
+            sys.stdout.write(
+                os.environ.get('FAKE_ADB_DIAGNOSTICS_TEXT', '== RefineID Diagnostics ==\\nstatus=ok\\n')
+            )
+            sys.exit(0)
         if cmd.startswith(('am force-stop', 'input ')):
             sys.exit(0)
 
@@ -295,6 +315,7 @@ class AndroidTestScriptsSuite(unittest.TestCase):
         for name in (
             'adb_ui.py',
             'connected-test.py',
+            'dump-phone-diagnostics.py',
             'rapp-tablet-pair.py',
             'rapp-tablet-browser-login.py',
             'start-tablet-emulator.py',
@@ -1647,6 +1668,205 @@ class AndroidTestScriptsSuite(unittest.TestCase):
         ambiguous = self.run_install(FAKE_ADB_DEVICES='emulator-5554\tdevice\nUSB123\toffline\n')
         self.assertNotEqual(ambiguous.returncode, 0)
         self.assertIn('multiple Android devices attached (2)', ambiguous.stderr)
+
+    def test_dump_phone_diagnostics_targeting_privacy_and_broadcast_checks(self):
+        # Multiple devices (online or mixed online+offline) must fail before any broadcast or clear.
+        ambiguous = self.run_py('dump-phone-diagnostics.py', '--clear')
+        self.assertNotEqual(ambiguous.returncode, 0)
+        self.assertIn('multiple Android devices attached (2)', ambiguous.stderr)
+        self.assertNotIn('emulator-5554', ambiguous.stderr)
+        self.assertNotIn('192.0.2.10:5555', ambiguous.stderr)
+        self.assertEqual(self.read_lines(self.adb_log), ['devices'])
+
+        self.clear_logs()
+        mixed = self.run_py(
+            'dump-phone-diagnostics.py',
+            '--clear',
+            FAKE_ADB_DEVICES='emulator-5554\toffline\n192.0.2.10:5555\tdevice\n',
+        )
+        self.assertNotEqual(mixed.returncode, 0)
+        self.assertIn('multiple Android devices attached (2)', mixed.stderr)
+        self.assertNotIn('emulator-5554', mixed.stderr)
+        self.assertNotIn('192.0.2.10:5555', mixed.stderr)
+        self.assertEqual(self.read_lines(self.adb_log), ['devices'])
+
+        # No attached devices fails cleanly.
+        self.clear_logs()
+        none_attached = self.run_py('dump-phone-diagnostics.py', FAKE_ADB_DEVICES='')
+        self.assertNotEqual(none_attached.returncode, 0)
+        self.assertIn('no connected Android device found', none_attached.stderr)
+
+        # Empty serial and conflicting positional + target flag fail at arg parse without leaking serial.
+        self.clear_logs()
+        empty_pos = self.run_py('dump-phone-diagnostics.py', '')
+        self.assertEqual(empty_pos.returncode, 2)
+        conflict = self.run_py('dump-phone-diagnostics.py', '--emulator', '192.0.2.10:5555')
+        self.assertEqual(conflict.returncode, 2)
+        self.assertNotIn('192.0.2.10:5555', conflict.stderr)
+        self.assertEqual(self.read_lines(self.adb_log), [])
+
+        # Offline explicit target fails without leaking serial.
+        self.clear_logs()
+        offline_target = self.run_py(
+            'dump-phone-diagnostics.py',
+            '--serial',
+            '192.0.2.10:5555',
+            FAKE_ADB_DEVICES='192.0.2.10:5555\toffline\n',
+        )
+        self.assertNotEqual(offline_target.returncode, 0)
+        self.assertIn("not online in 'adb devices'", offline_target.stderr)
+        self.assertNotIn('192.0.2.10:5555', offline_target.stderr)
+        self.assertEqual(self.read_lines(self.adb_log), ['devices'])
+
+        # --clear targets the selected Wi-Fi phone and never prints the serial/IP.
+        self.clear_logs()
+        cleared = self.run_py('dump-phone-diagnostics.py', '--clear', '--wifi-phone')
+        self.assertEqual(cleared.returncode, 0, msg=cleared.stderr)
+        self.assertEqual(cleared.stdout, '')
+        self.assertIn('Logs cleared.', cleared.stderr)
+        self.assertNotIn('192.0.2.10:5555', cleared.stderr)
+        self.assertNotIn('192.0.2.10:5555', cleared.stdout)
+        self.assertEqual(
+            self.read_lines(self.adb_log),
+            [
+                'devices',
+                '-s 192.0.2.10:5555 shell am broadcast -a fi.refineid.android.CLEAR_LOGS -p fi.refineid.android',
+            ],
+        )
+
+        # --emulator, ANDROID_SERIAL, and whitespace-padded --serial all target cleanly.
+        self.clear_logs()
+        emu_clear = self.run_py('dump-phone-diagnostics.py', '--clear', '--emulator')
+        self.assertEqual(emu_clear.returncode, 0, msg=emu_clear.stderr)
+        self.assertNotIn('emulator-5554', emu_clear.stderr)
+        self.assertEqual(
+            self.read_lines(self.adb_log)[1],
+            '-s emulator-5554 shell am broadcast -a fi.refineid.android.CLEAR_LOGS -p fi.refineid.android',
+        )
+
+        self.clear_logs()
+        env_dump = self.run_py(
+            'dump-phone-diagnostics.py',
+            ANDROID_SERIAL='emulator-5554',
+            FAKE_ADB_DIAGNOSTICS_TEXT='env-ok\n',
+        )
+        self.assertEqual(env_dump.returncode, 0, msg=env_dump.stderr)
+        self.assertEqual(env_dump.stdout, 'env-ok\n')
+        self.assertEqual(
+            self.read_lines(self.adb_log)[1],
+            '-s emulator-5554 shell am broadcast -a fi.refineid.android.DUMP_DIAGNOSTICS -p fi.refineid.android',
+        )
+
+        self.clear_logs()
+        padded_serial = self.run_py(
+            'dump-phone-diagnostics.py',
+            '--serial',
+            '  192.0.2.10:5555  ',
+            FAKE_ADB_DIAGNOSTICS_TEXT='padded-ok\n',
+        )
+        self.assertEqual(padded_serial.returncode, 0, msg=padded_serial.stderr)
+        self.assertEqual(padded_serial.stdout, 'padded-ok\n')
+        self.assertEqual(
+            self.read_lines(self.adb_log)[1],
+            '-s 192.0.2.10:5555 shell am broadcast -a fi.refineid.android.DUMP_DIAGNOSTICS -p fi.refineid.android',
+        )
+
+        # Positional serial overrides ANDROID_SERIAL and dumps diagnostics verbatim without leaking serial.
+        self.clear_logs()
+        dumped = self.run_py(
+            'dump-phone-diagnostics.py',
+            '192.0.2.10:5555',
+            ANDROID_SERIAL='emulator-5554',
+            FAKE_ADB_DIAGNOSTICS_TEXT='line-one\nline-two\n',
+        )
+        self.assertEqual(dumped.returncode, 0, msg=dumped.stderr)
+        self.assertEqual(dumped.stdout, 'line-one\nline-two\n')
+        self.assertEqual(dumped.stderr, '')
+        self.assertEqual(
+            self.read_lines(self.adb_log),
+            [
+                'devices',
+                '-s 192.0.2.10:5555 shell am broadcast -a fi.refineid.android.DUMP_DIAGNOSTICS -p fi.refineid.android',
+                '-s 192.0.2.10:5555 shell run-as fi.refineid.android cat files/diagnostics.txt',
+            ],
+        )
+
+        # Unhandled or non-zero-result broadcasts fail before run-as without leaking serial.
+        for label, extra_args, broadcast_out in (
+            (
+                'unhandled-dump',
+                ['--serial', 'emulator-5554'],
+                'Broadcasting: Intent {}\nBroadcast completed: result=0\n',
+            ),
+            (
+                'nonzero-result-dump',
+                ['--serial', 'emulator-5554'],
+                'Broadcasting: Intent {}\nBroadcast completed: result=-1, data="DUMP_OK: 1"\n',
+            ),
+            (
+                'unhandled-clear',
+                ['--clear', '--serial', 'emulator-5554'],
+                'Broadcasting: Intent {}\nBroadcast completed: result=0\n',
+            ),
+        ):
+            with self.subTest(case=label):
+                self.clear_logs()
+                res = self.run_py(
+                    'dump-phone-diagnostics.py',
+                    *extra_args,
+                    FAKE_ADB_BROADCAST_OUT=broadcast_out,
+                )
+                self.assertNotEqual(res.returncode, 0)
+                self.assertIn('was not handled', res.stderr)
+                self.assertNotIn('emulator-5554', res.stderr)
+                self.assertEqual(len(self.read_lines(self.adb_log)), 2)
+
+        # Non-zero adb exits for broadcast and run-as fail cleanly without leaking serial.
+        self.clear_logs()
+        bcast_fail = self.run_py(
+            'dump-phone-diagnostics.py',
+            '--serial',
+            '192.0.2.10:5555',
+            FAKE_ADB_FAIL_BROADCAST='1',
+        )
+        self.assertNotEqual(bcast_fail.returncode, 0)
+        self.assertNotIn('192.0.2.10:5555', bcast_fail.stderr)
+        self.assertEqual(len(self.read_lines(self.adb_log)), 2)
+
+        self.clear_logs()
+        run_as_fail = self.run_py(
+            'dump-phone-diagnostics.py',
+            '--serial',
+            '192.0.2.10:5555',
+            FAKE_ADB_FAIL_RUN_AS='1',
+        )
+        self.assertNotEqual(run_as_fail.returncode, 0)
+        self.assertNotIn('192.0.2.10:5555', run_as_fail.stderr)
+        self.assertEqual(len(self.read_lines(self.adb_log)), 3)
+
+        # Resolves SDK platform-tools/adb when REFINEID_ADB is unset.
+        self.clear_logs()
+        fake_sdk = self.root / 'fake-sdk'
+        sdk_adb = fake_sdk / 'platform-tools' / 'adb'
+        sdk_adb.parent.mkdir(parents=True)
+        shutil.copy2(self.fake_adb, sdk_adb)
+        sdk_adb.chmod(0o755)
+        via_sdk = self.run_py(
+            'dump-phone-diagnostics.py',
+            '--clear',
+            REFINEID_ADB='',
+            ANDROID_HOME=str(fake_sdk),
+            FAKE_ADB_DEVICES='192.0.2.10:5555\tdevice\n',
+        )
+        self.assertEqual(via_sdk.returncode, 0, msg=via_sdk.stderr)
+        self.assertNotIn('192.0.2.10:5555', via_sdk.stderr)
+        self.assertEqual(
+            self.read_lines(self.adb_log),
+            [
+                'devices',
+                '-s 192.0.2.10:5555 shell am broadcast -a fi.refineid.android.CLEAR_LOGS -p fi.refineid.android',
+            ],
+        )
 
 
 if __name__ == '__main__':
