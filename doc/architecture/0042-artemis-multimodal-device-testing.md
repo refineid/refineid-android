@@ -21,14 +21,14 @@ We integrate ARTEMIS into the RefineID Android development and verification pipe
   - Runs JVM unit tests, strict linters (Android lint, detekt, Spotless ktlint, Clippy, rustfmt, ShellCheck), and offline synthetic `UiAutomator` tests.
   - 100% deterministic, offline, and sub-minute execution with zero external network or LLM dependencies.
 - **Tier 2 (Autonomous Multimodal Device Verification — Development & Lab)**:
-  - Driven by ARTEMIS via the native CLI tool `Scripts/test-artemis.sh` and the Model Context Protocol (MCP) server integrated into developer AI environments (such as Antigravity).
+  - Driven by ARTEMIS via the native CLI tool `Scripts/test-artemis.py` and the Model Context Protocol (MCP) server integrated into developer AI environments (such as Antigravity).
   - Runs on demand against connected test hardware (e.g., Samsung Galaxy S22 `SM-S901B`) over USB or Wi-Fi ADB.
   - Exercises end-to-end user journeys, exploratory edge cases, and visual layout rendering.
   - Insights and stable UI trajectories discovered by ARTEMIS are codified back into deterministic Tier 1 `UiAutomator` tests.
 
-### 2. Mainline Test Suites (`Scripts/test-artemis.sh`)
+### 2. Mainline Test Suites (`Scripts/test-artemis.py`)
 
-`Scripts/test-artemis.sh` provides unified execution of predefined test suites:
+`Scripts/test-artemis.py` provides unified execution of predefined test suites:
 
 - **`smoke`**: Verifies app launch, system permission handling, main screen surface loading (`UiAutomationIds.MAIN_SCREEN`), and navigates into Diagnostics to inspect live NFC and CCID reader states.
 - **`browser`**: Exercises the in-app browser harness (`BrowserHarness.kt`), verifies URL navigation controls, and inspects mutual TLS client-authentication triggers (tracked in Issue #83).

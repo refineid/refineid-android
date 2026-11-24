@@ -23,7 +23,7 @@ tablet.
 ## Start it
 
 ```bash
-Scripts/start-tablet-emulator.sh [<host network interface>]
+Scripts/start-tablet-emulator.py [<host network interface>]
 ```
 
 The script creates the `refineid_tablet` AVD on first use, starts it
@@ -41,8 +41,9 @@ host interface's network under its subnet mask. It needs:
   in `~/.android` (AVD state, metrics) and `/tmp/android-root` (crash
   reports).
 
-Stop it with `Scripts/stop-tablet-emulator.sh`, which shuts the emulator
-down and returns `~/.android` to the user.
+Stop it with `Scripts/stop-tablet-emulator.py`, which shuts the emulator
+down and returns the `refineid_tablet` AVD and emulator state under
+`~/.android` to the user.
 
 The emulator command it runs:
 
@@ -67,7 +68,7 @@ Observed with emulator 37.1.11 on Apple silicon:
 ## Pair it with the phone
 
 ```bash
-Scripts/rapp-tablet-pair.sh [--phone <serial>] [--tablet <serial>]
+Scripts/rapp-tablet-pair.py [--phone <serial>] [--tablet <serial>]
 ```
 
 The phone is the one device on Wi-Fi debugging (see
@@ -77,17 +78,16 @@ rather than restarting it, so the phone keeps PIN 1 and its listener)
 and turns Card Remote Access on, reads
 the offered code from the screen into a variable, opens Remote Access on
 the tablet, turns remote use on, types the code, and waits for the entry
-to close. Progress goes to stdout and the last line is `paired`; it
-exits non-zero with the tablet's failure reason, or when the pairing
-does not finish within a minute. The code is never printed. Never run
-it, or any script built on the helpers, under `bash -x`: xtrace prints
-variables and arguments, the code among them.
+to close. Progress goes to stdout and the last line is `paired`; it exits non-zero
+when the tablet shows `pairingFailure`, or when the pairing does not
+finish within a minute. Neither the code nor node text is printed.
 
-Both scripts drive the UI through `Scripts/adb-ui.sh`, sourced helpers
-that find nodes by Compose test tag (exposed as resource ids), tap them,
-wait for them and read their state, and never print node text. They use
-the SDK's `adb`, refuse to guess when more than one phone or emulator is
-connected, and delete the dump file from the device after reading it.
+Both scripts drive the UI through `Scripts/adb_ui.py`, shared Python helpers
+that parse `uiautomator dump` XML, find nodes by Compose test tag (exposed as
+resource ids), tap them, wait for them and read their state, and never print
+node text. They use the SDK's `adb`, refuse to guess when more than one phone
+or emulator is connected, and delete the dump file from the device after
+reading it.
 New device scripts reuse them, and a node a script needs gets a test tag
 in `UiAutomationIds` rather than a match on localised text. Two limits
 of `uiautomator dump` shape the pairing script:
@@ -101,16 +101,16 @@ of `uiautomator dump` shape the pairing script:
 ## Log in from the tablet's browser
 
 ```bash
-Scripts/rapp-tablet-browser-login.sh [--url <https url>]
+Scripts/rapp-tablet-browser-login.py [--url <https url>]
 ```
 
 With the tablet paired, the script opens the in-app browser on the
 tablet, loads the URL (by default a public service that requests a
 client certificate from any issuer) and judges the TLS handshake from
 the debug build's `browser:` traces: the client-certificate request,
-its completion and the signature status. It prints the traces, which
-carry only enum values and counts, and ends with `logged in`. It never
-prints page content, which can carry the certificate subject.
+its completion and the signature status. It prints the traces, which carry only enum values and counts, and ends
+with `client-certificate signature succeeded`. It never prints page
+content, which can carry the certificate subject.
 
 - The card signs on the phone, so it lies on the phone's NFC reader for
   the whole run. When the phone asks for the card (`RappCardTapMessage`)
@@ -127,7 +127,7 @@ prints page content, which can carry the certificate subject.
 Keep hands off the emulator while a script drives it. Touches on the
 emulator window can switch the tablet into desktop windowing and bring
 other apps' windows over RefineID, and the scripts' taps then land in
-the wrong window. `Scripts/stop-tablet-emulator.sh` and a fresh start
+the wrong window. `Scripts/stop-tablet-emulator.py` and a fresh start
 restore a known state.
 
 ## Build signing
@@ -143,17 +143,22 @@ builds; the tablet can be uninstalled freely.
 
 ## Instrumented tests
 
-`connectedDebugAndroidTest` installs and runs on every connected device,
-including the custodian phone; it did not honour `ANDROID_SERIAL` here.
-Run instrumented tests on the tablet alone with adb:
+`./gradlew :app:connectedDebugAndroidTest` installs and runs on every
+connected device, including the custodian phone, because the Gradle daemon and
+configuration cache do not carry per-invocation `ANDROID_SERIAL`. Run
+instrumented tests on one target device through `Scripts/connected-test.py`:
 
 ```bash
-Scripts/gradle.sh :app:assembleDebug :app:assembleDebugAndroidTest
-adb -s emulator-5554 install -r -t app/build/outputs/apk/debug/app-debug.apk
-adb -s emulator-5554 install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb -s emulator-5554 shell am instrument -w -e class <test class> \
-  fi.refineid.android.test/androidx.test.runner.AndroidJUnitRunner
+Scripts/connected-test.py --emulator --class <test class>
 ```
+
+Or select an explicit serial with `--serial emulator-5554`, and pass extra
+instrumentation runner arguments with `-e <key> <value>`. The wrapper builds
+the debug and `androidTest` APKs with `Scripts/gradle.sh`, installs both over
+`adb -s` onto only the selected device (leaving the app installed), fails
+immediately if either install fails, and runs `AndroidJUnitRunner` so any test
+failure, crash, or zero-test run exits non-zero. When more than one device is
+connected and no selector is given, it refuses to guess.
 
 ## Secrets and screenshots
 
