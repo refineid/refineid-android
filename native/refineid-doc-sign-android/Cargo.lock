@@ -661,12 +661,12 @@ checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 [[package]]
 name = "refineid-ber"
 version = "26.11.24"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#d1516f40723e803ed09f7ff4aee09533a5141669"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#ff97dce120eb930dfc493c8c5d6db175c5f045c0"
 
 [[package]]
 name = "refineid-cms"
 version = "26.11.24"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#d1516f40723e803ed09f7ff4aee09533a5141669"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#ff97dce120eb930dfc493c8c5d6db175c5f045c0"
 dependencies = [
  "base64ct",
  "const-oid",
@@ -685,7 +685,7 @@ dependencies = [
 [[package]]
 name = "refineid-digest"
 version = "26.11.24"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#d1516f40723e803ed09f7ff4aee09533a5141669"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#ff97dce120eb930dfc493c8c5d6db175c5f045c0"
 dependencies = [
  "md-5",
  "sha1",
@@ -695,7 +695,7 @@ dependencies = [
 [[package]]
 name = "refineid-doc-sign"
 version = "26.11.24"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#d1516f40723e803ed09f7ff4aee09533a5141669"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#ff97dce120eb930dfc493c8c5d6db175c5f045c0"
 dependencies = [
  "base64ct",
  "const-oid",
@@ -727,7 +727,7 @@ dependencies = [
 [[package]]
 name = "refineid-remote"
 version = "26.11.24"
-source = "git+https://github.com/RefineID/refineid-core.git?branch=main#d1516f40723e803ed09f7ff4aee09533a5141669"
+source = "git+https://github.com/RefineID/refineid-core.git?branch=main#ff97dce120eb930dfc493c8c5d6db175c5f045c0"
 dependencies = [
  "refineid-digest",
 ]
